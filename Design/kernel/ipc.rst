@@ -2,7 +2,7 @@
 Inter-process communication
 ===========================
 
-IPC is achieved by "thread hopping": a thread stores data to be transmitted in
+IPC is achieved by "process hopping": a thread stores data to be transmitted in
 some of its registers and asks the kernel to switch it to another process.
 
 If the other process has a notification handler set up, it will set the
