@@ -1,0 +1,116 @@
+diff -ru '--exclude=configure' /tmp/gcc-11.1.0/config.sub gcc-11.1.0/config.sub
+--- /tmp/gcc-11.1.0/config.sub	2021-04-27 12:00:12.000000000 +0200
++++ gcc-11.1.0/config.sub	2021-09-08 11:32:05.703109751 +0200
+@@ -1733,6 +1733,8 @@
+ 		;;
+ 	none)
+ 		;;
++	norostb*)
++		;;
+ 	*)
+ 		echo Invalid configuration \`"$1"\': OS \`"$os"\' not recognized 1>&2
+ 		exit 1
+diff -ru '--exclude=configure' /tmp/gcc-11.1.0/fixincludes/mkfixinc.sh gcc-11.1.0/fixincludes/mkfixinc.sh
+--- /tmp/gcc-11.1.0/fixincludes/mkfixinc.sh	2021-04-27 12:00:12.000000000 +0200
++++ gcc-11.1.0/fixincludes/mkfixinc.sh	2021-09-08 11:32:18.703184093 +0200
+@@ -11,6 +11,7 @@
+ 
+ # Check for special fix rules for particular targets
+ case $machine in
++	*-*-norostb* | \
+     i?86-*-cygwin* | \
+     i?86-*-mingw32* | \
+     x86_64-*-mingw32* | \
+diff -ru '--exclude=configure' /tmp/gcc-11.1.0/gcc/config.gcc gcc-11.1.0/gcc/config.gcc
+--- /tmp/gcc-11.1.0/gcc/config.gcc	2021-04-27 12:00:13.000000000 +0200
++++ gcc-11.1.0/gcc/config.gcc	2021-09-08 11:32:44.203329950 +0200
+@@ -771,6 +771,13 @@
+   tmake_file="${tmake_file} t-dragonfly"
+   target_has_targetdm=yes
+   ;;
++*-*-norostb*)
++  gas=yes
++  gnu_ld=yes
++  default_use_cxa_atexit=yes
++  use_gcc_stdint=wrap
++  native_system_header_dir=/include
++  ;;
+ *-*-freebsd*)
+   # This is the generic ELF configuration of FreeBSD.  Later
+   # machine-specific sections may refine and add to this
+@@ -2466,6 +2473,11 @@
+ 	cxx_target_objs="${cxx_target_objs} microblaze-c.o"
+ 	tmake_file="${tmake_file} microblaze/t-microblaze"
+         ;;
++riscv*-*-norostb*)
++	tm_file="elfos.h glibc-stdint.h ${tm_file} norostb.h"
++	gnu_ld=yes
++	gas=yes
++	;;
+ riscv*-*-linux*)
+ 	tm_file="elfos.h gnu-user.h linux.h glibc-stdint.h ${tm_file} riscv/linux.h"
+ 	case "x${enable_multilib}" in
+diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libgcc/config.host gcc-11.1.0/libgcc/config.host
+--- /tmp/gcc-11.1.0/libgcc/config.host	2021-04-27 12:00:15.000000000 +0200
++++ gcc-11.1.0/libgcc/config.host	2021-09-08 11:33:17.727521757 +0200
+@@ -222,6 +222,10 @@
+   tmake_file="$tmake_file t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver"
+   extra_parts="crtbegin.o crtend.o crtbeginS.o crtendS.o"
+   ;;
++*-*-norostb*)
++  tmake_file="$tmake_file t-crtstuff t-crtstuff-pic t-libgcc-pic"
++  extra_parts="$extra_parts crti.o crtbegin.o crtend.o crtn.o"
++  ;;
+ *-*-freebsd*)
+   # This is the generic ELF configuration of FreeBSD.  Later
+   # machine-specific sections may refine and add to this
+diff -ru '--exclude=configure' /tmp/gcc-11.1.0/libstdc++-v3/crossconfig.m4 gcc-11.1.0/libstdc++-v3/crossconfig.m4
+--- /tmp/gcc-11.1.0/libstdc++-v3/crossconfig.m4	2021-04-27 12:00:16.000000000 +0200
++++ gcc-11.1.0/libstdc++-v3/crossconfig.m4	2021-09-08 11:33:56.647744516 +0200
+@@ -88,6 +88,13 @@
+     AC_DEFINE(HAVE_HYPOT)
+     ;;
+ 
++  *-norostb*)
++    GLIBCXX_CHECK_COMPILER_FEATURES
++    GLIBCXX_CHECK_LINKER_FEATURES
++    GLIBCXX_CHECK_MATH_SUPPORT
++    GLIBCXX_CHECK_STDLIB_SUPPORT
++    ;;
++
+   *-freebsd*)
+     SECTION_FLAGS='-ffunction-sections -fdata-sections'
+     AC_SUBST(SECTION_FLAGS) 
+diff -ruN /tmp/gcc-11.1.0/gcc/config/norostb.h gcc-11.1.0/gcc/config/norostb.h
+--- /tmp/gcc-11.1.0/gcc/config/norostb.h	1970-01-01 01:00:00.000000000 +0100
++++ gcc-11.1.0/gcc/config/norostb.h	2021-09-08 11:34:38.239982647 +0200
+@@ -0,0 +1,29 @@
++#undef TARGET_DUX
++#define TARGET_DUX
++ 
++#undef LIB_SPEC
++#define LIB_SPEC "-lc -lnorostb"
++ 
++#undef STARTFILE_SPEC
++#define STARTFILE_SPEC "crt0.o%s crti.o%s crtbegin.o%s"
++ 
++#undef ENDFILE_SPEC
++#define ENDFILE_SPEC "crtend.o%s crtn.o%s"
++ 
++#undef TARGET_OS_CPP_BUILTINS
++#define TARGET_OS_CPP_BUILTINS()      \
++  do {                                \
++    builtin_define ("__norostb__");       \
++    builtin_assert ("system=norostb");    \
++  } while(0);
++
++#undef STANDARD_STARTFILE_PREFIX
++#define STANDARD_STARTFILE_PREFIX "/lib/"
++
++#define LINK_SPEC "%{shared:-shared} %{static:-static} %{!shared: %{!static: %{rdynamic:-export-dynamic}}}"
++
++#undef PID_TYPE
++#define PID_TYPE "int"
++
++#undef NATIVE_SYSTEM_HEADER_DIR
++#define NATIVE_SYSTEM_HEADER_DIR "/include"
