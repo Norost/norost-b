@@ -43,6 +43,6 @@ This section covers a structure with the following format::
 .norost.driver
 ''''''''''''''
 
-See the Driver_ document for details
+See the Driver document for details
 
 .. Driver ../driver/Index.rst

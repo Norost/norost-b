@@ -54,6 +54,7 @@ Pseudo-properties
 ``.address-cells``   ``#address-cells`` specified by the parent node
 ``.size-cells``      ``#size-cells`` specified by the parent node
 ``.interrupt-cells`` ``#interrupt-cells`` specified by the parent node
+==================== =================================================
 
 
 Children
