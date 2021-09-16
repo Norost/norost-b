@@ -49,7 +49,7 @@ fn new(program_counter: usize, registers: usize, _: usize, _: usize, _: usize, _
 }
 
 /// Create a new thread in another process.
-fn hop_new(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+fn call_new(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	if port_len == 0 {
 		// Anonymous, numeric ID
 	} else {
@@ -58,7 +58,7 @@ fn hop_new(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize)
 }
 
 /// Move the current thread to another process.
-fn hop(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+fn call(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	if port_len == 0 {
 		// Anonymous, numeric ID
 	} else {
@@ -66,8 +66,13 @@ fn hop(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> 
 	}
 }
 
+/// Return to the calling process
+fn r#return(port: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+
+}
+
 /// Destroy the current thread.
-fn exit_thread(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+fn exit(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 
 }
 
