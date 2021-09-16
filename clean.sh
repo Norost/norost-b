@@ -3,3 +3,4 @@
 set -x
 
 rm -rf build/
+cargo clean

@@ -1,3 +1,5 @@
 build/
 sysroot/
 target/
+isodir/
+*.iso
