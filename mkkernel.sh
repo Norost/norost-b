@@ -1,12 +1,13 @@
-CC=gcc
-RUST_TARGET=../x86_64-unknown-norostb.json
-CARGO_OPT=
-ARCH=amd64
+#!/bin/sh
+
+. ./env.sh
+
+set -e
 
 cd kernel
 cargo rustc \
 	--release \
-	--target $RUST_TARGET \
+	--target $RUST_TARGET_FILE \
 	$CARGO_OPT \
 	-- \
 	-C linker=$CC \

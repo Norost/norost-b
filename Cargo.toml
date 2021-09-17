@@ -1,7 +1,10 @@
+cargo-features = ["strip"]
+
 [workspace]
 
 members = [
-	"kernel"
+	"kernel",
+	"boot/amd64"
 ]
 
 [profile.dev]
@@ -9,3 +12,10 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+lto = "fat"
+strip = "symbols"
+
+[profile.release.package.noraboot]
+codegen-units = 1
+opt-level = 'z'
+strip = "symbols"

@@ -5,3 +5,7 @@ version = 3
 [[package]]
 name = "nora"
 version = "0.1.0"
+
+[[package]]
+name = "noraboot"
+version = "0.1.0"

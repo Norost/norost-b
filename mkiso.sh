@@ -1,8 +1,14 @@
 #!/bin/sh
 
-./mkkernel.sh
+. ./env.sh
+
+./mkkernel.sh || exit $?
+./mkboot.sh || exit $?
+
+set -e
 
 mkdir -p isodir/boot/grub
-cp target/x86_64-unknown-norostb/release/nora isodir/boot/nora
-cp boot/grub/grub.cfg isodir/boot/grub/grub.cfg
+cp target/$RUST_TARGET/release/nora isodir/boot/nora
+cp target/$RUST_TARGET_32/release/noraboot isodir/boot/noraboot
+cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 grub-mkrescue -o norost.iso isodir
