@@ -12,6 +12,14 @@ static HEADER: Header = {
 	let magic = 0xE85250D6;
 	let flags = 0;
 	let header_length = 0;
-	let checksum = 0u32.wrapping_sub(magic).wrapping_sub(flags).wrapping_sub(header_length);
-	Header { magic, flags, header_length, checksum }
+	let checksum = 0u32
+		.wrapping_sub(magic)
+		.wrapping_sub(flags)
+		.wrapping_sub(header_length);
+	Header {
+		magic,
+		flags,
+		header_length,
+		checksum,
+	}
 };

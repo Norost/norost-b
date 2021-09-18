@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
+
+[features]
+default = ["mem-max-16t"]
+mem-max-16t = []
+mem-max-256m = []

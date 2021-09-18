@@ -194,10 +194,17 @@ where
 
 		let virt_address = header.virtual_address & !PAGE_MASK;
 		let phys_address = data.as_ptr() as u64 + header.offset;
-		let count = (header.memory_size + offset + PAGE_MASK) / PAGE_SIZE;
+		let count = (header.file_size + offset + PAGE_MASK) / PAGE_SIZE;
 		for i in 0..count {
 			let virt = virt_address + i * PAGE_SIZE;
 			let phys = phys_address + i * PAGE_SIZE;
+			let (r, w, x) = (f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0);
+			page_tables.add(virt, phys, r, w, x, &mut page_alloc)?;
+		}
+		let alloc = (header.memory_size + offset + PAGE_MASK) / PAGE_SIZE;
+		for i in count..alloc {
+			let virt = virt_address + i * PAGE_SIZE;
+			let phys = page_alloc() as u64;
 			let (r, w, x) = (f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0);
 			page_tables.add(virt, phys, r, w, x, &mut page_alloc)?;
 		}

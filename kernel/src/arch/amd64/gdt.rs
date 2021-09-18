@@ -1,8 +1,8 @@
 use super::tss::TSS;
 use core::convert::TryInto;
+use core::marker::PhantomData;
 use core::mem;
 use core::pin::Pin;
-use core::marker::PhantomData;
 
 // ~~stolen from~~ inspired by ToaruOS code
 
@@ -135,8 +135,10 @@ impl GDTPointer {
 
 	pub unsafe fn activate(&self) {
 		asm!("
+			xchgw %bx, %bx
 			lgdtq	({0})
-
+/* TODO figure all this out, I don't understand why it causes mysterious triple faults
+ * and weird data corrupts depending on changes to unrelated things
 			# cs.rpl < cpl, so %rsp and %ss need to be pushed too
 			pushq	$(2 * 8)			# ss, kernel_data
 			pushq	%rsp				# rsp
@@ -153,6 +155,7 @@ impl GDTPointer {
 			mov		%ax, %fs
 			mov		%ax, %gs
 			mov		%ax, %ss
+			*/
 
 			movw	$(5 * 8), %ax	# tss
 			ltr		%ax

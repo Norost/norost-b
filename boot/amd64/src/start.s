@@ -1,4 +1,6 @@
 .globl		_start
+.globl		stack_top
+.globl		stack_bottom
 
 .section	.text
 _start:

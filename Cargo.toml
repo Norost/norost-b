@@ -13,7 +13,7 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 lto = "fat"
-strip = "symbols"
+#strip = "symbols"
 
 [profile.release.package.noraboot]
 codegen-units = 1

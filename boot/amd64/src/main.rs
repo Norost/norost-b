@@ -1,19 +1,29 @@
 #![no_main]
 #![no_std]
 #![feature(asm)]
+#![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
 
 mod elf64;
 mod gdt;
+mod info;
 mod multiboot2;
 mod paging;
 mod vga;
 
 use core::convert::TryInto;
+use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use core::slice;
 
 static GDT: gdt::GDT = gdt::GDT::new();
 static GDT_PTR: gdt::GDTPointer = gdt::GDTPointer::new(&GDT);
+
+extern "C" {
+	static boot_top: usize;
+	static boot_bottom: usize;
+	static stack_top: usize;
+	static stack_bottom: usize;
+}
 
 #[export_name = "main"]
 fn main(magic: u32, arg: *const u8) -> ! {
@@ -25,8 +35,16 @@ fn main(magic: u32, arg: *const u8) -> ! {
 		halt();
 	}
 
-	let mut avail_memory = None;
+	let mut avail_memory = MaybeUninit::uninit_array::<8>();
+	let mut avail_memory_count = 0;
 	let mut kernel = None;
+
+	let (bt_top, bt_bottom) = unsafe {
+		(&boot_top as *const _ as u64, &boot_bottom as *const _ as u64)
+	};
+	let (stk_top, stk_bottom) = unsafe {
+		(&stack_top as *const _ as usize, &stack_bottom as *const _ as usize)
+	};
 
 	use multiboot2::bootinfo as bi;
 	for e in unsafe { bi::BootInfo::new(arg) } {
@@ -38,37 +56,89 @@ fn main(magic: u32, arg: *const u8) -> ! {
 				}
 			}
 			bi::Info::MemoryMap(m) => {
-				avail_memory = m.entries.iter().find(|e| e.is_available());
+				m.entries.iter().filter(|e| e.is_available()).for_each(|e| {
+					let (mut base, mut size) = (e.base_address, e.length);
+					if e.base_address == 0 {
+						// Split of the first page so we can avoid writing to null (which is UB)
+						avail_memory[avail_memory_count].write(info::MemoryRegion {
+							base: 0,
+							size: 4096,
+						});
+						avail_memory_count += 1;
+						base += 4096;
+						size -= 4096;
+					}
+					avail_memory[avail_memory_count].write(info::MemoryRegion {
+						base,
+						size,
+					});
+					avail_memory_count += 1;
+				});
 			}
 		}
 	}
 
-	let avail_memory = avail_memory.unwrap_or_else(|| {
-		print_err(&mut vga, b"No available memory");
-		halt();
-	});
 	let kernel = kernel.unwrap_or_else(|| {
 		print_err(&mut vga, b"No kernel module");
 		halt();
 	});
 
-	let mut mem_start = avail_memory.base_address;
-	let offt = (0x1000 - mem_start) & 0xfff;
-	mem_start = mem_start + offt;
-	let mut mem_count = (avail_memory.length - offt) / 0x1000;
-
-	if mem_start == 0 {
-		// TODO figure out if writing to null pointers is actually UB.
-		// For now, just avoid it.
-		mem_start += 0x1000;
-		mem_count -= 1;
+	// Remove regions occupied by the kernel (FIXME replace with actual kernel fuckwit)
+	for i in (0..avail_memory_count).rev() {
+		let list = [(stk_bottom as u64, stk_top as u64), (kernel.start.into(), kernel.end.into())];
+		for (bottom, top) in list.iter().copied() {
+			// SAFETY: all elements up to avail_memory_count have been written.
+			let e = unsafe { avail_memory[i].assume_init() };
+			let (base, end) = (e.base, e.base + e.size);
+			if bottom <= e.base && end <= top {
+				// Discard the entire entry
+				avail_memory_count -= 1;
+				for i in i..avail_memory_count {
+					unsafe {
+						avail_memory[i].write(avail_memory[i].assume_init());
+					}
+				}
+			} else if bottom < end && end <= top {
+				// Cut off the top half
+				avail_memory[i].write(info::MemoryRegion {
+					base,
+					size: bottom - base,
+				});
+			} else if bottom <= base && base < top {
+				// Cut off the bottom half
+				avail_memory[i].write(info::MemoryRegion {
+					base: top,
+					size: end - top,
+				});
+			} else if base <= bottom && top <= end {
+				// Split the entry in half
+				avail_memory[i].write(info::MemoryRegion {
+					base,
+					size: bottom - base,
+				});
+				avail_memory[avail_memory_count].write(info::MemoryRegion {
+					base: top,
+					size: end - top,
+				});
+				avail_memory_count += 1;
+			}
+		}
 	}
 
-	let mut page_alloc = move || {
-		assert!(mem_count > 0);
-		mem_start += 4096;
-		mem_count -= 1;
-		let page = mem_start as *mut paging::Page;
+	let avail_memory = unsafe {
+		// SAFETY: all elements up to avail_memory_count have been written.
+		MaybeUninit::slice_assume_init_mut(&mut avail_memory[..avail_memory_count])
+	};
+
+	// Set up page table
+	let mut page_alloc_region = 0;
+	let mut page_alloc = || {
+		while avail_memory[page_alloc_region].size < 4096 || avail_memory[page_alloc_region].base == 0 {
+			page_alloc_region += 1;
+		}
+		let page = avail_memory[page_alloc_region].base as *mut paging::Page;
+		avail_memory[page_alloc_region].base += 4096;
+		avail_memory[page_alloc_region].size -= 4096;
 		unsafe { *page = paging::Page::zeroed() };
 		page
 	};
@@ -96,6 +166,8 @@ fn main(magic: u32, arg: *const u8) -> ! {
 		halt();
 	});
 
+	let info = info::Info::new(avail_memory, (stk_top, stk_bottom));
+
 	unsafe {
 		pml4.activate();
 		let (el, eh) = (entry as u32, (entry >> 32) as u32);
@@ -121,7 +193,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 
 			# Jump to kernel entry
 			jmp		*%rbx
-		", in("eax") el, in("ebx") eh, in("edi") arg, options(noreturn, att_syntax));
+		", in("eax") el, in("ebx") eh, in("edi") &info, options(noreturn, att_syntax));
 	}
 }
 
