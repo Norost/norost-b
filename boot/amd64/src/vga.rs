@@ -1,6 +1,3 @@
-use core::convert::TryFrom;
-use core::mem;
-
 pub struct Text {
 	row: u8,
 	column: u8,
@@ -15,14 +12,10 @@ impl Text {
 		Self { row: 0, column: 0 }
 	}
 
-	fn write_byte(&mut self, b: u8, fg: u8, bg: u8, x: u8, y: u8) {
-		assert!(x < Self::WIDTH);
-		assert!(y < Self::HEIGHT);
-		unsafe {
-			let i = isize::from(Self::WIDTH) * isize::from(y) + isize::from(x);
-			let v = u16::from(b) | (u16::from(fg & 0xf | bg << 4) << 8);
-			core::ptr::write_volatile(Self::BUFFER.offset(i), v);
-		}
+	unsafe fn write_byte(&mut self, b: u8, fg: u8, bg: u8, x: u8, y: u8) {
+		let i = isize::from(Self::WIDTH) * isize::from(y) + isize::from(x);
+		let v = u16::from(b) | (u16::from(fg & 0xf | bg << 4) << 8);
+		core::ptr::write_volatile(Self::BUFFER.offset(i), v);
 	}
 
 	fn put_byte(&mut self, b: u8, fg: u8, bg: u8) {
@@ -30,7 +23,10 @@ impl Text {
 			self.column = 0;
 			self.row += 1;
 		} else {
-			self.write_byte(b, fg, bg, self.column, self.row);
+			// SAFETY: x and y are in range
+			unsafe {
+				self.write_byte(b, fg, bg, self.column, self.row);
+			}
 			self.column += 1;
 			if self.column >= Self::WIDTH {
 				self.column = 0;
@@ -48,12 +44,11 @@ impl Text {
 		}
 	}
 
-	pub fn write_num(&mut self, mut n: i128, base: u8, fg: u8, bg: u8) {
+	pub fn write_num(&mut self, mut n: i128, base: u8, fg: u8, bg: u8) -> Result<(), InvalidBase> {
 		// Implementation stolen from https://stackoverflow.com/a/23840699/7327379
-		assert!(base >= 2);
-		assert!(base < 36);
+		(2 <= base && base < 36).then(|| ()).ok_or(InvalidBase)?;
 
-		let mut t = n;
+		let mut t;
 
 		let mut buf = [0; 128];
 		let mut i = 0;
@@ -76,5 +71,9 @@ impl Text {
 		for b in buf[..i].iter().rev().copied() {
 			self.put_byte(b, fg, bg);
 		}
+
+		Ok(())
 	}
 }
+
+pub struct InvalidBase;

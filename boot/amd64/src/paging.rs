@@ -52,7 +52,7 @@ impl PML4 {
 	where
 		F: FnMut() -> *mut Page,
 	{
-		assert!(!self.0[0].present());
+		debug_assert!(!self.0[0].present());
 
 		// Map the first 2M
 		//
@@ -60,7 +60,7 @@ impl PML4 {
 		// plenty.
 
 		let pd = &mut *page_alloc().cast::<Directory>();
-		pd.0[0].set_mega(0, true, true, true);
+		pd.0[0].set_mega(0, true, true, true).unwrap_or_else(|_| unreachable!());
 
 		let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
 		pdp.0[0].set(pd);
@@ -76,13 +76,20 @@ impl PML4 {
 		write: bool,
 		execute: bool,
 		mut page_alloc: F,
-	) where
+	) -> Result<(), AddError>
+	where
 		F: FnMut() -> *mut Page,
 	{
-		assert_eq!(virt & 0xfff, 0);
-		assert_eq!(phys & 0xfff, 0);
+		(virt & 0xfff == 0)
+			.then(|| ())
+			.ok_or(AddError::BadAlignment)?;
+		(phys & 0xfff == 0)
+			.then(|| ())
+			.ok_or(AddError::BadAlignment)?;
 		// Ensure kernel is placed entirely in higher half
-		assert!(virt & (1 << 63) > 0);
+		(virt & (1 << 63) > 0)
+			.then(|| ())
+			.ok_or(AddError::LowerHalf)?;
 
 		// PML4
 		let tbl = &mut self.0[usize::try_from((virt >> 39) & 0x1ff).unwrap()];
@@ -119,12 +126,12 @@ impl PML4 {
 
 		// PT
 		let tbl = &mut tbl.0[usize::try_from((virt >> 12) & 0x1ff).unwrap()];
-		let tbl = match tbl.get() {
-			Some(tbl) => panic!("occupied"),
-			None => unsafe {
-				tbl.set(phys, read, write, execute);
-			},
+		match tbl.get() {
+			Some(_) => Err(AddError::Occupied)?,
+			None => tbl.set(phys, read, write, execute)?,
 		};
+
+		Ok(())
 	}
 
 	pub unsafe fn activate(&self) {
@@ -204,9 +211,12 @@ impl DirectoryEntry {
 		self.0 = pt as u64 | 1;
 	}
 
-	fn set_mega(&mut self, page: u64, r: bool, w: bool, x: bool) {
-		assert_eq!(page & ((1 << 21) - 1), 0);
-		self.0 = page | (1 << 7) | rwx_flags(r, w, x) | 1;
+	fn set_mega(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
+		(page & ((1 << 21) - 1) == 0)
+			.then(|| ())
+			.ok_or(SetError::BadAlignment)?;
+		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | 1;
+		Ok(())
 	}
 
 	fn is_mega(&self) -> bool {
@@ -224,9 +234,12 @@ impl TableEntry {
 		self.0 & 1 > 0
 	}
 
-	fn set(&mut self, page: u64, r: bool, w: bool, x: bool) {
-		assert_eq!(page & ((1 << 12) - 1), 0);
-		self.0 = page | rwx_flags(r, w, x) | 1;
+	fn set(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
+		(page & ((1 << 12) - 1) == 0)
+			.then(|| ())
+			.ok_or(SetError::BadAlignment)?;
+		self.0 = page | rwx_flags(r, w, x)? | 1;
+		Ok(())
 	}
 
 	fn get(&mut self) -> Option<u64> {
@@ -234,15 +247,64 @@ impl TableEntry {
 	}
 }
 
-fn rwx_flags(r: bool, w: bool, x: bool) -> u64 {
+#[derive(Clone, Copy)]
+pub enum AddError {
+	BadRWXFlags,
+	BadAlignment,
+	Occupied,
+	LowerHalf,
+}
+
+impl From<SetError> for AddError {
+	fn from(err: SetError) -> Self {
+		match err {
+			SetError::BadRWXFlags => Self::BadRWXFlags,
+			SetError::BadAlignment => Self::BadAlignment,
+		}
+	}
+}
+
+impl From<AddError> for &'static str {
+	fn from(err: AddError) -> Self {
+		match err {
+			AddError::BadRWXFlags => <&'static str as From<_>>::from(BadRWXFlags),
+			AddError::BadAlignment => "bad alignment",
+			AddError::Occupied => "address occupied",
+			AddError::LowerHalf => "attempt to map lower half",
+		}
+	}
+}
+
+#[derive(Clone, Copy)]
+pub enum SetError {
+	BadRWXFlags,
+	BadAlignment,
+}
+
+impl From<BadRWXFlags> for SetError {
+	fn from(_: BadRWXFlags) -> Self {
+		Self::BadRWXFlags
+	}
+}
+
+#[derive(Clone, Copy)]
+struct BadRWXFlags;
+
+impl From<BadRWXFlags> for &'static str {
+	fn from(_: BadRWXFlags) -> Self {
+		"bad RWX flags"
+	}
+}
+
+fn rwx_flags(r: bool, w: bool, x: bool) -> Result<u64, BadRWXFlags> {
 	match (r, w, x) {
-		(true, true, true) => 1 << 1,
-		(false, true, true) => panic!(),
-		(true, false, true) => 0,
-		(false, false, true) => 0,
-		(true, true, false) => 1 << 1,
-		(false, true, false) => panic!(),
-		(true, false, false) => 0,
-		(false, false, false) => panic!(),
+		(true, true, true) => Ok(1 << 1),
+		(false, true, true) => Err(BadRWXFlags),
+		(true, false, true) => Ok(0),
+		(false, false, true) => Ok(0),
+		(true, true, false) => Ok(1 << 1),
+		(false, true, false) => Err(BadRWXFlags),
+		(true, false, false) => Ok(0),
+		(false, false, false) => Err(BadRWXFlags),
 	}
 }

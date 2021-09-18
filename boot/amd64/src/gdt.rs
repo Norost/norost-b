@@ -1,6 +1,4 @@
-use core::convert::TryInto;
 use core::mem;
-use core::pin::Pin;
 
 #[repr(C)]
 struct GDTEntry {
@@ -13,15 +11,14 @@ struct GDTEntry {
 }
 
 #[repr(C)]
-pub struct GDT64 {
+pub struct GDT {
 	null: GDTEntry,
 	code: GDTEntry,
 	data: GDTEntry,
 }
 
-impl GDT64 {
+impl GDT {
 	pub const fn new() -> Self {
-		// Values copied from https://wiki.osdev.org/index.php?title=Setting_Up_Long_Mode&oldid=22154#Entering_the_64-bit_Submode
 		Self {
 			null: GDTEntry {
 				limit_low: 0xffff,
@@ -32,19 +29,19 @@ impl GDT64 {
 				base_high: 0,
 			},
 			code: GDTEntry {
-				limit_low: 0x0,
+				limit_low: 0xffff,
 				base_low: 0,
 				base_mid: 0,
-				access: 0b1001_1010,
-				granularity: 0b1010_1111,
+				access: 0b1_00_1_1_0_1_0,
+				granularity: (1 << 7) | (1 << 5) | 0xf,
 				base_high: 0,
 			},
 			data: GDTEntry {
-				limit_low: 0x0,
+				limit_low: 0xffff,
 				base_low: 0,
 				base_mid: 0,
-				access: 0b1001_0010,
-				granularity: 0b0000_00000,
+				access: 0b1_00_1_0_0_1_0,
+				granularity: (1 << 7) | (1 << 5) | 0xf,
 				base_high: 0,
 			},
 		}
@@ -52,23 +49,22 @@ impl GDT64 {
 }
 
 #[repr(C)]
-#[repr(packed)]
-pub struct GDT64Pointer {
-	pub limit: u16,
-	address: u32,
+pub struct GDTPointer<'a> {
+	_padding: [u16; 1],
+	limit: u16,
+	address: &'a GDT,
 }
 
-impl GDT64Pointer {
-	pub fn new(gdt: Pin<&GDT64>) -> Self {
-		unsafe {
-			Self {
-				limit: (mem::size_of::<GDT64>() - 1).try_into().unwrap(),
-				address: gdt.get_ref() as *const _ as u32,
-			}
+impl<'a> GDTPointer<'a> {
+	pub const fn new(gdt: &'a GDT) -> Self {
+		Self {
+			_padding: [0; 1],
+			limit: (mem::size_of::<GDT>() - 1) as u16,
+			address: gdt,
 		}
 	}
 
 	pub unsafe fn activate(&self) {
-		asm!("lgdtl ({0})", in(reg) self as *const _, options(att_syntax));
+		asm!("lgdtl ({0})", in(reg) &self.limit, options(att_syntax));
 	}
 }

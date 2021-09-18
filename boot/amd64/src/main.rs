@@ -12,8 +12,8 @@ use core::convert::TryInto;
 use core::panic::PanicInfo;
 use core::slice;
 
-#[export_name = "gdt64"]
-static GDT64: gdt::GDT64 = gdt::GDT64::new();
+static GDT: gdt::GDT = gdt::GDT::new();
+static GDT_PTR: gdt::GDTPointer = gdt::GDTPointer::new(&GDT);
 
 #[export_name = "main"]
 fn main(magic: u32, arg: *const u8) -> ! {
@@ -21,7 +21,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 
 	if magic != 0x36d76289 {
 		vga.write_str(b"Bad multiboot2 magic: ", 0xc, 0);
-		vga.write_num(magic.into(), 16, 0xc, 0);
+		vga.write_num(magic.into(), 16, 0xc, 0).unwrap_or_else(|_| unreachable!());
 		halt();
 	}
 
@@ -31,44 +31,26 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	use multiboot2::bootinfo as bi;
 	for e in unsafe { bi::BootInfo::new(arg) } {
 		match e {
-			bi::Info::Unknown(n) => {
-				vga.write_str(b"Unknown info: ", 0xb, 0);
-				vga.write_num(n.into(), 16, 0xb, 0);
-				vga.write_str(b"\n", 0xb, 0);
-			}
+			bi::Info::Unknown(_) => (),
 			bi::Info::Module(m) => {
-				vga.write_str(b"Module: \"", 0xb, 0);
-				vga.write_str(m.string, 0xb, 0);
-				vga.write_str(b"\" ", 0xb, 0);
-				vga.write_num(m.start.into(), 16, 0xb, 0);
-				vga.write_str(b" - ", 0xb, 0);
-				vga.write_num(m.end.into(), 16, 0xb, 0);
-				vga.write_str(b"\n", 0xb, 0);
 				if m.string == b"kernel" {
 					kernel = Some(m);
 				}
 			}
 			bi::Info::MemoryMap(m) => {
-				vga.write_str(b"Memory map:\n", 0xb, 0);
-				for e in m.entries.iter() {
-					vga.write_str(b"  ", 0xb, 0);
-					vga.write_num(e.base_address.into(), 16, 0xb, 0);
-					vga.write_str(b" + ", 0xb, 0);
-					vga.write_num(e.length.into(), 16, 0xb, 0);
-					vga.write_str(b" (", 0xb, 0);
-					vga.write_num(e.typ.into(), 16, 0xb, 0);
-					vga.write_str(b")\n", 0xb, 0);
-				}
-				let e = m.entries.iter().find(|e| e.is_available()).unwrap();
-				avail_memory = Some(e);
+				avail_memory = m.entries.iter().find(|e| e.is_available());
 			}
 		}
 	}
 
-	vga.write_str(b"Setting up PML4\n", 0xa, 0);
-
-	let avail_memory = avail_memory.unwrap();
-	let kernel = kernel.unwrap();
+	let avail_memory = avail_memory.unwrap_or_else(|| {
+		print_err(&mut vga, b"No available memory");
+		halt();
+	});
+	let kernel = kernel.unwrap_or_else(|| {
+		print_err(&mut vga, b"No kernel module");
+		halt();
+	});
 
 	let mut mem_start = avail_memory.base_address;
 	let offt = (0x1000 - mem_start) & 0xfff;
@@ -107,27 +89,17 @@ fn main(magic: u32, arg: *const u8) -> ! {
 			(kernel.end - kernel.start).try_into().unwrap(),
 		)
 	};
-	let entry = elf64::load_elf(kernel, page_alloc, pml4);
 
-	vga.write_str(b"FUCK\n", 0xa, 0);
+	let entry = elf64::load_elf(kernel, page_alloc, pml4).unwrap_or_else(|e| {
+		vga.write_str(b"Failed to load ELF: ", 0xc, 0);
+		vga.write_str(<&'static str as From<_>>::from(e).as_bytes(), 0xc, 0);
+		halt();
+	});
 
 	unsafe {
 		pml4.activate();
-	}
-	vga.write_str(b"GDT\n", 0xa, 0);
-
-	let gdt = gdt::GDT64::new();
-	let gdt = core::pin::Pin::new(&gdt);
-	let gdt = gdt::GDT64Pointer::new(gdt);
-	vga.write_num(gdt.limit.into(), 16, 0x8, 0x7);
-	unsafe {
-		gdt.activate();
-	}
-
-	vga.write_str(b"Done\n", 0xa, 0);
-
-	unsafe {
 		let (el, eh) = (entry as u32, (entry >> 32) as u32);
+		GDT_PTR.activate();
 		asm!("
 			# Switch to long mode
 			ljmp	$0x8, $realm64
@@ -155,15 +127,25 @@ fn main(magic: u32, arg: *const u8) -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+	/*
+	#[cfg(not(debug_assertions))]
+	unsafe {
+		asm!("jmp	panic_function_is_present_");
+	}
+	*/
 	let mut vga = vga::Text::new();
 	vga.write_str(b"Panic! ", 0xc, 0);
 	if let Some(loc) = _info.location() {
 		vga.write_str(b"[", 0xc, 0);
 		vga.write_str(loc.file().as_bytes(), 0xc, 0);
 		vga.write_str(b"]:", 0xc, 0);
-		vga.write_num(loc.line().into(), 10, 0xc, 0);
+		vga.write_num(loc.line().into(), 10, 0xc, 0).unwrap_or_else(|_| unreachable!());
 	}
 	halt();
+}
+
+fn print_err(vga: &mut vga::Text, s: &[u8]) {
+	vga.write_str(s, 0xc, 0);
 }
 
 fn halt() -> ! {

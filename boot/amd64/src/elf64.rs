@@ -1,4 +1,4 @@
-use crate::paging::{Page, PML4};
+use crate::paging::{Page, PML4, AddError};
 use core::convert::{TryFrom, TryInto};
 use core::mem;
 
@@ -55,64 +55,123 @@ const TYPE_EXEC: u16 = 2;
 const MACHINE: u16 = 0x3e;
 const FLAGS: u32 = 0;
 
-pub fn load_elf<F>(data: &[u8], mut page_alloc: F, page_tables: &mut PML4) -> u64
+#[derive(Clone, Copy)]
+pub enum ParseError {
+	DataTooShort,
+	BadMagic,
+	BadAlignment,
+	UnsupportedClass,
+	UnsupportedEndian,
+	UnsupportedVersion,
+	UnsupportedType,
+	UnsupportedMachine,
+	UnsupportedFlags,
+	ProgramHeaderSizeMismatch,
+	OffsetOutOfBounds,
+	AddressOffsetMismatch,
+	PageAddError(AddError),
+}
+
+impl From<ParseError> for &'static str {
+	fn from(err: ParseError) -> &'static str {
+		match err {
+			ParseError::DataTooShort => "data too short",
+			ParseError::BadMagic => "bad magic",
+			ParseError::BadAlignment => "bad alignment",
+			ParseError::UnsupportedClass => "unsupported class",
+			ParseError::UnsupportedEndian => "unsupported endian",
+			ParseError::UnsupportedVersion => "unsupported version",
+			ParseError::UnsupportedType => "unsupported type",
+			ParseError::UnsupportedMachine => "unsupported machine",
+			ParseError::UnsupportedFlags => "unsupported flags",
+			ParseError::ProgramHeaderSizeMismatch => "program header size mismatch",
+			ParseError::OffsetOutOfBounds => "offset out of bounds",
+			ParseError::AddressOffsetMismatch => "address offset mismatch",
+			ParseError::PageAddError(e) => <&'static str as From<_>>::from(e),
+		}
+	}
+}
+
+impl From<AddError> for ParseError {
+	fn from(err: AddError) -> Self {
+		Self::PageAddError(err)
+	}
+}
+
+pub fn load_elf<F>(
+	data: &[u8],
+	mut page_alloc: F,
+	page_tables: &mut PML4,
+) -> Result<u64, ParseError>
 where
 	F: FnMut() -> *mut Page,
 {
-	assert!(data.len() >= 16, "Data too short to include magic");
+	(data.len() >= 16)
+		.then(|| ())
+		.ok_or(ParseError::DataTooShort)?;
 
 	// SAFETY: the data is at least 16 bytes long
 	let identifier = unsafe { &*(data as *const [u8] as *const Identifier) };
 
-	assert_eq!(&identifier.magic, b"\x7fELF", "Bad ELF magic");
-	assert_eq!(
-		data.as_ptr().align_offset(mem::size_of::<usize>()),
-		0,
-		"Bad alignment"
-	);
+	(&identifier.magic == b"\x7fELF")
+		.then(|| ())
+		.ok_or(ParseError::BadMagic)?;
+	(data.as_ptr().align_offset(mem::size_of::<usize>()) == 0)
+		.then(|| ())
+		.ok_or(ParseError::BadAlignment)?;
 
 	const ID_ELF64: u8 = 2;
-	assert_eq!(identifier.class, ID_ELF64, "Unsupported class");
+	const LITTLE_ENDIAN: u8 = 1;
+	(identifier.class == ID_ELF64)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedClass)?;
+	(identifier.data == LITTLE_ENDIAN)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedEndian)?;
+	(identifier.version == 1)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedVersion)?;
 
-	#[cfg(target_endian = "little")]
-	assert_eq!(identifier.data, 1, "Unsupported endianness");
-	#[cfg(target_endian = "big")]
-	assert_eq!(identifier.data, 2, "Unsupported endianness");
-
-	assert_eq!(identifier.version, 1, "Unsupported version");
-
-	assert!(
-		data.len() >= mem::size_of::<FileHeader>(),
-		"Header too small"
-	);
+	(data.len() >= mem::size_of::<FileHeader>())
+		.then(|| ())
+		.ok_or(ParseError::DataTooShort)?;
 	// SAFETY: the data is long enough
 	let header = unsafe { &*(data as *const [u8] as *const FileHeader) };
 
-	assert_eq!(header.typ, TYPE_EXEC, "Unsupported type");
-
-	assert_eq!(header.machine, MACHINE, "Unsupported machine type");
-
-	assert_eq!(header.flags & !FLAGS, 0, "Unsupported flags");
+	(header.typ == TYPE_EXEC)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedType)?;
+	(header.machine == MACHINE)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedMachine)?;
+	(header.flags & !FLAGS == 0)
+		.then(|| ())
+		.ok_or(ParseError::UnsupportedFlags)?;
 
 	// Parse the program headers and create the segments.
 
 	let count = header.program_header_entry_count as usize;
 	let size = header.program_header_entry_size as usize;
-	assert_eq!(
-		size,
-		mem::size_of::<ProgramHeader>(),
-		"Bad program header size"
-	);
-	assert!(
-		data.len() >= count * size + usize::try_from(header.program_header_offset).unwrap(),
-		"Program headers exceed the size of the file"
-	);
+
+	(size == mem::size_of::<ProgramHeader>())
+		.then(|| ())
+		.ok_or(ParseError::ProgramHeaderSizeMismatch)?;
+	let h_offt =
+		usize::try_from(header.program_header_offset).map_err(|_| ParseError::OffsetOutOfBounds)?;
+	(data.len() >= count * size + h_offt)
+		.then(|| ())
+		.ok_or(ParseError::OffsetOutOfBounds)?;
 
 	for k in 0..count {
 		// SAFETY: the data is large enough and aligned and the header size matches.
 		let header = unsafe {
 			let h = data as *const [u8] as *const u8;
-			let h = h.add(header.program_header_offset.try_into().unwrap());
+			let h = h.add(
+				header
+					.program_header_offset
+					.try_into()
+					.map_err(|_| ParseError::OffsetOutOfBounds)?,
+			);
 			let h = h as *const ProgramHeader;
 			&*h.add(k)
 		};
@@ -127,11 +186,9 @@ where
 		const PAGE_MASK: u64 = 0xfff;
 		const PAGE_SIZE: u64 = 0x1000;
 
-		assert_eq!(
-			header.offset & PAGE_MASK,
-			header.virtual_address & PAGE_MASK,
-			"Offset is not aligned"
-		);
+		(header.offset & PAGE_MASK == header.virtual_address & PAGE_MASK)
+			.then(|| ())
+			.ok_or(ParseError::AddressOffsetMismatch)?;
 
 		let offset = header.offset & PAGE_MASK;
 
@@ -142,11 +199,11 @@ where
 			let virt = virt_address + i * PAGE_SIZE;
 			let phys = phys_address + i * PAGE_SIZE;
 			let (r, w, x) = (f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0);
-			page_tables.add(virt, phys, r, w, x, &mut page_alloc);
+			page_tables.add(virt, phys, r, w, x, &mut page_alloc)?;
 		}
 	}
 
-	header.entry
+	Ok(header.entry)
 }
 
 const FLAG_EXEC: u32 = 0x1;

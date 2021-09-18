@@ -107,8 +107,11 @@ pub mod bootinfo {
 		const MODULE: u32 = 3;
 		const MEMORY_MAP: u32 = 6;
 
+		/// # Safety
+		///
+		/// The pointer must be properly aligned and point to a valid multiboot2 info structure.
 		pub unsafe fn new(ptr: *const u8) -> Self {
-			assert_eq!(ptr.align_offset(8), 0);
+			debug_assert_eq!(ptr.align_offset(8), 0);
 			let size = usize::try_from((*ptr.cast::<FixedPart>()).total_size).unwrap();
 			Self {
 				ptr: ptr.add(mem::size_of::<FixedPart>()),
@@ -129,11 +132,11 @@ pub mod bootinfo {
 				self.ptr = ptr.wrapping_add(size);
 				self.ptr = self.ptr.wrapping_add(self.ptr.align_offset(8));
 				let ptr = ptr.wrapping_add(mem::size_of::<Tag>());
-				let size = size.checked_sub(mem::size_of::<Tag>()).unwrap();
+				let size = size - mem::size_of::<Tag>();
 
 				match tag.typ {
 					Self::MODULE => {
-						assert!(size >= mem::size_of::<u32>() * 2);
+						debug_assert!(size >= mem::size_of::<u32>() * 2);
 						unsafe {
 							let start = *ptr.cast::<u32>();
 							let end = *ptr.cast::<u32>().wrapping_add(1);
@@ -141,21 +144,21 @@ pub mod bootinfo {
 							let mut len = 0;
 							while *string.add(len) != 0 {
 								len += 1;
-								assert!(len <= size - mem::size_of::<u32>() * 2);
+								debug_assert!(len <= size - mem::size_of::<u32>() * 2);
 							}
 							let string = slice::from_raw_parts(string, len);
 							Info::Module(Module { start, end, string })
 						}
 					}
 					Self::MEMORY_MAP => {
-						assert!(
+						debug_assert!(
 							size >= mem::size_of::<u32>() * 2 + mem::size_of::<MemoryMapEntry>()
 						);
 						unsafe {
 							let entry_size = mem::size_of::<MemoryMapEntry>() as u32;
 							let entry_version = 0;
-							assert_eq!(*ptr.cast::<u32>(), entry_size);
-							assert_eq!(*ptr.cast::<u32>().add(1), entry_version);
+							debug_assert_eq!(*ptr.cast::<u32>(), entry_size);
+							debug_assert_eq!(*ptr.cast::<u32>().add(1), entry_version);
 							Info::MemoryMap(MemoryMap {
 								entries: slice::from_raw_parts(
 									ptr.add(mem::size_of::<u32>() * 2).cast(),
