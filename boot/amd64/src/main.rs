@@ -119,6 +119,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	let gdt = gdt::GDT64::new();
 	let gdt = core::pin::Pin::new(&gdt);
 	let gdt = gdt::GDT64Pointer::new(gdt);
+	vga.write_num(gdt.limit.into(), 16, 0x8, 0x7);
 	unsafe {
 		gdt.activate();
 	}

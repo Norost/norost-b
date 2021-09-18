@@ -32,7 +32,7 @@ impl GDT64 {
 				base_high: 0,
 			},
 			code: GDTEntry {
-				limit_low: 0xffff,
+				limit_low: 0x0,
 				base_low: 0,
 				base_mid: 0,
 				access: 0b1001_1010,
@@ -54,7 +54,7 @@ impl GDT64 {
 #[repr(C)]
 #[repr(packed)]
 pub struct GDT64Pointer {
-	limit: u16,
+	pub limit: u16,
 	address: u32,
 }
 
@@ -62,7 +62,7 @@ impl GDT64Pointer {
 	pub fn new(gdt: Pin<&GDT64>) -> Self {
 		unsafe {
 			Self {
-				limit: mem::size_of::<GDT64>().try_into().unwrap(),
+				limit: (mem::size_of::<GDT64>() - 1).try_into().unwrap(),
 				address: gdt.get_ref() as *const _ as u32,
 			}
 		}
