@@ -6,55 +6,53 @@
 use core::fmt::Write;
 use core::panic::PanicInfo;
 
+#[macro_use]
+mod log;
+
 mod arch;
 mod boot;
 mod driver;
 mod memory;
+mod power;
 mod sync;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
-	let mut vga = driver::vga::text::Text::new();
-	writeln!(vga, "Hello motherfucker! {:#?}", boot_info);
-
-	writeln!(vga, "Free memory: {:?}", memory::frame::free_memory());
+	{
+		log::__VGA.lock().clear()
+	}
 
 	for region in boot_info.memory_regions() {
-		use memory::{Page, frame::{MemoryRegion, PPN}};
+		use memory::{
+			frame::{MemoryRegion, PPN},
+			Page,
+		};
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
 		let base = base + align;
 		let count = (size - align) / Page::SIZE;
 		if let Ok(base) = PPN::try_from_usize(base) {
-			let region = MemoryRegion {
-				base,
-				count,
-			};
-			writeln!(vga, "Add {:?}", &region);
+			let region = MemoryRegion { base, count };
 			unsafe {
 				memory::frame::add_memory_region(region);
 			}
 		}
 	}
 
-	writeln!(vga, "Free memory: {:?}", memory::frame::free_memory());
-
-	let cb = |p| { writeln!(vga, "Allocated page: {:?}", p); };
-	memory::frame::allocate(3, cb, core::ptr::null(), 0);
-
 	unsafe {
+		memory::r#virtual::init();
+		debug!("{:#?}", memory::r#virtual::DumpCurrent);
+		loop {}
 		arch::init();
 	}
 
-	vga.write_str(b"QUACK QUACK QUACK\n", 0xa, 0x0);
-
-	loop {}
+	power::halt();
 }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
 	let mut vga = driver::vga::text::Text::new();
-	vga.write_str(b"PANIC!\n", 0xc, 0x0);
-	let _ = writeln!(vga, "{:?}", info);
-	loop {}
+	fatal!("Panic!");
+	fatal!("  {:?}", info);
+	power::halt();
 }

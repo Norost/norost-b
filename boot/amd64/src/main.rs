@@ -19,8 +19,6 @@ static GDT: gdt::GDT = gdt::GDT::new();
 static GDT_PTR: gdt::GDTPointer = gdt::GDTPointer::new(&GDT);
 
 extern "C" {
-	static boot_top: usize;
-	static boot_bottom: usize;
 	static stack_top: usize;
 	static stack_bottom: usize;
 }
@@ -39,9 +37,6 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	let mut avail_memory_count = 0;
 	let mut kernel = None;
 
-	let (bt_top, bt_bottom) = unsafe {
-		(&boot_top as *const _ as u64, &boot_bottom as *const _ as u64)
-	};
 	let (stk_top, stk_bottom) = unsafe {
 		(&stack_top as *const _ as usize, &stack_bottom as *const _ as usize)
 	};
@@ -82,6 +77,16 @@ fn main(magic: u32, arg: *const u8) -> ! {
 		print_err(&mut vga, b"No kernel module");
 		halt();
 	});
+
+	// Determine (guess) the maximum valid physical address
+	let mut memory_top = 0;
+	for e in avail_memory[..avail_memory_count].iter() {
+		// SAFETY: all elements up to avail_memory_count have been written.
+		let e = unsafe { e.assume_init() };
+		if e.size > 0 { // shouldn't happen but let's be sure
+			memory_top = memory_top.max(e.base + e.size - 1);
+		}
+	}
 
 	// Remove regions occupied by the kernel (FIXME replace with actual kernel fuckwit)
 	for i in (0..avail_memory_count).rev() {
@@ -150,7 +155,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	};
 
 	unsafe {
-		pml4.identity_map(&mut page_alloc);
+		pml4.identity_map(&mut page_alloc, memory_top);
 	}
 
 	let kernel = unsafe {

@@ -17,3 +17,9 @@ pub unsafe fn init() {
 	)));
 	GDT_PTR.assume_init_mut().activate();
 }
+
+pub fn halt() -> ! {
+	loop {
+		unsafe { asm!("hlt") };
+	}
+}

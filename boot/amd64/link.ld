@@ -4,8 +4,6 @@ SECTIONS
 {
 	. = 1M;
 
-	boot_bottom = .;
-
 	.multiboot :
 	{
 		KEEP(*(.multiboot));
@@ -31,8 +29,6 @@ SECTIONS
 		*(COMMON)
 		*(.bss .bss.*)
 	}
-
-	boot_top = .;
 
 	/DISCARD/ :
 	{

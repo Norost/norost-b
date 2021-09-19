@@ -45,27 +45,75 @@ impl PML4 {
 		Self([V; 512])
 	}
 
+	/// `memory_top` is *inclusive*.
+	///
 	/// # Safety
 	///
 	/// May only be called once.
-	pub unsafe fn identity_map<F>(&mut self, mut page_alloc: F)
+	pub unsafe fn identity_map<F>(&mut self, mut page_alloc: F, memory_top: u64)
 	where
 		F: FnMut() -> *mut Page,
 	{
 		debug_assert!(!self.0[0].present());
 
-		// Map the first 2M
-		//
-		// 1G hugepages can be used on some processors, but 2M has wider compatibility and is
-		// plenty.
+		// FIXME account for different memory types
+		const PDPE1GB: u64 = 1 << (32 + 26); // stolen from Linux (arch/x86/include/asm/cpufeatures.h)
+		let use_1gb = {
+			let (ecx, edx): (u32, u32);
+			asm!("cpuid", in("eax") 0x8000_0001u32, out("ecx") ecx, out("edx") edx, options(att_syntax));
+			let features = (u64::from(edx) << 32) | u64::from(ecx);
+			features & PDPE1GB > 0
+		};
 
-		let pd = &mut *page_alloc().cast::<Directory>();
-		pd.0[0].set_mega(0, true, true, true).unwrap_or_else(|_| unreachable!());
+		// Identity-map the first 1G.
 
 		let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
-		pdp.0[0].set(pd);
-
+		if use_1gb {
+			pdp.0[0].set_giga(0, true, true, true).unwrap_or_else(|_| unreachable!());
+		} else {
+			let pd = &mut *page_alloc().cast::<Directory>();
+			for m in 0usize..512 {
+				let addr = u64::try_from(m).unwrap() << 21;
+				pd.0[m].set_mega(addr, true, true, true).unwrap_or_else(|_| unreachable!());
+			}
+			pdp.0[0].set(pd);
+		}
 		self.0[0].set(pdp);
+
+		// Identity map the first 64T of available physical memory to 0xffff_c000_0000_0000
+		// FIXME account for different memory types
+
+		assert!(memory_top < 1 << 46);
+		for t in 384..512 {
+
+			let addr = u64::try_from(t - 384).unwrap() << 39;
+			if addr > memory_top {
+				break;
+			}
+			let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
+
+			for g in 0..512 {
+				let addr = addr | u64::try_from(g).unwrap() << 30;
+				if addr > memory_top {
+					break;
+				}
+
+				if use_1gb {
+					pdp.0[g].set_giga(addr, true, true, false).unwrap_or_else(|_| unreachable!());
+				} else {
+					let pd = &mut *page_alloc().cast::<Directory>();
+					for m in 0..512 {
+						let addr = addr | u64::try_from(m).unwrap() << 21;
+						if addr > memory_top {
+							break;
+						}
+						pd.0[m].set_mega(addr, true, true, false).unwrap_or_else(|_| unreachable!());
+					}
+					pdp.0[g].set(pd);
+				}
+			}
+			self.0[t].set(pdp);
+		}
 	}
 
 	pub fn add<F>(
@@ -187,6 +235,14 @@ impl DirectoryPointersEntry {
 	/// `pd` must be properly initialized.
 	unsafe fn set(&mut self, pd: *mut Directory) {
 		self.0 = pd as u64 | 1;
+	}
+
+	fn set_giga(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
+		(page & ((1 << 21) - 1) == 0)
+			.then(|| ())
+			.ok_or(SetError::BadAlignment)?;
+		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | 1;
+		Ok(())
 	}
 
 	fn is_giga(&self) -> bool {

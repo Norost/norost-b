@@ -5,7 +5,7 @@
 mod dumb_stack;
 
 use super::Page;
-use core::convert::TryInto;
+use core::convert::{TryFrom, TryInto};
 use core::fmt;
 
 /// A Physical Page Number.
@@ -13,19 +13,24 @@ use core::fmt;
 /// PPNs are guaranteed to be properly aligned and may be optimized for size:
 /// * If at most 2^32 pages are expected to be available, PPNS will be 32 bits.
 /// * If at most 2^16 pages are expected to be available, PPNS will be 16 bits.
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 #[cfg(not(any(feature = "mem-max-16t", feature = "mem-max-256m")))]
 pub struct PPN(u64);
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 #[cfg(all(feature = "mem-max-16t", not(feature = "mem-max-256m")))]
 pub struct PPN(u32);
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 #[cfg(feature = "mem-max-256m")]
 pub struct PPN(u16);
 
 impl PPN {
 	pub fn try_from_usize(ptr: usize) -> Result<Self, PPNError> {
-		(ptr % Page::SIZE == 0).then(|| {
-			let ptr = ptr / Page::SIZE;
-			ptr.try_into().map(Self).map_err(|_| PPNError::OutOfRange)
-		}).ok_or(PPNError::Misaligned)?
+		(ptr % Page::SIZE == 0)
+			.then(|| {
+				let ptr = ptr / Page::SIZE;
+				ptr.try_into().map(Self).map_err(|_| PPNError::OutOfRange)
+			})
+			.ok_or(PPNError::Misaligned)?
 	}
 }
 
@@ -35,10 +40,35 @@ impl fmt::Debug for PPN {
 	}
 }
 
+macro_rules! derive_try_from {
+	($ty:ty) => {
+		impl TryFrom<PPN> for $ty {
+			type Error = OutOfRange;
+
+			fn try_from(ppn: PPN) -> Result<Self, Self::Error> {
+				let ob = u32::try_from(Page::OFFSET_BITS).map_err(|_| OutOfRange)?;
+				let v = Self::try_from(ppn.0).map_err(|_| OutOfRange)?;
+				v.checked_shl(ob).ok_or(OutOfRange)
+			}
+		}
+	};
+}
+
+derive_try_from!(u128);
+derive_try_from!(u64);
+derive_try_from!(u32);
+derive_try_from!(u16);
+derive_try_from!(u8);
+derive_try_from!(usize);
+
+#[derive(Debug)]
 pub enum PPNError {
 	Misaligned,
 	OutOfRange,
 }
+
+#[derive(Debug)]
+pub struct OutOfRange;
 
 /// A single page frame with a variable size.
 #[derive(Debug)]
@@ -136,5 +166,7 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 
 /// The amount of free memory in bytes.
 pub fn free_memory() -> u128 {
-	(dumb_stack::STACK.lock().count() * Page::SIZE).try_into().unwrap()
+	(dumb_stack::STACK.lock().count() * Page::SIZE)
+		.try_into()
+		.unwrap()
 }

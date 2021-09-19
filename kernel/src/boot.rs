@@ -27,7 +27,10 @@ impl fmt::Debug for Info {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
-			.field("stack", &format_args!("0x{:x} - 0x{:x}", self.stack_bottom, self.stack_top))
+			.field(
+				"stack",
+				&format_args!("0x{:x} - 0x{:x}", self.stack_bottom, self.stack_top),
+			)
 			.finish()
 	}
 }
@@ -42,6 +45,12 @@ pub struct MemoryRegion {
 
 impl fmt::Debug for MemoryRegion {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "MemoryRegion(0x{:x} - 0x{:x} [0x{:x}])", self.base, self.base + self.size, self.size)
+		write!(
+			f,
+			"MemoryRegion(0x{:x} - 0x{:x} [0x{:x}])",
+			self.base,
+			self.base + self.size,
+			self.size
+		)
 	}
 }
