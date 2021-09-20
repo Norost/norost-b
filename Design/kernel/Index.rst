@@ -4,6 +4,8 @@ Norost B Design: Kernel
 
 .. contents::
 
+.. include:: goals.rst
+
 .. include:: boot.rst
 
 .. include:: allocator.rst
