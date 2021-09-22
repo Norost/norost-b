@@ -14,14 +14,14 @@ use core::fmt;
 /// * If at most 2^32 pages are expected to be available, PPNS will be 32 bits.
 /// * If at most 2^16 pages are expected to be available, PPNS will be 16 bits.
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+pub struct PPN(pub PPNBox);
+
 #[cfg(not(any(feature = "mem-max-16t", feature = "mem-max-256m")))]
-pub struct PPN(u64);
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+pub type PPNBox = u64;
 #[cfg(all(feature = "mem-max-16t", not(feature = "mem-max-256m")))]
-pub struct PPN(u32);
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+pub type PPNBox = u32;
 #[cfg(feature = "mem-max-256m")]
-pub struct PPN(u16);
+pub type PPNBox = u16;
 
 impl PPN {
 	pub fn try_from_usize(ptr: usize) -> Result<Self, PPNError> {
@@ -76,6 +76,17 @@ pub struct PageFrame {
 	pub base: PPN,
 	/// The size of the frame expressed as `2 ^ p2size`.
 	pub p2size: u8,
+}
+
+impl PageFrame {
+	/// # Safety
+	///
+	/// The base and p2size originates from `PageFrame::into_raw()`.
+	pub unsafe fn from_raw(base: PPN, p2size: u8) -> Self {
+		Self {
+			base, p2size,
+		}
+	}
 }
 
 /// A region of physical memory

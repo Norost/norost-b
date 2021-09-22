@@ -18,4 +18,4 @@ lto = "fat"
 [profile.release.package.noraboot]
 codegen-units = 1
 opt-level = 'z'
-strip = "symbols"
+#strip = "symbols"

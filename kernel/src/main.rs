@@ -39,8 +39,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	unsafe {
 		memory::r#virtual::init();
-		debug!("{:#?}", memory::r#virtual::DumpCurrent);
-		loop {}
 		arch::init();
 	}
 

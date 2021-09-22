@@ -1,3 +1,4 @@
+pub mod asm;
 mod gdt;
 mod multiboot;
 mod tss;

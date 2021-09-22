@@ -3,10 +3,9 @@ use core::fmt;
 
 #[repr(C)]
 pub struct Info {
-	memory_regions_ptr: u32,
-	memory_regions_len: u32,
-	stack_top: u32,
-	stack_bottom: u32,
+	memory_regions_len: u16,
+	_padding: [u16; 3],
+	memory_regions: [MemoryRegion; 0],
 }
 
 impl Info {
@@ -16,7 +15,7 @@ impl Info {
 	pub fn memory_regions(&self) -> &[MemoryRegion] {
 		unsafe {
 			core::slice::from_raw_parts(
-				usize::try_from(self.memory_regions_ptr).unwrap() as *const _,
+				&self.memory_regions as *const _,
 				usize::try_from(self.memory_regions_len).unwrap(),
 			)
 		}
@@ -27,10 +26,6 @@ impl fmt::Debug for Info {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
-			.field(
-				"stack",
-				&format_args!("0x{:x} - 0x{:x}", self.stack_bottom, self.stack_top),
-			)
 			.finish()
 	}
 }

@@ -1,3 +1,4 @@
+use crate::memory::r#virtual::phys_to_virt;
 use core::fmt;
 
 pub struct Text {
@@ -9,7 +10,6 @@ pub struct Text {
 impl Text {
 	const WIDTH: u8 = 80;
 	const HEIGHT: u8 = 24;
-	const BUFFER: *mut u16 = 0x0b8000 as *mut u16;
 
 	pub const fn new() -> Self {
 		Self { row: 0, column: 0, colors: 0xf }
@@ -32,9 +32,10 @@ impl Text {
 	}
 
 	unsafe fn write_byte(b: u8, colors: u8, x: u8, y: u8) {
+		let buffer = phys_to_virt(0xb8000).cast::<u16>();
 		let i = isize::from(Self::WIDTH) * isize::from(y) + isize::from(x);
 		let v = u16::from(b) | (u16::from(colors) << 8);
-		core::ptr::write_volatile(Self::BUFFER.offset(i), v);
+		core::ptr::write_volatile(buffer.offset(i), v);
 	}
 
 	fn put_byte(&mut self, b: u8) {
