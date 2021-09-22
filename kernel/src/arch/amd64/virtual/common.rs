@@ -6,7 +6,7 @@ use core::ptr;
 
 pub struct Entry(u64);
 
-pub const IDEMPOTENT_MAP_ADDRESS: *mut u8 = 0xffff_c000_0000_0000 as *mut _;
+pub const IDENTITY_MAP_ADDRESS: *mut u8 = 0xffff_c000_0000_0000 as *mut _;
 
 impl Entry {
 	const PRESENT: u64 = 1 << 0;
@@ -74,22 +74,19 @@ impl Entry {
 		}
 	}
 
-	/// # Safety
+	/// Clear this entry and return the physical address.
 	///
-	/// Identity mappings must still be present.
-	pub fn new_table_phys(&mut self, frame: frame::PageFrame) -> &mut [Entry; 512] {
-		assert_eq!(frame.p2size, 0);
-		let frame: u64 = frame.base.try_into().unwrap();
-		// SAFETY: FIXME the allocator makes no guarantees about the address of the frame.
-		let tbl = unsafe { frame as *mut [Entry; 512] };
-		// SAFETY: a fully zeroed Entry is valid.
-		dbg!();
-		loop {}
-		unsafe { ptr::write_bytes(tbl, 0, mem::size_of::<[Entry; 512]>()) };
-		dbg!();
-		self.0 = frame | Self::PRESENT;
-		// SAFETY: the table is properly initialized.
-		unsafe { &mut *tbl }
+	/// Note that this does not clear entries in tables. It is up to the caller
+	/// to clear these entries.
+	pub fn clear(&mut self) -> Option<frame::PPN> {
+		self.is_present().then(|| {
+			debug_assert!(frame::PPN::try_from_usize((self.0 & !0xfff).try_into().unwrap()).is_ok());
+			// This should fit as long as we receive valid page frames
+			// try_into() isn't used as it'll have a _huge_ performance impact.
+			let ppn = frame::PPN((self.0 >> 12) as frame::PPNBox);
+			self.0 = 0;
+			ppn
+		})
 	}
 }
 
@@ -143,18 +140,18 @@ pub fn get_current<'a>() -> &'a mut [Entry; 512] {
 /// # Safety
 ///
 /// `virt` must point to a location inside the idempotent map.
-unsafe fn virt_to_phys(virt: *const u8) -> u64 {
+pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 	debug_assert!(
-		IDEMPOTENT_MAP_ADDRESS as *const _ <= virt && virt <= u64::MAX as *const _,
+		IDENTITY_MAP_ADDRESS as *const _ <= virt && virt <= u64::MAX as *const _,
 		"virt out of range"
 	);
-	virt.offset_from(IDEMPOTENT_MAP_ADDRESS).try_into().unwrap()
+	virt.offset_from(IDENTITY_MAP_ADDRESS).try_into().unwrap()
 }
 
 /// # Safety
 ///
 /// `phys` must be in range, i.e. lower than `1 << 46`.
-unsafe fn phys_to_virt(phys: u64) -> *mut u8 {
+pub unsafe fn phys_to_virt(phys: u64) -> *mut u8 {
 	debug_assert!(phys < 1 << 46, "phys out of range");
-	IDEMPOTENT_MAP_ADDRESS.add(usize::try_from(phys).unwrap())
+	IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap())
 }

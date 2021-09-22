@@ -18,9 +18,7 @@ mod sync;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
-	{
-		log::__VGA.lock().clear()
-	}
+	log::init();
 
 	for region in boot_info.memory_regions() {
 		use memory::{
@@ -41,8 +39,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	unsafe {
 		memory::r#virtual::init();
-		debug!("{:#?}", memory::r#virtual::DumpCurrent);
-		loop {}
 		arch::init();
 	}
 

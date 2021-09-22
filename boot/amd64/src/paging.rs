@@ -1,4 +1,6 @@
-use core::convert::TryFrom;
+use crate::cpuid;
+use crate::mtrr;
+use core::convert::{TryInto, TryFrom};
 use core::mem::MaybeUninit;
 
 #[repr(C)]
@@ -50,38 +52,32 @@ impl PML4 {
 	/// # Safety
 	///
 	/// May only be called once.
-	pub unsafe fn identity_map<F>(&mut self, mut page_alloc: F, memory_top: u64)
+	pub unsafe fn identity_map<F>(&mut self, mut page_alloc: F, memory_top: u64, cpuid: &cpuid::Features)
 	where
 		F: FnMut() -> *mut Page,
 	{
 		debug_assert!(!self.0[0].present());
 
-		// FIXME account for different memory types
-		const PDPE1GB: u64 = 1 << (32 + 26); // stolen from Linux (arch/x86/include/asm/cpufeatures.h)
-		let use_1gb = {
-			let (ecx, edx): (u32, u32);
-			asm!("cpuid", in("eax") 0x8000_0001u32, out("ecx") ecx, out("edx") edx, options(att_syntax));
-			let features = (u64::from(edx) << 32) | u64::from(ecx);
-			features & PDPE1GB > 0
-		};
+		assert!(cpuid.mtrr(), "no MTRRs available");
 
-		// Identity-map the first 1G.
-
+		// Identity-map the bootloader init section, which is located at the start and less than
+		// 4KB.
+		// 4KB pages are used to avoid undefined behaviour as 2MB/1GB pages can overlap regions
+		// with different memory types.
+		let init = &crate::boot_bottom as *const _ as usize;
 		let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
-		if use_1gb {
-			pdp.0[0].set_giga(0, true, true, true).unwrap_or_else(|_| unreachable!());
-		} else {
-			let pd = &mut *page_alloc().cast::<Directory>();
-			for m in 0usize..512 {
-				let addr = u64::try_from(m).unwrap() << 21;
-				pd.0[m].set_mega(addr, true, true, true).unwrap_or_else(|_| unreachable!());
-			}
-			pdp.0[0].set(pd);
-		}
+		let pd = &mut *page_alloc().cast::<Directory>();
+		let pt = &mut *page_alloc().cast::<Table>();
+		pt.0[(init >> 12) & 0x1ff].set(init.try_into().unwrap(), true, false, true).unwrap();
+		pd.0[(init >> 21) & 0x1ff].set(pt);
+		pdp.0[(init >> 30) & 0x1ff].set(pd);
 		self.0[0].set(pdp);
 
+		let use_1gb = cpuid.pdpe1gb();
+
 		// Identity map the first 64T of available physical memory to 0xffff_c000_0000_0000
-		// FIXME account for different memory types
+
+		let mtrrs = mtrr::AllRanges::new();
 
 		assert!(memory_top < 1 << 46);
 		for t in 384..512 {
@@ -98,17 +94,64 @@ impl PML4 {
 					break;
 				}
 
-				if use_1gb {
-					pdp.0[g].set_giga(addr, true, true, false).unwrap_or_else(|_| unreachable!());
-				} else {
-					let pd = &mut *page_alloc().cast::<Directory>();
-					for m in 0..512 {
+				let map_2mb = |pd: &mut Directory, from, page_alloc: &mut F| {
+					// Attempt to map as series of 2MBs
+					for m in from..512 {
 						let addr = addr | u64::try_from(m).unwrap() << 21;
 						if addr > memory_top {
 							break;
 						}
-						pd.0[m].set_mega(addr, true, true, false).unwrap_or_else(|_| unreachable!());
+						// Split the page in pieces unconditionally since the first 1MB is a
+						// mishmash of memory types no matter what (don't even bother with
+						// fixed MTRRs).
+						if mtrrs.intersects_2mb(addr) || (t, g, m) == (384, 0, 0) {
+							let pt = &mut *page_alloc().cast::<Table>();
+							for k in 0..512 {
+								let addr = addr | u64::try_from(k).unwrap() << 12;
+								if addr > memory_top {
+									break;
+								}
+								pt.0[k].set(addr, true, true, false).unwrap();
+							}
+							pd.0[m].set(pt);
+						} else {
+							pd.0[m].set_mega(addr, true, true, false).unwrap();
+						}
 					}
+				};
+
+				// Ditto about first 1MB
+				if use_1gb && (t, g) != (384, 0) {
+					// Attempt to map whole 1G
+					if let Some(m) = mtrrs.intersects_1gb(addr) {
+						let pd = &mut *page_alloc().cast::<Directory>();
+						// Map all unaffected 2MB frames with hugepages.
+						for m in 0..m {
+							let addr = addr | u64::try_from(m).unwrap() << 21;
+							if addr > memory_top {
+								break;
+							}
+							pd.0[m].set_mega(addr, true, true, false).unwrap();
+						}
+						// Map affected 2MB page as 4K pages
+						let pt = &mut *page_alloc().cast::<Table>();
+						for k in 0..512 {
+							let addr = addr | u64::try_from(k).unwrap() << 12;
+							if addr > memory_top {
+								break;
+							}
+							pt.0[k].set(addr, true, true, false).unwrap();
+						}
+						pd.0[m].set(pt);
+						// Do regular scan on remaining pages
+						map_2mb(pd, m + 1, &mut page_alloc);
+						pdp.0[g].set(pd);
+					} else {
+						pdp.0[g].set_giga(addr, true, true, false).unwrap();
+					}
+				} else {
+					let pd = &mut *page_alloc().cast::<Directory>();
+					map_2mb(pd, 0, &mut page_alloc);
 					pdp.0[g].set(pd);
 				}
 			}
@@ -180,26 +223,6 @@ impl PML4 {
 		};
 
 		Ok(())
-	}
-
-	pub unsafe fn activate(&self) {
-		asm!("
-			# Enable PAE
-			movl	%cr4, %eax
-			orl		$0x20, %eax
-			movl	%eax, %cr4
-			# Set PML4
-			movl	{0}, %cr3
-			# Enable long mode
-			movl	$0xc0000080, %ecx	# IA32_EFER
-			rdmsr
-			orl		$0x100, %eax		# Enable long mode
-			wrmsr
-			# Enable paging
-			movl	%cr0, %eax
-			orl		$0x80000000, %eax
-			movl	%eax, %cr0
-		", in(reg) self as *const _, out("eax") _, out("ecx") _, out("edx") _, options(att_syntax));
 	}
 }
 
@@ -331,7 +354,7 @@ impl From<AddError> for &'static str {
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum SetError {
 	BadRWXFlags,
 	BadAlignment,

@@ -2,11 +2,15 @@
 #![no_std]
 #![feature(asm)]
 #![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
+#![feature(option_result_unwrap_unchecked)]
 
+mod cpuid;
 mod elf64;
 mod gdt;
 mod info;
 mod multiboot2;
+mod msr;
+mod mtrr;
 mod paging;
 mod vga;
 
@@ -15,21 +19,39 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use core::slice;
 
+#[link_section = ".init.gdt"]
 static GDT: gdt::GDT = gdt::GDT::new();
 static GDT_PTR: gdt::GDTPointer = gdt::GDTPointer::new(&GDT);
 
 extern "C" {
-	static stack_top: usize;
-	static stack_bottom: usize;
+	static boot_top: usize;
+	static boot_bottom: usize;
 }
 
+#[repr(C)]
+struct Return {
+	entry: u64,
+	pml4: &'static paging::PML4,
+	info: &'static info::Info,
+}
+
+static mut INFO: info::Info = info::Info::empty();
+static mut VGA: Option<vga::Text> = None;
+
 #[export_name = "main"]
-fn main(magic: u32, arg: *const u8) -> ! {
-	let mut vga = vga::Text::new();
+extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
+	unsafe {
+		VGA = Some(vga::Text::new());
+	}
+
+	let cpuid = cpuid::Features::new().unwrap_or_else(|| {
+		print_err(b"No CPUID support");
+		halt();
+	});
 
 	if magic != 0x36d76289 {
-		vga.write_str(b"Bad multiboot2 magic: ", 0xc, 0);
-		vga.write_num(magic.into(), 16, 0xc, 0).unwrap_or_else(|_| unreachable!());
+		print_err(b"Bad multiboot2 magic: ");
+		print_err_num(magic.into(), 16);
 		halt();
 	}
 
@@ -37,8 +59,8 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	let mut avail_memory_count = 0;
 	let mut kernel = None;
 
-	let (stk_top, stk_bottom) = unsafe {
-		(&stack_top as *const _ as usize, &stack_bottom as *const _ as usize)
+	let (bt_top, bt_bottom) = unsafe {
+		(&boot_top as *const _ as usize, &boot_bottom as *const _ as usize)
 	};
 
 	use multiboot2::bootinfo as bi;
@@ -74,7 +96,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	}
 
 	let kernel = kernel.unwrap_or_else(|| {
-		print_err(&mut vga, b"No kernel module");
+		print_err(b"No kernel module");
 		halt();
 	});
 
@@ -88,9 +110,9 @@ fn main(magic: u32, arg: *const u8) -> ! {
 		}
 	}
 
-	// Remove regions occupied by the kernel (FIXME replace with actual kernel fuckwit)
+	// Remove regions occupied by the kernel
 	for i in (0..avail_memory_count).rev() {
-		let list = [(stk_bottom as u64, stk_top as u64), (kernel.start.into(), kernel.end.into())];
+		let list = [(bt_bottom as u64, bt_top as u64), (kernel.start.into(), kernel.end.into())];
 		for (bottom, top) in list.iter().copied() {
 			// SAFETY: all elements up to avail_memory_count have been written.
 			let e = unsafe { avail_memory[i].assume_init() };
@@ -155,7 +177,7 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	};
 
 	unsafe {
-		pml4.identity_map(&mut page_alloc, memory_top);
+		pml4.identity_map(&mut page_alloc, memory_top, &cpuid);
 	}
 
 	let kernel = unsafe {
@@ -166,39 +188,21 @@ fn main(magic: u32, arg: *const u8) -> ! {
 	};
 
 	let entry = elf64::load_elf(kernel, page_alloc, pml4).unwrap_or_else(|e| {
-		vga.write_str(b"Failed to load ELF: ", 0xc, 0);
-		vga.write_str(<&'static str as From<_>>::from(e).as_bytes(), 0xc, 0);
+		print_err(b"Failed to load ELF: ");
+		print_err(<&'static str as From<_>>::from(e).as_bytes());
 		halt();
 	});
 
-	let info = info::Info::new(avail_memory, (stk_top, stk_bottom));
-
-	unsafe {
-		pml4.activate();
-		let (el, eh) = (entry as u32, (entry >> 32) as u32);
+	let info = unsafe {
 		GDT_PTR.activate();
-		asm!("
-			# Switch to long mode
-			ljmp	$0x8, $realm64
-		.code64
-		realm64:
+		INFO.set_memory_regions(avail_memory);
+		&INFO
+	};
 
-			# Fix entry address
-			mov		$32, %cl
-			shlq	%cl, %rbx
-			orq		%rax, %rbx
-
-			# Setup data segment properly
-			mov		$0x10, %ax
-			mov		%ax, %ds
-			mov		%ax, %es
-			mov		%ax, %fs
-			mov		%ax, %gs
-			mov		%ax, %ss
-
-			# Jump to kernel entry
-			jmp		*%rbx
-		", in("eax") el, in("ebx") eh, in("edi") &info, options(noreturn, att_syntax));
+	Return {
+		entry,
+		pml4,
+		info,
 	}
 }
 
@@ -210,19 +214,26 @@ fn panic(_info: &PanicInfo) -> ! {
 		asm!("jmp	panic_function_is_present_");
 	}
 	*/
-	let mut vga = vga::Text::new();
-	vga.write_str(b"Panic! ", 0xc, 0);
+	print_err(b"Panic! ");
 	if let Some(loc) = _info.location() {
-		vga.write_str(b"[", 0xc, 0);
-		vga.write_str(loc.file().as_bytes(), 0xc, 0);
-		vga.write_str(b"]:", 0xc, 0);
-		vga.write_num(loc.line().into(), 10, 0xc, 0).unwrap_or_else(|_| unreachable!());
+		print_err(b"[");
+		print_err(loc.file().as_bytes());
+		print_err(b"]:");
+		print_err_num(loc.line().into(), 10);
 	}
 	halt();
 }
 
-fn print_err(vga: &mut vga::Text, s: &[u8]) {
-	vga.write_str(s, 0xc, 0);
+fn print_err(s: &[u8]) {
+	debug_assert!(unsafe { VGA.is_some() });
+	unsafe {
+		VGA.as_mut().unwrap_unchecked().write_str(s, 0xc, 0)
+	}
+}
+
+fn print_err_num(n: i128, base: u8) {
+	debug_assert!(unsafe { VGA.is_some() });
+	let _ = unsafe { VGA.as_mut().unwrap_unchecked().write_num(n, base, 0xc, 0) };
 }
 
 fn halt() -> ! {

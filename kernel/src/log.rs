@@ -1,16 +1,19 @@
 use crate::sync::SpinLock;
-use crate::driver::vga::text::Text;
+use crate::driver::uart::x86::UART;
 
-pub static __VGA: SpinLock<Text> = SpinLock::new(Text::new());
+pub static __LOG: SpinLock<Option<UART>> = SpinLock::new(None);
+
+pub fn init() {
+	*__LOG.lock() = unsafe { Some(UART::new(0x3f8)) };
+}
 
 #[macro_export]
 macro_rules! debug {
 	($($args:tt)*) => {{
 		#[allow(unused_imports)]
 		use core::fmt::Write;
-		let mut vga = $crate::log::__VGA.lock();
-		vga.set_colors(0x7, 0);
-		writeln!(vga, $($args)*).unwrap();
+		let mut log = $crate::log::__LOG.lock();
+		writeln!(log.as_mut().unwrap(), $($args)*).unwrap();
 	}}
 }
 
@@ -19,9 +22,8 @@ macro_rules! fatal {
 	($($args:tt)*) => {{
 		#[allow(unused_imports)]
 		use core::fmt::Write;
-		let mut vga = $crate::log::__VGA.lock();
-		vga.set_colors(0xc, 0);
-		writeln!(vga, $($args)*).unwrap();
+		let mut log = $crate::log::__LOG.lock();
+		writeln!(log.as_mut().unwrap(), $($args)*).unwrap();
 	}}
 }
 

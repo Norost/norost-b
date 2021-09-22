@@ -2,4 +2,8 @@
 
 ./mkiso.sh || exit $?
 
-qemu-system-x86_64 --enable-kvm -cpu host -drive format=raw,file=norost.iso
+cpu="--enable-kvm -cpu host"
+
+[ -z ${CPU+x} ] || cpu="-cpu $CPU"
+
+qemu-system-x86_64 $cpu -drive format=raw,file=norost.iso -serial mon:stdio $@

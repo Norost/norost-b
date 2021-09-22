@@ -4,6 +4,8 @@ SECTIONS
 {
 	. = 1M;
 
+	boot_bottom = .;
+
 	.multiboot :
 	{
 		KEEP(*(.multiboot));
@@ -11,6 +13,7 @@ SECTIONS
 
 	.text :
 	{
+		*(.init .init.*)
 		*(.text .text.*)
 	}
  
@@ -34,4 +37,6 @@ SECTIONS
 	{
 		*(.note .note.*)
 	}
+
+	boot_top = .;
 }
