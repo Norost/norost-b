@@ -44,7 +44,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		VGA = Some(vga::Text::new());
 	}
 
-	print_err(b"ULTRAKEK\n");
 	let cpuid = cpuid::Features::new().unwrap_or_else(|| {
 		print_err(b"No CPUID support");
 		halt();
