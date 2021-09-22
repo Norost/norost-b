@@ -55,26 +55,24 @@ impl fmt::Debug for DumpCurrent {
 		// TODO make this recursive. get_entry_mut should be suitable.
 		// L4
 		for (t, e) in root.iter_mut().enumerate() {
-			if e.is_leaf() {
-				writeln!(f, "  {}", t)?;
-			} else if let Some(tbl) = e.as_table_mut() {
-				writeln!(f, "  {}:", t)?;
+			if let Some(tbl) = e.as_table_mut() {
+				writeln!(f, "{:>3}:", t)?;
 				// L3
 				for (g, e) in tbl.iter_mut().enumerate() {
 					if e.is_leaf() {
-						writeln!(f, "    {}", g)?;
+						writeln!(f, " 1G {:>3}", g)?;
 					} else if let Some(tbl) = e.as_table_mut() {
-						writeln!(f, "    {}:", g)?;
+						writeln!(f, "PDP {:>3}:", g)?;
 						// L2
 						for (m, e) in tbl.iter_mut().enumerate() {
 							if e.is_leaf() {
-								writeln!(f, "      {}", m)?;
+								writeln!(f, "    2M {:>3}", m)?;
 							} else if let Some(tbl) = e.as_table_mut() {
-								writeln!(f, "      {}:", m)?;
+								writeln!(f, "    PD {:>3}:", m)?;
 								// L1
 								for (k, e) in tbl.iter_mut().enumerate() {
 									if e.is_present() {
-										writeln!(f, "        {}", k)?;
+										writeln!(f, "         4K {:>3}", k)?;
 									}
 								}
 							}

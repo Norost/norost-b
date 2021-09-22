@@ -60,8 +60,9 @@ impl Features {
 	}
 
 	// List stolen from https://sandpile.org/x86/cpuid.htm
+	// Some like the elusive PG1G/pdpe1gb have been found in QEMU source (target/i386/cpu.c)
 	flag!(basic mtrr = 0x1 | 12);
-	flag!(extended pdpe1gb = 0x16 | 26);
+	flag!(extended pdpe1gb = 0x1 | 26);
 }
 
 struct CPUID {
