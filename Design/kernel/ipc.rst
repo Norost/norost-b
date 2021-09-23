@@ -2,77 +2,88 @@
 Inter-process communication
 ===========================
 
-IPC is achieved by "process hopping": a thread stores data to be transmitted in
-some of its registers and asks the kernel to switch it to another process.
-
-If the other process has a notification handler set up, it will set the
-thread's program counter to that of the handler. If not, the call will fail.
-
-The hopped thread will have no stack. The receiving process needs to allocate
-a stack if necessary.
-
-
-Asynchronous communication
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-If a thread needs to keep running while making a request, it can create a new
-thread with the target process and message contents already set.
-
-
-Sharing memory
-~~~~~~~~~~~~~~
-
-To share a large amount of memory, mappings can be moved or shared. The sending
-process specifies a range which the receiving process can then accept.
-
-Move mappings will unmap the region in the sender's address space if the
-receiver accepts it. Otherwise, it will remain in the sender's address space.
-
-Share mappings will not unmap the region but will increase a reference counter
-per page. Each page size (4k/2M/1G...) has a separate reference counter to
-improve sharing speed.
-
-
-Ports
+Goals
 ~~~~~
 
-Processes are not addressed directly, instead a process estabilishes a port
-through which communications occur.
+IPC communication by clients is classified in three categories:
 
-There are three types of ports:
+* Low throughput:
+  For applications that do not need fast I/O an extensive set of synchronous
+  calls are available. These are implemented on top of high throughput
+  asynchronous calls.
+
+* High throughput, generic:
+  Applications that need high I/O throughput but need to work with a variety of
+  other processes can make use of an asynchronous ring buffer. 
+
+* High throughput, specialzied:
+  For systems with processes dedicated to certain tasks the devices can be
+  passed directly to these processes. This will have the highest possible
+  throughput of any solution.
+
+The design described below focuses on the high throughput, generic case.
 
 
-Named ports
-'''''''''''
+Data sharing mechanisms
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Named ports are globally accessible and are addressed by a string.
+Data is shared through the use of shared memory mappings. In general, there are
+three types of shared memory:
+
+* Kernel memory, where only one process shares a buffer with the kernel.
+  This is used for the I/O queues.
+* File memory, where any process and the kernel share a file object which may
+  be cached in memory and/or be stored somewhere on a disk. This mechanism is
+  backed by the VFS.
+* Anonymous memory, where any process share a fixed size of memory. This is
+  useful for e.g. framebuffers, which are generally static in size.
 
 
-Anonymous ports
+Ring buffers
+~~~~~~~~~~~~
+
+All communication rely on ring buffers to notify the kernel and processes.
+There are two types of ring buffers: client buffers and server buffers.
+
+The approach is heavily inspired by Linux' ``io_uring``, which seems to scale
+the best when under high pressure.
+
+
+Client buffers
+''''''''''''''
+
+The client buffer consists of two queues: the submission queue and the
+completion queue.
+
+Each entry in the submission is 64 bytes large. The first byte indicates the
+opcode of the operation, the last 8 bytes are reserved for arbitrary user data
+and the value of the remaining 55 bytes depend on the exact operation.
+
+When a operation has completed, an entry is added to the completion queue. Each
+entry in the completion queue has two fields: the first being the 64-bit
+userdata field, the second being 64 bits of arbitrary data depending on the
+performed operation.
+
+
+Servers buffers
 '''''''''''''''
 
-Anonymous ports can be created when spawning a process or when returning from a
-hop.
+Server buffers work much like client buffers except in the reverse way: instead
+of submitting entries, entries are *received* via a submitted ring. Any entries
+that have finished processing are added to a completed ring.
+
+A submitted entry has the same structure as that of a client submission entry:
+first byte for the opcode, 55 bytes for arbitrary data and the last 8 for
+userdata (although in this case, it is a kernel tag). The completed entry has
+the 64-bit userdata as first field and 64 bits of arbitrary data as the next.
 
 
-Callstack model
-~~~~~~~~~~~~~~~
+Queue processing
+''''''''''''''''
 
-When a thread hops, it can choose whether a checkpoint should be
-created. This checkpoint holds the stack pointer and program counter at the
-moment of the call, allowing the state before the call to be restored.
+Client queues are exclusively processed by the kernel. A process can request
+the kernel to explicitly scan the queue once or to do so periodically, i.e.
+polling. In the latter case, a separate kernel thread is spawned.
 
-The checkpoint is added to a list in the receiving process' structure. This
-process can use the checkpoint at any time. On process destruction, all
-checkpoints are iterated and the waiting processes are notified.
-
-
-Notifications
-~~~~~~~~~~~~~
-
-There are a few special types of IPC performed by the kernel. These all have a
-dedicated handler that can be registered by a process:
-
-* Process exit
-* Page fault
-* Memory exhaustion
+A process with one or more server queues can request to be woken up if *any*
+queue has one or more entries.
