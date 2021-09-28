@@ -135,30 +135,23 @@ impl GDTPointer {
 
 	pub unsafe fn activate(&self) {
 		asm!("
-			xchgw %bx, %bx
-			lgdtq	({0})
-/* TODO figure all this out, I don't understand why it causes mysterious triple faults
- * and weird data corrupts depending on changes to unrelated things
-			# cs.rpl < cpl, so %rsp and %ss need to be pushed too
-			pushq	$(2 * 8)			# ss, kernel_data
-			pushq	%rsp				# rsp
-			pushfq						# rflags
-			pushq	$(1 * 8)			# cs, kernel_code
-			movabsq	$.reload_gdt, %rax
-			pushq	%rax				# rip
-			iretq						# pops rip > cs > rflags > rsp > ss
+			lgdt	[{0}]
+
+			lea		rax, [rip + .reload_gdt]
+			push	0x8					# cs
+			push	rax					# rîp
+			rex64 retf
 
 		.reload_gdt:
-			mov		$(2 * 8), %ax	# kernel_data
-			mov		%ax, %ds
-			mov		%ax, %es
-			mov		%ax, %fs
-			mov		%ax, %gs
-			mov		%ax, %ss
-			*/
-
-			movw	$(5 * 8), %ax	# tss
-			ltr		%ax
-		", in(reg) &self.limit, out("rax") _, options(att_syntax));
+			mov		ax, 2 * 8
+			mov		ds, ax
+			mov		es, ax
+			mov		fs, ax
+			mov		gs, ax
+			mov		ss, ax
+			
+			mov		ax, 5 * 8
+			ltr		ax
+		", in(reg) &self.limit);
 	}
 }

@@ -2,4 +2,4 @@
 
 ./mkiso.sh || exit $?
 
-bochs
+bochs -q
