@@ -7,6 +7,7 @@ mod dumb_stack;
 use super::Page;
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
+use core::ptr;
 
 /// A Physical Page Number.
 ///
@@ -31,6 +32,36 @@ impl PPN {
 				ptr.try_into().map(Self).map_err(|_| PPNError::OutOfRange)
 			})
 			.ok_or(PPNError::Misaligned)?
+	}
+
+	pub fn as_ptr(&self) -> *mut Page {
+		// SAFETY: PPNs are always in range.
+		unsafe {
+			let phys = u64::from(self.0) * u64::try_from(Page::SIZE).unwrap();
+			super::r#virtual::phys_to_virt(phys).cast()
+		}
+	}
+
+	/// # Safety
+	///
+	/// The pointer must be aligned and point to somewhere inside the identity map.
+	pub unsafe fn from_ptr(page: *mut Page) -> Self {
+		let virt = super::r#virtual::virt_to_phys(page.cast());
+		Self((usize::try_from(virt).unwrap() / Page::SIZE) as u16)
+	}
+
+	pub fn next(&self) -> Self {
+		Self(self.0 + 1)
+	}
+
+	pub fn as_phys(&self) -> usize {
+		self.0 as usize * Page::SIZE
+	}
+	
+	fn clear(self) {
+		unsafe {
+			ptr::write_bytes(self.as_ptr(), 0, 1)
+		}
 	}
 }
 
@@ -107,10 +138,18 @@ impl MemoryRegion {
 	}
 }
 
+#[derive(Debug)]
 pub enum AllocateError {
 	OutOfFrames,
 }
 
+#[derive(Debug)]
+pub enum AllocateContiguousError {
+	OutOfFrames,
+	CountIsZero,
+}
+
+#[derive(Debug)]
 pub enum DeallocateError {}
 
 /// Allocate a range of pages.
@@ -142,6 +181,15 @@ where
 		.ok_or(AllocateError::OutOfFrames)
 }
 
+/// Allocate a physically contiguous range of pages.
+pub fn allocate_contiguous(count: usize) -> Result<PPN, AllocateContiguousError> {
+	match count {
+		0 => Err(AllocateContiguousError::CountIsZero),
+		1 => dumb_stack::STACK.lock().pop().ok_or(AllocateContiguousError::OutOfFrames),
+		_ => Err(AllocateContiguousError::OutOfFrames),
+	}
+}
+
 /// Free a range of pages.
 ///
 /// # Safety
@@ -170,6 +218,8 @@ where
 pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 	let mut stack = dumb_stack::STACK.lock();
 	while let Some(ppn) = region.take() {
+		// Clear the page beforehand to improve alloc speed and clear any potential secrets.
+		ppn.clear();
 		// Just discard any leftover pages.
 		let _ = stack.push(ppn);
 	}

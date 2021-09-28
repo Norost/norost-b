@@ -29,19 +29,20 @@ pub fn init() {
 		}
 	}
 
-	debug!("{:#?}", DumpCurrent);
-	loop {}
-
 	// Add tables for all of the higher half memory.
 	//
 	// This is so these global tables can be reused for new page tables without modifying
 	// existing tables.
-	let mut i = 256;
-	frame::allocate(128, |frame| {
+	let mut i = 256 + root[256..256 + 128].iter().filter(|e| e.is_present()).count();
+	frame::allocate(256 + 128 - i, |frame| {
 		assert_eq!(frame.p2size, 0); // shouldn't happen on amd64 platforms with count < 512
+		while root[i].is_present() {
+			i += 1;
+			assert!(i < 256 + 128);
+		}
+		// SAFETY: physical identity mappings are active
+		unsafe { root[i].new_table(frame, false) };
 		i += 1;
-		// SAFETY: physical identity mappings are still active
-		unsafe { root[i].new_table(frame) };
 	}, common::IDENTITY_MAP_ADDRESS, 0);
 }
 

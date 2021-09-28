@@ -1,9 +1,13 @@
 use crate::memory::frame;
 use crate::memory::Page;
 use core::convert::{TryFrom, TryInto};
+use core::fmt;
 use core::mem;
 use core::ptr;
 
+// Don't implement copy to avoid accidentally updating stack values instead of
+// entries in a table.
+#[derive(Clone)]
 pub struct Entry(u64);
 
 pub const IDENTITY_MAP_ADDRESS: *mut u8 = 0xffff_c000_0000_0000 as *mut _;
@@ -31,6 +35,10 @@ impl Entry {
 		self.is_present() && self.0 & Self::PAGE_SIZE > 0
 	}
 
+	pub fn is_user(&self) -> bool {
+		self.is_present() && self.0 & Self::USER > 0
+	}
+
 	pub fn as_table_mut(&mut self) -> Option<&mut [Entry; 512]> {
 		// SAFETY: FIXME not sure how to guarantee safety :/
 		self.is_table().then(|| unsafe {
@@ -38,7 +46,7 @@ impl Entry {
 		})
 	}
 
-	pub fn make_table(&mut self, hint_color: u8) -> Result<&mut [Entry; 512], MakeTableError> {
+	pub fn make_table(&mut self, user: bool, hint_color: u8) -> Result<&mut [Entry; 512], MakeTableError> {
 		if self.is_table() {
 			// The borrow checked is retarded, so this will have to do.
 			Ok(self.as_table_mut().unwrap())
@@ -47,29 +55,32 @@ impl Entry {
 		} else {
 			let mut frame = None;
 			frame::allocate(1, |f| frame = Some(f), self as *mut _ as *mut _, hint_color)?;
-			Ok(self.new_table(frame.unwrap()))
+			Ok(self.new_table(frame.unwrap(), user))
 		}
 	}
 
-	pub fn new_table(&mut self, frame: frame::PageFrame) -> &mut [Entry; 512] {
+	pub fn new_table(&mut self, frame: frame::PageFrame, user: bool) -> &mut [Entry; 512] {
 		assert_eq!(frame.p2size, 0);
+		assert!(!self.is_present());
 		let frame = frame.base.try_into().unwrap();
 		// SAFETY: FIXME the allocator makes no guarantees about the address of the frame.
 		let tbl = unsafe { phys_to_virt(frame).cast::<[Entry; 512]>() };
 		// SAFETY: a fully zeroed Entry is valid.
-		unsafe { ptr::write_bytes(tbl, 0, mem::size_of::<[Entry; 512]>()) };
+		unsafe { ptr::write_bytes(tbl, 0, 1) };
 		self.0 = frame | Self::PRESENT;
+		self.0 |= Self::USER * u64::from(u8::from(user));
 		// SAFETY: the table is properly initialized.
 		unsafe { &mut *tbl }
 	}
 
-	pub fn set_page(&mut self, frame: u64) -> Result<(), SetPageError> {
+	pub fn set_page(&mut self, frame: u64, user: bool) -> Result<(), SetPageError> {
 		if self.is_table() {
 			Err(SetPageError::IsTable)
 		} else if self.is_leaf() {
 			Err(SetPageError::IsMapped)
 		} else {
-			self.0 = frame | Self::PRESENT;
+			self.0 = frame | Self::PAGE_SIZE | Self::PRESENT;
+			self.0 |= Self::USER * u64::from(u8::from(user));
 			Ok(())
 		}
 	}
@@ -87,6 +98,22 @@ impl Entry {
 			self.0 = 0;
 			ppn
 		})
+	}
+}
+
+impl fmt::Debug for Entry {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if self.is_present() {
+			write!(
+				f,
+				"present - 0x{:x}, {}, {}",
+				self.0 & !0xfff,
+				self.is_leaf().then(|| "leaf").unwrap_or("table"),
+				self.is_user().then(|| "user").unwrap_or("supervisor"),
+			)
+		} else {
+			write!(f, "not present - 0x{:x}", self.0)
+		}
 	}
 }
 

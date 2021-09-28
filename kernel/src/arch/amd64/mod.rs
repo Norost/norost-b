@@ -28,8 +28,6 @@ pub unsafe fn init() {
 	}, true, 0));
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
-
-	unsafe { asm!("ud2") }
 }
 
 pub fn halt() -> ! {
