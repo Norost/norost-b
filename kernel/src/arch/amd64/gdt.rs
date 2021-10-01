@@ -64,6 +64,16 @@ impl<'a> GDT<'a> {
 	pub fn new(tss: &'a TSS) -> Self {
 		let tss = tss as *const _ as u64;
 
+		// Layout
+		//
+		// 0: null
+		// 1: kernel code
+		// 2: kernel data
+		// 3: user code
+		// 4: user data
+		// 5 & 6: tss
+		//
+		// See syscall::init() for reasoning
 		Self {
 			null: GDTEntry {
 				limit_low: 0xffff,
@@ -89,19 +99,19 @@ impl<'a> GDT<'a> {
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},
-			user_code: GDTEntry {
-				limit_low: 0xffff,
-				base_low: 0,
-				base_mid: 0,
-				access: 0b1_11_1_1_0_1_0,
-				granularity: (1 << 5) | (1 << 7) | 0xf,
-				base_high: 0,
-			},
 			user_data: GDTEntry {
 				limit_low: 0xffff,
 				base_low: 0,
 				base_mid: 0,
 				access: 0b1_11_1_0_0_1_0,
+				granularity: (1 << 5) | (1 << 7) | 0xf,
+				base_high: 0,
+			},
+			user_code: GDTEntry {
+				limit_low: 0xffff,
+				base_low: 0,
+				base_mid: 0,
+				access: 0b1_11_1_1_0_1_0,
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},

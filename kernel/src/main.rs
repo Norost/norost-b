@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(asm)]
 #![feature(maybe_uninit_extra, maybe_uninit_uninit_array)]
+#![feature(naked_functions)]
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -51,7 +52,9 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		0x86, 0xdb, // xchg bl, bl
 		0x86, 0xc9, // xchg cl, cl
 		0x86, 0xd2, // xchg dl, dl
-		0xeb, 0xf6, // jmp  rip-10
+		//0xeb, 0xf6, // jmp  rip-10
+		0x0f, 0x05, // syscall
+		0xeb, 0xf4, // jmp  rip-12
 	];
 	let frame = memory::frame::allocate_contiguous(1).unwrap();
 	for (i, b) in program.iter().copied().enumerate() {
@@ -67,7 +70,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	process.run();
 	unsafe { let _ = core::ptr::read_volatile(0x0 as *const u8); }
-	unsafe { asm!("ud2") };
 
 	dbg!(memory::r#virtual::DumpCurrent);
 

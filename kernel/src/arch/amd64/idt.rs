@@ -16,6 +16,7 @@ impl IDTEntry {
 	const ATTRIBUTE_GATETYPE_INTERRUPT: u8 = 0xe;
 	const ATTRIBUTE_GATETYPE_TRAP: u8 = 0xf;
 	const ATTRIBUTE_PRESENT: u8 = 0x80;
+	const ATTRIBUTE_DPL: u8 = 0x60;
 
 	const EMPTY: Self = Self {
 		offset_low: 0,
@@ -35,6 +36,7 @@ impl IDTEntry {
 			selector,
 			ist,
 			type_attributes: Self::ATTRIBUTE_PRESENT
+				| Self::ATTRIBUTE_DPL
 				| is_trap
 					.then(|| Self::ATTRIBUTE_GATETYPE_TRAP)
 					.unwrap_or(Self::ATTRIBUTE_GATETYPE_INTERRUPT),
