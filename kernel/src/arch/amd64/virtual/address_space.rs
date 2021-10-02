@@ -1,7 +1,7 @@
 use super::common;
 use crate::memory::Page;
 use crate::memory::frame;
-use crate::memory::r#virtual::phys_to_virt;
+use crate::memory::r#virtual::{RWX, phys_to_virt};
 
 pub struct AddressSpace {
 	cr3: usize,
@@ -28,7 +28,7 @@ impl AddressSpace {
 	/// # Safety
 	///
 	/// If the mappings already existed, they must be flushed from the TLB.
-	pub unsafe fn map(&mut self, address: *const Page, frames: impl ExactSizeIterator<Item = frame::PPN>, hint_color: u8) -> Result<(), MapError> {
+	pub unsafe fn map(&mut self, address: *const Page, frames: impl ExactSizeIterator<Item = frame::PPN>, rwx: RWX, hint_color: u8) -> Result<(), MapError> {
 		let tbl = self.table_mut();
 		dbg!(tbl as *mut _);
 		for (i, f) in frames.enumerate() {

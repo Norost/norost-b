@@ -55,21 +55,37 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		halt();
 	}
 
+	use multiboot2::bootinfo as bi;
+
 	let mut avail_memory = MaybeUninit::uninit_array::<8>();
 	let mut avail_memory_count = 0;
 	let mut kernel = None;
+	let mut drivers = MaybeUninit::uninit_array::<32>();
+	let mut drivers_count = 0;
 
 	let (bt_top, bt_bottom) = unsafe {
 		(&boot_top as *const _ as usize, &boot_bottom as *const _ as usize)
 	};
 
-	use multiboot2::bootinfo as bi;
 	for e in unsafe { bi::BootInfo::new(arg) } {
 		match e {
 			bi::Info::Unknown(_) => (),
 			bi::Info::Module(m) => {
-				if m.string == b"kernel" {
-					kernel = Some(m);
+				match m.string {
+					b"kernel" => kernel = Some(m),
+					b"driver" => {
+						let d = info::Driver {
+							address: m.start as u32,
+							size: (m.end - m.start) as u32,
+						};
+						drivers[drivers_count].write(d);
+						drivers_count += 1;
+					}
+					m => {
+						print_err(b"Unknown module type: ");
+						print_err(m);
+						halt();
+					},
 				}
 			}
 			bi::Info::MemoryMap(m) => {
@@ -100,6 +116,10 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		halt();
 	});
 
+	let drivers = unsafe {
+		MaybeUninit::slice_assume_init_ref(&drivers[..drivers_count])
+	};
+
 	// Determine (guess) the maximum valid physical address
 	let mut memory_top = 0;
 	for e in avail_memory[..avail_memory_count].iter() {
@@ -111,9 +131,10 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	}
 
 	// Remove regions occupied by the kernel
-	for i in (0..avail_memory_count).rev() {
-		let list = [(bt_bottom as u64, bt_top as u64), (kernel.start.into(), kernel.end.into())];
-		for (bottom, top) in list.iter().copied() {
+	let list = [(bt_bottom as u64, bt_top as u64), (kernel.start.into(), kernel.end.into())];
+	let driver_list = drivers.iter().map(|d| (d.address.into(), (d.address + d.size).into()));
+	for (bottom, top) in list.iter().copied().chain(driver_list) {
+		for i in (0..avail_memory_count).rev() {
 			// SAFETY: all elements up to avail_memory_count have been written.
 			let e = unsafe { avail_memory[i].assume_init() };
 			let (base, end) = (e.base, e.base + e.size);
@@ -196,6 +217,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let info = unsafe {
 		GDT_PTR.activate();
 		INFO.set_memory_regions(avail_memory);
+		INFO.set_drivers(drivers);
 		&INFO
 	};
 

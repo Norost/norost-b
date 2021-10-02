@@ -45,30 +45,14 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		arch::init();
 	}
 
-	// Simple test program meant to be loaded at 0x1000
-	#[rustfmt::ignore]
-	let program = [
-		0x86, 0xc0, // xchg al, al
-		0x86, 0xdb, // xchg bl, bl
-		0x86, 0xc9, // xchg cl, cl
-		0x86, 0xd2, // xchg dl, dl
-		//0xeb, 0xf6, // jmp  rip-10
-		0x0f, 0x05, // syscall
-		0xeb, 0xf4, // jmp  rip-12
-	];
-	let frame = memory::frame::allocate_contiguous(1).unwrap();
-	for (i, b) in program.iter().copied().enumerate() {
-		unsafe {
-			*frame.as_ptr().cast::<u8>().add(i) = b;
-		}
-	}
+	dbg!(boot_info);
 
-	let mut process = scheduler::process::Process::new().unwrap();
-	unsafe {
-		process.add_frames(0x1000 as *const _, Some(frame).into_iter()).unwrap();
-	}
+	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
-	process.run();
+	for driver in boot_info.drivers() {
+		let mut process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
+		process.run();
+	}
 	unsafe { let _ = core::ptr::read_volatile(0x0 as *const u8); }
 
 	dbg!(memory::r#virtual::DumpCurrent);

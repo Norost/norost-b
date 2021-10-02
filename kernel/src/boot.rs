@@ -1,10 +1,11 @@
-use core::convert::TryFrom;
+use core::convert::{TryFrom, TryInto};
 use core::fmt;
 
 #[repr(C)]
 pub struct Info {
 	memory_regions_len: u16,
-	_padding: [u16; 3],
+	drivers_len: u8,
+	_padding: [u8; 5],
 	memory_regions: [MemoryRegion; 0],
 }
 
@@ -14,9 +15,21 @@ impl Info {
 	/// This *excludes* memory used by the stack and the kernel.
 	pub fn memory_regions(&self) -> &[MemoryRegion] {
 		unsafe {
+			let b = self.memory_regions.as_ptr();
 			core::slice::from_raw_parts(
-				&self.memory_regions as *const _,
-				usize::try_from(self.memory_regions_len).unwrap(),
+				b,
+				usize::from(self.memory_regions_len),
+			)
+		}
+	}
+
+	/// All drivers to be loaded at boot.
+	pub fn drivers(&self) -> &[Driver] {
+		unsafe {
+			let b = self.memory_regions.as_ptr().add(usize::from(self.memory_regions_len));
+			core::slice::from_raw_parts(
+				b.cast(),
+				usize::from(self.drivers_len),
 			)
 		}
 	}
@@ -26,6 +39,7 @@ impl fmt::Debug for Info {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
+			.field("drivers", &self.drivers())
 			.finish()
 	}
 }
@@ -45,6 +59,35 @@ impl fmt::Debug for MemoryRegion {
 			"MemoryRegion(0x{:x} - 0x{:x} [0x{:x}])",
 			self.base,
 			self.base + self.size,
+			self.size
+		)
+	}
+}
+
+#[repr(C)]
+pub struct Driver {
+	/// Start address of the ELF file.
+	pub address: u32,
+	/// Size of the ELF file in bytes.
+	pub size: u32,
+}
+
+impl Driver {
+	pub fn as_slice(&self) -> &[u8] {
+		unsafe {
+			let a = crate::memory::r#virtual::phys_to_virt(self.address.into());
+			core::slice::from_raw_parts(a, self.size.try_into().unwrap())
+		}
+	}
+}
+
+impl fmt::Debug for Driver {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"Driver(0x{:x} - 0x{:x} [0x{:x}])",
+			self.address,
+			self.address + self.size,
 			self.size
 		)
 	}
