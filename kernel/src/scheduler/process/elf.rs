@@ -178,7 +178,7 @@ impl super::Process {
 			}
 		}
 
-		slf.entry = header.entry.try_into().unwrap();
+		slf.thread = Some(super::super::Thread::new(header.entry.try_into().unwrap())?);
 
 		Ok(slf)
 	}

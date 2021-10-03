@@ -18,7 +18,7 @@ struct Return {
 	value: usize,
 }
 
-type Syscall = fn(usize, usize, usize, usize, usize, usize) -> Return;
+type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
 pub const SYSCALLS_LEN: usize = 1;
 #[export_name = "syscall_table"]
@@ -26,7 +26,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
 ];
 
-fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	// SAFETY: FIXME
 	let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
 	info!("[user log] {}", core::str::from_utf8(s).unwrap_or("<illegible>"));

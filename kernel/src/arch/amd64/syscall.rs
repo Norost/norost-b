@@ -19,21 +19,47 @@ pub unsafe fn init() {
 	//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 	msr::wrmsr(msr::LSTAR, handler as u64);
 
+	// Set GS.Base to a local CPU structure
+	msr::wrmsr(msr::GS_BASE, &mut CPU_LOCAL_DATA as *mut _ as u64);
+
 	dbg!(msr::rdmsr(0xc0000081) as *const u8);
 	dbg!(msr::rdmsr(0xc0000082) as *const u8);
 }
 
-#[export_name = "mini_test_stack"]
-#[used]
-static mut MINI_STACK: [usize; 1024] = [0; 1024];
+#[repr(C)]
+struct CpuLocalData {
+	user_stack: usize,
+	kernel_stack: *mut usize,
+}
+
+static mut CPU_LOCAL_DATA: CpuLocalData = CpuLocalData {
+	user_stack: 0,
+	kernel_stack: core::ptr::null_mut(),
+};
 
 #[naked]
 unsafe fn handler() {
 	asm!("
-		# Save thread registers
-		lea		rsp, [rip + mini_test_stack + 0x1000]
+		# Load kernel stack
+		swapgs
+		mov		gs:[0], rsp		# Save user stack ptr
+		mov		rsp, gs:[8]		# Load kernel stack ptr
+
+		# Save thread registers (except rax & rdx, we overwrite those anyways)
+		push	r15
+		push	r14
+		push	r13
+		push	r12
 		push	r11
+		push	r10
+		push	r9
+		push	r8
+		push	rbp
+		push	rdi
+		push	rsi
+		push	rdi
 		push	rcx
+		push	rbx
 
 		# Check if the syscall ID is valid
 		# Jump forward to take advantage of static prediction
@@ -47,8 +73,21 @@ unsafe fn handler() {
 		call	[rcx]
 
 	.return:
+		pop		rbx
 		pop		rcx
+		pop		rdi
+		pop		rsi
+		pop		rdi
+		pop		rbp
+		pop		r8
+		pop		r9
+		pop		r10
 		pop		r11
+		pop		r12
+		pop		r13
+		pop		r14
+		pop		r15
+		swapgs
 		rex64 sysret
 
 		# Set error code and return

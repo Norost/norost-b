@@ -50,14 +50,14 @@ pub struct GDTPointer {
 
 #[repr(C)]
 pub struct GDT<'a> {
-	null: GDTEntry,
-	kernel_code: GDTEntry,
-	kernel_data: GDTEntry,
-	user_code: GDTEntry,
-	user_data: GDTEntry,
-	tss: GDTEntry,
+	null: GDTEntry,                       // 0
+	kernel_code: GDTEntry,                // 1
+	kernel_data: GDTEntry,                // 2
+	user_code: GDTEntry,                  // 3
+	user_data: GDTEntry,                  // 4
+	tss: GDTEntry,                        // 5
 	tss_extra: GDTEntryHigh,
-	_tss_marker: PhantomData<&'a ()>,
+	_marker: PhantomData<&'a ()>,
 }
 
 impl<'a> GDT<'a> {
@@ -71,7 +71,7 @@ impl<'a> GDT<'a> {
 		// 2: kernel data
 		// 3: user code
 		// 4: user data
-		// 5 & 6: tss
+		// 5: tss
 		//
 		// See syscall::init() for reasoning
 		Self {
@@ -99,19 +99,19 @@ impl<'a> GDT<'a> {
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},
-			user_data: GDTEntry {
-				limit_low: 0xffff,
-				base_low: 0,
-				base_mid: 0,
-				access: 0b1_11_1_0_0_1_0,
-				granularity: (1 << 5) | (1 << 7) | 0xf,
-				base_high: 0,
-			},
 			user_code: GDTEntry {
 				limit_low: 0xffff,
 				base_low: 0,
 				base_mid: 0,
 				access: 0b1_11_1_1_0_1_0,
+				granularity: (1 << 5) | (1 << 7) | 0xf,
+				base_high: 0,
+			},
+			user_data: GDTEntry {
+				limit_low: 0xffff,
+				base_low: 0,
+				base_mid: 0,
+				access: 0b1_11_1_0_0_1_0,
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},
@@ -127,7 +127,7 @@ impl<'a> GDT<'a> {
 				base_higher: (tss >> 32) as u32,
 				_reserved: 0,
 			},
-			_tss_marker: PhantomData,
+			_marker: PhantomData,
 		}
 	}
 }
@@ -156,10 +156,9 @@ impl GDTPointer {
 			mov		ax, 2 * 8
 			mov		ds, ax
 			mov		es, ax
-			mov		fs, ax
-			mov		gs, ax
 			mov		ss, ax
-			
+
+			# Set TSS
 			mov		ax, 5 * 8
 			ltr		ax
 		", in(reg) &self.limit);
