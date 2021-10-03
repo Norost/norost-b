@@ -18,6 +18,16 @@ macro_rules! debug {
 }
 
 #[macro_export]
+macro_rules! info {
+	($($args:tt)*) => {{
+		#[allow(unused_imports)]
+		use core::fmt::Write;
+		let mut log = $crate::log::__LOG.lock();
+		writeln!(log.as_mut().unwrap(), $($args)*).unwrap();
+	}}
+}
+
+#[macro_export]
 macro_rules! fatal {
 	($($args:tt)*) => {{
 		#[allow(unused_imports)]

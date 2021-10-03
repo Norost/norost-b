@@ -1,4 +1,5 @@
 use super::msr;
+use crate::scheduler::syscall;
 
 pub unsafe fn init() {
 	dbg!(handler as *const u8);
@@ -29,18 +30,31 @@ static mut MINI_STACK: [usize; 1024] = [0; 1024];
 #[naked]
 unsafe fn handler() {
 	asm!("
-	.l:
+		# Save thread registers
 		lea		rsp, [rip + mini_test_stack + 0x1000]
 		push	r11
 		push	rcx
-		call	syscall_test
+
+		# Check if the syscall ID is valid
+		# Jump forward to take advantage of static prediction
+		cmp		rax, {syscall_count}
+		jae		.bad_syscall_id
+
+		# Call the appriopriate handler
+		# TODO figure out how to do this in one instruction
+		lea		rcx, [rip + syscall_table]
+		lea		rcx, [rcx + rax * 8]
+		call	[rcx]
+
+	.return:
 		pop		rcx
 		pop		r11
 		rex64 sysret
-	", options(noreturn));
-}
 
-#[export_name = "syscall_test"]
-unsafe fn test() {
-	dbg!("I work!");
+		# Set error code and return
+	.bad_syscall_id:
+		mov		rax, -1
+		xor		edx, edx
+		jmp		.return
+	", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
 }

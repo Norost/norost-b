@@ -20,14 +20,21 @@ struct Return {
 
 type Syscall = fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-const SYSCALLS_COUNT: usize = 0;
-static SYSCALLS: [Syscall; SYSCALLS_COUNT] = [
-	create_process,
-	kill_process,
-	spawn_thread,
-	hop_thread,
-	exit_thread,
+pub const SYSCALLS_LEN: usize = 1;
+#[export_name = "syscall_table"]
+static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
+	syslog,
 ];
+
+fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	// SAFETY: FIXME
+	let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
+	info!("[user log] {}", core::str::from_utf8(s).unwrap_or("<illegible>"));
+	Return {
+		status: 0,
+		value: len,
+	}
+}
 
 /// Create a new process. This process will automatically have one running thread to initialize
 /// the process.
