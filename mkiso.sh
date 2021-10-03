@@ -13,4 +13,9 @@ cp target/$RUST_TARGET_32/release/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 (cd drivers/hello_world && ./build.sh)
 cp drivers/hello_world/hello isodir/drivers/hello_world
-grub-mkrescue -o norost.iso isodir
+grub-mkrescue -o norost.iso isodir \
+	--locales= \
+	--fonts= \
+	--install-modules="multiboot2 normal" \
+	--modules= \
+	--compress=xz
