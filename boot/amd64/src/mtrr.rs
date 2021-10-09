@@ -28,11 +28,9 @@ impl Range {
 	pub unsafe fn get(id: u8) -> Option<Self> {
 		let id = u32::from(id) * 2;
 		let mask = rdmsr(0x201 + id);
-		((mask & 1 << 11) > 0).then(|| {
-			Self {
-				base: rdmsr(0x200 + id),
-				mask: mask & !0xfff,
-			}
+		((mask & 1 << 11) > 0).then(|| Self {
+			base: rdmsr(0x200 + id),
+			mask: mask & !0xfff,
 		})
 	}
 
@@ -88,7 +86,9 @@ impl AllRanges {
 	/// Check whether the given 2MB frame intersects with any range.
 	pub fn intersects_2mb(&self, address: u64) -> bool {
 		// SAFETY: All MTRRs up to count exist.
-		(0..self.count).filter_map(|i| unsafe { Range::get(i) }).any(|r| r.intersects_2mb(address))
+		(0..self.count)
+			.filter_map(|i| unsafe { Range::get(i) })
+			.any(|r| r.intersects_2mb(address))
 	}
 
 	/// Check whether the given 1GB frame intersects with any range. Returns the index of the first

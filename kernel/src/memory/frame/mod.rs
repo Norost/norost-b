@@ -56,11 +56,9 @@ impl PPN {
 	pub fn as_phys(&self) -> usize {
 		self.0 as usize * Page::SIZE
 	}
-	
+
 	fn clear(self) {
-		unsafe {
-			ptr::write_bytes(self.as_ptr(), 0, 1)
-		}
+		unsafe { ptr::write_bytes(self.as_ptr(), 0, 1) }
 	}
 }
 
@@ -113,9 +111,7 @@ impl PageFrame {
 	///
 	/// The base and p2size originates from `PageFrame::into_raw()`.
 	pub unsafe fn from_raw(base: PPN, p2size: u8) -> Self {
-		Self {
-			base, p2size,
-		}
+		Self { base, p2size }
 	}
 }
 
@@ -184,7 +180,10 @@ where
 pub fn allocate_contiguous(count: usize) -> Result<PPN, AllocateContiguousError> {
 	match count {
 		0 => Err(AllocateContiguousError::CountIsZero),
-		1 => dumb_stack::STACK.lock().pop().ok_or(AllocateContiguousError::OutOfFrames),
+		1 => dumb_stack::STACK
+			.lock()
+			.pop()
+			.ok_or(AllocateContiguousError::OutOfFrames),
 		_ => Err(AllocateContiguousError::OutOfFrames),
 	}
 }

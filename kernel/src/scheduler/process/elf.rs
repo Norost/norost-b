@@ -1,7 +1,7 @@
-use crate::memory::Page;
 use crate::memory::frame;
 use crate::memory::frame::PPN;
-use crate::memory::r#virtual::{MapError, RWX, virt_to_phys};
+use crate::memory::r#virtual::{virt_to_phys, MapError, RWX};
+use crate::memory::Page;
 use core::mem;
 
 #[repr(C)]
@@ -67,7 +67,6 @@ const FLAG_READ: u32 = 0x4;
 
 impl super::Process {
 	pub fn from_elf(data: &[u8]) -> Result<Self, ElfError> {
-
 		let mut slf = Self::new()?;
 
 		(data.len() >= 16)
@@ -120,8 +119,8 @@ impl super::Process {
 		(size == mem::size_of::<ProgramHeader>())
 			.then(|| ())
 			.ok_or(ElfError::ProgramHeaderSizeMismatch)?;
-		let h_offt =
-			usize::try_from(header.program_header_offset).map_err(|_| ElfError::OffsetOutOfBounds)?;
+		let h_offt = usize::try_from(header.program_header_offset)
+			.map_err(|_| ElfError::OffsetOutOfBounds)?;
 		(data.len() >= count * size + h_offt)
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
@@ -157,14 +156,18 @@ impl super::Process {
 			let offset = header.offset & page_mask;
 
 			let virt_address = header.virtual_address & !page_mask;
-			let phys_address = (unsafe { virt_to_phys(data.as_ptr()) } + header.offset) & !page_mask;
+			let phys_address =
+				(unsafe { virt_to_phys(data.as_ptr()) } + header.offset) & !page_mask;
 			let count = (header.file_size + page_mask) / page_size;
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
 			for i in 0..count {
 				let virt = (virt_address + i * page_size) as *const _;
-				let phys = PPN::try_from_usize(usize::try_from(phys_address + i * page_size).unwrap()).unwrap();
+				let phys =
+					PPN::try_from_usize(usize::try_from(phys_address + i * page_size).unwrap())
+						.unwrap();
 				unsafe {
-					slf.address_space.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
+					slf.address_space
+						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
 				}
 			}
 			let alloc = (header.memory_size + offset + page_mask) / page_size;
@@ -172,7 +175,8 @@ impl super::Process {
 				let virt = (virt_address + i * page_size) as *const _;
 				let phys = frame::allocate_contiguous(1)?;
 				unsafe {
-					slf.address_space.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
+					slf.address_space
+						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
 				}
 			}
 		}
@@ -220,4 +224,3 @@ impl From<MapError> for ElfError {
 		Self::MapError(err)
 	}
 }
-

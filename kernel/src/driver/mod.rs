@@ -1,2 +1,2 @@
-pub mod vga;
 pub mod uart;
+pub mod vga;

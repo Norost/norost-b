@@ -1,5 +1,5 @@
-pub use crate::arch::amd64::r#virtual::*;
 use super::frame::PPN;
+pub use crate::arch::amd64::r#virtual::*;
 
 pub unsafe trait Mappable<I>
 where

@@ -1,5 +1,5 @@
-use crate::memory::frame;
 use super::process::Process;
+use crate::memory::frame;
 
 #[repr(C)]
 pub struct Thread {
@@ -10,21 +10,26 @@ pub struct Thread {
 impl Thread {
 	pub fn new(start: usize) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
-			let kernel_stack_base = frame::allocate_contiguous(1)?.as_ptr().cast::<[usize; 512]>();
+			let kernel_stack_base = frame::allocate_contiguous(1)?
+				.as_ptr()
+				.cast::<[usize; 512]>();
 			let mut kernel_stack = kernel_stack_base.add(1).cast::<usize>();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
 			push(4 * 8 | 3); // ss
-			push(0);         // rsp
-			//push(0x202);     // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(0x2);       // rflags: Set reserved bit 1
+			push(0); // rsp
+		 //push(0x202);     // rflags: Set reserved bit 1, enable interrupts (IF)
+			push(0x2); // rflags: Set reserved bit 1
 			push(3 * 8 | 3); // cs
-			push(start);     // rip
-			// Reserve space for (zeroed) registers
+			push(start); // rip
+			 // Reserve space for (zeroed) registers
 			kernel_stack = kernel_stack.sub(16);
-			Ok(Self { kernel_stack_base, kernel_stack })
+			Ok(Self {
+				kernel_stack_base,
+				kernel_stack,
+			})
 		}
 	}
 

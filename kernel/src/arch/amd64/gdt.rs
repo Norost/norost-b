@@ -49,12 +49,12 @@ pub struct GDTPointer {
 
 #[repr(C)]
 pub struct GDT<'a> {
-	null: GDTEntry,                       // 0
-	kernel_code: GDTEntry,                // 1
-	kernel_data: GDTEntry,                // 2
-	user_code: GDTEntry,                  // 3
-	user_data: GDTEntry,                  // 4
-	tss: GDTEntry,                        // 5
+	null: GDTEntry,        // 0
+	kernel_code: GDTEntry, // 1
+	kernel_data: GDTEntry, // 2
+	user_code: GDTEntry,   // 3
+	user_data: GDTEntry,   // 4
+	tss: GDTEntry,         // 5
 	tss_extra: GDTEntryHigh,
 	_marker: PhantomData<&'a ()>,
 }

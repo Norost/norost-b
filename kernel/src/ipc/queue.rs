@@ -1,6 +1,6 @@
-use crate::memory::Page;
 use crate::memory::frame;
-use crate::memory::r#virtual::{Mappable};
+use crate::memory::r#virtual::Mappable;
+use crate::memory::Page;
 use core::alloc::Layout;
 use core::cell::Cell;
 use core::mem;
@@ -81,7 +81,9 @@ impl ClientQueue {
 			let value = entry.get();
 			// compiler_fence emits code: https://github.com/rust-lang/rust/issues/62256
 			// the asm! macro can perform a compiler memory barrier without emitting code
-			unsafe { asm!("# {0}", in(reg) entry); }
+			unsafe {
+				asm!("# {0}", in(reg) entry);
+			}
 			self.submission_tail = self.submission_tail.wrapping_add(1);
 			value
 		})
@@ -92,7 +94,9 @@ impl ClientQueue {
 		let head = usize::try_from(self.completion_head & self.completion_mask).unwrap();
 		self.completions()[head].set(entry);
 		self.completion_head = self.completion_head.wrapping_add(1);
-		self.header().completion_head.store(self.completion_head, Ordering::Release);
+		self.header()
+			.completion_head
+			.store(self.completion_head, Ordering::Release);
 	}
 
 	/// Return the submissions ring.
@@ -101,8 +105,11 @@ impl ClientQueue {
 	fn submissions(&self) -> &[Cell<SubmissionEntry>] {
 		unsafe {
 			let slen = usize::try_from(self.completion_mask).unwrap() + 1;
-			let ptr = self.queues.as_ptr()
-				.cast::<ClientQueueHeader>().add(1)
+			let ptr = self
+				.queues
+				.as_ptr()
+				.cast::<ClientQueueHeader>()
+				.add(1)
 				.cast();
 			slice::from_raw_parts(ptr, slen)
 		}
@@ -115,25 +122,33 @@ impl ClientQueue {
 		unsafe {
 			let slen = usize::try_from(self.completion_mask).unwrap() + 1;
 			let clen = usize::try_from(self.completion_mask).unwrap() + 1;
-			let ptr = self.queues.as_ptr()
-				.cast::<ClientQueueHeader>().add(1)
-				.cast::<Cell<SubmissionEntry>>().add(slen)
+			let ptr = self
+				.queues
+				.as_ptr()
+				.cast::<ClientQueueHeader>()
+				.add(1)
+				.cast::<Cell<SubmissionEntry>>()
+				.add(slen)
 				.cast();
 			slice::from_raw_parts(ptr, clen)
 		}
 	}
 
 	fn header(&self) -> &ClientQueueHeader {
-		unsafe {
-			self.queues.cast().as_ref()
-		}
+		unsafe { self.queues.cast().as_ref() }
 	}
 
 	fn ring_layout(sq_size: u32, cq_size: u32) -> Layout {
 		let header_layout = Layout::new::<ClientQueueHeader>();
 		let sq_layout = Layout::array::<SubmissionEntry>(sq_size.try_into().unwrap()).unwrap();
 		let cq_layout = Layout::array::<CompletionEntry>(cq_size.try_into().unwrap()).unwrap();
-		header_layout.extend(sq_layout).unwrap().0.extend(cq_layout).unwrap().0
+		header_layout
+			.extend(sq_layout)
+			.unwrap()
+			.0
+			.extend(cq_layout)
+			.unwrap()
+			.0
 	}
 }
 
@@ -150,7 +165,10 @@ unsafe impl Mappable<Iter> for ClientQueue {
 	}
 
 	fn frames(&self) -> Iter {
-		Iter(unsafe { frame::PPN::from_ptr(self.queues.as_ptr().cast()) }, self.len())
+		Iter(
+			unsafe { frame::PPN::from_ptr(self.queues.as_ptr().cast()) },
+			self.len(),
+		)
 	}
 }
 

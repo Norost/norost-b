@@ -1,4 +1,4 @@
-use crate::paging::{Page, PML4, AddError};
+use crate::paging::{AddError, Page, PML4};
 use core::mem;
 
 #[repr(C)]

@@ -1,5 +1,5 @@
-use crate::sync::SpinLock;
 use crate::driver::uart::x86::UART;
+use crate::sync::SpinLock;
 
 pub static __LOG: SpinLock<Option<UART>> = SpinLock::new(None);
 

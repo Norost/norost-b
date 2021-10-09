@@ -1,7 +1,7 @@
 use super::common;
-use crate::memory::Page;
 use crate::memory::frame;
-use crate::memory::r#virtual::{RWX, phys_to_virt};
+use crate::memory::r#virtual::{phys_to_virt, RWX};
+use crate::memory::Page;
 
 pub struct AddressSpace {
 	cr3: usize,
@@ -11,10 +11,13 @@ impl AddressSpace {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
 		let ppn = frame::allocate_contiguous(1)?;
 		let mut slf = Self { cr3: ppn.as_phys() };
-		
+
 		// Map the kernel pages
 		let cur = unsafe { Self::current() };
-		for (w, r) in unsafe { slf.table_mut() }[256..].iter_mut().zip(cur[256..].iter()) {
+		for (w, r) in unsafe { slf.table_mut() }[256..]
+			.iter_mut()
+			.zip(cur[256..].iter())
+		{
 			*w = r.clone();
 		}
 
@@ -28,7 +31,13 @@ impl AddressSpace {
 	/// # Safety
 	///
 	/// If the mappings already existed, they must be flushed from the TLB.
-	pub unsafe fn map(&mut self, address: *const Page, frames: impl ExactSizeIterator<Item = frame::PPN>, rwx: RWX, hint_color: u8) -> Result<(), MapError> {
+	pub unsafe fn map(
+		&mut self,
+		address: *const Page,
+		frames: impl ExactSizeIterator<Item = frame::PPN>,
+		rwx: RWX,
+		hint_color: u8,
+	) -> Result<(), MapError> {
 		let tbl = self.table_mut();
 		for (i, f) in frames.enumerate() {
 			loop {
@@ -68,6 +77,4 @@ impl Drop for AddressSpace {
 }
 
 #[derive(Debug)]
-pub enum MapError {
-
-}
+pub enum MapError {}

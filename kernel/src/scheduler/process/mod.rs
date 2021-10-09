@@ -2,9 +2,9 @@ mod elf;
 
 use crate::arch;
 use crate::ipc::queue::{ClientQueue, NewClientQueueError};
-use crate::memory::Page;
 use crate::memory::frame;
 use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX};
+use crate::memory::Page;
 
 pub struct Process {
 	address_space: AddressSpace,
@@ -34,14 +34,20 @@ impl Process {
 		self.thread.as_mut().unwrap().resume(s)
 	}
 
-	pub fn init_client_queue(&mut self, address: *const Page, submit_p2size: u8, completion_p2size: u8) -> Result<(), NewQueueError> {
+	pub fn init_client_queue(
+		&mut self,
+		address: *const Page,
+		submit_p2size: u8,
+		completion_p2size: u8,
+	) -> Result<(), NewQueueError> {
 		match self.client_queue.as_ref() {
 			Some(_) => Err(NewQueueError::QueueAlreadyExists(core::ptr::null())), // TODO return start of queue
 			None => {
 				let queue = ClientQueue::new(submit_p2size.into(), completion_p2size.into())
 					.map_err(NewQueueError::NewClientQueueError)?;
 				unsafe {
-					self.address_space.map(address, queue.frames(), RWX::RW, self.hint_color)
+					self.address_space
+						.map(address, queue.frames(), RWX::RW, self.hint_color)
 						.map_err(NewQueueError::MapError)?;
 				}
 				self.client_queue = Some(queue);
@@ -56,12 +62,16 @@ impl Process {
 		while let Some(e) = queue.pop_submission() {
 			match e.opcode {
 				OP_SYSLOG => {
-					let ptr = usize::from_le_bytes(e.data[ 7..15].try_into().unwrap());
+					let ptr = usize::from_le_bytes(e.data[7..15].try_into().unwrap());
 					let len = usize::from_le_bytes(e.data[15..23].try_into().unwrap());
 					let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
 					info!("{}", core::str::from_utf8(s).unwrap());
 				}
-				_ => todo!("handle erroneous opcodes (opcode {}, userdata {})", e.opcode, e.user_data),
+				_ => todo!(
+					"handle erroneous opcodes (opcode {}, userdata {})",
+					e.opcode,
+					e.user_data
+				),
 			}
 		}
 		Ok(())

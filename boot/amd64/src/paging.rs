@@ -51,8 +51,12 @@ impl PML4 {
 	/// # Safety
 	///
 	/// May only be called once.
-	pub unsafe fn identity_map<F>(&mut self, mut page_alloc: F, memory_top: u64, cpuid: &cpuid::Features)
-	where
+	pub unsafe fn identity_map<F>(
+		&mut self,
+		mut page_alloc: F,
+		memory_top: u64,
+		cpuid: &cpuid::Features,
+	) where
 		F: FnMut() -> *mut Page,
 	{
 		debug_assert!(!self.0[0].present());
@@ -67,7 +71,9 @@ impl PML4 {
 		let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
 		let pd = &mut *page_alloc().cast::<Directory>();
 		let pt = &mut *page_alloc().cast::<Table>();
-		pt.0[(init >> 12) & 0x1ff].set(init.try_into().unwrap(), true, false, true).unwrap();
+		pt.0[(init >> 12) & 0x1ff]
+			.set(init.try_into().unwrap(), true, false, true)
+			.unwrap();
 		pd.0[(init >> 21) & 0x1ff].set(pt);
 		pdp.0[(init >> 30) & 0x1ff].set(pd);
 		self.0[0].set(pdp);
@@ -80,7 +86,6 @@ impl PML4 {
 
 		assert!(memory_top < 1 << 46);
 		for t in 384..512 {
-
 			let addr = u64::try_from(t - 384).unwrap() << 39;
 			if addr > memory_top {
 				break;

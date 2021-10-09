@@ -8,9 +8,9 @@ mod cpuid;
 mod elf64;
 mod gdt;
 mod info;
-mod multiboot2;
 mod msr;
 mod mtrr;
+mod multiboot2;
 mod paging;
 mod vga;
 
@@ -63,30 +63,31 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let mut drivers_count = 0;
 
 	let (bt_top, bt_bottom) = unsafe {
-		(&boot_top as *const _ as usize, &boot_bottom as *const _ as usize)
+		(
+			&boot_top as *const _ as usize,
+			&boot_bottom as *const _ as usize,
+		)
 	};
 
 	for e in unsafe { bi::BootInfo::new(arg) } {
 		match e {
 			bi::Info::Unknown(_) => (),
-			bi::Info::Module(m) => {
-				match m.string {
-					b"kernel" => kernel = Some(m),
-					b"driver" => {
-						let d = info::Driver {
-							address: m.start as u32,
-							size: (m.end - m.start) as u32,
-						};
-						drivers[drivers_count].write(d);
-						drivers_count += 1;
-					}
-					m => {
-						print_err(b"Unknown module type: ");
-						print_err(m);
-						halt();
-					},
+			bi::Info::Module(m) => match m.string {
+				b"kernel" => kernel = Some(m),
+				b"driver" => {
+					let d = info::Driver {
+						address: m.start as u32,
+						size: (m.end - m.start) as u32,
+					};
+					drivers[drivers_count].write(d);
+					drivers_count += 1;
 				}
-			}
+				m => {
+					print_err(b"Unknown module type: ");
+					print_err(m);
+					halt();
+				}
+			},
 			bi::Info::MemoryMap(m) => {
 				m.entries.iter().filter(|e| e.is_available()).for_each(|e| {
 					let (mut base, mut size) = (e.base_address, e.length);
@@ -100,10 +101,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 						base += 4096;
 						size -= 4096;
 					}
-					avail_memory[avail_memory_count].write(info::MemoryRegion {
-						base,
-						size,
-					});
+					avail_memory[avail_memory_count].write(info::MemoryRegion { base, size });
 					avail_memory_count += 1;
 				});
 			}
@@ -115,23 +113,27 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		halt();
 	});
 
-	let drivers = unsafe {
-		MaybeUninit::slice_assume_init_ref(&drivers[..drivers_count])
-	};
+	let drivers = unsafe { MaybeUninit::slice_assume_init_ref(&drivers[..drivers_count]) };
 
 	// Determine (guess) the maximum valid physical address
 	let mut memory_top = 0;
 	for e in avail_memory[..avail_memory_count].iter() {
 		// SAFETY: all elements up to avail_memory_count have been written.
 		let e = unsafe { e.assume_init() };
-		if e.size > 0 { // shouldn't happen but let's be sure
+		if e.size > 0 {
+			// shouldn't happen but let's be sure
 			memory_top = memory_top.max(e.base + e.size - 1);
 		}
 	}
 
 	// Remove regions occupied by the kernel
-	let list = [(bt_bottom as u64, bt_top as u64), (kernel.start.into(), kernel.end.into())];
-	let driver_list = drivers.iter().map(|d| (d.address.into(), (d.address + d.size).into()));
+	let list = [
+		(bt_bottom as u64, bt_top as u64),
+		(kernel.start.into(), kernel.end.into()),
+	];
+	let driver_list = drivers
+		.iter()
+		.map(|d| (d.address.into(), (d.address + d.size).into()));
 	for (bottom, top) in list.iter().copied().chain(driver_list) {
 		for i in (0..avail_memory_count).rev() {
 			// SAFETY: all elements up to avail_memory_count have been written.
@@ -180,7 +182,9 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// Set up page table
 	let mut page_alloc_region = 0;
 	let mut page_alloc = || {
-		while avail_memory[page_alloc_region].size < 4096 || avail_memory[page_alloc_region].base == 0 {
+		while avail_memory[page_alloc_region].size < 4096
+			|| avail_memory[page_alloc_region].base == 0
+		{
 			page_alloc_region += 1;
 		}
 		let page = avail_memory[page_alloc_region].base as *mut paging::Page;
@@ -220,11 +224,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		&INFO
 	};
 
-	Return {
-		entry,
-		pml4,
-		info,
-	}
+	Return { entry, pml4, info }
 }
 
 #[panic_handler]
@@ -247,9 +247,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 fn print_err(s: &[u8]) {
 	debug_assert!(unsafe { VGA.is_some() });
-	unsafe {
-		VGA.as_mut().unwrap_unchecked().write_str(s, 0xc, 0)
-	}
+	unsafe { VGA.as_mut().unwrap_unchecked().write_str(s, 0xc, 0) }
 }
 
 fn print_err_num(n: i128, base: u8) {

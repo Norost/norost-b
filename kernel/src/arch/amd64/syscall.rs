@@ -1,6 +1,6 @@
 use super::msr;
-use crate::scheduler::syscall;
 use crate::scheduler::process::Process;
+use crate::scheduler::syscall;
 
 pub unsafe fn init() {
 	// Enable syscall/sysenter
@@ -10,7 +10,7 @@ pub unsafe fn init() {
 	// Notes from OSDev wiki:
 	// * SYSCALL loads CS from STAR 47:32
 	// * It then loads SS from STAR 47:32 + 8.
-	// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8. 
+	// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
 	// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
 	//   userland SS will be loaded from STAR 63:48 + 8
 	msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2) << 48);

@@ -12,7 +12,11 @@ impl Text {
 	const HEIGHT: u8 = 24;
 
 	pub const fn new() -> Self {
-		Self { row: 0, column: 0, colors: 0xf }
+		Self {
+			row: 0,
+			column: 0,
+			colors: 0xf,
+		}
 	}
 
 	pub fn set_colors(&mut self, fg: u8, bg: u8) {

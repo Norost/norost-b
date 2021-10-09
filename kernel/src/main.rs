@@ -50,7 +50,9 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		let mut process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
 		process.run();
 	}
-	unsafe { let _ = core::ptr::read_volatile(0x0 as *const u8); }
+	unsafe {
+		let _ = core::ptr::read_volatile(0x0 as *const u8);
+	}
 
 	power::halt();
 }

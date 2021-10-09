@@ -15,7 +15,7 @@ impl UART {
 		while !self.transmit_empty() {}
 		unsafe { io::outb(self.port, byte) }
 	}
-	
+
 	#[must_use = "I/O port space accesses cannot be optimized out"]
 	pub fn transmit_empty(&self) -> bool {
 		self.line_status() & 1 << 6 != 0

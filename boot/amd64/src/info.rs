@@ -7,7 +7,7 @@ pub struct Info {
 	memory_regions_len: u16,
 	drivers_len: u8,
 	_padding: [u8; 5],
-	buffer: [u8; 2048 - 8]
+	buffer: [u8; 2048 - 8],
 }
 
 #[derive(Clone, Copy)]
@@ -34,7 +34,10 @@ impl Info {
 	}
 
 	pub fn set_memory_regions(&mut self, memory_regions: &[MemoryRegion]) {
-		assert_eq!(self.drivers_len, 0, "set_memory_regions must be called before set_drivers");
+		assert_eq!(
+			self.drivers_len, 0,
+			"set_memory_regions must be called before set_drivers"
+		);
 		self.memory_regions_len = memory_regions.len().try_into().unwrap();
 		unsafe {
 			let b = self.buffer.as_mut_ptr();
@@ -45,7 +48,11 @@ impl Info {
 	pub fn set_drivers(&mut self, drivers: &[Driver]) {
 		self.drivers_len = drivers.len().try_into().unwrap();
 		unsafe {
-			let b = self.buffer.as_mut_ptr().cast::<MemoryRegion>().add(usize::from(self.memory_regions_len));
+			let b = self
+				.buffer
+				.as_mut_ptr()
+				.cast::<MemoryRegion>()
+				.add(usize::from(self.memory_regions_len));
 			ptr::copy_nonoverlapping(drivers.as_ptr(), b.cast(), drivers.len());
 		}
 	}

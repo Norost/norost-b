@@ -15,21 +15,18 @@ impl Info {
 	pub fn memory_regions(&self) -> &[MemoryRegion] {
 		unsafe {
 			let b = self.memory_regions.as_ptr();
-			core::slice::from_raw_parts(
-				b,
-				usize::from(self.memory_regions_len),
-			)
+			core::slice::from_raw_parts(b, usize::from(self.memory_regions_len))
 		}
 	}
 
 	/// All drivers to be loaded at boot.
 	pub fn drivers(&self) -> &[Driver] {
 		unsafe {
-			let b = self.memory_regions.as_ptr().add(usize::from(self.memory_regions_len));
-			core::slice::from_raw_parts(
-				b.cast(),
-				usize::from(self.drivers_len),
-			)
+			let b = self
+				.memory_regions
+				.as_ptr()
+				.add(usize::from(self.memory_regions_len));
+			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
 		}
 	}
 }

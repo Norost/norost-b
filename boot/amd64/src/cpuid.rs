@@ -55,7 +55,10 @@ impl Features {
 			let (max_basic_eax, max_extended_eax): (u32, u32);
 			asm!("cpuid", inout("eax") 0 << 31 => max_basic_eax, out("ebx") _, out("ecx") _, out("edx") _);
 			asm!("cpuid", inout("eax") 1 << 31 => max_extended_eax, out("ebx") _, out("ecx") _, out("edx") _);
-			Some(Self { max_basic_eax, max_extended_eax })
+			Some(Self {
+				max_basic_eax,
+				max_extended_eax,
+			})
 		}
 	}
 

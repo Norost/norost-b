@@ -1,8 +1,8 @@
 pub mod asm;
 mod gdt;
 mod idt;
-mod multiboot;
 mod msr;
+mod multiboot;
 mod syscall;
 mod tss;
 pub mod r#virtual;

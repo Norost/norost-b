@@ -44,7 +44,11 @@ impl Entry {
 		})
 	}
 
-	pub fn make_table(&mut self, user: bool, hint_color: u8) -> Result<&mut [Entry; 512], MakeTableError> {
+	pub fn make_table(
+		&mut self,
+		user: bool,
+		hint_color: u8,
+	) -> Result<&mut [Entry; 512], MakeTableError> {
 		if self.is_table() {
 			// The borrow checked is retarded, so this will have to do.
 			Ok(self.as_table_mut().unwrap())
@@ -72,7 +76,12 @@ impl Entry {
 		unsafe { &mut *tbl }
 	}
 
-	pub fn set_page(&mut self, frame: u64, user: bool, writeable: bool) -> Result<(), SetPageError> {
+	pub fn set_page(
+		&mut self,
+		frame: u64,
+		user: bool,
+		writeable: bool,
+	) -> Result<(), SetPageError> {
 		if self.is_table() {
 			Err(SetPageError::IsTable)
 		} else if self.is_leaf() {
@@ -91,7 +100,9 @@ impl Entry {
 	/// to clear these entries.
 	pub fn clear(&mut self) -> Option<frame::PPN> {
 		self.is_present().then(|| {
-			debug_assert!(frame::PPN::try_from_usize((self.0 & !0xfff).try_into().unwrap()).is_ok());
+			debug_assert!(
+				frame::PPN::try_from_usize((self.0 & !0xfff).try_into().unwrap()).is_ok()
+			);
 			// This should fit as long as we receive valid page frames
 			// try_into() isn't used as it'll have a _huge_ performance impact.
 			let ppn = frame::PPN((self.0 >> 12) as frame::PPNBox);
