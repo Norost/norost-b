@@ -5,6 +5,7 @@ use crate::ipc::queue::{ClientQueue, NewClientQueueError};
 use crate::memory::Page;
 use crate::memory::frame;
 use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX};
+use core::convert::TryInto;
 
 pub struct Process {
 	address_space: AddressSpace,
@@ -51,6 +52,23 @@ impl Process {
 		}
 	}
 
+	pub fn poll_client_queue(&mut self) -> Result<(), PollQueueError> {
+		let queue = self.client_queue.as_mut().ok_or(PollQueueError::NoQueue)?;
+		const OP_SYSLOG: u8 = 127;
+		while let Some(e) = queue.pop_submission() {
+			match e.opcode {
+				OP_SYSLOG => {
+					let ptr = usize::from_le_bytes(e.data[ 7..15].try_into().unwrap());
+					let len = usize::from_le_bytes(e.data[15..23].try_into().unwrap());
+					let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
+					info!("{}", core::str::from_utf8(s).unwrap());
+				}
+				_ => todo!("handle erroneous opcodes (opcode {}, userdata {})", e.opcode, e.user_data),
+			}
+		}
+		Ok(())
+	}
+
 	// FIXME wildly unsafe!
 	pub fn current<'a>() -> &'a mut Self {
 		arch::current_process()
@@ -72,4 +90,9 @@ pub enum NewQueueError {
 	QueueAlreadyExists(*const Page),
 	NewClientQueueError(NewClientQueueError),
 	MapError(MapError),
+}
+
+#[derive(Debug)]
+pub enum PollQueueError {
+	NoQueue,
 }

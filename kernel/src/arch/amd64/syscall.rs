@@ -1,5 +1,6 @@
 use super::msr;
 use crate::scheduler::syscall;
+use crate::scheduler::process::Process;
 
 pub unsafe fn init() {
 	dbg!(handler as *const u8);
