@@ -1,5 +1,4 @@
 use super::common;
-use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use crate::memory::frame;
 
@@ -40,8 +39,7 @@ pub fn init() {
 			i += 1;
 			assert!(i < 256 + 128);
 		}
-		// SAFETY: physical identity mappings are active
-		unsafe { root[i].new_table(frame, false) };
+		root[i].new_table(frame, false);
 		i += 1;
 	}, common::IDENTITY_MAP_ADDRESS, 0);
 }
@@ -50,8 +48,7 @@ pub struct DumpCurrent;
 
 impl fmt::Debug for DumpCurrent {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use core::fmt::Write;
-		let mut d = writeln!(f, "PML4 (CR3)")?;
+		writeln!(f, "PML4 (CR3)")?;
 		let root = common::get_current();
 		// TODO make this recursive. get_entry_mut should be suitable.
 		// L4

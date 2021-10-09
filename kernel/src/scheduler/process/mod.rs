@@ -37,7 +37,7 @@ impl Process {
 
 	pub fn init_client_queue(&mut self, address: *const Page, submit_p2size: u8, completion_p2size: u8) -> Result<(), NewQueueError> {
 		match self.client_queue.as_ref() {
-			Some(_) => Err(NewQueueError::QueueAlreadyExists(todo!())),
+			Some(_) => Err(NewQueueError::QueueAlreadyExists(core::ptr::null())), // TODO return start of queue
 			None => {
 				let queue = ClientQueue::new(submit_p2size.into(), completion_p2size.into())
 					.map_err(NewQueueError::NewClientQueueError)?;
@@ -45,7 +45,6 @@ impl Process {
 					self.address_space.map(address, queue.frames(), RWX::RW, self.hint_color)
 						.map_err(NewQueueError::MapError)?;
 				}
-				dbg!();
 				self.client_queue = Some(queue);
 				Ok(())
 			}

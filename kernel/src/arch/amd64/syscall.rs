@@ -3,8 +3,6 @@ use crate::scheduler::syscall;
 use crate::scheduler::process::Process;
 
 pub unsafe fn init() {
-	dbg!(handler as *const u8);
-
 	// Enable syscall/sysenter
 	msr::set_bits(msr::IA32_EFER, msr::IA32_EFER_SCE, true);
 
@@ -22,9 +20,6 @@ pub unsafe fn init() {
 
 	// Set GS.Base to a local CPU structure
 	msr::wrmsr(msr::GS_BASE, &mut CPU_LOCAL_DATA as *mut _ as u64);
-
-	dbg!(msr::rdmsr(0xc0000081) as *const u8);
-	dbg!(msr::rdmsr(0xc0000082) as *const u8);
 }
 
 #[repr(C)]
@@ -41,7 +36,7 @@ static mut CPU_LOCAL_DATA: CpuLocalData = CpuLocalData {
 };
 
 #[naked]
-unsafe fn handler() {
+unsafe extern "C" fn handler() {
 	asm!("
 		# Load kernel stack
 		swapgs

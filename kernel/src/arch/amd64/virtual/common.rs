@@ -2,7 +2,6 @@ use crate::memory::frame;
 use crate::memory::Page;
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
-use core::mem;
 use core::ptr;
 
 // Don't implement copy to avoid accidentally updating stack values instead of
@@ -42,7 +41,7 @@ impl Entry {
 	pub fn as_table_mut(&mut self) -> Option<&mut [Entry; 512]> {
 		// SAFETY: FIXME not sure how to guarantee safety :/
 		self.is_table().then(|| unsafe {
-			&mut *phys_to_virt(self.0 & !u64::try_from(Page::OFFSET_MASK).unwrap()).cast()
+			&mut *phys_to_virt(self.0 & !u64::try_from(Page::MASK).unwrap()).cast()
 		})
 	}
 

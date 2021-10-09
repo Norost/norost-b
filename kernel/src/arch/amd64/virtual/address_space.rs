@@ -34,16 +34,11 @@ impl AddressSpace {
 			loop {
 				match common::get_entry_mut(tbl, address.add(i) as u64, 0, 3) {
 					Ok(e) => {
-						dbg!(e as *mut _);
 						e.set_page(f.as_phys() as u64, true, rwx.w()).unwrap();
-						dbg!(e);
-						dbg!(address.add(i), f.as_phys());
 						break;
 					}
-					Err((e, d)) => {
-						dbg!(e as *mut _);
+					Err((e, _)) => {
 						e.make_table(true, hint_color).unwrap();
-						dbg!(d);
 					}
 				}
 			}
@@ -56,13 +51,13 @@ impl AddressSpace {
 	}
 
 	unsafe fn table_mut(&mut self) -> &mut [common::Entry; 512] {
-		&mut *phys_to_virt((self.cr3 & !Page::OFFSET_MASK) as u64).cast()
+		&mut *phys_to_virt((self.cr3 & !Page::MASK) as u64).cast()
 	}
 
 	unsafe fn current<'a>() -> &'a mut [common::Entry; 512] {
 		let cr3: usize;
 		asm!("mov {0}, cr3", out(reg) cr3);
-		&mut *phys_to_virt((cr3 & !Page::OFFSET_MASK) as u64).cast()
+		&mut *phys_to_virt((cr3 & !Page::MASK) as u64).cast()
 	}
 }
 

@@ -201,7 +201,7 @@ where
 {
 	let mut stack = dumb_stack::STACK.lock();
 	for _ in 0..count {
-		let mut frame = callback();
+		let frame = callback();
 		for i in 0..1u16 << frame.p2size {
 			let ppn = PPN(frame.base.0 + i);
 			stack.push(ppn).expect("stack is full (double free?)");

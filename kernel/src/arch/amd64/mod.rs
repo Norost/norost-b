@@ -7,6 +7,8 @@ mod syscall;
 mod tss;
 pub mod r#virtual;
 
+pub use syscall::current_process;
+
 use core::mem::MaybeUninit;
 
 static mut TSS: tss::TSS = tss::TSS::new();
@@ -31,10 +33,12 @@ pub unsafe fn init() {
 	GDT_PTR.assume_init_mut().activate();
 
 	// Setup IDT
+	/*
 	IDT.set(8, idt::IDTEntry::new(1 * 8, || {
 		fatal!("Double fault!");
 		halt();
 	}, true, 0));
+	*/
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
 

@@ -4,7 +4,6 @@
 #![feature(maybe_uninit_extra, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 
-use core::fmt::Write;
 use core::panic::PanicInfo;
 
 #[macro_use]
@@ -45,8 +44,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		arch::init();
 	}
 
-	dbg!(boot_info);
-
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
 	for driver in boot_info.drivers() {
@@ -55,14 +52,11 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 	unsafe { let _ = core::ptr::read_volatile(0x0 as *const u8); }
 
-	dbg!(memory::r#virtual::DumpCurrent);
-
 	power::halt();
 }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-	let mut vga = driver::vga::text::Text::new();
 	fatal!("Panic!");
 	fatal!("  {:?}", info);
 	power::halt();

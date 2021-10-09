@@ -73,11 +73,9 @@ pub struct IDTPointer {
 
 impl IDTPointer {
 	pub fn new<const L: usize>(idt: &'static IDT<L>) -> Self {
-		unsafe {
-			Self {
-				limit: u16::try_from(mem::size_of_val(idt) - 1).unwrap(),
-				offset: idt as *const _ as u64,
-			}
+		Self {
+			limit: u16::try_from(mem::size_of_val(idt) - 1).unwrap(),
+			offset: idt as *const _ as u64,
 		}
 	}
 

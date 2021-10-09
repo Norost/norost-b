@@ -134,12 +134,10 @@ impl<'a> GDT<'a> {
 
 impl GDTPointer {
 	pub fn new(gdt: Pin<&GDT>) -> Self {
-		unsafe {
-			Self {
-				_padding: [0; 3],
-				limit: (mem::size_of::<GDT>() - 1).try_into().unwrap(),
-				address: gdt.get_ref() as *const _ as u64,
-			}
+		Self {
+			_padding: [0; 3],
+			limit: (mem::size_of::<GDT>() - 1).try_into().unwrap(),
+			address: gdt.get_ref() as *const _ as u64,
 		}
 	}
 

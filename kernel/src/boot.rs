@@ -1,4 +1,4 @@
-use core::convert::{TryFrom, TryInto};
+use core::convert::TryInto;
 use core::fmt;
 
 #[repr(C)]
