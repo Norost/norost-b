@@ -69,11 +69,12 @@ impl Entry {
 		unsafe { ptr::write_bytes(tbl, 0, 1) };
 		self.0 = frame | Self::PRESENT;
 		self.0 |= Self::USER * u64::from(u8::from(user));
+		self.0 |= Self::READ_WRITE;
 		// SAFETY: the table is properly initialized.
 		unsafe { &mut *tbl }
 	}
 
-	pub fn set_page(&mut self, frame: u64, user: bool) -> Result<(), SetPageError> {
+	pub fn set_page(&mut self, frame: u64, user: bool, writeable: bool) -> Result<(), SetPageError> {
 		if self.is_table() {
 			Err(SetPageError::IsTable)
 		} else if self.is_leaf() {
@@ -81,6 +82,7 @@ impl Entry {
 		} else {
 			self.0 = frame | Self::PAGE_SIZE | Self::PRESENT;
 			self.0 |= Self::USER * u64::from(u8::from(user));
+			self.0 |= Self::READ_WRITE * u64::from(u8::from(writeable));
 			Ok(())
 		}
 	}

@@ -30,13 +30,12 @@ impl AddressSpace {
 	/// If the mappings already existed, they must be flushed from the TLB.
 	pub unsafe fn map(&mut self, address: *const Page, frames: impl ExactSizeIterator<Item = frame::PPN>, rwx: RWX, hint_color: u8) -> Result<(), MapError> {
 		let tbl = self.table_mut();
-		dbg!(tbl as *mut _);
 		for (i, f) in frames.enumerate() {
 			loop {
 				match common::get_entry_mut(tbl, address.add(i) as u64, 0, 3) {
 					Ok(e) => {
 						dbg!(e as *mut _);
-						e.set_page(f.as_phys() as u64, true).unwrap();
+						e.set_page(f.as_phys() as u64, true, rwx.w()).unwrap();
 						dbg!(e);
 						dbg!(address.add(i), f.as_phys());
 						break;
@@ -69,7 +68,7 @@ impl AddressSpace {
 
 impl Drop for AddressSpace {
 	fn drop(&mut self) {
-		todo!()
+		//todo!()
 	}
 }
 

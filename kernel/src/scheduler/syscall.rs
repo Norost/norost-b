@@ -1,3 +1,6 @@
+use crate::ipc;
+use crate::scheduler::process::Process;
+
 macro_rules! syscall {
 	{
 		$(#[$outer:meta])*
@@ -20,10 +23,11 @@ struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 1;
+pub const SYSCALLS_LEN: usize = 2;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
+	init_client_queue,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -33,6 +37,16 @@ extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: us
 	Return {
 		status: 0,
 		value: len,
+	}
+}
+
+extern "C" fn init_client_queue(address: usize, submission_p2size: usize, completion_p2size: usize, _: usize, _: usize, _: usize) -> Return {
+	Process::current()
+		.init_client_queue(address as *mut _, submission_p2size as u8, completion_p2size as u8)
+		.unwrap();
+	Return {
+		status: 0,
+		value: 0,
 	}
 }
 
@@ -52,30 +66,7 @@ fn kill_process(pid: usize, _: usize, _: usize, _: usize, _: usize, _: usize) {
 
 /// Create a new thread in the same process.
 fn new(program_counter: usize, registers: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-
-}
-
-/// Create a new thread in another process.
-fn call_new(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	if port_len == 0 {
-		// Anonymous, numeric ID
-	} else {
-		// Public, string ID
-	}
-}
-
-/// Move the current thread to another process.
-fn call(port: usize, port_len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	if port_len == 0 {
-		// Anonymous, numeric ID
-	} else {
-		// Public, string ID
-	}
-}
-
-/// Return to the calling process
-fn r#return(port: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-
+	todo!()
 }
 
 /// Destroy the current thread.

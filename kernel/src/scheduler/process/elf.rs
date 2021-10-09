@@ -158,8 +158,8 @@ impl super::Process {
 			let offset = header.offset & page_mask;
 
 			let virt_address = header.virtual_address & !page_mask;
-			let phys_address = unsafe { virt_to_phys(data.as_ptr()) } + header.offset;
-			let count = (header.file_size + offset + page_mask) / page_size;
+			let phys_address = (unsafe { virt_to_phys(data.as_ptr()) } + header.offset) & !page_mask;
+			let count = (header.file_size + page_mask) / page_size;
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
 			for i in 0..count {
 				let virt = (virt_address + i * page_size) as *const _;

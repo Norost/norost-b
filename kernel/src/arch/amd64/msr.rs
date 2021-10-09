@@ -1,6 +1,8 @@
 pub const IA32_EFER: u32 = 0xc0000080;
 pub const IA32_EFER_SCE: u64 = 1;
 
+pub const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
+
 pub const STAR: u32 = 0xc0000081;
 pub const LSTAR: u32 = 0xc0000082;
 

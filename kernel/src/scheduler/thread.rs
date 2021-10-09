@@ -1,4 +1,5 @@
 use crate::memory::frame;
+use super::process::Process;
 
 #[repr(C)]
 pub struct Thread {
@@ -27,10 +28,11 @@ impl Thread {
 		}
 	}
 
-	pub fn resume(&self) -> ! {
+	pub fn resume(&self, process: *const Process) -> ! {
 		// iretq is the only way to preserve all registers
 		unsafe {
 			asm!("
+				mov		gs:[0x10], {1}
 				# Set kernel stack
 				mov		rsp, {0}
 
@@ -59,7 +61,7 @@ impl Thread {
 				swapgs
 
 				rex64 iretq
-			", in(reg) self.kernel_stack, options(noreturn));
+			", in(reg) self.kernel_stack, in(reg) process, options(noreturn));
 		}
 	}
 }

@@ -30,11 +30,13 @@ pub unsafe fn init() {
 struct CpuLocalData {
 	user_stack: usize,
 	kernel_stack: *mut usize,
+	current_process: *mut Process,
 }
 
 static mut CPU_LOCAL_DATA: CpuLocalData = CpuLocalData {
 	user_stack: 0,
 	kernel_stack: core::ptr::null_mut(),
+	current_process: core::ptr::null_mut(),
 };
 
 #[naked]
@@ -87,6 +89,7 @@ unsafe fn handler() {
 		pop		r13
 		pop		r14
 		pop		r15
+		mov		rsp, gs:[0]
 		swapgs
 		rex64 sysret
 
@@ -96,4 +99,12 @@ unsafe fn handler() {
 		xor		edx, edx
 		jmp		.return
 	", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
+}
+
+pub fn current_process<'a>() -> &'a mut Process {
+	unsafe {
+		let process: *mut Process;
+		asm!("mov {0}, gs:[0x10]", out(reg) process);
+		&mut *process
+	}
 }

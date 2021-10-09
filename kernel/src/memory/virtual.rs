@@ -3,14 +3,14 @@ use super::frame::PPN;
 
 pub unsafe trait Mappable<I>
 where
-	I: Iterator<Item = PPN>,
+	I: ExactSizeIterator<Item = PPN>,
 {
 	fn len(&self) -> usize;
 
 	fn frames(&self) -> I;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum RWX {
 	R,
 	W,
@@ -30,6 +30,13 @@ impl RWX {
 			(true, false, true) => Ok(Self::RX),
 			(true, true, true) => Ok(Self::RWX),
 			_ => Err(IncompatibleRWXFlags),
+		}
+	}
+
+	pub fn w(&self) -> bool {
+		match self {
+			Self::W | Self::RW | Self::RWX => true,
+			Self::R | Self::X | Self::RX => false,
 		}
 	}
 }
