@@ -1,5 +1,4 @@
 use crate::paging::{Page, PML4, AddError};
-use core::convert::{TryFrom, TryInto};
 use core::mem;
 
 #[repr(C)]

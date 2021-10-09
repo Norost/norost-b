@@ -3,8 +3,6 @@ use crate::memory::frame;
 use crate::memory::r#virtual::{Mappable};
 use core::alloc::Layout;
 use core::cell::Cell;
-use core::convert::TryInto;
-use core::convert::TryFrom;
 use core::mem;
 use core::ptr::NonNull;
 use core::slice;

@@ -2,7 +2,6 @@ use crate::memory::Page;
 use crate::memory::frame;
 use crate::memory::frame::PPN;
 use crate::memory::r#virtual::{MapError, RWX, virt_to_phys};
-use core::convert::{TryFrom, TryInto};
 use core::mem;
 
 #[repr(C)]

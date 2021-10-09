@@ -5,7 +5,6 @@ use crate::ipc::queue::{ClientQueue, NewClientQueueError};
 use crate::memory::Page;
 use crate::memory::frame;
 use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX};
-use core::convert::TryInto;
 
 pub struct Process {
 	address_space: AddressSpace,

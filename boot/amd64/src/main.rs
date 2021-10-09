@@ -14,7 +14,6 @@ mod mtrr;
 mod paging;
 mod vga;
 
-use core::convert::TryInto;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use core::slice;

@@ -5,7 +5,6 @@
 mod dumb_stack;
 
 use super::Page;
-use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::ptr;
 

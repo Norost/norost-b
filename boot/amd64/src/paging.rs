@@ -1,6 +1,5 @@
 use crate::cpuid;
 use crate::mtrr;
-use core::convert::{TryInto, TryFrom};
 use core::mem::MaybeUninit;
 
 #[repr(C)]
