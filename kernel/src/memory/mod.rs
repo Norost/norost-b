@@ -1,3 +1,4 @@
+mod heap;
 pub mod frame;
 pub mod r#virtual;
 

@@ -61,6 +61,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let mut kernel = None;
 	let mut drivers = MaybeUninit::uninit_array::<32>();
 	let mut drivers_count = 0;
+	
+	let mut rsdp = None;
 
 	let (bt_top, bt_bottom) = unsafe {
 		(
@@ -105,6 +107,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 					avail_memory_count += 1;
 				});
 			}
+			bi::Info::AcpiRsdp(r) => rsdp = Some(r),
 		}
 	}
 
@@ -112,8 +115,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		print_err(b"No kernel module");
 		halt();
 	});
-
 	let drivers = unsafe { MaybeUninit::slice_assume_init_ref(&drivers[..drivers_count]) };
+	let rsdp = rsdp.unwrap();
 
 	// Determine (guess) the maximum valid physical address
 	let mut memory_top = 0;
@@ -219,6 +222,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 	let info = unsafe {
 		GDT_PTR.activate();
+		INFO.set_rsdp(rsdp);
 		INFO.set_memory_regions(avail_memory);
 		INFO.set_drivers(drivers);
 		&INFO

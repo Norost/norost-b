@@ -6,6 +6,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+acpi = "*"
+rsdp = "*"
 
 [features]
 default = ["mem-max-16t"]

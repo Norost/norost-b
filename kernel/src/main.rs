@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
 #![feature(asm)]
 #![feature(maybe_uninit_extra, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
@@ -39,9 +40,12 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		}
 	}
 
+	dbg!(boot_info);
+
 	unsafe {
 		memory::r#virtual::init();
 		arch::init();
+		driver::init(boot_info);
 	}
 
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
