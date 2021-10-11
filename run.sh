@@ -6,4 +6,9 @@ cpu="--enable-kvm -cpu host"
 
 [ -z ${CPU+x} ] || cpu="-cpu $CPU"
 
-qemu-system-x86_64 $cpu -drive format=raw,file=norost.iso -serial mon:stdio $@
+qemu-system-x86_64 \
+	$cpu \
+	-drive format=raw,file=norost.iso \
+	-serial mon:stdio $@ \
+	-machine q35 \
+	-s

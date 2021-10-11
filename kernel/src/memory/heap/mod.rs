@@ -9,6 +9,7 @@ struct Global;
 
 unsafe impl GlobalAlloc for Global {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+		dbg!(layout);
 		frame::allocate_contiguous(Page::min_pages_for_bytes(layout.size()))
 			.unwrap()
 			.as_ptr()

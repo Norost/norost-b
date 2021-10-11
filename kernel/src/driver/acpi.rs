@@ -14,7 +14,16 @@ impl acpi::AcpiHandler for Handler {
 }
 
 pub unsafe fn init(boot: &boot::Info) {
+	boot.rsdp.validate().unwrap();
+
 	let rsdp = virt_to_phys(&boot.rsdp as *const _ as *const _).try_into().unwrap();
 	let acpi = acpi::AcpiTables::from_rsdp(Handler, rsdp).unwrap();
-	dbg!(acpi.dsdt, acpi.ssdts);
+	dbg!(&acpi.dsdt, &acpi.ssdts);
+
+	for (sig, sdt) in acpi.sdts.iter() {
+		dbg!(sig);
+	}
+
+	#[cfg(feature = "driver-pci")]
+	super::pci::init_acpi(&acpi);
 }

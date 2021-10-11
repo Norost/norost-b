@@ -8,7 +8,6 @@ cd kernel
 cargo rustc \
 	--release \
 	--target $RUST_TARGET_FILE \
-	--features mem-max-256m \
 	-- \
 	-C linker=$CC \
 	-C link-arg=-nostartfiles \

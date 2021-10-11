@@ -10,6 +10,7 @@ acpi = "*"
 rsdp = "*"
 
 [features]
-default = ["mem-max-16t"]
+default = ["mem-max-16t", "driver-pci"]
 mem-max-16t = []
 mem-max-256m = []
+driver-pci = []

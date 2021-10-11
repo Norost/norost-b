@@ -2,6 +2,7 @@ use super::common;
 use crate::memory::frame;
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
+use core::ptr::NonNull;
 
 pub struct AddressSpace {
 	cr3: usize,
@@ -50,6 +51,36 @@ impl AddressSpace {
 						e.make_table(true, hint_color).unwrap();
 					}
 				}
+			}
+		}
+		Ok(())
+	}
+
+	pub unsafe fn kernel_map(
+		mut address: *const Page,
+		frames: impl ExactSizeIterator<Item = frame::PageFrame>,
+		rwx: RWX,
+	) -> Result<(), MapError> {
+		let tbl = Self::current();
+		for f in frames {
+			let level = (f.p2size >= 9).then(|| 1).unwrap_or(0);
+			let offset = (f.p2size >= 9).then(|| 1 << 9).unwrap_or(1);
+			let count = (f.p2size >= 9).then(|| 1 << (f.p2size - 9)).unwrap_or(1);
+			let mut ppn = f.base;
+			for _ in 0..count {
+				loop {
+					match common::get_entry_mut(tbl, address as u64, level, 3 - level) {
+						Ok(e) => {
+							e.set_page(ppn.as_phys() as u64, false, rwx.w()).unwrap();
+							address = address.add(offset);
+							break;
+						}
+						Err((e, _)) => {
+							e.make_table(false, 0).unwrap();
+						}
+					}
+				}
+				ppn = ppn.skip(offset.try_into().unwrap());
 			}
 		}
 		Ok(())

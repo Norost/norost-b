@@ -46,11 +46,15 @@ impl PPN {
 	/// The pointer must be aligned and point to somewhere inside the identity map.
 	pub unsafe fn from_ptr(page: *mut Page) -> Self {
 		let virt = super::r#virtual::virt_to_phys(page.cast());
-		Self((usize::try_from(virt).unwrap() / Page::SIZE) as u16)
+		Self((usize::try_from(virt).unwrap() / Page::SIZE) as PPNBox)
 	}
 
 	pub fn next(&self) -> Self {
 		Self(self.0 + 1)
+	}
+
+	pub fn skip(&self, n: PPNBox) -> Self {
+		Self(self.0 + n)
 	}
 
 	pub fn as_phys(&self) -> usize {
@@ -200,7 +204,7 @@ where
 	let mut stack = dumb_stack::STACK.lock();
 	for _ in 0..count {
 		let frame = callback();
-		for i in 0..1u16 << frame.p2size {
+		for i in 0..(1 as PPNBox) << frame.p2size {
 			let ppn = PPN(frame.base.0 + i);
 			stack.push(ppn).expect("stack is full (double free?)");
 		}

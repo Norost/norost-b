@@ -16,6 +16,7 @@ mod driver;
 mod ipc;
 mod memory;
 mod power;
+mod util;
 mod scheduler;
 mod sync;
 
