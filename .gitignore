@@ -3,3 +3,4 @@ sysroot/
 target/
 isodir/
 *.iso
+disk0
