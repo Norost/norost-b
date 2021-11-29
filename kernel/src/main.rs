@@ -1,8 +1,12 @@
 #![no_std]
 #![no_main]
-#![feature(asm)]
-#![feature(maybe_uninit_extra, maybe_uninit_uninit_array)]
+#![feature(alloc_error_handler)]
+#![feature(asm, asm_const, asm_sym)]
+#![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(slice_index_methods)]
+
+extern crate alloc;
 
 use core::panic::PanicInfo;
 
@@ -39,9 +43,12 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		}
 	}
 
+	dbg!(boot_info);
+
 	unsafe {
 		memory::r#virtual::init();
 		arch::init();
+		driver::init(boot_info);
 	}
 
 	assert!(!boot_info.drivers().is_empty(), "no drivers");

@@ -5,6 +5,9 @@ pub struct Info {
 	memory_regions_len: u16,
 	drivers_len: u8,
 	_padding: [u8; 5],
+	#[cfg(target_arch = "x86_64")]
+	pub rsdp: rsdp::Rsdp,
+	_padding2: [u8; 4],
 	memory_regions: [MemoryRegion; 0],
 }
 
@@ -36,6 +39,7 @@ impl fmt::Debug for Info {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
 			.field("drivers", &self.drivers())
+			.field("rsdp", &self.rsdp)
 			.finish()
 	}
 }

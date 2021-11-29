@@ -3,9 +3,108 @@
 version = 3
 
 [[package]]
-name = "nora"
+name = "acpi"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee817a324f75ec8fa4db9b79ca77dcde7114718d37d3dc7c94f6361c30f7d9ae"
+dependencies = [
+ "bit_field",
+ "log",
+ "rsdp",
+]
+
+[[package]]
+name = "bit_field"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcb6dd1c2376d2e096796e234a70e17e94cc2d5d54ff8ce42b28cef1d0d359a4"
+
+[[package]]
+name = "cfg-if"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "driver_virtio_block"
+version = "0.1.0"
+dependencies = [
+ "kernel",
+ "pci",
+ "virtio",
+ "virtio_block",
+]
+
+[[package]]
+name = "endian"
 version = "0.1.0"
 
 [[package]]
+name = "kernel"
+version = "0.1.0"
+
+[[package]]
+name = "log"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
+name = "nora"
+version = "0.1.0"
+dependencies = [
+ "acpi",
+ "pci",
+ "rsdp",
+]
+
+[[package]]
 name = "noraboot"
+version = "0.1.0"
+dependencies = [
+ "rsdp",
+]
+
+[[package]]
+name = "pci"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "volatile",
+]
+
+[[package]]
+name = "rsdp"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66d3add2fc55ef37511bcf81a08ee7a09eff07b23aae38b06a29024a38c604b1"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "virtio"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "pci",
+ "volatile",
+]
+
+[[package]]
+name = "virtio_block"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "kernel",
+ "pci",
+ "virtio",
+ "volatile",
+]
+
+[[package]]
+name = "volatile"
 version = "0.1.0"

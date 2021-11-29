@@ -1,5 +1,28 @@
 use core::mem;
 
+#[macro_export]
+macro_rules! __idt_wrap_handler {
+	($fn:ident) => {
+		{
+			const _: fn(u32, *const ()) = $fn;
+			#[naked]
+			unsafe fn f() {
+				asm!("
+					pop		rdi		# Error code
+					pop		rsi		# RIP
+					pop		rax		# CS
+					pop		rax		# RFLAGS
+					pop		rax		# SS:RSP
+					call	{f}
+				66:
+					jmp		66b		# TODO
+				", f = sym $fn, options(noreturn));
+			}
+			f
+		}
+	}
+}
+
 #[repr(C)]
 pub struct IDTEntry {
 	offset_low: u16,
@@ -27,7 +50,7 @@ impl IDTEntry {
 		_unused_1: 0,
 	};
 
-	pub fn new(selector: u16, handler: fn(), is_trap: bool, ist: u8) -> Self {
+	pub fn new(selector: u16, handler: unsafe fn(), is_trap: bool, ist: u8) -> Self {
 		assert!(ist < 8, "ist out of bounds");
 		let handler = handler as usize;
 		Self {

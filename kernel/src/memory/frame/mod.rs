@@ -2,11 +2,15 @@
 //!
 //! For now it's just a big, dumb stack as that's easy.
 
+mod dma_frame;
 mod dumb_stack;
+
+pub use dma_frame::*;
 
 use super::Page;
 use core::fmt;
 use core::ptr;
+use core::num::NonZeroUsize;
 
 /// A Physical Page Number.
 ///
@@ -46,11 +50,15 @@ impl PPN {
 	/// The pointer must be aligned and point to somewhere inside the identity map.
 	pub unsafe fn from_ptr(page: *mut Page) -> Self {
 		let virt = super::r#virtual::virt_to_phys(page.cast());
-		Self((usize::try_from(virt).unwrap() / Page::SIZE) as u16)
+		Self((usize::try_from(virt).unwrap() / Page::SIZE) as PPNBox)
 	}
 
 	pub fn next(&self) -> Self {
 		Self(self.0 + 1)
+	}
+
+	pub fn skip(&self, n: PPNBox) -> Self {
+		Self(self.0 + n)
 	}
 
 	pub fn as_phys(&self) -> usize {
@@ -113,6 +121,57 @@ impl PageFrame {
 	pub unsafe fn from_raw(base: PPN, p2size: u8) -> Self {
 		Self { base, p2size }
 	}
+
+	pub fn iter(&self) -> Result<PageFrameIter, PageFrameIterError> {
+		Ok(PageFrameIter {
+			base: self.base,
+			count: 1usize
+				.checked_shl(self.p2size.into())
+				.ok_or(PageFrameIterError::TooLarge)?,
+		})
+	}
+}
+
+impl IntoIterator for PageFrame {
+	type Item = PPN;
+	type IntoIter = PageFrameIter;
+
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter().unwrap()
+	}
+}
+
+pub struct PageFrameIter {
+	base: PPN,
+	count: usize,
+}
+
+impl Iterator for PageFrameIter {
+	type Item = PPN;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.count.checked_sub(1).map(|c| {
+			let b = self.base;
+			self.base = self.base.next();
+			self.count = c;
+			b
+		})
+	}
+
+	fn count(self) -> usize {
+		self.count
+	}
+}
+
+impl ExactSizeIterator for PageFrameIter {
+	fn len(&self) -> usize {
+		self.count
+	}
+}
+
+#[derive(Debug)]
+pub enum PageFrameIterError {
+	TooLarge,
 }
 
 /// A region of physical memory
@@ -177,15 +236,8 @@ where
 }
 
 /// Allocate a physically contiguous range of pages.
-pub fn allocate_contiguous(count: usize) -> Result<PPN, AllocateContiguousError> {
-	match count {
-		0 => Err(AllocateContiguousError::CountIsZero),
-		1 => dumb_stack::STACK
-			.lock()
-			.pop()
-			.ok_or(AllocateContiguousError::OutOfFrames),
-		_ => Err(AllocateContiguousError::OutOfFrames),
-	}
+pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
+	dumb_stack::STACK.lock().pop_contiguous_range(count).ok_or(AllocateContiguousError::OutOfFrames)
 }
 
 /// Free a range of pages.
@@ -200,7 +252,7 @@ where
 	let mut stack = dumb_stack::STACK.lock();
 	for _ in 0..count {
 		let frame = callback();
-		for i in 0..1u16 << frame.p2size {
+		for i in 0..(1 as PPNBox) << frame.p2size {
 			let ppn = PPN(frame.base.0 + i);
 			stack.push(ppn).expect("stack is full (double free?)");
 		}

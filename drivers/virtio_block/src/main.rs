@@ -1,0 +1,127 @@
+#![no_std]
+#![no_main]
+#![feature(asm, naked_functions)]
+
+use kernel::syscall;
+use kernel::syslog;
+
+use core::mem;
+use core::panic::PanicInfo;
+use core::ptr::NonNull;
+
+#[export_name = "main"]
+extern "C" fn main() {
+	syslog!("Hello, world! from Rust");
+
+	let pci_config = 0x1000_0000 as *const _;
+
+	let handle = syscall::pci_map_any(0x1af4 << 16 | 0x1001, pci_config)
+		.unwrap()
+		.try_into()
+		.unwrap();
+
+	use core::fmt::Write;
+	syslog!("handle: {}", handle);
+	syslog!(
+		"first 4 bytes: {:08x}",
+		unsafe { *pci_config.cast::<u32>() }
+	);
+
+	let pci = unsafe {
+		pci::Pci::new(
+			core::ptr::NonNull::new(pci_config as *mut _).unwrap(),
+			0,
+			0,
+			&[],
+		)
+	};
+
+	let mut dma_addr = 0x2666_0000;
+
+	let mut dev = unsafe {
+		let h = pci.get(0, 0, 0).unwrap();
+		match h {
+			pci::Header::H0(h) => {
+				for (i, b) in h.base_address.iter().enumerate() {
+					syslog!("{}: {:x}", i, b.get());
+				}
+
+				let mut map_addr = 0x2000_0000 as *const kernel::Page;
+
+				let get_phys_addr = |addr| {
+					let addr = NonNull::new(addr as *mut _).unwrap();
+					syscall::physical_address(addr).unwrap()
+				};
+				let map_bar = |bar| {
+					let addr = map_addr.cast();
+					let _ = syscall::pci_map_bar(handle, bar, addr)
+						.map_err(|_| ())
+						.unwrap();
+					map_addr = map_addr.wrapping_add(16);
+					NonNull::new(addr as *mut _).unwrap()
+				};
+				let dma_alloc = |size| unsafe {
+					syslog!("dma: {:#x}", dma_addr);
+					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
+					let res = syscall::alloc_dma(Some(d), size).unwrap();
+					dma_addr += size;
+					let a = syscall::physical_address(d).unwrap();
+					Ok((d.cast(), a))
+				};
+				let d = virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
+
+				syslog!("pci status: {:#x}", h.status());
+
+				d
+			}
+			_ => unreachable!(),
+		}
+	};
+
+	let mut sectors = virtio_block::Sector::default();
+	for (w, r) in sectors.0.iter_mut().zip(b"Greetings, fellow developers!") {
+		*w = *r;
+	}
+
+	let h = pci.get(0, 0, 0).unwrap();
+	syslog!("writing the stuff...");
+	dev.write(&sectors, 0, || ()).unwrap();
+	syslog!("done writing the stuff");
+
+	loop {}
+}
+
+#[naked]
+#[export_name = "_start"]
+unsafe fn start() {
+	asm!(
+		"
+		lea		rsp, [rip + __stack + 0x8000]
+
+		#push	rax
+		call	main
+
+		mov		eax, 6
+		xor		edi, edi
+		syscall
+	",
+		options(noreturn)
+	);
+}
+
+#[derive(Clone, Copy)]
+#[repr(align(4096))]
+struct P([u64; 512]);
+#[export_name = "__stack"]
+static mut STACK: [P; 0x8] = [P([0xdeadbeef; 4096 / 8]); 8];
+
+static mut TEST: u8 = 8;
+#[export_name = "test2__"]
+static TEST2: u8 = 5;
+
+#[panic_handler]
+fn panic_handler(info: &PanicInfo) -> ! {
+	use core::fmt::Write;
+	writeln!(syscall::SysLog::default(), "Panic! {:#?}", info);
+	loop {}
+}

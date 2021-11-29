@@ -37,6 +37,21 @@ impl Entry {
 		self.is_present() && self.0 & Self::USER > 0
 	}
 
+	pub fn is_writeable(&self) -> bool {
+		self.is_present() && self.0 & Self::READ_WRITE > 0
+	}
+
+	pub fn page(&self) -> Option<u64> {
+		self.is_leaf().then(|| self.0 & !0xfff)
+	}
+
+	pub fn as_table(&self) -> Option<&[Entry; 512]> {
+		// SAFETY: FIXME not sure how to guarantee safety :/
+		self.is_table().then(|| unsafe {
+			&*phys_to_virt(self.0 & !u64::try_from(Page::MASK).unwrap()).cast()
+		})
+	}
+
 	pub fn as_table_mut(&mut self) -> Option<&mut [Entry; 512]> {
 		// SAFETY: FIXME not sure how to guarantee safety :/
 		self.is_table().then(|| unsafe {
@@ -145,6 +160,23 @@ impl From<frame::AllocateError> for MakeTableError {
 		match err {
 			frame::AllocateError::OutOfFrames => Self::OutOfFrames,
 		}
+	}
+}
+
+pub fn get_entry(
+	table: &[Entry; 512],
+	address: u64,
+	level: u8,
+	depth: u8,
+) -> Option<&Entry> {
+	let offt = usize::try_from((address >> (12 + u64::from(level + depth) * 9)) & 0x1ff).unwrap();
+	let entry = &table[offt];
+	if depth == 0 {
+		Some(entry)
+	} else if let Some(table) = entry.as_table() {
+		get_entry(table, address, level, depth - 1)
+	} else {
+		None
 	}
 }
 

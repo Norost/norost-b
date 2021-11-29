@@ -16,6 +16,7 @@ impl<T> SpinLock<T> {
 		}
 	}
 
+	#[track_caller]
 	pub fn lock(&self) -> Guard<T> {
 		loop {
 			match self
@@ -23,7 +24,11 @@ impl<T> SpinLock<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
-				Err(_) => (),
+				Err(_) => {
+					// Force unlock for now, even though that's unsafe
+					self.lock.store(0, Ordering::Release);
+					panic!("double lock on single core CPU!");
+				}
 			}
 		}
 	}
@@ -51,6 +56,6 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
-		self.lock.lock.store(0, Ordering::Relaxed);
+		self.lock.lock.store(0, Ordering::Release);
 	}
 }
