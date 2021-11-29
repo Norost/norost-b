@@ -12,7 +12,7 @@ pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
 	/// All mapped objects
-	objects: Vec<(RangeInclusive<*const ()>, Box<dyn MemoryObject>)>,
+	objects: Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
 }
 
 impl AddressSpace {
@@ -29,10 +29,24 @@ impl AddressSpace {
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
 		hint_color: u8,
-	) -> Result<(), MapError> {
-		unsafe {
+	) -> Result<MemoryObjectHandle, MapError> {
+
+		let base = base.unwrap(); // TODO
+		let count = object
+			.physical_pages()
+			.into_vec()
+			.into_iter()
+			.flat_map(|f| f)
+			.count();
+		let end = base.as_ptr().wrapping_add(count).wrapping_sub(1);
+		if end < base.as_ptr() {
+			Err(MapError::Overflow)?;
+		}
+		let end = NonNull::new(base.as_ptr()).unwrap();
+
+		let e = unsafe {
 			self.mmu_address_space.map(
-				base.map_or(core::ptr::null(), |b| b.as_ptr() as *const _),
+				base.as_ptr() as *const _,
 				// TODO avoid collect()
 				object
 					.physical_pages()
@@ -44,7 +58,17 @@ impl AddressSpace {
 				rwx,
 				hint_color,
 			)
-		}
+		};
+		e.map(|()| {
+			let h = MemoryObjectHandle(self.objects.len());
+			self.objects.push((base..=end, object));
+			h
+		})
+	}
+
+	/// Get a reference to a memory object.
+	pub fn get_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
+		self.objects.get(handle.0).map(|(_, o)| &**o)
 	}
 
 	/// Map a virtual address to a physical address.
@@ -63,5 +87,20 @@ impl core::ops::Deref for AddressSpace {
 impl core::ops::DerefMut for AddressSpace {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.mmu_address_space
+	}
+}
+
+#[derive(Clone, Copy)]
+pub struct MemoryObjectHandle(usize);
+
+impl From<MemoryObjectHandle> for usize {
+	fn from(h: MemoryObjectHandle) -> Self {
+		h.0
+	}
+}
+
+impl From<usize> for MemoryObjectHandle {
+	fn from(n: usize) -> Self {
+		Self(n)
 	}
 }

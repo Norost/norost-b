@@ -128,4 +128,6 @@ impl Drop for AddressSpace {
 }
 
 #[derive(Debug)]
-pub enum MapError {}
+pub enum MapError {
+	Overflow,
+}

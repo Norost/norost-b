@@ -5,6 +5,7 @@
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(slice_index_methods)]
+#![feature(trait_upcasting)]
 
 extern crate alloc;
 

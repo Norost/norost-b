@@ -3,7 +3,6 @@ use crate::memory::frame;
 use crate::scheduler::MemoryObject;
 use alloc::boxed::Box;
 use core::num::NonZeroUsize;
-use core::ops::Range;
 
 /// A physically contiguous range of pages
 pub struct DMAFrame {
@@ -30,6 +29,4 @@ impl MemoryObject for DMAFrame {
 			})
 			.collect()
 	}
-
-	fn mark_dirty(&mut self, _: Range<usize>) {}
 }

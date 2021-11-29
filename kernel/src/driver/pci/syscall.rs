@@ -1,7 +1,10 @@
 use super::PciDevice;
 use super::PCI;
+use crate::memory::r#virtual::{RWX, MemoryObjectHandle};
 use crate::scheduler::process::Process;
 use crate::scheduler::syscall::Return;
+use core::ptr::NonNull;
+use alloc::boxed::Box;
 
 pub extern "C" fn map_any(
 	id: usize,
@@ -43,7 +46,7 @@ pub extern "C" fn map_any(
 	if let Some((bus, dev)) = bus_dev {
 		let dev = PciDevice::new(bus, dev);
 		let handle = Process::current()
-			.pci_add_device(dev, address as *const _)
+			.map_memory_object(NonNull::new(address as *mut _), Box::new(dev), RWX::R)
 			.unwrap();
 		Return {
 			status: 0,
@@ -65,8 +68,15 @@ pub extern "C" fn map_bar(
 	_: usize,
 	_: usize,
 ) -> Return {
-	Process::current()
-		.pci_map_bar(handle as u32, bar as u8, address as *mut _)
+	let handle = MemoryObjectHandle::from(handle);
+	let p = Process::current();
+	let dev = p.get_memory_object(handle)
+		.and_then(|d| {
+			<dyn core::any::Any>::downcast_ref::<PciDevice>(d)
+		})
+		.unwrap();
+	let bar = dev.bar_region(bar.try_into().unwrap()).unwrap();
+	p.map_memory_object(NonNull::new(address as *mut _), Box::new(bar), RWX::RW)
 		.unwrap();
 	Return {
 		status: 0,
