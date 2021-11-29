@@ -3,6 +3,8 @@ use crate::memory::frame::PPN;
 use crate::memory::r#virtual::{virt_to_phys, MapError, RWX};
 use crate::memory::Page;
 use core::mem;
+use core::num::NonZeroUsize;
+use core::ops::Range;
 
 #[repr(C)]
 struct FileHeader {
@@ -155,10 +157,13 @@ impl super::Process {
 
 			let offset = header.offset & page_mask;
 
+			let (phys, virt) = (header.physical_address, header.virtual_address);
+			let count = page_count(phys..phys + header.file_size);
+			let alloc = page_count(virt..virt + header.memory_size);
+
 			let virt_address = header.virtual_address & !page_mask;
 			let phys_address =
 				(unsafe { virt_to_phys(data.as_ptr()) } + header.offset) & !page_mask;
-			let count = (header.file_size + page_mask) / page_size;
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
 			for i in 0..count {
 				let virt = (virt_address + i * page_size) as *const _;
@@ -170,10 +175,9 @@ impl super::Process {
 						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
 				}
 			}
-			let alloc = (header.memory_size + offset + page_mask) / page_size;
 			for i in count..alloc {
 				let virt = (virt_address + i * page_size) as *const _;
-				let phys = frame::allocate_contiguous(1)?;
+				let phys = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?;
 				unsafe {
 					slf.address_space
 						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
@@ -185,6 +189,17 @@ impl super::Process {
 
 		Ok(slf)
 	}
+}
+
+/// Determine the amount of pages needed to cover an address range
+fn page_count(range: Range<u64>) -> u64 {
+	let (pm, ps) = (
+		u64::try_from(Page::MASK).unwrap(),
+		u64::try_from(Page::SIZE).unwrap(),
+	);
+	let start = range.start & !pm;
+	let end = range.end.wrapping_add(pm) & !pm;
+	end.wrapping_sub(start) / ps
 }
 
 #[derive(Debug)]

@@ -62,15 +62,15 @@ unsafe extern "C" fn handler() {
 		# Check if the syscall ID is valid
 		# Jump forward to take advantage of static prediction
 		cmp		rax, {syscall_count}
-		jae		.bad_syscall_id
+		jae		1f
 
-		# Call the appriopriate handler
+		# Call the appropriate handler
 		# TODO figure out how to do this in one instruction
 		lea		rcx, [rip + syscall_table]
 		lea		rcx, [rcx + rax * 8]
 		call	[rcx]
 
-	.return:
+	2:
 		pop		rbx
 		pop		rcx
 		pop		rdi
@@ -90,10 +90,10 @@ unsafe extern "C" fn handler() {
 		rex64 sysret
 
 		# Set error code and return
-	.bad_syscall_id:
+	1:
 		mov		rax, -1
 		xor		edx, edx
-		jmp		.return
+		jmp		2b
 	", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
 }
 

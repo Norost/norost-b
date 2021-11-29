@@ -1,0 +1,12 @@
+cargo-features = ["edition2021"]
+
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[features]
+default = ["userspace"]
+userspace = []

@@ -5,6 +5,7 @@ use core::alloc::Layout;
 use core::cell::Cell;
 use core::mem;
 use core::ptr::NonNull;
+use core::num::NonZeroUsize;
 use core::slice;
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -55,7 +56,7 @@ impl ClientQueue {
 		let ring_layout = Self::ring_layout(sq_size, cq_size);
 
 		let pages = Page::min_pages_for_bytes(ring_layout.size());
-		let queues = frame::allocate_contiguous(pages)
+		let queues = frame::allocate_contiguous(NonZeroUsize::new(pages).unwrap())
 			.map_err(NewClientQueueError::AllocateError)?
 			.as_ptr();
 

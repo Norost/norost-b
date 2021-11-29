@@ -1,6 +1,7 @@
 #!/bin/sh
 
 ./mkiso.sh || exit $?
+make disk0 || exit $?
 
 cpu="--enable-kvm -cpu host"
 
@@ -11,4 +12,6 @@ qemu-system-x86_64 \
 	-drive format=raw,file=norost.iso \
 	-serial mon:stdio $@ \
 	-machine q35 \
-	-s
+	-drive file=disk0,format=raw,if=none,id=disk0 \
+	-device virtio-blk-pci,drive=disk0 \
+	#-s

@@ -6,9 +6,9 @@ pub use address_space::{AddressSpace, MapError};
 pub use common::{phys_to_virt, virt_to_phys};
 pub use pml4::*;
 
-use crate::memory::Page;
-use crate::memory::frame::{PPN, PageFrame};
+use crate::memory::frame::{PageFrame, PPN};
 use crate::memory::r#virtual::RWX;
+use crate::memory::Page;
 use core::ptr::NonNull;
 
 pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<Page>, ()> {
@@ -49,13 +49,13 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 		}
 	}
 
-	let virt = phys_to_virt(phys.try_into().unwrap()).cast(); 
+	let virt = phys_to_virt(phys.try_into().unwrap()).cast();
 	let iter = Iter {
 		phys: PPN::from_ptr(virt),
 		size: size / 4096,
 	};
 
 	AddressSpace::kernel_map(virt, iter, RWX::RW).unwrap();
-	
+
 	Ok(NonNull::new_unchecked(virt))
 }

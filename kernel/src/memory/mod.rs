@@ -1,5 +1,5 @@
-mod heap;
 pub mod frame;
+mod heap;
 pub mod r#virtual;
 
 #[cfg(target_arch = "x86_64")]

@@ -26,6 +26,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "driver_virtio_block"
+version = "0.1.0"
+dependencies = [
+ "kernel",
+ "pci",
+ "virtio",
+ "virtio_block",
+]
+
+[[package]]
+name = "endian"
+version = "0.1.0"
+
+[[package]]
+name = "kernel"
+version = "0.1.0"
+
+[[package]]
 name = "log"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -39,6 +57,7 @@ name = "nora"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "pci",
  "rsdp",
 ]
 
@@ -50,6 +69,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pci"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "volatile",
+]
+
+[[package]]
 name = "rsdp"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -57,3 +84,27 @@ checksum = "66d3add2fc55ef37511bcf81a08ee7a09eff07b23aae38b06a29024a38c604b1"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "virtio"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "pci",
+ "volatile",
+]
+
+[[package]]
+name = "virtio_block"
+version = "0.1.0"
+dependencies = [
+ "endian",
+ "kernel",
+ "pci",
+ "virtio",
+ "volatile",
+]
+
+[[package]]
+name = "volatile"
+version = "0.1.0"

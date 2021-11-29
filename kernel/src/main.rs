@@ -1,9 +1,12 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
-#![feature(asm)]
-#![feature(maybe_uninit_extra, maybe_uninit_uninit_array)]
+#![feature(asm, asm_const, asm_sym)]
+#![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(slice_index_methods)]
+
+extern crate alloc;
 
 use core::panic::PanicInfo;
 
@@ -16,7 +19,6 @@ mod driver;
 mod ipc;
 mod memory;
 mod power;
-mod util;
 mod scheduler;
 mod sync;
 

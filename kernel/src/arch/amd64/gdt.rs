@@ -144,12 +144,12 @@ impl GDTPointer {
 		asm!("
 			lgdt	[{0}]
 
-			lea		rax, [rip + .reload_gdt]
+			lea		rax, [rip + 0f]
 			push	0x8					# cs
 			push	rax					# rîp
 			rex64 retf
 
-		.reload_gdt:
+		0:
 			mov		ax, 2 * 8
 			mov		ds, ax
 			mov		es, ax

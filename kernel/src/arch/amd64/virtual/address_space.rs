@@ -2,6 +2,7 @@ use super::common;
 use crate::memory::frame;
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 pub struct AddressSpace {
@@ -10,7 +11,7 @@ pub struct AddressSpace {
 
 impl AddressSpace {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
-		let ppn = frame::allocate_contiguous(1)?;
+		let ppn = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?;
 		let mut slf = Self { cr3: ppn.as_phys() };
 
 		// Map the kernel pages
@@ -86,8 +87,27 @@ impl AddressSpace {
 		Ok(())
 	}
 
+	/// Map a virtual address to a physical address.
+	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
+		let offt = address.as_ptr() as usize & 0xfff;
+		let tbl = unsafe { self.table() };
+		// TODO hugepages
+		let e = common::get_entry(tbl, address.as_ptr() as u64, 0, 3)?;
+		let p = e.page()?;
+		// TODO check for executable
+		let rwx = match e.is_writeable() {
+			true => RWX::RW,
+			false => RWX::R,
+		};
+		Some((p as usize | offt, rwx))
+	}
+
 	pub unsafe fn activate(&self) {
 		asm!("mov cr3, {0}", in(reg) self.cr3);
+	}
+
+	unsafe fn table(&self) -> &[common::Entry; 512] {
+		&*phys_to_virt((self.cr3 & !Page::MASK) as u64).cast()
 	}
 
 	unsafe fn table_mut(&mut self) -> &mut [common::Entry; 512] {

@@ -16,6 +16,7 @@ impl<T> SpinLock<T> {
 		}
 	}
 
+	#[track_caller]
 	pub fn lock(&self) -> Guard<T> {
 		loop {
 			match self

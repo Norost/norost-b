@@ -1,8 +1,8 @@
 mod acpi;
-pub mod uart;
-pub mod vga;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
+pub mod uart;
+pub mod vga;
 
 use crate::boot;
 

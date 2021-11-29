@@ -1,6 +1,6 @@
 #![no_main]
 #![no_std]
-#![feature(asm)]
+#![feature(asm, asm_const)]
 #![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
 #![feature(option_result_unwrap_unchecked)]
 
@@ -61,7 +61,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let mut kernel = None;
 	let mut drivers = MaybeUninit::uninit_array::<32>();
 	let mut drivers_count = 0;
-	
+
 	let mut rsdp = None;
 
 	let (bt_top, bt_bottom) = unsafe {

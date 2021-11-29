@@ -1,6 +1,7 @@
-use super::Page;
 use super::frame;
+use super::Page;
 use core::alloc::{GlobalAlloc, Layout};
+use core::num::NonZeroUsize;
 
 #[global_allocator]
 static GLOBAL: Global = Global;
@@ -9,15 +10,14 @@ struct Global;
 
 unsafe impl GlobalAlloc for Global {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-		dbg!(layout);
-		frame::allocate_contiguous(Page::min_pages_for_bytes(layout.size()))
+		let c = NonZeroUsize::new(Page::min_pages_for_bytes(layout.size())).unwrap();
+		frame::allocate_contiguous(c)
 			.unwrap()
 			.as_ptr()
 			.cast()
 	}
 
-	unsafe fn dealloc(&self, _: *mut u8, _: Layout) {
-	}
+	unsafe fn dealloc(&self, _: *mut u8, _: Layout) {}
 }
 
 #[alloc_error_handler]
