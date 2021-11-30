@@ -19,7 +19,7 @@ pub trait Table {
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(&self, name: &str, tags: &[&str]) -> Box<dyn Query>;
+	fn query(&self, name: Option<&str>, tags: &[&str]) -> Box<dyn Query>;
 
 	/// Get a single object based on ID.
 	fn get(&self, id: Id) -> Option<Object>;
@@ -73,6 +73,18 @@ pub trait Interface {
 #[repr(transparent)]
 pub struct Id(u64);
 
+impl From<Id> for u64 {
+	fn from(i: Id) -> Self {
+		i.0
+	}
+}
+
+impl From<u64> for Id {
+	fn from(n: u64) -> Id {
+		Self(n)
+	}
+}
+
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -98,7 +110,7 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(table_id: TableId, name: &str, tags: &[&str]) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(table_id: TableId, name: Option<&str>, tags: &[&str]) -> Result<Box<dyn Query>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())

@@ -68,6 +68,12 @@ impl MemoryObject for PciDevice {
 	}
 }
 
+impl crate::object_table::Interface for PciDevice {
+	fn memory_object(&self) -> Option<Box<dyn MemoryObject>> {
+		Some(Box::new(PciDevice { device: self.device, bus: self.bus }))
+	}
+}
+
 #[derive(Debug)]
 pub enum BarError {
 	NonExistent,
