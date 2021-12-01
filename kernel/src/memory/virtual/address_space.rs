@@ -1,6 +1,6 @@
 use crate::arch::r#virtual;
 use crate::memory::{
-	r#virtual::{MapError, RWX},
+	r#virtual::{MapError, RWX, PPN},
 	Page,
 };
 use crate::scheduler::MemoryObject;
@@ -74,6 +74,22 @@ impl AddressSpace {
 	/// Map a virtual address to a physical address.
 	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
 		self.mmu_address_space.get_physical_address(address)
+	}
+
+	/// Identity-map a physical frame.
+	///
+	/// # Returns
+	///
+	/// `true` if a new mapping has been added, `false` otherwise.
+	///
+	/// # Panics
+	///
+	/// `size` must be a multiple of the page size.
+	pub fn identity_map(ppn: PPN, size: usize) -> bool {
+		assert_eq!(size % Page::SIZE, 0);
+		unsafe {
+			r#virtual::add_identity_mapping(ppn.as_phys(), size).is_ok()
+		}
 	}
 }
 

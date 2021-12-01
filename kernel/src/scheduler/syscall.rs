@@ -18,7 +18,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 10;
+pub const SYSCALLS_LEN: usize = 11;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -31,6 +31,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	query_next,
 	open_object,
 	map_object,
+	sleep,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -226,6 +227,32 @@ extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_o
 	Return {
 		status: 0,
 		value: base.unwrap().as_ptr() as usize,
+	}
+}
+
+extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	let time = match mem::size_of_val(&time_l) {
+		4 => (time_h as u64) << 32 | time_l as u64,
+		8 | 16 => time_l as u64,
+		s => unreachable!("unsupported usize size of {}", s),
+	};
+	dbg!(time);
+	use crate::driver::apic::local_apic;
+
+	unsafe { asm!("sti") };
+
+	let a = local_apic::get();
+	a.spurious_interrupt_vector.set((a.spurious_interrupt_vector.get() | 0x100));
+	a.divide_configuration_register.set(3);
+	// one-shot | non-mask | idle | vector
+	a.lvt_timer.set(0 << 17 | 0 << 16 | 0 << 12 | 61);
+	a.initial_count.set(time.try_into().unwrap_or(u32::MAX));
+
+	unsafe { asm!("hlt") };
+
+	Return {
+		status: 0,
+		value: 0,
 	}
 }
 

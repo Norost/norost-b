@@ -2,7 +2,7 @@ use core::mem;
 
 #[macro_export]
 macro_rules! __idt_wrap_handler {
-	($fn:ident) => {
+	(trap $fn:ident) => {
 		{
 			const _: fn(u32, *const ()) = $fn;
 			#[naked]
@@ -10,17 +10,81 @@ macro_rules! __idt_wrap_handler {
 				asm!("
 					pop		rdi		# Error code
 					pop		rsi		# RIP
-					pop		rax		# CS
-					pop		rax		# RFLAGS
-					pop		rax		# SS:RSP
+
+					cld
 					call	{f}
-				66:
-					jmp		66b		# TODO
+
+					rex64 iretq
 				", f = sym $fn, options(noreturn));
 			}
-			f
+			$crate::arch::amd64::idt::Handler::Trap(f)
 		}
-	}
+	};
+	(int $fn:ident) => {
+		{
+			const _: fn(*const ()) = $fn;
+			#[naked]
+			unsafe fn f() {
+				asm!("
+					push	rax
+					push	rbx
+					push	rcx
+					push	rdx
+					push	rdi
+					push	rsi
+					push	rbp
+					push	r8
+					push	r9
+					push	r10
+					push	r11
+					push	r12
+					push	r13
+					push	r14
+					push	r15
+
+					mov		rdi, [rsp + 15 * 8]		# RIP
+					cld
+					call	{f}
+
+					# Mark EOI
+					mov		ecx, {msr}
+					rdmsr
+					and		eax, 0xfffff000
+					movabs	rcx, {virt_ident}
+					or		rax, rcx
+					mov		DWORD PTR [rax + {eoi}], 0
+
+					pop		r15
+					pop		r14
+					pop		r13
+					pop		r12
+					pop		r11
+					pop		r10
+					pop		r9
+					pop		r8
+					pop		rbp
+					pop		rsi
+					pop		rdi
+					pop		rdx
+					pop		rcx
+					pop		rbx
+					pop		rax
+
+					iretq
+				", f = sym $fn,
+				msr = const super::msr::IA32_APIC_BASE_MSR,
+				eoi = const 0xb0,
+				virt_ident = const 0xffff_c000_0000_0000u64,
+				options(noreturn));
+			}
+			$crate::arch::amd64::idt::Handler::Int(f)
+		}
+	};
+}
+
+pub enum Handler {
+	Int(unsafe fn()),
+	Trap(unsafe fn()),
 }
 
 #[repr(C)]
@@ -50,9 +114,12 @@ impl IDTEntry {
 		_unused_1: 0,
 	};
 
-	pub fn new(selector: u16, handler: unsafe fn(), is_trap: bool, ist: u8) -> Self {
+	pub fn new(selector: u16, handler: Handler, ist: u8) -> Self {
 		assert!(ist < 8, "ist out of bounds");
-		let handler = handler as usize;
+		let (handler, is_trap) = match handler {
+			Handler::Int(h) => (h as usize, false),
+			Handler::Trap(h) => (h as usize, true),
+		};
 		Self {
 			offset_low: (handler >> 0) as u16,
 			selector,

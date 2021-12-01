@@ -8,6 +8,7 @@ use kernel::syslog;
 use core::mem;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
+use core::time::Duration;
 
 #[export_name = "main"]
 extern "C" fn main() {
@@ -105,7 +106,9 @@ extern "C" fn main() {
 	dev.write(&sectors, 0, || ()).unwrap();
 	syslog!("done writing the stuff");
 
-	loop {}
+	loop {
+		syscall::sleep(Duration::from_secs(1));
+	}
 }
 
 #[naked]
