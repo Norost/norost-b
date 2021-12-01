@@ -67,8 +67,9 @@ unsafe extern "C" fn handler() {
 		# Call the appropriate handler
 		# TODO figure out how to do this in one instruction
 		lea		rcx, [rip + syscall_table]
-		lea		rcx, [rcx + rax * 8]
-		call	[rcx]
+		lea		rax, [rcx + rax * 8]
+		mov		rcx, r10 # r10 is used as 4th parameter
+		call	[rax]
 
 	2:
 		pop		rbx

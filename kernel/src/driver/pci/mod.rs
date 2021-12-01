@@ -8,6 +8,7 @@
 
 use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
 use crate::memory::Page;
+use crate::object_table;
 use crate::sync::SpinLock;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
 use core::cell::Cell;
@@ -17,7 +18,7 @@ use core::ptr::NonNull;
 use pci::Pci;
 
 mod device;
-pub mod syscall;
+mod table;
 
 pub use device::PciDevice;
 
@@ -52,4 +53,6 @@ where
 	}
 
 	*PCI.lock() = Some(pci);
+
+	object_table::add_table(table::PciTable);
 }

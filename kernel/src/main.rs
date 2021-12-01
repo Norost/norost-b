@@ -4,7 +4,9 @@
 #![feature(asm, asm_const, asm_sym)]
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
+#![feature(trait_upcasting)]
 
 extern crate alloc;
 
@@ -16,8 +18,10 @@ mod log;
 mod arch;
 mod boot;
 mod driver;
+mod ffi;
 mod ipc;
 mod memory;
+mod object_table;
 mod power;
 mod scheduler;
 mod sync;

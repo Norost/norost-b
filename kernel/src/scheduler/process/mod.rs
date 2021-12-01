@@ -6,8 +6,9 @@ use crate::arch;
 use crate::driver::pci::PciDevice;
 use crate::ipc::queue::{ClientQueue, NewClientQueueError};
 use crate::memory::frame;
-use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX};
+use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX, MemoryObjectHandle};
 use crate::memory::Page;
+use crate::object_table::{Object, Query};
 use core::ptr::NonNull;
 use alloc::{boxed::Box, vec::Vec};
 
@@ -20,8 +21,8 @@ pub struct Process {
 	thread: Option<super::Thread>,
 	//threads: Vec<NonNull<Thread>>,
 	client_queue: Option<ClientQueue>,
-	#[cfg(feature = "driver-pci")]
-	pci_devices: Vec<Option<PciDevice>>,
+	objects: Vec<Object>,
+	queries: Vec<Box<dyn Query>>,
 }
 
 impl Process {
@@ -32,8 +33,8 @@ impl Process {
 			hint_color: 0,
 			thread: None,
 			client_queue: None,
-			#[cfg(feature = "driver-pci")]
-			pci_devices: Vec::new(),
+			objects: Default::default(),
+			queries: Default::default(),
 		})
 	}
 
@@ -86,15 +87,39 @@ impl Process {
 		Ok(())
 	}
 
+	/// Add an object to the process' object table.
+	pub fn add_object(&mut self, object: Object) -> Result<ObjectHandle, AddObjectError> {
+		self.objects.push(object);
+		Ok(ObjectHandle(self.objects.len() - 1))
+	}
+
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object(
 		&mut self,
 		base: Option<NonNull<Page>>,
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<(), MapError>
+	) -> Result<MemoryObjectHandle, MapError>
 	{
 		self.address_space.map_object(base, object.into(), rwx, self.hint_color)
+	}
+
+	/// Map a memory object to a memory range.
+	pub fn map_memory_object_2(
+		&mut self,
+		handle: ObjectHandle,
+		base: Option<NonNull<Page>>,
+		offset: u64,
+		rwx: RWX,
+	) -> Result<MemoryObjectHandle, MapError>
+	{
+		let obj = self.objects[handle.0].memory_object(offset).unwrap();
+		self.address_space.map_object(base, obj, rwx, self.hint_color)
+	}
+
+	/// Get a reference to a memory object.
+	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
+		self.address_space.get_object(handle)
 	}
 
 	/// Map a virtual address to a physical address.
@@ -102,64 +127,15 @@ impl Process {
 		self.address_space.get_physical_address(address)
 	}
 
-	#[cfg(feature = "driver-pci")]
-	pub fn pci_add_device(&mut self, device: PciDevice, address: *const Page) -> Result<u32, ()> {
-		let region = device.config_region();
-		unsafe {
-			let region = region.base;
-			let region = Some(region).into_iter();
-			self.address_space
-				.map(address, region, RWX::RW, self.hint_color)
-				.unwrap();
-		}
-
-		match self.pci_devices.iter().position(Option::is_none) {
-			Some(i) => {
-				self.pci_devices[i] = Some(device);
-				Ok(i as u32)
-			}
-			None => {
-				self.pci_devices.push(Some(device));
-				Ok((self.pci_devices.len() - 1) as u32)
-			}
-		}
+	/// Add an object query.
+	pub fn add_query(&mut self, query: Box<dyn Query>) -> QueryHandle {
+		self.queries.push(query);
+		QueryHandle(self.queries.len() - 1)
 	}
 
-	#[cfg(feature = "driver-pci")]
-	pub fn pci_map_bar(&mut self, device: u32, bar: u8, address: *const Page) -> Result<(), ()> {
-		let dev = usize::try_from(device).unwrap();
-		let dev = self
-			.pci_devices
-			.get(dev)
-			.and_then(Option::as_ref)
-			.ok_or(())?;
-		let region = dev.bar_region(bar).map_err(|_| ())?;
-		unsafe {
-			for i in 0..1 << region.p2size {
-				self.address_space
-					.map(
-						address.wrapping_add(i),
-						Some(region.base.skip(i.try_into().unwrap())).into_iter(),
-						RWX::RW,
-						self.hint_color,
-					)
-					.unwrap();
-			}
-		}
-		Ok(())
-	}
-
-	#[cfg(feature = "driver-pci")]
-	pub fn pci_remove_device(&mut self, handle: u32) -> Result<(), ()> {
-		if self.pci_devices.len() + 1 == handle as usize {
-			self.pci_devices.pop();
-			Ok(())
-		} else {
-			self.pci_devices
-				.get_mut(handle as usize)
-				.map(|e| *e = None)
-				.ok_or(())
-		}
+	/// Get a mutable reference to a query.
+	pub fn get_query_mut(&mut self, handle: QueryHandle) -> Option<&mut (dyn Query + 'static)> {
+		self.queries.get_mut(handle.0).map(|q| &mut **q)
 	}
 
 	// FIXME wildly unsafe!
@@ -189,3 +165,38 @@ pub enum NewQueueError {
 pub enum PollQueueError {
 	NoQueue,
 }
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct ObjectHandle(usize);
+
+impl From<ObjectHandle> for usize {
+	fn from(h: ObjectHandle) -> Self {
+		h.0
+	}
+}
+
+impl From<usize> for ObjectHandle {
+	fn from(n: usize) -> Self {
+		Self(n)
+	}
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct QueryHandle(usize);
+
+impl From<QueryHandle> for usize {
+	fn from(h: QueryHandle) -> Self {
+		h.0
+	}
+}
+
+impl From<usize> for QueryHandle {
+	fn from(n: usize) -> Self {
+		Self(n)
+	}
+}
+
+#[derive(Debug)]
+pub enum AddObjectError {}

@@ -107,7 +107,7 @@ pub enum PPNError {
 pub struct OutOfRange;
 
 /// A single page frame with a variable size.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PageFrame {
 	pub base: PPN,
 	/// The size of the frame expressed as `2 ^ p2size`.
