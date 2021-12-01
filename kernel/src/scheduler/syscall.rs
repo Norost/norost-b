@@ -18,20 +18,12 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 12;
+pub const SYSCALLS_LEN: usize = 10;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
 	init_client_queue,
 	push_client_queue,
-	#[cfg(feature = "driver-pci")]
-	driver::pci::syscall::map_any,
-	#[cfg(feature = "driver-pci")]
-	driver::pci::syscall::map_bar,
-	#[cfg(not(feature = "driver-pci"))]
-	undefined,
-	#[cfg(not(feature = "driver-pci"))]
-	undefined,
 	alloc_dma,
 	physical_address,
 	next_table,
@@ -154,7 +146,7 @@ extern "C" fn query_table(id: usize, name: usize, name_len: usize, tags: usize, 
 			.map(|f| f.unchecked_as_slice())
 			.map(|s| core::str::from_utf8(s).unwrap())
 			.collect::<Vec<_>>();
-		dbg!(name, tags)
+		(name, tags)
 	};
 	let query = object_table::query(id, name, &tags).unwrap();
 	let handle = Process::current().add_query(query);
@@ -222,13 +214,18 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 	}
 }
 
-extern "C" fn map_object(handle: usize, address: usize, _rwx: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_or_length: usize, length_or_rwx: usize, rwx: usize) -> Return {
+	let (offset, length, rwx) = match mem::size_of_val(&offset_l) {
+		4 => ((offset_h_or_length as u64) << 32 | offset_l as u64, length_or_rwx, rwx),
+		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
+		s => unreachable!("unsupported usize size of {}", s),
+	};
 	let handle = ObjectHandle::from(handle);
-	let address = NonNull::new(address as *mut _);
-	Process::current().map_memory_object_2(handle, address, RWX::RW);
+	let base = NonNull::new(base as *mut _);
+	Process::current().map_memory_object_2(handle, base, offset, RWX::RW).unwrap();
 	Return {
 		status: 0,
-		value: 0,
+		value: base.unwrap().as_ptr() as usize,
 	}
 }
 

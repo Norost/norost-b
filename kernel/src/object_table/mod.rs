@@ -77,7 +77,7 @@ impl DerefMut for Object {
 pub trait Interface {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
-	fn memory_object(&self) -> Option<Box<dyn MemoryObject>>;
+	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>>;
 }
 
 /// The unique identifier of an object.

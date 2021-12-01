@@ -14,8 +14,9 @@ extern "C" fn main() {
 	syslog!("Hello, world! from Rust");
 
 	let mut id = None;
+	let mut dev = None;
 	syslog!("iter tables");
-	while let Some((i, inf)) = syscall::next_table(id) {
+	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
 		syslog!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
 			let tags: [syscall::Slice<u8>; 2] = [
@@ -28,28 +29,25 @@ extern "C" fn main() {
 			let mut obj = syscall::ObjectInfo::new(&mut buf);
 			while let Ok(()) = syscall::query_next(h, &mut obj) {
 				syslog!("{:#?}", &obj);
+				dev = Some((i, obj.id));
+				break 'found_dev;
 			}
 		}
 		id = Some(i);
 	}
 
-	let pci_config = 0x1000_0000 as *const _;
+	let (tbl, dev) = dev.unwrap();
+	let handle = syscall::open_object(tbl, dev).unwrap();
 
-	let handle = syscall::pci_map_any(0x1af4 << 16 | 0x1001, pci_config)
-		.unwrap()
-		.try_into()
-		.unwrap();
+	let pci_config = NonNull::new(0x1000_0000 as *mut _);
+	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
 
 	use core::fmt::Write;
-	syslog!("handle: {}", handle);
-	syslog!(
-		"first 4 bytes: {:08x}",
-		unsafe { *pci_config.cast::<u32>() }
-	);
+	syslog!("handle: {:?}", handle);
 
 	let pci = unsafe {
 		pci::Pci::new(
-			core::ptr::NonNull::new(pci_config as *mut _).unwrap(),
+			pci_config.cast(),
 			0,
 			0,
 			&[],
@@ -66,16 +64,15 @@ extern "C" fn main() {
 					syslog!("{}: {:x}", i, b.get());
 				}
 
-				let mut map_addr = 0x2000_0000 as *const kernel::Page;
+				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
 
 				let get_phys_addr = |addr| {
 					let addr = NonNull::new(addr as *mut _).unwrap();
 					syscall::physical_address(addr).unwrap()
 				};
-				let map_bar = |bar| {
+				let map_bar = |bar: u8| {
 					let addr = map_addr.cast();
-					let _ = syscall::pci_map_bar(handle, bar, addr)
-						.map_err(|_| ())
+					syscall::map_object(handle, NonNull::new(addr), (bar + 1).into(), usize::MAX)
 						.unwrap();
 					map_addr = map_addr.wrapping_add(16);
 					NonNull::new(addr as *mut _).unwrap()

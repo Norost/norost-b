@@ -18,7 +18,6 @@ use core::ptr::NonNull;
 use pci::Pci;
 
 mod device;
-pub mod syscall;
 mod table;
 
 pub use device::PciDevice;

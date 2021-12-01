@@ -109,10 +109,11 @@ impl Process {
 		&mut self,
 		handle: ObjectHandle,
 		base: Option<NonNull<Page>>,
+		offset: u64,
 		rwx: RWX,
 	) -> Result<MemoryObjectHandle, MapError>
 	{
-		let obj = self.objects[handle.0].memory_object().unwrap();
+		let obj = self.objects[handle.0].memory_object(offset).unwrap();
 		self.address_space.map_object(base, obj, rwx, self.hint_color)
 	}
 

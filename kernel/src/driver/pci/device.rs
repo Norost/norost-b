@@ -69,8 +69,30 @@ impl MemoryObject for PciDevice {
 }
 
 impl crate::object_table::Interface for PciDevice {
-	fn memory_object(&self) -> Option<Box<dyn MemoryObject>> {
-		Some(Box::new(PciDevice { device: self.device, bus: self.bus }))
+	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
+		if offset == 0 {
+			return Some(Box::new(PciDevice { device: self.device, bus: self.bus }));
+		}
+
+		let index = usize::try_from(offset - 1).ok()?;
+		let pci = PCI.lock();
+		let pci = pci.as_ref().unwrap();
+		let header = pci.get(self.bus, self.device, 0).unwrap();
+		let bar = header.base_addresses().get(index)?;
+		let (size, orig) = bar.size();
+		bar.set(orig);
+		let size = size?;
+		if !BaseAddress::is_mmio(orig) {
+			return None;
+		}
+		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
+		let addr = BaseAddress::address(orig, upper).unwrap();
+		let frame = PageFrame {
+			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
+			p2size: size.trailing_zeros() as u8 - 12, // log2
+		};
+		let device = PciDevice { bus: self.bus, device: self.device };
+		Some(Box::new(BarRegion { device, frame }))
 	}
 }
 

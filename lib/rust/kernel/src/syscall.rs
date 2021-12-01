@@ -1,13 +1,11 @@
 const ID_SYSLOG: usize = 0;
-const ID_PCI_MAP_ANY: usize = 3;
-const ID_PCI_MAP_BAR: usize = 4;
-const ID_ALLOC_DMA: usize = 5;
-const ID_PHYSICAL_ADDRESS: usize = 6;
-const ID_NEXT_TABLE: usize = 7;
-const ID_QUERY_TABLE: usize = 8;
-const ID_QUERY_NEXT: usize = 9;
-const ID_OPEN_OBJECT: usize = 10;
-const ID_MAP_OBJECT: usize = 11;
+const ID_ALLOC_DMA: usize = 3;
+const ID_PHYSICAL_ADDRESS: usize = 4;
+const ID_NEXT_TABLE: usize = 5;
+const ID_QUERY_TABLE: usize = 6;
+const ID_QUERY_NEXT: usize = 7;
+const ID_OPEN_OBJECT: usize = 8;
+const ID_MAP_OBJECT: usize = 9;
 
 use crate::Page;
 use core::fmt;
@@ -36,6 +34,10 @@ impl Default for TableId {
 		Self(u32::MAX)
 	}
 }
+
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct Handle(usize);
 
 #[repr(C)]
 pub struct TableInfo {
@@ -194,43 +196,6 @@ pub extern "C" fn syslog(s: &[u8]) -> Result {
 }
 
 #[inline]
-pub extern "C" fn pci_map_any(id: u32, address: *const ()) -> Result {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_PCI_MAP_ANY,
-			in("edi") id,
-			in("rsi") address,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
-}
-
-#[inline]
-pub extern "C" fn pci_map_bar(handle: u32, bar: u8, address: *const ()) -> Result {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_PCI_MAP_BAR,
-			in("edi") handle,
-			in("sil") bar,
-			in("rdx") address,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
-}
-
-#[inline]
 pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result {
 	let (status, value): (usize, usize);
 	unsafe {
@@ -323,6 +288,44 @@ pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> core:
 		)
 	}
 	ret(status, value).map(|_| ())
+}
+
+#[inline]
+pub extern "C" fn open_object(table_id: TableId, id: Id) -> core::result::Result<Handle, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_OPEN_OBJECT,
+			in("rdi") table_id.0,
+			in("rsi") id.0,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|v| Handle(v))
+}
+
+#[inline]
+pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> core::result::Result<NonNull<Page>, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_MAP_OBJECT,
+			in("rdi") handle.0,
+			in("rsi") base.map_or_else(core::ptr::null_mut, NonNull::as_ptr),
+			in("rdx") offset,
+			in("r10") length,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
 }
 
 #[repr(C)]
