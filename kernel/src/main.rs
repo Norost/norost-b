@@ -18,6 +18,7 @@ mod log;
 mod arch;
 mod boot;
 mod driver;
+mod ffi;
 mod ipc;
 mod memory;
 mod object_table;

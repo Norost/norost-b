@@ -8,6 +8,7 @@ use crate::ipc::queue::{ClientQueue, NewClientQueueError};
 use crate::memory::frame;
 use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX, MemoryObjectHandle};
 use crate::memory::Page;
+use crate::object_table::{Object, Query};
 use core::ptr::NonNull;
 use alloc::{boxed::Box, vec::Vec};
 
@@ -20,6 +21,8 @@ pub struct Process {
 	thread: Option<super::Thread>,
 	//threads: Vec<NonNull<Thread>>,
 	client_queue: Option<ClientQueue>,
+	objects: Vec<Object>,
+	queries: Vec<Box<dyn Query>>,
 }
 
 impl Process {
@@ -30,6 +33,8 @@ impl Process {
 			hint_color: 0,
 			thread: None,
 			client_queue: None,
+			objects: Default::default(),
+			queries: Default::default(),
 		})
 	}
 
@@ -82,6 +87,12 @@ impl Process {
 		Ok(())
 	}
 
+	/// Add an object to the process' object table.
+	pub fn add_object(&mut self, object: Object) -> Result<ObjectHandle, AddObjectError> {
+		self.objects.push(object);
+		Ok(ObjectHandle(self.objects.len() - 1))
+	}
+
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object(
 		&mut self,
@@ -93,6 +104,18 @@ impl Process {
 		self.address_space.map_object(base, object.into(), rwx, self.hint_color)
 	}
 
+	/// Map a memory object to a memory range.
+	pub fn map_memory_object_2(
+		&mut self,
+		handle: ObjectHandle,
+		base: Option<NonNull<Page>>,
+		rwx: RWX,
+	) -> Result<MemoryObjectHandle, MapError>
+	{
+		let obj = self.objects[handle.0].memory_object().unwrap();
+		self.address_space.map_object(base, obj, rwx, self.hint_color)
+	}
+
 	/// Get a reference to a memory object.
 	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
 		self.address_space.get_object(handle)
@@ -101,6 +124,17 @@ impl Process {
 	/// Map a virtual address to a physical address.
 	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
 		self.address_space.get_physical_address(address)
+	}
+
+	/// Add an object query.
+	pub fn add_query(&mut self, query: Box<dyn Query>) -> QueryHandle {
+		self.queries.push(query);
+		QueryHandle(self.queries.len() - 1)
+	}
+
+	/// Get a mutable reference to a query.
+	pub fn get_query_mut(&mut self, handle: QueryHandle) -> Option<&mut (dyn Query + 'static)> {
+		self.queries.get_mut(handle.0).map(|q| &mut **q)
 	}
 
 	// FIXME wildly unsafe!
@@ -130,3 +164,38 @@ pub enum NewQueueError {
 pub enum PollQueueError {
 	NoQueue,
 }
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct ObjectHandle(usize);
+
+impl From<ObjectHandle> for usize {
+	fn from(h: ObjectHandle) -> Self {
+		h.0
+	}
+}
+
+impl From<usize> for ObjectHandle {
+	fn from(n: usize) -> Self {
+		Self(n)
+	}
+}
+
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct QueryHandle(usize);
+
+impl From<QueryHandle> for usize {
+	fn from(h: QueryHandle) -> Self {
+		h.0
+	}
+}
+
+impl From<usize> for QueryHandle {
+	fn from(n: usize) -> Self {
+		Self(n)
+	}
+}
+
+#[derive(Debug)]
+pub enum AddObjectError {}

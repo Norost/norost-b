@@ -13,6 +13,26 @@ use core::ptr::NonNull;
 extern "C" fn main() {
 	syslog!("Hello, world! from Rust");
 
+	let mut id = None;
+	syslog!("iter tables");
+	while let Some((i, inf)) = syscall::next_table(id) {
+		syslog!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
+		if inf.name() == b"pci" {
+			let tags: [syscall::Slice<u8>; 2] = [
+				b"vendor-id:1af4".into(),
+				b"device-id:1001".into(),
+			];
+			let h = syscall::query_table(i, None, &tags).unwrap();
+			syslog!("{:?}", h);
+			let mut buf = [0; 256];
+			let mut obj = syscall::ObjectInfo::new(&mut buf);
+			while let Ok(()) = syscall::query_next(h, &mut obj) {
+				syslog!("{:#?}", &obj);
+			}
+		}
+		id = Some(i);
+	}
+
 	let pci_config = 0x1000_0000 as *const _;
 
 	let handle = syscall::pci_map_any(0x1af4 << 16 | 0x1001, pci_config)

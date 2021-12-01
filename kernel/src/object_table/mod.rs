@@ -35,6 +35,18 @@ where
 {
 }
 
+pub struct NoneQuery;
+
+impl Query for NoneQuery {}
+
+impl Iterator for NoneQuery {
+	type Item = Object;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		None
+	}
+}
+
 /// A single object.
 pub struct Object {
 	/// The ID of this object.
@@ -89,6 +101,18 @@ impl From<u64> for Id {
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct TableId(u32);
+
+impl From<TableId> for u32 {
+	fn from(i: TableId) -> Self {
+		i.0
+	}
+}
+
+impl From<u32> for TableId {
+	fn from(n: u32) -> TableId {
+		Self(n)
+	}
+}
 
 /// Get a list of all tables with their respective name and ID.
 pub fn tables() -> Vec<(Box<str>, TableId)> {
@@ -151,6 +175,22 @@ pub fn add_table(table: impl Table + 'static) -> TableId {
 		id
 	}
 	add(Box::new(table))
+}
+
+/// Return the name and ID of the table after another table, or the first table if `id` is `None`.
+pub fn next_table(id: Option<TableId>) -> Option<(Box<str>, TableId)> {
+	let tbl = TABLES.lock();
+	let (id, tbl) = match id {
+		None => tbl
+			.iter()
+			.enumerate()
+			.find_map(|(i, t)| t.as_ref().map(|t| (i, t))),
+		Some(id) => tbl
+			.iter()
+			.enumerate()
+			.find_map(|(i, t)| t.as_ref().and_then(|t| (i > id.0 as usize).then(|| (i, t)))),
+	}?;
+	Some((tbl.name().into(), TableId(id as u32)))
 }
 
 #[derive(Debug)]
