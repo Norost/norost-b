@@ -9,6 +9,7 @@ mod tss;
 pub mod r#virtual;
 
 pub use syscall::current_process;
+pub use syscall::set_current_thread;
 
 use core::mem::MaybeUninit;
 
@@ -34,7 +35,7 @@ pub unsafe fn init() {
 	GDT_PTR.assume_init_mut().activate();
 
 	// Setup IDT
-	IDT.set(61, idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int test), 0));
+	IDT.set(61, idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0));
 	IDT.set(
 		8,
 		idt::IDTEntry::new(
@@ -57,10 +58,11 @@ pub unsafe fn init() {
 	syscall::init();
 }
 
-fn test(rip: *const ()) {
+fn handle_timer(rip: *const ()) -> ! {
 	debug!("Timer interrupt!");
 	unsafe {
 		debug!("  RIP:     {:p}", rip);
+		crate::scheduler::next_thread()
 	}
 }
 
@@ -86,6 +88,7 @@ fn handle_general_protection_fault(error: u32, rip: *const ()) {
 }
 
 fn handle_page_fault(error: u32, rip: *const ()) {
+	unsafe { crate::log::force_unlock() };
 	fatal!("Page fault!");
 	unsafe {
 		let addr: *const ();

@@ -18,7 +18,7 @@ pub struct Process {
 	//in_ports: Vec<Option<InPort>>,:
 	//out_ports: Vec<Option<OutPort>>,
 	//named_ports: Box<[ReverseNamedPort]>,
-	thread: Option<super::Thread>,
+	thread: Option<super::round_robin::Guard>,
 	//threads: Vec<NonNull<Thread>>,
 	client_queue: Option<ClientQueue>,
 	objects: Vec<Object>,
@@ -38,10 +38,13 @@ impl Process {
 		})
 	}
 
-	pub fn run(&mut self) -> ! {
+	pub fn activate_address_space(&self) {
 		unsafe { self.address_space.activate() };
-		let s = self as *const _;
-		self.thread.as_mut().unwrap().resume(s)
+	}
+
+	pub fn run(&mut self) -> ! {
+		self.activate_address_space();
+		self.thread.as_mut().unwrap().resume()
 	}
 
 	pub fn init_client_queue(
@@ -57,7 +60,7 @@ impl Process {
 					.map_err(NewQueueError::NewClientQueueError)?;
 				unsafe {
 					self.address_space
-						.map(address, queue.frames(), RWX::R, self.hint_color)
+						.map(address, queue.frames(), RWX::RW, self.hint_color)
 						.map_err(NewQueueError::MapError)?;
 				}
 				self.client_queue = Some(queue);

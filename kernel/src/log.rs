@@ -7,6 +7,10 @@ pub fn init() {
 	*__LOG.lock() = unsafe { Some(UART::new(0x3f8)) };
 }
 
+pub unsafe fn force_unlock() {
+	__LOG.force_unlock();
+}
+
 #[macro_export]
 macro_rules! debug {
 	($($args:tt)*) => {{

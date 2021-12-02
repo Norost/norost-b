@@ -8,7 +8,7 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use alloc::boxed::Box;
 
-static THREAD_LIST: SpinLock<Option<NonNull<Node>>> = SpinLock::new(None);
+static THREAD_LIST: SpinLock<(usize, Option<NonNull<Node>>)> = SpinLock::new((0, None));
 
 struct Node {
 	next: Cell<NonNull<Node>>,
@@ -62,7 +62,7 @@ impl Deref for Guard {
 	}
 }
 
-pub fn insert(thread: Thread) {
+pub fn insert(thread: Thread) -> Guard {
 	let node = Box::new(Node {
 		next: Cell::new(NonNull::new(0x1 as *mut _).unwrap()),
 		thread,
@@ -71,20 +71,27 @@ pub fn insert(thread: Thread) {
 	let mut n = THREAD_LIST.lock();
 	let node = Box::leak(node);
 	let ptr = NonNull::new(node as *mut _).unwrap();
-	if let Some(n) = *n {
+	if let Some(n) = n.1 {
 		let n = unsafe { n.as_ref() };
 		node.next.set(n.next.get());
 		n.next.set(ptr);
 	} else {
 		node.next.set(ptr);
-		*n = Some(ptr);
+		n.1 = Some(ptr);
 	}
+	n.0 += 1;
+
+	unsafe { Guard::new(ptr) }
 }
 
 pub fn next() -> Option<Guard> {
 	let mut l = THREAD_LIST.lock();
-	l.map(|n| unsafe {
-		*l = Some(n.as_ref().next.get());
+	l.1.map(|n| unsafe {
+		l.1 = Some(n.as_ref().next.get());
 		Guard::new(n)
 	})
+}
+
+pub fn count() -> usize {
+	THREAD_LIST.lock().0
 }

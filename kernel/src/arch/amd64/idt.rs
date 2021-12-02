@@ -26,6 +26,7 @@ macro_rules! __idt_wrap_handler {
 			#[naked]
 			unsafe fn f() {
 				asm!("
+					# Save thread state
 					push	rax
 					push	rbx
 					push	rcx
@@ -41,7 +42,9 @@ macro_rules! __idt_wrap_handler {
 					push	r13
 					push	r14
 					push	r15
+					mov		gs:[8], rsp		# Save kernel stack pointer
 
+					# Call handler
 					mov		rdi, [rsp + 15 * 8]		# RIP
 					cld
 					call	{f}
@@ -54,6 +57,7 @@ macro_rules! __idt_wrap_handler {
 					or		rax, rcx
 					mov		DWORD PTR [rax + {eoi}], 0
 
+					# Restore thread state
 					pop		r15
 					pop		r14
 					pop		r13
@@ -71,6 +75,51 @@ macro_rules! __idt_wrap_handler {
 					pop		rax
 
 					iretq
+				", f = sym $fn,
+				msr = const super::msr::IA32_APIC_BASE_MSR,
+				eoi = const 0xb0,
+				virt_ident = const 0xffff_c000_0000_0000u64,
+				options(noreturn));
+			}
+			$crate::arch::amd64::idt::Handler::Int(f)
+		}
+	};
+	(int noreturn $fn:ident) => {
+		{
+			const _: fn(*const ()) -> ! = $fn;
+			#[naked]
+			unsafe fn f() {
+				asm!("
+					# Save thread state
+					push	rax
+					push	rbx
+					push	rcx
+					push	rdx
+					push	rdi
+					push	rsi
+					push	rbp
+					push	r8
+					push	r9
+					push	r10
+					push	r11
+					push	r12
+					push	r13
+					push	r14
+					push	r15
+					mov		gs:[8], rsp		# Save kernel stack pointer
+
+					# Mark EOI
+					mov		ecx, {msr}
+					rdmsr
+					and		eax, 0xfffff000
+					movabs	rcx, {virt_ident}
+					or		rax, rcx
+					mov		DWORD PTR [rax + {eoi}], 0
+
+					# Call handler
+					mov		rdi, [rsp + 15 * 8]		# RIP
+					cld
+					jmp		{f}
 				", f = sym $fn,
 				msr = const super::msr::IA32_APIC_BASE_MSR,
 				eoi = const 0xb0,

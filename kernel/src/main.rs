@@ -58,15 +58,15 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
-	for driver in boot_info.drivers() {
-		let mut process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
-		process.run();
-	}
-	unsafe {
-		let _ = core::ptr::read_volatile(0x0 as *const u8);
-	}
+	let mut processes = alloc::vec::Vec::with_capacity(8);
 
-	power::halt();
+	for driver in boot_info.drivers() {
+		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
+		processes.push(process);
+	}
+	dbg!(scheduler::thread_count());
+
+	processes.leak()[0].run()
 }
 
 #[panic_handler]

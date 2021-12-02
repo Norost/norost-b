@@ -239,16 +239,15 @@ extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, 
 	dbg!(time);
 	use crate::driver::apic::local_apic;
 
-	unsafe { asm!("sti") };
-
 	let a = local_apic::get();
 	a.spurious_interrupt_vector.set((a.spurious_interrupt_vector.get() | 0x100));
 	a.divide_configuration_register.set(3);
 	// one-shot | non-mask | idle | vector
 	a.lvt_timer.set(0 << 17 | 0 << 16 | 0 << 12 | 61);
-	a.initial_count.set(time.try_into().unwrap_or(u32::MAX));
+	//a.initial_count.set(time.try_into().unwrap_or(u32::MAX));
+	a.initial_count.set(0);
 
-	unsafe { asm!("hlt") };
+	unsafe { asm!("int 61") }; // Articifical timer interrupt.
 
 	Return {
 		status: 0,

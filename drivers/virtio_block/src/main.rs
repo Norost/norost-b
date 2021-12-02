@@ -107,7 +107,8 @@ extern "C" fn main() {
 	syslog!("done writing the stuff");
 
 	loop {
-		syscall::sleep(Duration::from_secs(1));
+		syscall::sleep(Duration::MAX);
+		syslog!("Hello from virtio driver!");
 	}
 }
 
