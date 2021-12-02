@@ -1,10 +1,14 @@
 .intel_syntax noprefix
 
+.equ	SYS_SLEEP, 10
+
 .globl _start
 
 .section .text
 
 _start:
+
+	jmp		3f
 
 	lea		rsp, [rip + stack_end]
 	
@@ -15,18 +19,28 @@ _start:
 	mov		edx, 1337
 	call	submit_client_queue_entry
 
-.l0:
+2:
 	xor		eax, eax				# syslog
 	lea		rdi, [hello]			# address of string
 	mov		rsi, hello_end - hello	# length of string
 	syscall
 
-	mov		ecx, 2000 * 1000 * 1000 # idle for 2G cycles
-.l1:
-	loop	.l1
-
 	call	push_client_queue
-	jmp		.l0
+
+3:
+
+	xor		eax, eax				# syslog
+	lea		rdi, [hello]			# address of string
+	mov		rsi, hello_end - hello	# length of string
+	syscall
+
+4:
+	# Sleep forever
+	mov		eax, SYS_SLEEP
+	mov		rdi, -1
+	syscall
+
+	jmp		3b
 
 
 new_client_queue:

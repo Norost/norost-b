@@ -1,6 +1,8 @@
 use super::msr;
 use crate::scheduler::process::Process;
+use crate::scheduler::Thread;
 use crate::scheduler::syscall;
+use core::ptr::NonNull;
 
 pub unsafe fn init() {
 	// Enable syscall/sysenter
@@ -17,23 +19,11 @@ pub unsafe fn init() {
 	// Set LSTAR to handler
 	//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 	msr::wrmsr(msr::LSTAR, handler as u64);
-
-	// Set GS.Base to a local CPU structure
-	msr::wrmsr(msr::GS_BASE, &mut CPU_LOCAL_DATA as *mut _ as u64);
 }
 
-#[repr(C)]
-struct CpuLocalData {
-	user_stack: usize,
-	kernel_stack: *mut usize,
-	current_process: *mut Process,
+pub unsafe fn set_current_thread(thread: NonNull<Thread>) {
+	msr::wrmsr(msr::GS_BASE, thread.as_ptr() as u64);
 }
-
-static mut CPU_LOCAL_DATA: CpuLocalData = CpuLocalData {
-	user_stack: 0,
-	kernel_stack: core::ptr::null_mut(),
-	current_process: core::ptr::null_mut(),
-};
 
 #[naked]
 unsafe extern "C" fn handler() {
@@ -86,8 +76,17 @@ unsafe extern "C" fn handler() {
 		pop		r13
 		pop		r14
 		pop		r15
+
+		# Save kernel stack in case it got overwritten
+		mov		gs:[8], rsp
+
+		# Restore user stack pointer
 		mov		rsp, gs:[0]
+
+		# Swap to user GS for TLS
 		swapgs
+
+		# Go back to user mode
 		rex64 sysret
 
 		# Set error code and return

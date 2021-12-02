@@ -6,12 +6,14 @@ const ID_QUERY_TABLE: usize = 6;
 const ID_QUERY_NEXT: usize = 7;
 const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
+const ID_SLEEP: usize = 10;
 
 use crate::Page;
 use core::fmt;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use core::time::Duration;
 
 type Result = core::result::Result<usize, (NonZeroUsize, usize)>;
 
@@ -326,6 +328,25 @@ pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset
 		)
 	}
 	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
+}
+
+
+#[inline]
+pub extern "C" fn sleep(duration: Duration) -> core::result::Result<(), (NonZeroUsize, usize)> {
+	let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_SLEEP,
+			in("rdi") micros,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|_| ())
 }
 
 #[repr(C)]

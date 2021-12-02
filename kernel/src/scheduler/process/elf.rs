@@ -5,6 +5,8 @@ use crate::memory::Page;
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ops::Range;
+use core::ptr::NonNull;
+use alloc::boxed::Box;
 
 #[repr(C)]
 struct FileHeader {
@@ -68,7 +70,7 @@ const FLAG_WRITE: u32 = 0x2;
 const FLAG_READ: u32 = 0x4;
 
 impl super::Process {
-	pub fn from_elf(data: &[u8]) -> Result<Self, ElfError> {
+	pub fn from_elf(data: &[u8]) -> Result<Box<Self>, ElfError> {
 		let mut slf = Self::new()?;
 
 		(data.len() >= 16)
@@ -185,7 +187,11 @@ impl super::Process {
 			}
 		}
 
-		slf.thread = Some(super::super::Thread::new(header.entry.try_into().unwrap())?);
+		let mut slf = Box::new(slf);
+
+		let thr = super::super::Thread::new(header.entry.try_into().unwrap(), NonNull::from(&*slf))?;
+		let thr = super::super::round_robin::insert(thr);
+		slf.thread = Some(thr);
 
 		Ok(slf)
 	}

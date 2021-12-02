@@ -2,13 +2,14 @@ pub mod asm;
 mod gdt;
 #[macro_use]
 mod idt;
-mod msr;
+pub mod msr;
 mod multiboot;
 mod syscall;
 mod tss;
 pub mod r#virtual;
 
 pub use syscall::current_process;
+pub use syscall::set_current_thread;
 
 use core::mem::MaybeUninit;
 
@@ -34,21 +35,22 @@ pub unsafe fn init() {
 	GDT_PTR.assume_init_mut().activate();
 
 	// Setup IDT
+	IDT.set(61, idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0));
 	IDT.set(
 		8,
 		idt::IDTEntry::new(
 			1 * 8,
-			|| {
-				fatal!("Double fault!");
-				halt();
-			},
-			true,
+			__idt_wrap_handler!(trap handle_double_fault),
 			0,
 		),
 	);
 	IDT.set(
+		13,
+		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_general_protection_fault), 0),
+	);
+	IDT.set(
 		14,
-		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(handle_page_fault), true, 0),
+		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
 	);
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
@@ -56,7 +58,37 @@ pub unsafe fn init() {
 	syscall::init();
 }
 
+fn handle_timer(rip: *const ()) -> ! {
+	debug!("Timer interrupt!");
+	unsafe {
+		debug!("  RIP:     {:p}", rip);
+		crate::scheduler::next_thread()
+	}
+}
+
+fn handle_double_fault(error: u32, rip: *const ()) {
+	fatal!("Double fault!");
+	unsafe {
+		let addr: *const ();
+		asm!("mov {}, cr2", out(reg) addr);
+		fatal!("  error:   {:#x}", error);
+		fatal!("  RIP:     {:p}", rip);
+		fatal!("  address: {:p}", addr);
+	}
+	halt();
+}
+
+fn handle_general_protection_fault(error: u32, rip: *const ()) {
+	fatal!("General protection fault!");
+	unsafe {
+		fatal!("  error:   {:#x}", error);
+		fatal!("  RIP:     {:p}", rip);
+	}
+	halt();
+}
+
 fn handle_page_fault(error: u32, rip: *const ()) {
+	unsafe { crate::log::force_unlock() };
 	fatal!("Page fault!");
 	unsafe {
 		let addr: *const ();

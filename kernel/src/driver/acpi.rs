@@ -30,6 +30,8 @@ pub unsafe fn init(boot: &boot::Info) {
 		dbg!(sig);
 	}
 
+	super::apic::init_acpi(&acpi);
+
 	#[cfg(feature = "driver-pci")]
 	super::pci::init_acpi(&acpi);
 }

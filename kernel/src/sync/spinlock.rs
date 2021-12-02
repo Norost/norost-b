@@ -32,6 +32,10 @@ impl<T> SpinLock<T> {
 			}
 		}
 	}
+
+	pub unsafe fn force_unlock(&self) {
+		self.lock.store(0, Ordering::Relaxed)
+	}
 }
 
 unsafe impl<T> Sync for SpinLock<T> {}
