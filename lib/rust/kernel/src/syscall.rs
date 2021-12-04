@@ -7,6 +7,7 @@ const ID_QUERY_NEXT: usize = 7;
 const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
 const ID_SLEEP: usize = 10;
+const ID_CREATE_TABLE: usize = 13;
 
 use crate::Page;
 use core::fmt;
@@ -19,7 +20,7 @@ type Result = core::result::Result<usize, (NonZeroUsize, usize)>;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
-pub struct Id(u64);
+pub struct Id(pub(crate) u64);
 
 impl Default for Id {
 	fn default() -> Self {
@@ -177,6 +178,14 @@ impl fmt::Debug for ByteStr<'_> {
 		}
 	}
 }
+
+pub enum TableType {
+	Streaming,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct TableHandle(usize);
 
 #[optimize(size)]
 #[inline]
@@ -347,6 +356,29 @@ pub extern "C" fn sleep(duration: Duration) -> core::result::Result<(), (NonZero
 		)
 	}
 	ret(status, value).map(|_| ())
+}
+
+#[inline]
+pub fn create_table(name: &str, ty: TableType) -> core::result::Result<Handle, (NonZeroUsize, usize)> {
+	let ty = match ty {
+		TableType::Streaming => 0,
+	};
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_CREATE_TABLE,
+			in("rdi") name.as_ptr(),
+			in("rsi") name.len(),
+			in("rdx") ty,
+			in("rcx") core::ptr::null::<()>(),
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(Handle)
 }
 
 #[repr(C)]

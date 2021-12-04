@@ -5,10 +5,14 @@
 //! Objects can be searched/filtered by a combination of name and/or tags. Individual objects are
 //! addressed by unique integer IDs.
 
+mod streaming;
+
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
 use alloc::{boxed::Box, vec::Vec};
 use core::ops::{Deref, DerefMut};
+
+pub use streaming::StreamingTable;
 
 /// The global list of all tables.
 static TABLES: SpinLock<Vec<Option<Box<dyn Table>>>> = SpinLock::new(Vec::new());
@@ -77,7 +81,17 @@ impl DerefMut for Object {
 pub trait Interface {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
-	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>>;
+	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
+		None
+	}
+
+	fn read(&self, _: u64, data: &mut [u8]) -> Result<usize, ()> {
+		Err(())
+	}
+
+	fn write(&self, _: u64, data: &[u8]) -> Result<usize, ()> {
+		Err(())
+	}
 }
 
 /// The unique identifier of an object.

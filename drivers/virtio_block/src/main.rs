@@ -106,9 +106,73 @@ extern "C" fn main() {
 	dev.write(&sectors, 0, || ()).unwrap();
 	syslog!("done writing the stuff");
 
+	let (mut rd, mut wr) = (
+		core::cell::UnsafeCell::new(P([0; 4096 / 8])),
+		core::cell::UnsafeCell::new(P([0; 4096 / 8])),
+	);
+
+	// Register new table of Streaming type
+	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
+	
+	// Map the interface for the table
+	let cmds = NonNull::new(0x6666_0000 as *mut _);
+	let cmds = syscall::map_object(tbl, cmds, 0, 4096).unwrap();
+	let cmds = unsafe {
+		cmds.cast::<kernel::object_table::streaming::CommandQueue>().as_ref()
+	};
+	
+	// Register a new object
+
+	let mut wr_i = 0;
+
+	let mut i = 0;
+	let mut last_cmd = None;
 	loop {
+		// Wait for events from the table
 		syscall::sleep(Duration::MAX);
-		syslog!("Hello from virtio driver!");
+
+		// Log events
+		syslog!("{:p}", cmds);
+		syslog!("{:#x?}", syscall::physical_address(NonNull::from(cmds).cast()));
+		while let Some(cmd) = cmds.pop_command() {
+			use kernel::object_table::streaming::{Command, Response};
+			let rsp = match cmd {
+				Command::Open { .. } => {
+					syslog!("[stream-table] {:?}", "open");
+					Response::open(
+						&cmd,
+						NonNull::new(wr.get()).unwrap().cast(),
+						12,
+						NonNull::new(rd.get()).unwrap().cast(),
+						12,
+					)
+				}
+				Command::Write { count, .. } => {
+					syslog!("[stream-table] {:?}", count);
+
+					let wr: &[u8] = unsafe {
+						core::slice::from_raw_parts(wr.get().cast(), 4096)
+					};
+					syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
+					syslog!("wr_i {}", wr_i % wr.len());
+					for i in wr_i .. wr_i + count {
+						syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
+					}
+
+					wr_i += count;
+					Response::write(
+						&cmd,
+						count,
+					)
+				}
+				_ => todo!(),
+			}.unwrap();
+			last_cmd = Some(cmd);
+			i += 1;
+			cmds.push_response(rsp);
+		}
+
+		// Mark events as handled
 	}
 }
 

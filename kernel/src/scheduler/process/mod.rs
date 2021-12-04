@@ -120,6 +120,11 @@ impl Process {
 		self.address_space.map_object(base, obj, rwx, self.hint_color)
 	}
 
+	/// Get a reference to an object.
+	pub fn get_object(&mut self, handle: ObjectHandle) -> Option<&Object> {
+		self.objects.get(handle.0)
+	}
+
 	/// Get a reference to a memory object.
 	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
 		self.address_space.get_object(handle)

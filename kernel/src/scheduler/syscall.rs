@@ -18,7 +18,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 11;
+pub const SYSCALLS_LEN: usize = 14;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -32,6 +32,9 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	open_object,
 	map_object,
 	sleep,
+	read_object,
+	write_object,
+	create_table,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -202,11 +205,7 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 		4 | 8 | 16 => u32::try_from(table_id).unwrap(),
 		s => unreachable!("unsupported usize size of {}", s),
 	}.into();
-	let id = match mem::size_of_val(&id_l) {
-		4 => u64::try_from(id_h).unwrap() << 32 | u64::try_from(id_l).unwrap(),
-		8 | 16 => id_l.try_into().unwrap(),
-		s => unreachable!("unsupported usize size of {}", s),
-	}.into();
+	let id = Id::from(merge_u64(id_l, id_h));
 	let obj = object_table::get(table_id, id).unwrap();
 	let handle = Process::current().add_object(obj.unwrap());
 	Return {
@@ -230,12 +229,67 @@ extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_o
 	}
 }
 
-extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	let time = match mem::size_of_val(&time_l) {
-		4 => (time_h as u64) << 32 | time_l as u64,
-		8 | 16 => time_l as u64,
-		s => unreachable!("unsupported usize size of {}", s),
+extern "C" fn read_object(handle: usize, base: usize, length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
+	let handle = ObjectHandle::from(handle);
+	let offset = merge_u64(offset_l, offset_h);
+	let base = NonNull::new(base as *mut u8).unwrap();
+	todo!()
+}
+
+extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
+	dbg!(handle, base, length, offset_l);
+	let handle = ObjectHandle::from(handle);
+	let offset = merge_u64(offset_l, offset_h);
+	let base = NonNull::new(base as *mut u8).unwrap();
+	let data = unsafe { core::slice::from_raw_parts(base.as_ptr(), length) };
+
+	let written = Process::current().get_object(handle).unwrap().write(offset, data).unwrap();
+
+	Return {
+		status: 0,
+		value: dbg!(written),
+	}
+}
+
+extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: usize, _: usize, _: usize) -> Return {
+	let name = NonNull::new(name as *mut u8).unwrap();
+	assert!(name_len <= 255, "name too long");
+	let name = unsafe { core::slice::from_raw_parts(name.as_ptr(), name_len) };
+	let name = core::str::from_utf8(name).unwrap();
+	dbg!(name, ty);
+
+	let name = name.into();
+	let tbl = match ty {
+		0 => {
+			let (tbl, intf) = object_table::StreamingTable::new(name, NonNull::from(Process::current()));
+			object_table::add_table(tbl);
+			intf
+		}
+		_ => todo!(),
 	};
+
+	let tbl = crate::object_table::Object {
+		id: Id::from(0),
+		name: "".into(),
+		tags: [].into(),
+		interface: tbl,
+	};
+	let handle = Process::current().add_object(tbl).unwrap();
+
+	Return {
+		status: 0,
+		value: handle.into(),
+	}
+}
+
+#[repr(transparent)]
+struct SleepOptions(usize);
+
+impl SleepOptions {
+}
+
+extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	let time = merge_u64(time_l, time_h);
 	dbg!(time);
 	use crate::driver::apic::local_apic;
 
@@ -260,5 +314,13 @@ extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usi
 	Return {
 		status: usize::MAX,
 		value: 0,
+	}
+}
+
+fn merge_u64(l: usize, h: usize) -> u64 {
+	match mem::size_of_val(&l) {
+		4 => (h as u64) << 32 | l as u64,
+		8 | 16 => l as u64,
+		s => unreachable!("unsupported usize size of {}", s),
 	}
 }

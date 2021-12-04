@@ -7,6 +7,8 @@
 #[macro_use]
 pub mod syscall;
 
+pub mod object_table;
+
 #[repr(align(4096))]
 #[repr(C)]
 pub struct Page([u128; 256]);
