@@ -1,5 +1,8 @@
 pub mod local_apic;
+pub mod io_apic;
+mod reg;
 
+use reg::*;
 use crate::arch::amd64::msr;
 use crate::memory::Page;
 use acpi::{AcpiHandler, AcpiTables};
@@ -10,10 +13,10 @@ where
 {
 	disable_pic();
 	local_apic::init();
-	dbg!(local_apic::get());
-	dbg!(local_apic::get() as *const _);
+	io_apic::init();
 	let info = acpi.platform_info().unwrap();
-	dbg!(info.interrupt_model);
+
+	io_apic::set_irq(8, 0, 40);
 }
 
 fn disable_pic() {
@@ -21,8 +24,8 @@ fn disable_pic() {
 		let b: u8;
 		asm!("
 			mov {0}, 0xff
-			out 0xa1, {0}
 			out 0x21, {0}
+			out 0xa1, {0}
 		", out(reg_byte) b)
 	}
 }

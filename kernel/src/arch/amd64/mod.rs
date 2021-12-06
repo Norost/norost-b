@@ -8,6 +8,7 @@ mod syscall;
 mod tss;
 pub mod r#virtual;
 
+pub use idt::{Handler, IDTEntry};
 pub use syscall::current_process;
 pub use syscall::set_current_thread;
 
@@ -52,6 +53,7 @@ pub unsafe fn init() {
 		14,
 		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
 	);
+
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
 
@@ -62,7 +64,11 @@ fn handle_timer(rip: *const ()) -> ! {
 	debug!("Timer interrupt!");
 	unsafe {
 		debug!("  RIP:     {:p}", rip);
-		crate::scheduler::next_thread()
+		loop {
+			if let Err(t) = crate::scheduler::next_thread() {
+				todo!("sleep until");
+			}
+		}
 	}
 }
 
@@ -104,4 +110,11 @@ pub fn halt() -> ! {
 	loop {
 		unsafe { asm!("hlt") };
 	}
+}
+
+pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
+	IDT.set(
+		irq,
+		entry,
+	);
 }

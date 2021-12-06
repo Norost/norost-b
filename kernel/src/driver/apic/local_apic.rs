@@ -1,3 +1,4 @@
+use super::{RegR, RegW, RegRW};
 use crate::memory::r#virtual::{AddressSpace, phys_to_virt};
 use crate::memory::frame::PPN;
 use core::cell::UnsafeCell;
@@ -100,46 +101,6 @@ impl fmt::Debug for LocalApic {
 		hex(&mut f, "divide_configuration_register",  self.divide_configuration_register.get());
 
 		f.finish()
-	}
-}
-
-#[repr(C)]
-pub struct RegR {
-	value: UnsafeCell<u32>,
-	_dont_touch: [UnsafeCell<u32>; 3],
-}
-
-impl RegR {
-	pub fn get(&self) -> u32 {
-		unsafe { core::ptr::read_volatile(self.value.get()) }
-	}
-}
-
-#[repr(C)]
-pub struct RegW {
-	value: UnsafeCell<u32>,
-	_dont_touch: [UnsafeCell<u32>; 3],
-}
-
-impl RegW {
-	pub fn set(&self, value: u32) {
-		unsafe { core::ptr::write_volatile(self.value.get(), value) }
-	}
-}
-
-#[repr(C)]
-pub struct RegRW {
-	value: UnsafeCell<u32>,
-	_dont_touch: [UnsafeCell<u32>; 3],
-}
-
-impl RegRW {
-	pub fn get(&self) -> u32 {
-		unsafe { core::ptr::read_volatile(self.value.get()) }
-	}
-
-	pub fn set(&self, value: u32) {
-		unsafe { core::ptr::write_volatile(self.value.get(), value) }
 	}
 }
 

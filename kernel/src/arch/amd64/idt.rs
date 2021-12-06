@@ -6,7 +6,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(u32, *const ()) = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					pop		rdi		# Error code
 					pop		rsi		# RIP
@@ -24,7 +24,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(*const ()) = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					# Save thread state
 					push	rax
@@ -88,7 +88,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(*const ()) -> ! = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					# Save thread state
 					push	rax
@@ -132,8 +132,8 @@ macro_rules! __idt_wrap_handler {
 }
 
 pub enum Handler {
-	Int(unsafe fn()),
-	Trap(unsafe fn()),
+	Int(unsafe extern "C" fn()),
+	Trap(unsafe extern "C" fn()),
 }
 
 #[repr(C)]

@@ -10,7 +10,7 @@ use alloc::boxed::Box;
 
 static THREAD_LIST: SpinLock<(usize, Option<NonNull<Node>>)> = SpinLock::new((0, None));
 
-struct Node {
+pub struct Node {
 	next: Cell<NonNull<Node>>,
 	thread: Thread,
 	ref_counter: AtomicUsize,
@@ -35,6 +35,10 @@ impl Guard {
 	unsafe fn new(node: NonNull<Node>) -> Self {
 		node.as_ref().ref_counter.fetch_add(1, Ordering::Relaxed);
 		Self { node }
+	}
+
+	pub fn as_non_null_ptr(&self) -> NonNull<Node> {
+		self.node
 	}
 }
 

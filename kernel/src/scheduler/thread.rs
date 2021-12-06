@@ -1,5 +1,6 @@
 use super::process::Process;
 use crate::memory::frame;
+use crate::time::Monotonic;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
@@ -92,5 +93,9 @@ impl Thread {
 			options(noreturn)
 			);
 		}
+	}
+
+	pub fn sleep_until(&self) -> Monotonic {
+		Monotonic::ZERO
 	}
 }

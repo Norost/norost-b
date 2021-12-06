@@ -5,6 +5,7 @@
 #![feature(const_trait_impl)]
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(never_type)]
 #![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
 #![feature(trait_upcasting)]
@@ -26,6 +27,7 @@ mod object_table;
 mod power;
 mod scheduler;
 mod sync;
+mod time;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
@@ -59,6 +61,13 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
 	let mut processes = alloc::vec::Vec::with_capacity(8);
+
+	let a = driver::apic::local_apic::get();
+	a.spurious_interrupt_vector.set((a.spurious_interrupt_vector.get() | 0x100));
+	loop {
+		unsafe { asm!("sti; hlt") };
+		dbg!(time::Monotonic::now());
+	}
 
 	for driver in boot_info.drivers() {
 		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
