@@ -5,7 +5,12 @@ mod reg;
 use reg::*;
 use crate::arch::amd64::msr;
 use crate::memory::Page;
+use crate::time::Monotonic;
+use core::time::Duration;
 use acpi::{AcpiHandler, AcpiTables};
+
+// No atomic is necessary as the value is read only once anyways.
+static mut TICKS_PER_SECOND: u32 = 0;
 
 pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>)
 where
@@ -16,17 +21,76 @@ where
 	io_apic::init();
 	let info = acpi.platform_info().unwrap();
 
-	io_apic::set_irq(8, 0, 40);
+	//io_apic::set_irq(8, 0, 40);
+}
+
+pub fn post_init() {
+	calibrate_timer(Duration::from_millis(10));
+}
+
+/// Set the timer in one-shot mode for the given duration in the future.
+///
+/// Smaller durations are more precise. The timer may end early if the duration
+/// is too large.
+pub fn set_timer_oneshot(t: Duration) {
+	let mut ticks = t.as_nanos()
+		.saturating_mul(unsafe { TICKS_PER_SECOND }.into())
+		.saturating_div(1_000_000_000);
+	// Scale down the resolution until the ticks fit
+	let mut shift = 0;
+	let ticks = loop {
+		if let Ok(ticks) = ticks.try_into() {
+			break ticks;
+		}
+		ticks >>= 1;
+		shift += 1;
+	};
+	// Translate shift to something we can put in the divide configuration reigster
+	let (shift, ticks) = match shift {
+		0 => (0b1011, ticks),
+		1 => (0b0000, ticks),
+		2 => (0b1000, ticks),
+		3 => (0b0010, ticks),
+		4 => (0b1010, ticks),
+		5 => (0b0001, ticks),
+		6 => (0b1001, ticks),
+		7 => (0b0011, ticks),
+		_ => (0b0011, u32::MAX), // Default to highest
+	};
+	local_apic::get().divide_configuration.set(shift);
+	local_apic::get().initial_count.set(ticks);
+}
+
+/// Loop for the given duration and count the amount of passed ACPI timer cycles to
+/// calibrate the timer.
+fn calibrate_timer(t: Duration) {
+	let end = Monotonic::now().saturating_add(t);
+	let lapic = local_apic::get();
+	lapic.divide_configuration.set(0b1011); // Set divisor to 1
+	lapic.initial_count.set(u32::MAX);
+	while Monotonic::now() < end {
+		/* pass */
+	}
+	let ticks = u32::MAX - lapic.current_count.get();
+	lapic.initial_count.set(0);
+	unsafe {
+		TICKS_PER_SECOND = u128::from(ticks)
+			.checked_mul(1_000_000_000)
+			.expect("multiplication overflow")
+			.checked_div(t.as_nanos())
+			.expect("division overflow")
+			.try_into()
+			.expect("too many ticks per second");
+	}
 }
 
 fn disable_pic() {
 	unsafe {
-		let b: u8;
 		asm!("
-			mov {0}, 0xff
-			out 0x21, {0}
-			out 0xa1, {0}
-		", out(reg_byte) b)
+			mov al, 0xff
+			out 0x21, al
+			out 0xa1, al
+		", out("al") _)
 	}
 }
 

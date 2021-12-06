@@ -24,4 +24,6 @@ pub unsafe fn init(boot: &boot::Info) {
 	pic::init();
 
 	rtc::init();
+
+	apic::post_init();
 }

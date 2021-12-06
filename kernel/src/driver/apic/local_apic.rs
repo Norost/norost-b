@@ -40,7 +40,7 @@ pub struct LocalApic {
 	pub initial_count: RegRW,
 	pub current_count: RegR,
 	_reserved_3a_3d: [RegR; 0x3d - 0x3a + 1],
-	pub divide_configuration_register: RegRW,
+	pub divide_configuration: RegRW,
 }
 
 impl LocalApic {
@@ -98,7 +98,7 @@ impl fmt::Debug for LocalApic {
 		hex(&mut f, "lvt_error",  self.lvt_error.get());
 		hex(&mut f, "initial_count",  self.initial_count.get());
 		hex(&mut f, "current_count",  self.current_count.get());
-		hex(&mut f, "divide_configuration_register",  self.divide_configuration_register.get());
+		hex(&mut f, "divide_configuration",  self.divide_configuration.get());
 
 		f.finish()
 	}

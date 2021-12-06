@@ -85,7 +85,8 @@ where
 	assert!(h.main_counter_is_64bits());
 	unsafe {
 		ADDRESS = add_identity_mapping(h.base_address.try_into().unwrap(), 4096).unwrap().cast().as_ptr();
-		MULTIPLIER = 1_000_000_000 / u128::from(hpet().capabilities_id().period());
+		// Period is in femtoseconds.
+		MULTIPLIER = u128::from(hpet().capabilities_id().period()) / 1_000_000;
 	}
 	dbg!(format_args!("{:#x}", h.base_address));
 	dbg!(format_args!("{:p}", &hpet().configuration));
