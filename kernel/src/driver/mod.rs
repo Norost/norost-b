@@ -1,5 +1,7 @@
 mod acpi;
 pub mod apic;
+#[cfg(feature = "driver-hpet")]
+pub mod hpet;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
 pub mod uart;

@@ -9,10 +9,11 @@ const RTC_IRQ: usize = 32 + 8;
 const RTC_RATE: u8 = 15;
 
 impl Monotonic {
+	#[cfg(not(feature = "driver-hpet"))]
 	pub fn now() -> Self {
 		// Frequency (Hz) is `32768 >> (rate - 1)`, default rate is 6
 		let freq = 1 << (16 - RTC_RATE);
-		Self::from_nanoseconds((RTC_TICKS.load(Ordering::Relaxed) / freq).into())
+		Self::from_seconds((RTC_TICKS.load(Ordering::Relaxed) / freq).into())
 	}
 }
 

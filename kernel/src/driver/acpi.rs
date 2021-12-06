@@ -34,4 +34,7 @@ pub unsafe fn init(boot: &boot::Info) {
 
 	#[cfg(feature = "driver-pci")]
 	super::pci::init_acpi(&acpi);
+
+	#[cfg(feature = "driver-hpet")]
+	super::hpet::init_acpi(&acpi);
 }

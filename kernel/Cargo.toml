@@ -11,7 +11,9 @@ rsdp = "*"
 pci = { path = "../lib/rust/pci" }
 
 [features]
-default = ["mem-max-16t", "driver-pci"]
+default = ["mem-max-16t", "driver-pci", "driver-hpet"]
 mem-max-16t = []
 mem-max-256m = []
 driver-pci = []
+driver-hpet = []
+driver-pic = []

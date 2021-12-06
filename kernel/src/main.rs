@@ -67,6 +67,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	loop {
 		unsafe { asm!("sti; hlt") };
 		dbg!(time::Monotonic::now());
+		dbg!(driver::hpet::hpet().counter.get());
 	}
 
 	for driver in boot_info.drivers() {
