@@ -42,6 +42,11 @@ _start:
 	mov		rdi, 1			# table
 	mov		rsi, 0			# object
 	syscall
+
+4:  mov		rdi, -1
+	call	sleep
+	jmp		4b
+
 	test	eax, eax
 	jnz		panic
 	mov		r15, rdx
@@ -58,6 +63,7 @@ _start:
 	jnz		panic
 
 	# Sleep forever
+4:
 	mov		rdi, -1
 	call	sleep
 

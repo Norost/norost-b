@@ -25,6 +25,10 @@ where
 }
 
 pub fn post_init() {
+	// Set interrupt vector
+	let t = local_apic::get().lvt_timer.get();
+	local_apic::get().lvt_timer.set(t & !0xff | 61);
+
 	calibrate_timer(Duration::from_millis(10));
 }
 
@@ -32,7 +36,7 @@ pub fn post_init() {
 ///
 /// Smaller durations are more precise. The timer may end early if the duration
 /// is too large.
-pub fn set_timer_oneshot(t: Duration) {
+pub fn set_timer_oneshot(t: Duration, irq: Option<u8>) {
 	let mut ticks = t.as_nanos()
 		.saturating_mul(unsafe { TICKS_PER_SECOND }.into())
 		.saturating_div(1_000_000_000);
@@ -57,6 +61,12 @@ pub fn set_timer_oneshot(t: Duration) {
 		7 => (0b0011, ticks),
 		_ => (0b0011, u32::MAX), // Default to highest
 	};
+
+	if let Some(irq) = irq {
+		let t = local_apic::get().lvt_timer.get();
+		local_apic::get().lvt_timer.set(t & !(1 << 16 | 0xff) | u32::from(irq));
+	}
+
 	local_apic::get().divide_configuration.set(shift);
 	local_apic::get().initial_count.set(ticks);
 }

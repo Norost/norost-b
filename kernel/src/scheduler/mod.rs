@@ -22,14 +22,17 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 	let mut thr = round_robin::next().unwrap();
 	let first = thr.as_non_null_ptr();
 	let now = Monotonic::now();
+	let mut t = Monotonic::MAX;
 	dbg!(now);
 	loop {
+		dbg!(thr.sleep_until());
 		if thr.sleep_until() <= now {
 			thr.resume();
 		}
+		t = t.min(thr.sleep_until());
 		thr = round_robin::next().unwrap();
 		if thr.as_non_null_ptr() == first {
-			return Err(now);
+			return Err(t);
 		}
 	}
 }

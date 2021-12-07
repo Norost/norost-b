@@ -129,6 +129,7 @@ extern "C" fn main() {
 	let mut last_cmd = None;
 	loop {
 		// Wait for events from the table
+		syslog!("ermaghed");
 		syscall::sleep(Duration::MAX);
 
 		// Log events

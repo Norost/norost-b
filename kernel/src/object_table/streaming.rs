@@ -1,10 +1,11 @@
 use super::*;
 use crate::memory::frame::{self, PageFrame, PPN};
-use crate::scheduler::process::Process;
+use crate::scheduler::{Thread, process::Process};
 use core::cell::{Cell, UnsafeCell};
 use alloc::boxed::Box;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU16, Ordering};
+use core::time::Duration;
 
 pub struct StreamingTable {
 	name: Box<str>,
@@ -47,7 +48,7 @@ impl Table for StreamingTable {
 			if let Some(rsp) = cmds.pop_response() {
 				break rsp;
 			}
-			unsafe { asm!("int 61") }; // Fake timer interrupt.
+			Thread::sleep(Duration::MAX);
 			dbg!();
 		};
 		let body = unsafe { rsp.body.open };
@@ -291,8 +292,7 @@ impl Interface for StreamObject {
 			if let Some(rsp) = cmd.pop_response() {
 				break rsp;
 			}
-			unsafe { asm!("int 61") }; // Fake timer interrupt.
-			dbg!();
+			Thread::sleep(Duration::MAX);
 		};
 		let body = unsafe { rsp.body.write };
 		assert_eq!(rsp.cmd_id, 14);

@@ -6,6 +6,7 @@
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
+#![feature(new_uninit)]
 #![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
 #![feature(trait_upcasting)]
@@ -62,18 +63,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	let mut processes = alloc::vec::Vec::with_capacity(8);
 
-	let a = driver::apic::local_apic::get();
-	a.spurious_interrupt_vector.set((a.spurious_interrupt_vector.get() | 0x100));
-	// one-shot | non-mask | idle | vector
-	a.lvt_timer.set(0 << 17 | 0 << 16 | 0 << 12 | 40);
-	driver::apic::set_timer_oneshot(core::time::Duration::from_secs(1));
-	loop {
-		dbg!(time::Monotonic::now());
-		dbg!(driver::hpet::hpet().counter.get());
-		unsafe { asm!("sti; hlt") };
-		driver::apic::set_timer_oneshot(core::time::Duration::from_secs(1));
-	}
-
 	for driver in boot_info.drivers() {
 		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
 		processes.push(process);
@@ -87,5 +76,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 fn panic(info: &PanicInfo) -> ! {
 	fatal!("Panic!");
 	fatal!("  {:?}", info);
-	power::halt();
+	loop {
+		power::halt();
+	}
 }

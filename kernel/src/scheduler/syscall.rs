@@ -4,9 +4,11 @@ use crate::memory::{frame, Page, r#virtual::RWX};
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame};
 use crate::scheduler::process::ObjectHandle;
 use crate::ffi;
+use crate::time::Monotonic;
 use core::marker::PhantomData;
 use core::mem;
 use core::ptr::NonNull;
+use core::time::Duration;
 use alloc::{boxed::Box, vec::Vec};
 
 #[derive(Clone, Copy)]
@@ -206,7 +208,9 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 		s => unreachable!("unsupported usize size of {}", s),
 	}.into();
 	let id = Id::from(merge_u64(id_l, id_h));
+	dbg!(id_l);
 	let obj = object_table::get(table_id, id).unwrap();
+	assert_ne!(dbg!(id_l), 0);
 	let handle = Process::current().add_object(obj.unwrap());
 	Return {
 		status: 0,
@@ -290,17 +294,12 @@ impl SleepOptions {
 
 extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let time = merge_u64(time_l, time_h);
+	let time = Duration::from_micros(time.into());
 	dbg!(time);
+	unsafe { for _ in 0..1000000000usize { asm!("") } }
 	use crate::driver::apic::local_apic;
 
-	let a = local_apic::get();
-	a.spurious_interrupt_vector.set((a.spurious_interrupt_vector.get() | 0x100));
-	a.divide_configuration.set(3);
-	// one-shot | non-mask | idle | vector
-	a.lvt_timer.set(0 << 17 | 0 << 16 | 0 << 12 | 61);
-	//a.initial_count.set(time.try_into().unwrap_or(u32::MAX));
-	a.initial_count.set(0);
-
+	crate::scheduler::Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
 	unsafe { asm!("int 61") }; // Articifical timer interrupt.
 
 	Return {

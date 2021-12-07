@@ -1,16 +1,18 @@
 use super::process::Process;
 use crate::memory::frame;
 use crate::time::Monotonic;
+use core::cell::Cell;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use core::time::Duration;
 
 #[derive(Debug)]
-#[repr(C)]
 pub struct Thread {
-	user_stack: *mut usize,
-	kernel_stack: *mut usize,
-	process: NonNull<Process>,
-	kernel_stack_base: *mut [usize; 512],
+	pub user_stack: Cell<Option<NonNull<usize>>>,
+	pub kernel_stack: Cell<NonNull<usize>>,
+	pub process: NonNull<Process>,
+	kernel_stack_base: NonNull<[usize; 512]>,
+	sleep_until: Cell<Monotonic>,
 }
 
 impl Thread {
@@ -33,10 +35,11 @@ impl Thread {
 			 // Reserve space for (zeroed) registers
 			kernel_stack = kernel_stack.sub(15);
 			Ok(Self {
-				user_stack: core::ptr::null_mut(),
-				kernel_stack_base,
-				kernel_stack,
+				user_stack: Cell::new(None),
+				kernel_stack_base: NonNull::new(kernel_stack_base).unwrap(),
+				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				process,
+				sleep_until: Cell::new(Monotonic::ZERO),
 			})
 		}
 	}
@@ -90,12 +93,26 @@ impl Thread {
 
 				rex64 iretq
 			",
-			options(noreturn)
+			options(noreturn),
 			);
 		}
 	}
 
+	pub fn set_sleep_until(&self, until: Monotonic) {
+		self.sleep_until.set(until)
+	}
+
 	pub fn sleep_until(&self) -> Monotonic {
-		Monotonic::ZERO
+		self.sleep_until.get()
+	}
+
+	pub fn sleep(duration: Duration) -> ! {
+		Self::current().set_sleep_until(Monotonic::now().saturating_add(duration));
+		unsafe { asm!("int 61", options(noreturn)) }; // Fake timer interrupt
+	}
+
+	// FIXME wildly unsafe!
+	pub fn current<'a>() -> &'a Self {
+		crate::arch::amd64::current_thread()
 	}
 }

@@ -29,6 +29,12 @@ impl Monotonic {
 	pub fn saturating_add(self, dt: Duration) -> Self {
 		self.checked_add(dt).unwrap_or(Self::MAX)
 	}	
+
+	/// Returns the `Duration` until the given `Monotonic`. This is `None` if the
+	/// given `Monotonic` has already passed.
+	pub fn duration_until(self, until: Self) -> Option<Duration> {
+		until.nanoseconds.checked_sub(self.nanoseconds).map(Duration::from_nanos)
+	}
 }
 
 impl fmt::Debug for Monotonic {
