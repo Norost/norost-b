@@ -125,3 +125,7 @@ pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 		entry,
 	);
 }
+
+pub fn yield_current_thread() {
+	unsafe { asm!("int 61") } // Fake timer interrupt
+}

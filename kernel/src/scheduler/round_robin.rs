@@ -2,98 +2,60 @@
 
 use super::Thread;
 use crate::sync::SpinLock;
-use core::cell::Cell;
 use core::ops::Deref;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 static THREAD_LIST: SpinLock<(usize, Option<NonNull<Node>>)> = SpinLock::new((0, None));
 
-pub struct Node {
-	next: Cell<NonNull<Node>>,
-	thread: Thread,
-	ref_counter: AtomicUsize,
+struct Node {
+	next: NonNull<Node>,
+	thread: Weak<Thread>,
 }
 
-impl Deref for Node {
-	type Target = Thread;
-
-	fn deref(&self) -> &Self::Target {
-		&self.thread
-	}
-}
-
-pub struct Guard {
-	node: NonNull<Node>,
-}
-
-impl Guard {
-	/// # Safety
-	///
-	/// The node must be valid.
-	unsafe fn new(node: NonNull<Node>) -> Self {
-		node.as_ref().ref_counter.fetch_add(1, Ordering::Relaxed);
-		Self { node }
-	}
-
-	pub fn as_non_null_ptr(&self) -> NonNull<Node> {
-		self.node
-	}
-}
-
-impl Drop for Guard {
-	fn drop(&mut self) {
-		// SAFETY: the node is valid.
-		let n = unsafe { self.node.as_ref() };
-		if n.ref_counter.fetch_sub(1, Ordering::Relaxed) == 0 {
-			// SAFETY: the node was allocated as a Box.
-			unsafe {
-				Box::from_raw(self.node.as_ptr());
-			}
-		}
-	}
-}
-
-impl Deref for Guard {
-	type Target = Thread;
-
-	fn deref(&self) -> &Self::Target {
-		// SAFETY: the node is valid.
-		unsafe {
-			self.node.as_ref()
-		}
-	}
-}
-
-pub fn insert(thread: Thread) -> Guard {
+pub fn insert(thread: Weak<Thread>) {
 	let node = Box::new(Node {
-		next: Cell::new(NonNull::new(0x1 as *mut _).unwrap()),
+		next: NonNull::new(0x1 as *mut _).unwrap(),
 		thread,
-		ref_counter: AtomicUsize::new(0),
 	});
 	let mut n = THREAD_LIST.lock();
 	let node = Box::leak(node);
 	let ptr = NonNull::new(node as *mut _).unwrap();
-	if let Some(n) = n.1 {
-		let n = unsafe { n.as_ref() };
-		node.next.set(n.next.get());
-		n.next.set(ptr);
+	if let Some(mut n) = n.1 {
+		let n = unsafe { n.as_mut() };
+		node.next = n.next;
+		n.next = ptr;
 	} else {
-		node.next.set(ptr);
+		node.next = ptr;
 		n.1 = Some(ptr);
 	}
 	n.0 += 1;
-
-	unsafe { Guard::new(ptr) }
 }
 
-pub fn next() -> Option<Guard> {
+pub fn next() -> Option<Arc<Thread>> {
 	let mut l = THREAD_LIST.lock();
-	l.1.map(|n| unsafe {
-		l.1 = Some(n.as_ref().next.get());
-		Guard::new(n)
-	})
+	let mut curr = l.1?;
+	loop {
+		let nn = {
+			// Use separate scope so we won't accidently use 'n' after a drop.
+			// and won't have two (mutable) references to c.
+			let c = unsafe { curr.as_ref() };
+			let n = unsafe { c.next.as_ref() };
+			if let Some(thr) = Weak::upgrade(&n.thread) {
+				l.1 = Some(c.next);
+				return Some(thr);
+			}
+			n.next
+		};
+		let c = unsafe { curr.as_mut() };
+		drop(unsafe { Box::from_raw(c.next.as_ptr()); });
+		if c.next == curr {
+			l.1 = None;
+			return None;
+		} else {
+			c.next = nn;
+		}
+	}
 }
 
 pub fn count() -> usize {

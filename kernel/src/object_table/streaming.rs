@@ -2,15 +2,16 @@ use super::*;
 use crate::memory::frame::{self, PageFrame, PPN};
 use crate::scheduler::{Thread, process::Process};
 use core::cell::{Cell, UnsafeCell};
-use alloc::boxed::Box;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU16, Ordering};
 use core::time::Duration;
+use alloc::{boxed::Box, sync::Weak};
 
 pub struct StreamingTable {
 	name: Box<str>,
 	process: NonNull<Process>,
 	commands: NonNull<CommandQueue>,
+	notify: Vec<Weak<Thread>>,
 }
 
 impl StreamingTable {
@@ -20,8 +21,9 @@ impl StreamingTable {
 		let commands = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap()).unwrap();
 		let commands = unsafe { phys_to_virt(commands.as_phys().try_into().unwrap()).cast() };
 		let commands = NonNull::new(commands).unwrap();
+		let notify = Vec::new();
 
-		(Self { name, process, commands }, Box::new(StreamTableInterface { commands }))
+		(Self { name, process, commands, notify }, Box::new(StreamTableInterface { commands }))
 	}
 }
 

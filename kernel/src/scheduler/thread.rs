@@ -106,9 +106,18 @@ impl Thread {
 		self.sleep_until.get()
 	}
 
-	pub fn sleep(duration: Duration) -> ! {
+	pub fn sleep(duration: Duration) {
 		Self::current().set_sleep_until(Monotonic::now().saturating_add(duration));
-		unsafe { asm!("int 61", options(noreturn)) }; // Fake timer interrupt
+		Self::yield_current();
+	}
+
+	pub fn yield_current() {
+		unsafe { asm!("int 61") }; // Fake timer interrupt
+	}
+
+	/// Cancel sleep
+	pub fn wake(&self) {
+		self.sleep_until.set(Monotonic::ZERO);
 	}
 
 	// FIXME wildly unsafe!

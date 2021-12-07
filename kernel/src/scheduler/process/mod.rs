@@ -1,6 +1,6 @@
 mod elf;
 
-use super::MemoryObject;
+use super::{MemoryObject, Thread};
 use crate::arch;
 #[cfg(feature = "driver-pci")]
 use crate::driver::pci::PciDevice;
@@ -10,7 +10,7 @@ use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX, MemoryObje
 use crate::memory::Page;
 use crate::object_table::{Object, Query};
 use core::ptr::NonNull;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec::Vec, sync::Arc};
 
 pub struct Process {
 	address_space: AddressSpace,
@@ -18,7 +18,7 @@ pub struct Process {
 	//in_ports: Vec<Option<InPort>>,:
 	//out_ports: Vec<Option<OutPort>>,
 	//named_ports: Box<[ReverseNamedPort]>,
-	thread: Option<super::round_robin::Guard>,
+	thread: Option<Arc<Thread>>,
 	//threads: Vec<NonNull<Thread>>,
 	client_queue: Option<ClientQueue>,
 	objects: Vec<Object>,

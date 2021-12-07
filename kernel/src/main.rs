@@ -32,7 +32,11 @@ mod time;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
-	log::init();
+	unsafe {
+		memory::r#virtual::init();
+		arch::init();
+		log::init();
+	}
 
 	for region in boot_info.memory_regions() {
 		use memory::{
@@ -51,11 +55,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		}
 	}
 
-	dbg!(boot_info);
-
 	unsafe {
-		memory::r#virtual::init();
-		arch::init();
 		driver::init(boot_info);
 	}
 

@@ -8,6 +8,7 @@ use core::time::Duration;
 use crate::time::Monotonic;
 pub use memory_object::*;
 pub use thread::Thread;
+use alloc::sync::Arc;
 
 pub use round_robin::count as thread_count;
 
@@ -20,7 +21,7 @@ pub use round_robin::count as thread_count;
 /// The current thread's state must be properly saved.
 pub unsafe fn next_thread() -> Result<!, Monotonic> {
 	let mut thr = round_robin::next().unwrap();
-	let first = thr.as_non_null_ptr();
+	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
 	dbg!(now);
@@ -31,7 +32,7 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 		}
 		t = t.min(thr.sleep_until());
 		thr = round_robin::next().unwrap();
-		if thr.as_non_null_ptr() == first {
+		if Arc::as_ptr(&thr) == first {
 			return Err(t);
 		}
 	}
