@@ -27,7 +27,7 @@ impl<T> SpinLock<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
-				Err(_) => (),
+				Err(_) => core::hint::spin_loop(),
 			}
 		}
 	}
@@ -38,6 +38,21 @@ impl<T> SpinLock<T> {
 }
 
 unsafe impl<T> Sync for SpinLock<T> {}
+
+impl<T> From<T> for SpinLock<T> {
+	fn from(t: T) -> Self {
+		Self::new(t)
+	}
+}
+
+impl<T> Default for SpinLock<T>
+where
+	T: Default,
+{
+	fn default() -> Self {
+		Self::new(Default::default())
+	}
+}
 
 pub struct Guard<'a, T> {
 	lock: &'a SpinLock<T>,

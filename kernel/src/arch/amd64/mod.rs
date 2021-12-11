@@ -9,7 +9,7 @@ mod tss;
 pub mod r#virtual;
 
 pub use idt::{Handler, IDTEntry};
-pub use syscall::{current_process, current_thread, set_current_thread};
+pub use syscall::{current_process, current_thread, current_thread_weak, set_current_thread};
 use crate::{scheduler, driver::apic, power, time::Monotonic};
 
 use core::mem::MaybeUninit;

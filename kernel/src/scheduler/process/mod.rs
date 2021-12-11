@@ -21,7 +21,7 @@ pub struct Process {
 	thread: Option<Arc<Thread>>,
 	//threads: Vec<NonNull<Thread>>,
 	client_queue: Option<ClientQueue>,
-	objects: Vec<Object>,
+	objects: Vec<Arc<dyn Object>>,
 	queries: Vec<Box<dyn Query>>,
 }
 
@@ -44,7 +44,7 @@ impl Process {
 
 	pub fn run(&mut self) -> ! {
 		self.activate_address_space();
-		self.thread.as_mut().unwrap().resume()
+		self.thread.clone().unwrap().resume()
 	}
 
 	pub fn init_client_queue(
@@ -91,7 +91,7 @@ impl Process {
 	}
 
 	/// Add an object to the process' object table.
-	pub fn add_object(&mut self, object: Object) -> Result<ObjectHandle, AddObjectError> {
+	pub fn add_object(&mut self, object: Arc<dyn Object>) -> Result<ObjectHandle, AddObjectError> {
 		self.objects.push(object);
 		Ok(ObjectHandle(self.objects.len() - 1))
 	}
@@ -121,7 +121,7 @@ impl Process {
 	}
 
 	/// Get a reference to an object.
-	pub fn get_object(&mut self, handle: ObjectHandle) -> Option<&Object> {
+	pub fn get_object(&mut self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
 		self.objects.get(handle.0)
 	}
 

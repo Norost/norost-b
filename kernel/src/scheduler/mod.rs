@@ -3,9 +3,15 @@ pub mod process;
 pub mod syscall;
 mod thread;
 mod round_robin;
+mod waker;
 
 use core::time::Duration;
+use crate::object_table;
 use crate::time::Monotonic;
+use core::future::Future;
+use core::pin::Pin;
+use core::marker::Unpin;
+use core::task::{Context, Poll};
 pub use memory_object::*;
 pub use thread::Thread;
 use alloc::sync::Arc;
@@ -24,9 +30,7 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
-	dbg!(now);
 	loop {
-		dbg!(thr.sleep_until());
 		if thr.sleep_until() <= now {
 			thr.resume();
 		}
@@ -35,5 +39,17 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 		if Arc::as_ptr(&thr) == first {
 			return Err(t);
 		}
+	}
+}
+
+/// Wait for an asynchronous task to finish.
+fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
+	let waker = waker::new_waker(Thread::current_weak());
+	let mut context = Context::from_waker(&waker);
+	loop {
+		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
+			return res;
+		}
+		Thread::sleep(Duration::MAX);
 	}
 }

@@ -1,12 +1,14 @@
 use super::process::Process;
+use crate::arch;
+use crate::object_table::Job;
 use crate::memory::frame;
 use crate::time::Monotonic;
 use core::cell::Cell;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
+use alloc::sync::{Arc, Weak};
 
-#[derive(Debug)]
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
 	pub kernel_stack: Cell<NonNull<usize>>,
@@ -45,12 +47,12 @@ impl Thread {
 	}
 
 	/// Suspend the currently running thread & begin running this thread.
-	pub fn resume(&self) -> ! {
-		unsafe {
-			crate::arch::amd64::set_current_thread(NonNull::from(self));
-		}
-
+	pub fn resume(self: Arc<Self>) -> ! {
 		unsafe { self.process.as_ref().activate_address_space() };
+
+		unsafe {
+			crate::arch::amd64::set_current_thread(self);
+		}
 
 		// iretq is the only way to preserve all registers
 		unsafe {
@@ -120,8 +122,17 @@ impl Thread {
 		self.sleep_until.set(Monotonic::ZERO);
 	}
 
-	// FIXME wildly unsafe!
-	pub fn current<'a>() -> &'a Self {
-		crate::arch::amd64::current_thread()
+	pub fn current() -> Arc<Self> {
+		arch::amd64::current_thread()
+	}
+
+	pub fn current_weak() -> Weak<Self> {
+		arch::amd64::current_thread_weak()
+	}
+}
+
+impl Drop for Thread {
+	fn drop(&mut self) {
+		todo!()
 	}
 }

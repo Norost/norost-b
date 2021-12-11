@@ -42,11 +42,6 @@ _start:
 	mov		rdi, 1			# table
 	mov		rsi, 0			# object
 	syscall
-
-4:  mov		rdi, -1
-	call	sleep
-	jmp		4b
-
 	test	eax, eax
 	jnz		panic
 	mov		r15, rdx
@@ -62,9 +57,8 @@ _start:
 	test	eax, eax
 	jnz		panic
 
-	# Sleep forever
-4:
-	mov		rdi, -1
+	# Sleep for 1 second (1_000_000 µs)
+	mov		rdi, 1000000
 	call	sleep
 
 	jmp		4b

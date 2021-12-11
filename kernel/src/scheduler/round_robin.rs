@@ -18,18 +18,18 @@ pub fn insert(thread: Weak<Thread>) {
 		next: NonNull::new(0x1 as *mut _).unwrap(),
 		thread,
 	});
-	let mut n = THREAD_LIST.lock();
-	let node = Box::leak(node);
-	let ptr = NonNull::new(node as *mut _).unwrap();
-	if let Some(mut n) = n.1 {
-		let n = unsafe { n.as_mut() };
-		node.next = n.next;
-		n.next = ptr;
+	let mut cur_ptr = THREAD_LIST.lock();
+	let new = Box::leak(node);
+	let new_ptr = NonNull::new(new as *mut _).unwrap();
+	if let Some(mut cur_ptr) = cur_ptr.1 {
+		let cur = unsafe { cur_ptr.as_mut() };
+		new.next = cur.next;
+		cur.next = new_ptr;
 	} else {
-		node.next = ptr;
-		n.1 = Some(ptr);
+		new.next = new_ptr;
+		cur_ptr.1 = Some(new_ptr);
 	}
-	n.0 += 1;
+	cur_ptr.0 += 1;
 }
 
 pub fn next() -> Option<Arc<Thread>> {

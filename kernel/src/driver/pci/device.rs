@@ -1,8 +1,12 @@
 use super::PCI;
 use crate::memory::frame::PageFrame;
 use crate::memory::frame::PPN;
+use crate::object_table::{Object, Events, Unpollable};
 use crate::scheduler::MemoryObject;
+use core::pin::Pin;
 use core::ptr::NonNull;
+use core::future::Future;
+use core::task::{Context, Poll};
 use pci::{BaseAddress, Header};
 use alloc::boxed::Box;
 
@@ -68,7 +72,7 @@ impl MemoryObject for PciDevice {
 	}
 }
 
-impl crate::object_table::Interface for PciDevice {
+impl Object for PciDevice {
 	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
 		if offset == 0 {
 			return Some(Box::new(PciDevice { device: self.device, bus: self.bus }));

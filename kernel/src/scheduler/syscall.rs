@@ -1,5 +1,5 @@
 use crate::{driver, object_table};
-use crate::object_table::{Id, TableId};
+use crate::object_table::{Id, TableId, Job, JobId, JobType};
 use crate::memory::{frame, Page, r#virtual::RWX};
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame};
 use crate::scheduler::process::ObjectHandle;
@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 use core::mem;
 use core::ptr::NonNull;
 use core::time::Duration;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec::Vec, sync::{Arc, Weak}};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -20,7 +20,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 14;
+pub const SYSCALLS_LEN: usize = 17;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -37,6 +37,9 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	read_object,
 	write_object,
 	create_table,
+	poll_object,
+	take_table_job,
+	finish_table_job,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -208,10 +211,9 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 		s => unreachable!("unsupported usize size of {}", s),
 	}.into();
 	let id = Id::from(merge_u64(id_l, id_h));
-	dbg!(id_l);
-	let obj = object_table::get(table_id, id).unwrap();
-	assert_ne!(dbg!(id_l), 0);
-	let handle = Process::current().add_object(obj.unwrap());
+	let ticket = object_table::get(table_id, id).unwrap();
+	let obj = super::block_on(ticket).unwrap().into_object().unwrap();
+	let handle = Process::current().add_object(obj);
 	Return {
 		status: 0,
 		value: handle.unwrap().into(),
@@ -248,10 +250,23 @@ extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: 
 	let data = unsafe { core::slice::from_raw_parts(base.as_ptr(), length) };
 
 	let written = Process::current().get_object(handle).unwrap().write(offset, data).unwrap();
+	let written = dbg!(super::block_on(written).unwrap())
+		.into_usize().unwrap();
 
 	Return {
 		status: 0,
 		value: dbg!(written),
+	}
+}
+
+extern "C" fn poll_object(handle: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	todo!();
+	let handle = ObjectHandle::from(handle);
+	let object = Process::current().get_object(handle).unwrap();
+	let event = super::block_on(object.event_listener().unwrap());
+	Return {
+		status: 0,
+		value: u32::from(event).try_into().unwrap(),
 	}
 }
 
@@ -265,24 +280,121 @@ extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: us
 	let name = name.into();
 	let tbl = match ty {
 		0 => {
-			let (tbl, intf) = object_table::StreamingTable::new(name, NonNull::from(Process::current()));
-			object_table::add_table(tbl);
-			intf
+			let tbl = object_table::StreamingTable::new(name, NonNull::from(Process::current()));
+			object_table::add_table(Arc::downgrade(&tbl) as Weak<dyn object_table::Table>);
+			tbl
 		}
 		_ => todo!(),
 	};
 
-	let tbl = crate::object_table::Object {
-		id: Id::from(0),
-		name: "".into(),
-		tags: [].into(),
-		interface: tbl,
-	};
 	let handle = Process::current().add_object(tbl).unwrap();
 
 	Return {
 		status: 0,
 		value: handle.into(),
+	}
+}
+
+#[derive(Default, Debug)]
+#[repr(C)]
+pub struct FfiJob {
+	pub ty: FfiJobType,
+	pub flags: [u8; 3],
+	pub job_id: JobId,
+	pub buffer_size: u32,
+	pub operation_size: u32,
+	pub object_id: Id,
+	pub buffer: Option<NonNull<u8>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct FfiJobType(u8);
+
+default!(newtype FfiJobType = u8::MAX);
+
+impl From<JobType> for FfiJobType {
+	fn from(jt: JobType) -> Self {
+		FfiJobType(jt as u8)
+	}
+}
+
+#[derive(Debug)]
+pub struct UnknownJobType;
+
+impl TryFrom<FfiJobType> for JobType {
+	type Error = UnknownJobType;
+
+	fn try_from(fjt: FfiJobType) -> Result<Self, Self::Error> {
+		match fjt.0 {
+			0 => Ok(Self::Open),
+			1 => Ok(Self::Read),
+			2 => Ok(Self::Write),
+			_ => Err(UnknownJobType),
+		}
+	}
+}
+
+impl TryFrom<FfiJob> for Job {
+	type Error = UnknownJobType;
+
+	fn try_from(fj: FfiJob) -> Result<Self, Self::Error> {
+		// TODO don't panic
+		let buffer = unsafe {
+			core::slice::from_raw_parts(
+				fj.buffer.unwrap().as_ptr(),
+				fj.buffer_size.try_into().unwrap()
+			)
+		};
+		Ok(Self {
+			ty: fj.ty.try_into()?,
+			flags: fj.flags,
+			job_id: fj.job_id,
+			object_id: fj.object_id,
+			operation_size: fj.operation_size,
+			buffer: buffer.into(),
+		})
+	}
+}
+
+extern "C" fn take_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	assert_ne!(job_ptr, 0);
+
+	let handle = ObjectHandle::from(handle);
+	let tbl = Process::current().get_object(handle).unwrap().clone().as_table().unwrap();
+
+	let mut job = unsafe { &mut *(job_ptr as *mut FfiJob) };
+	dbg!(&job);
+	let copy_to = unsafe { core::slice::from_raw_parts_mut(job.buffer.unwrap().as_ptr(), job.buffer_size.try_into().unwrap()) };
+	let info = super::block_on(tbl.take_job());
+	job.ty = info.ty.into();
+	job.flags = info.flags;
+	job.job_id = info.job_id;
+	job.object_id = info.object_id;
+	job.operation_size = info.operation_size;
+	let size = usize::try_from(info.operation_size).unwrap();
+	assert!(copy_to.len() >= size, "todo");
+	copy_to[..size].copy_from_slice(&info.buffer[..size]);
+
+	Return {
+		status: 0,
+		value: 0,
+	}
+}
+
+extern "C" fn finish_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	assert_ne!(job_ptr, 0);
+
+	let handle = ObjectHandle::from(handle);
+	let tbl = Process::current().get_object(handle).unwrap().clone().as_table().unwrap();
+
+	let data = unsafe { (job_ptr as *mut FfiJob).read() };
+
+	tbl.finish_job(data.try_into().unwrap()).unwrap();
+
+	Return {
+		status: 0,
+		value: 0,
 	}
 }
 

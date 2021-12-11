@@ -7,35 +7,48 @@
 
 mod streaming;
 
+use crate::scheduler::Thread;
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec::Vec, sync::{Arc, Weak}};
+use core::fmt;
+use core::future::Future;
+use core::pin::Pin;
+use core::ptr::NonNull;
+use core::task::{Context, Poll, Waker};
 use core::ops::{Deref, DerefMut};
 
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
-static TABLES: SpinLock<Vec<Option<Box<dyn Table>>>> = SpinLock::new(Vec::new());
+static TABLES: SpinLock<Vec<Weak<dyn Table>>> = SpinLock::new(Vec::new());
 
 /// A table of objects.
-pub trait Table {
+pub trait Table
+where
+	Self: Object, // This allows putting tables in the object list of each process.
+{
 	/// The name of this table.
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(&self, name: Option<&str>, tags: &[&str]) -> Box<dyn Query>;
+	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query>;
 
 	/// Get a single object based on ID.
-	fn get(&self, id: Id) -> Option<Object>;
+	fn get(self: Arc<Self>, id: Id) -> Ticket;
 
 	/// Create a new object.
-	fn create(&self, name: &str, tags: &[&str]) -> Result<Object, CreateObjectError>;
+	fn create(self: Arc<Self>, name: &str, tags: &[&str]) -> Ticket;
+
+	fn take_job(&self) -> JobTask;
+
+	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()>;
 }
 
 /// A query into a table.
 pub trait Query
 where
-	Self: Iterator<Item = Object>,
+	Self: Iterator<Item = QueryResult>,
 {
 }
 
@@ -44,87 +57,273 @@ pub struct NoneQuery;
 impl Query for NoneQuery {}
 
 impl Iterator for NoneQuery {
-	type Item = Object;
+	type Item = QueryResult;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		None
 	}
 }
 
-/// A single object.
-pub struct Object {
-	/// The ID of this object.
+/// A single query result
+pub struct QueryResult {
 	pub id: Id,
-	/// The name of the object.
 	pub name: Box<str>,
-	/// Tags associated with the object.
 	pub tags: Box<[Box<str>]>,
-	/// The interface to interact with this object.
-	pub interface: Box<dyn Interface>,
 }
 
-impl Deref for Object {
-	type Target = dyn Interface;
-
-	fn deref(&self) -> &Self::Target {
-		&*self.interface
-	}
-}
-
-impl DerefMut for Object {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut *self.interface
-	}
-}
-
-/// An interface to an object.
-pub trait Interface {
+/// A single object.
+pub trait Object {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
 	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
 		None
 	}
 
-	fn read(&self, _: u64, data: &mut [u8]) -> Result<usize, ()> {
+	fn read(&self, _: u64, data: &mut [u8]) -> Result<Ticket, ()> {
 		Err(())
 	}
 
-	fn write(&self, _: u64, data: &[u8]) -> Result<usize, ()> {
+	fn write(&self, _: u64, data: &[u8]) -> Result<Ticket, ()> {
 		Err(())
+	}
+
+	fn event_listener(&self) -> Result<EventListener, Unpollable> {
+		Err(Unpollable)
+	}
+
+	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
+		None
+	}
+}
+
+/// A pollable interface to an object.
+pub struct EventListener {
+	shared: Arc<SpinLock<(Option<Waker>, Option<Events>)>>,
+}
+
+pub struct EventWaker {
+	shared: Arc<SpinLock<(Option<Waker>, Option<Events>)>>,
+}
+
+impl EventListener {
+	fn new() -> (Self, EventWaker) {
+		let shared = Arc::new(SpinLock::default());
+		(Self { shared: shared.clone() }, EventWaker { shared })
+	}
+}
+
+impl EventWaker {
+	fn complete(self, event: Events) {
+		let mut l = self.shared.lock();
+		l.0.take().map(|w| w.wake());
+		l.1 = Some(event);
+	}
+}
+
+impl Future for EventListener {
+	type Output = Events;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+		let mut l = self.shared.lock();
+		if let Some(e) = l.1.take() {
+			return Poll::Ready(e)
+		}
+		l.0 = Some(cx.waker().clone());
+		Poll::Pending
+	}
+}
+
+/// A collection of events that occurred in an object
+#[repr(transparent)]
+pub struct Events(u32);
+
+impl Events {
+	pub const OPEN: u32 = 1 << 0;
+}
+
+bi_from!(newtype Events <=> u32);
+
+#[derive(Debug)]
+pub struct Unpollable;
+
+/// A job submitted by a client to be fulfilled by a server (i.e. table owner).
+#[derive(Default, Debug)]
+pub struct Job {
+	pub ty: JobType,
+	pub flags: [u8; 3],
+	pub job_id: JobId,
+	pub operation_size: u32,
+	pub object_id: Id,
+	pub buffer: Box<[u8]>,
+}
+
+#[derive(Default, Debug)]
+#[repr(u8)]
+pub enum JobType {
+	#[default]
+	Open  = 0,
+	Read  = 1,
+	Write = 2,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct JobId(u32);
+
+default!(newtype JobId = u32::MAX);
+bi_from!(newtype JobId <=> u32);
+
+/// Data submitted as part of a job.
+pub enum Data {
+	Usize(usize),
+	Bytes(Box<[u8]>),
+	Object(Arc<dyn Object>),
+}
+
+impl Data {
+	pub fn into_usize(self) -> Option<usize> {
+		match self {
+			Self::Usize(n) => Some(n),
+			_ => None,
+		}
+	}
+
+	pub fn into_bytes(self) -> Option<Box<[u8]>> {
+		match self {
+			Self::Bytes(n) => Some(n),
+			_ => None,
+		}
+	}
+
+	pub fn into_object(self) -> Option<Arc<dyn Object>> {
+		match self {
+			Self::Object(n) => Some(n),
+			_ => None,
+		}
+	}
+}
+
+impl fmt::Debug for Data {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = f.debug_tuple(stringify!(Data));
+		match self {
+			Self::Usize(n) => f.field(&n),
+			Self::Bytes(d) => f.field(&d),
+			Self::Object(d) => f.field(&"<object>"),
+		};
+		f.finish()
+	}
+}
+
+/// An error that occured during a job.
+#[derive(Debug)]
+pub struct Error {
+	pub code: u32,
+	pub message: Box<str>,
+}
+
+/// A ticket referring to a job to be completed.
+#[derive(Default)]
+pub struct Ticket {
+	inner: Arc<SpinLock<TicketInner>>,
+}
+
+impl Ticket {
+	pub fn new_complete(status: Result<Data, Error>) -> Self {
+		let inner = SpinLock::new(TicketInner { waker: None, status: Some(status) }).into();
+		Self { inner }
+	}
+
+	pub fn new() -> (Self, TicketWaker) {
+		let inner = Arc::new(SpinLock::new(TicketInner { waker: None, status: None }));
+		(Self { inner: inner.clone() }, TicketWaker { inner })
+	}
+
+	pub fn take_result(&self) -> Option<Result<Data, Error>> {
+		self.inner.lock().status.take()
+	}
+}
+
+pub struct TicketWaker {
+	inner: Arc<SpinLock<TicketInner>>,
+}
+
+impl TicketWaker {
+	fn complete(self, status: Result<Data, Error>) {
+		let mut l = self.inner.lock();
+		l.waker.take().map(|w| w.wake());
+		l.status = Some(status);
+	}
+}
+
+#[derive(Default)]
+pub struct TicketInner {
+	waker: Option<Waker>,
+	/// The completion status of this job.
+	status: Option<Result<Data, Error>>,
+}
+
+impl Future for Ticket {
+	type Output = Result<Data, Error>;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+		let mut t = self.inner.lock();
+		if let Some(s) = t.status.take() {
+			return Poll::Ready(s);
+		}
+		t.waker = Some(cx.waker().clone());
+		Poll::Pending
 	}
 }
 
 /// The unique identifier of an object.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct Id(u64);
 
-impl From<Id> for u64 {
-	fn from(i: Id) -> Self {
-		i.0
-	}
-}
-
-impl From<u64> for Id {
-	fn from(n: u64) -> Id {
-		Self(n)
-	}
-}
+default!(newtype Id = u64::MAX);
+bi_from!(newtype Id <=> u64);
 
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct TableId(u32);
 
-impl From<TableId> for u32 {
-	fn from(i: TableId) -> Self {
-		i.0
+bi_from!(newtype TableId <=> u32);
+
+pub struct JobTask {
+	shared: Arc<SpinLock<(Option<Waker>, Option<Job>)>>,
+}
+
+impl JobTask {
+	pub fn new(job: Option<Job>) -> (Self, JobWaker) {
+		let shared = Arc::new(SpinLock::new((None, job)));
+		(Self { shared: shared.clone() }, JobWaker { shared })
 	}
 }
 
-impl From<u32> for TableId {
-	fn from(n: u32) -> TableId {
-		Self(n)
+impl Future for JobTask {
+	type Output = Job;
+
+	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+		let mut t = self.shared.lock();
+		if let Some(s) = t.1.take() {
+			return Poll::Ready(s);
+		}
+		t.0 = Some(cx.waker().clone());
+		Poll::Pending
+	}
+}
+
+pub struct JobWaker {
+	shared: Arc<SpinLock<(Option<Waker>, Option<Job>)>>,
+}
+
+impl JobWaker {
+	fn complete(self, job: Job) {
+		let mut l = self.shared.lock();
+		l.0.take().map(|w| w.wake());
+		l.1 = Some(job);
 	}
 }
 
@@ -134,7 +333,7 @@ pub fn tables() -> Vec<(Box<str>, TableId)> {
 		.lock()
 		.iter()
 		.enumerate()
-		.filter_map(|(i, t)| t.as_ref().map(|t| (t.name().into(), TableId(i as u32))))
+		.filter_map(|(i, t)| t.upgrade().map(|t| (t.name().into(), TableId(i as u32))))
 		.collect()
 }
 
@@ -143,7 +342,7 @@ pub fn find_table(name: &str) -> Option<TableId> {
 	TABLES
 		.lock()
 		.iter()
-		.position(|e| e.as_ref().map_or(false, |e| e.name() == name))
+		.position(|e| e.upgrade().map_or(false, |e| e.name() == name))
 		.map(|i| TableId(i as u32))
 }
 
@@ -152,43 +351,37 @@ pub fn query(table_id: TableId, name: Option<&str>, tags: &[&str]) -> Result<Box
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
-		.and_then(Option::as_ref)
+		.and_then(Weak::upgrade)
 		.map(|tbl| tbl.query(name, tags))
 		.ok_or(QueryError::InvalidTableId)
 }
 
 /// Get an object from a table.
-pub fn get(table_id: TableId, id: Id) -> Result<Option<Object>, GetError> {
+pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
-		.and_then(Option::as_ref)
+		.and_then(Weak::upgrade)
 		.map(|tbl| tbl.get(id))
 		.ok_or(GetError::InvalidTableId)
 }
 
 /// Create a new object in a table.
-pub fn create(table_id: TableId, name: &str, tags: &[&str]) -> Result<Object, CreateError> {
+pub fn create(table_id: TableId, name: &str, tags: &[&str]) -> Result<Ticket, CreateError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
-		.and_then(Option::as_ref)
+		.and_then(Weak::upgrade)
 		.ok_or(CreateError::InvalidTableId)
-		.and_then(|tbl| tbl.create(name, tags).map_err(CreateError::CreateObjectError))
+		.map(|tbl| tbl.create(name, tags))
 }
 
 /// Add a new table.
 #[optimize(size)]
-pub fn add_table(table: impl Table + 'static) -> TableId {
-	// Inner function to reduce code size
-	#[optimize(size)]
-	fn add(table: Box<dyn Table>) -> TableId {
-		let mut tbl = TABLES.lock();
-		let id = TableId(tbl.len() as u32);
-		tbl.push(Some(table));
-		id
-	}
-	add(Box::new(table))
+pub fn add_table(table: Weak<dyn Table>) -> TableId {
+	let mut tbl = TABLES.lock();
+	tbl.push(table);
+	TableId((tbl.len() - 1) as u32)
 }
 
 /// Return the name and ID of the table after another table, or the first table if `id` is `None`.
@@ -198,11 +391,11 @@ pub fn next_table(id: Option<TableId>) -> Option<(Box<str>, TableId)> {
 		None => tbl
 			.iter()
 			.enumerate()
-			.find_map(|(i, t)| t.as_ref().map(|t| (i, t))),
+			.find_map(|(i, t)| t.upgrade().map(|t| (i, t))),
 		Some(id) => tbl
 			.iter()
 			.enumerate()
-			.find_map(|(i, t)| t.as_ref().and_then(|t| (i > id.0 as usize).then(|| (i, t)))),
+			.find_map(|(i, t)| t.upgrade().and_then(|t| (i > id.0 as usize).then(|| (i, t)))),
 	}?;
 	Some((tbl.name().into(), TableId(id as u32)))
 }

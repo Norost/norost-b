@@ -3,6 +3,8 @@
 #![feature(alloc_error_handler)]
 #![feature(asm, asm_const, asm_sym)]
 #![feature(const_trait_impl)]
+#![feature(derive_default_enum)]
+#![feature(drain_filter)]
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
@@ -14,6 +16,32 @@
 extern crate alloc;
 
 use core::panic::PanicInfo;
+
+macro_rules! bi_from {
+	(newtype $a:ident <=> $b:ident) => {
+		impl From<$a> for $b {
+			fn from(a: $a) -> $b {
+				a.0
+			}
+		}
+
+		impl From<$b> for $a {
+			fn from(b: $b) -> $a {
+				$a(b)
+			}
+		}
+	};
+}
+
+macro_rules! default {
+	(newtype $ty:ty = $value:expr) => {
+		impl Default for $ty {
+			fn default() -> Self {
+				Self($value)
+			}
+		}
+	};
+}
 
 #[macro_use]
 mod log;
@@ -75,7 +103,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
 	fatal!("Panic!");
-	fatal!("  {:?}", info);
+	fatal!("{:#?}", info);
 	loop {
 		power::halt();
 	}

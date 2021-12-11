@@ -1,5 +1,7 @@
-use crate::object_table::{Table, Query, NoneQuery, Id, Object, CreateObjectError};
-use alloc::{boxed::Box, string::String, format};
+use crate::object_table::{Table, Query, NoneQuery, Id, Object, CreateObjectError, Ticket, Data, QueryResult, Error, Events, Unpollable, Job, JobTask};
+use crate::scheduler::Thread;
+use core::pin::Pin;
+use alloc::{boxed::Box, string::String, format, sync::{Arc, Weak}};
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -9,7 +11,7 @@ impl Table for PciTable {
 		"pci"
 	}
 
-	fn query(&self, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
 		if let Some(name) = name {
 			Box::new(QueryName { item: bdf_from_string(name) })
 		} else { 
@@ -38,17 +40,32 @@ impl Table for PciTable {
 		}
 	}
 
-	fn get(&self, id: Id) -> Option<Object> {
-		let (bus, dev, func) = n_to_bdf(id.into())?;
-		let pci = super::PCI.lock();
-		let d = pci.as_ref().unwrap().get(bus, dev, func)?;
-		Some(pci_dev_object(d, bus, dev, func))
+	fn get(self: Arc<Self>, id: Id) -> Ticket {
+		let r = n_to_bdf(id.into())
+			.and_then(|(bus, dev, func)| {
+				let pci = super::PCI.lock();
+				pci.as_ref().unwrap().get(bus, dev, func)
+					.map(|d| Data::Object(pci_dev_object(d, bus, dev, func)))
+			})
+			.ok_or_else(|| todo!());
+		Ticket::new_complete(r)
 	}
 
-	fn create(&self, _: &str, _: &[&str]) -> Result<Object, CreateObjectError> {
-		Err(CreateObjectError { message: "can't create pci devices".into() })
+	fn create(self: Arc<Self>, _: &str, _: &[&str]) -> Ticket {
+		let e = Error { code: 1, message: "can't create pci devices".into() };
+		Ticket::new_complete(Err(e))
+	}
+
+	fn take_job(&self) -> JobTask {
+		unreachable!("kernel only table")
+	}
+
+	fn finish_job(self: Arc<Self>, _: Job) -> Result<(), ()> {
+		unreachable!("kernel only table")
 	}
 }
+
+impl Object for PciTable {}
 
 struct QueryName {
 	item: Option<(u8, u8, u8)>,
@@ -57,14 +74,14 @@ struct QueryName {
 impl Query for QueryName {}
 
 impl Iterator for QueryName {
-	type Item = Object;
+	type Item = QueryResult;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		dbg!(self.item);
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
 			let h = pci.as_ref().unwrap().get(b, d, f)?;
-			Some(pci_dev_object(h, b, d, f))
+			Some(pci_dev_query_result(h, b, d, f))
 		})
 	}
 }
@@ -78,7 +95,7 @@ struct QueryTags {
 impl Query for QueryTags {}
 
 impl Iterator for QueryTags {
-	type Item = Object;
+	type Item = QueryResult;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let pci = super::PCI.lock();
@@ -93,7 +110,7 @@ impl Iterator for QueryTags {
 				if self.device_id.map_or(false, |v| v != h.device_id()) {
 					continue;
 				}
-				return Some(pci_dev_object(h, bus, dev, func));
+				return Some(pci_dev_query_result(h, bus, dev, func));
 			}
 		}
 		None
@@ -110,16 +127,18 @@ fn bdf_from_string(s: &str) -> Option<(u8, u8, u8)> {
 	Some((bus.parse().ok()?, dev.parse().ok()?, func.parse().ok()?))
 }
 
-fn pci_dev_object(h: pci::Header, bus: u8, dev: u8, func: u8) -> Object {
-	Object {
-		id: (u64::from(bus) << 8 | u64::from(dev) << 3 | u64::from(func)).into(),
-		name: bdf_to_string(bus, dev, func).into(),
-		tags: [
-			format!("vendor-id:{:04x}", h.vendor_id()).into(),
-			format!("device-id:{:04x}", h.device_id()).into(),
-		].into(),
-		interface: Box::new(super::PciDevice::new(bus, dev))
-	}
+fn pci_dev_object(h: pci::Header, bus: u8, dev: u8, func: u8) -> Arc<dyn Object> {
+	Arc::new(super::PciDevice::new(bus, dev))
+}
+
+fn pci_dev_query_result(h: pci::Header, bus: u8, dev: u8, func: u8) -> QueryResult {
+	let id = (u64::from(bus) << 8 | u64::from(dev) << 3 | u64::from(func)).into();
+	let name = bdf_to_string(bus, dev, func).into();
+	let tags = [
+		format!("vendor-id:{:04x}", h.vendor_id()).into(),
+		format!("device-id:{:04x}", h.device_id()).into(),
+	].into();
+	QueryResult { id, name, tags }
 }
 
 fn n_to_bdf(n: u64) -> Option<(u8, u8, u8)> {

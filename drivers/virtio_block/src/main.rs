@@ -114,64 +114,69 @@ extern "C" fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
 	
-	// Map the interface for the table
-	let cmds = NonNull::new(0x6666_0000 as *mut _);
-	let cmds = syscall::map_object(tbl, cmds, 0, 4096).unwrap();
-	let cmds = unsafe {
-		cmds.cast::<kernel::object_table::streaming::CommandQueue>().as_ref()
-	};
-	
 	// Register a new object
 
 	let mut wr_i = 0;
 
 	let mut i = 0;
-	let mut last_cmd = None;
+
+	let mut buf = [0; 1024];
+
 	loop {
 		// Wait for events from the table
 		syslog!("ermaghed");
-		syscall::sleep(Duration::MAX);
+		//let e = syscall::poll_object(tbl).unwrap();
+
+		let job = syscall::take_table_job(tbl, &mut buf).unwrap();
+
+		syslog!("job: {:#?}", &job);
+
+		match job.ty {
+			syscall::Job::OPEN => (),
+			syscall::Job::WRITE => {
+				syslog!("write: {:?}", core::str::from_utf8(unsafe { job.data() }));
+			}
+			_ => todo!(),
+		}
+
+		syscall::finish_table_job(tbl, job).unwrap();
 
 		// Log events
-		syslog!("{:p}", cmds);
-		syslog!("{:#x?}", syscall::physical_address(NonNull::from(cmds).cast()));
-		while let Some(cmd) = cmds.pop_command() {
-			use kernel::object_table::streaming::{Command, Response};
-			let rsp = match cmd {
-				Command::Open { .. } => {
-					syslog!("[stream-table] {:?}", "open");
-					Response::open(
-						&cmd,
-						NonNull::new(wr.get()).unwrap().cast(),
-						12,
-						NonNull::new(rd.get()).unwrap().cast(),
-						12,
-					)
-				}
-				Command::Write { count, .. } => {
-					syslog!("[stream-table] {:?}", count);
+		//while let Some(cmd) = cmds.pop_command() {
+			/*
+			{
+				syslog!("[stream-table] {:?}", "open");
+				Response::open(
+					&cmd,
+					NonNull::new(wr.get()).unwrap().cast(),
+					12,
+					NonNull::new(rd.get()).unwrap().cast(),
+					12,
+				)
+			}
+			{
+				syslog!("[stream-table] {:?}", count);
 
-					let wr: &[u8] = unsafe {
-						core::slice::from_raw_parts(wr.get().cast(), 4096)
-					};
-					syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
-					syslog!("wr_i {}", wr_i % wr.len());
-					for i in wr_i .. wr_i + count {
-						syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
-					}
-
-					wr_i += count;
-					Response::write(
-						&cmd,
-						count,
-					)
+				let wr: &[u8] = unsafe {
+					core::slice::from_raw_parts(wr.get().cast(), 4096)
+				};
+				syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
+				syslog!("wr_i {}", wr_i % wr.len());
+				for i in wr_i .. wr_i + count {
+					syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
 				}
-				_ => todo!(),
-			}.unwrap();
+
+				wr_i += count;
+				Response::write(
+					&cmd,
+					count,
+				)
+			}
 			last_cmd = Some(cmd);
 			i += 1;
-			cmds.push_response(rsp);
-		}
+			c.unwrap();mds.push_response(rsp);
+			*/
+		//}
 
 		// Mark events as handled
 	}
@@ -209,5 +214,7 @@ static TEST2: u8 = 5;
 fn panic_handler(info: &PanicInfo) -> ! {
 	use core::fmt::Write;
 	writeln!(syscall::SysLog::default(), "Panic! {:#?}", info);
-	loop {}
+	loop {
+		syscall::sleep(Duration::MAX);
+	}
 }

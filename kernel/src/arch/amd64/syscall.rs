@@ -4,7 +4,7 @@ use crate::scheduler::Thread;
 use crate::scheduler::syscall;
 use core::ptr::{self, NonNull};
 use core::mem::MaybeUninit;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 pub unsafe fn init() {
 	// Enable syscall/sysenter
@@ -27,13 +27,19 @@ pub unsafe fn init() {
 	msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 }
 
-pub unsafe fn set_current_thread(thread: NonNull<Thread>) {
-	let thr = unsafe { thread.as_ref() };
-	let user_stack = thr.user_stack.get().map_or_else(ptr::null_mut, NonNull::as_ptr);
+pub unsafe fn set_current_thread(thread: Arc<Thread>) {
+	// Remove reference to current thread.
+	let old_thr: *const Thread;
+	asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
+	if !old_thr.is_null() {
+		Arc::from_raw(old_thr);
+	}
+	// Set reference to new thread.
+	let user_stack = thread.user_stack.get().map_or_else(ptr::null_mut, NonNull::as_ptr);
 	asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
-	asm!("mov gs:[1 * 8], {0}", in(reg) thr.kernel_stack.get().as_ptr());
-	asm!("mov gs:[2 * 8], {0}", in(reg) thr.process.as_ptr());
-	asm!("mov gs:[3 * 8], {0}", in(reg) thr);
+	asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
+	asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());
+	asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 }
 
 /// Copy thread state from the CPU data to the thread.
@@ -135,10 +141,24 @@ pub fn current_process<'a>() -> &'a mut Process {
 	}
 }
 
-pub fn current_thread<'a>() -> &'a Thread {
+pub fn current_thread() -> Arc<Thread> {
 	unsafe {
-		let thread: *const _;
+		let thread: *const Thread;
 		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		&*thread
+		let r = Arc::from_raw(thread);
+		let s = r.clone();
+		Arc::into_raw(r);
+		s
+	}
+}
+
+pub fn current_thread_weak() -> Weak<Thread> {
+	unsafe {
+		let thread: *const Thread;
+		asm!("mov {0}, gs:[0x18]", out(reg) thread);
+		let r = Arc::from_raw(thread);
+		let w = Arc::downgrade(&r);
+		Arc::into_raw(r);
+		w
 	}
 }

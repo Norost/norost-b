@@ -39,6 +39,21 @@ impl<T> Mutex<T> {
 
 unsafe impl<T> Sync for Mutex<T> {}
 
+impl<T> From<T> for Mutex<T> {
+	fn from(t: T) -> Self {
+		Self::new(t)
+	}
+}
+
+impl<T> Default for Mutex<T>
+where
+	T: Default,
+{
+	fn default() -> Self {
+		Self::new(Default::default())
+	}
+}
+
 pub struct Guard<'a, T> {
 	lock: &'a Mutex<T>,
 }
