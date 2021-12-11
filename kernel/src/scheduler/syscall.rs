@@ -1,11 +1,10 @@
-use crate::{driver, object_table};
+use crate::object_table;
 use crate::object_table::{Id, TableId, Job, JobId, JobType};
 use crate::memory::{frame, Page, r#virtual::RWX};
-use crate::scheduler::{process::Process, syscall::frame::DMAFrame};
+use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::scheduler::process::ObjectHandle;
 use crate::ffi;
 use crate::time::Monotonic;
-use core::marker::PhantomData;
 use core::mem;
 use core::ptr::NonNull;
 use core::time::Duration;
@@ -24,8 +23,8 @@ pub const SYSCALLS_LEN: usize = 17;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
-	init_client_queue,
-	push_client_queue,
+	undefined,
+	undefined,
 	alloc_dma,
 	physical_address,
 	next_table,
@@ -52,42 +51,6 @@ extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: us
 	Return {
 		status: 0,
 		value: len,
-	}
-}
-
-extern "C" fn init_client_queue(
-	address: usize,
-	submission_p2size: usize,
-	completion_p2size: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	Process::current()
-		.init_client_queue(
-			address as *mut _,
-			submission_p2size as u8,
-			completion_p2size as u8,
-		)
-		.unwrap();
-	Return {
-		status: 0,
-		value: 0,
-	}
-}
-
-extern "C" fn push_client_queue(
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	Process::current().poll_client_queue().unwrap();
-	Return {
-		status: 0,
-		value: 0,
 	}
 }
 
@@ -221,7 +184,7 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 }
 
 extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_or_length: usize, length_or_rwx: usize, rwx: usize) -> Return {
-	let (offset, length, rwx) = match mem::size_of_val(&offset_l) {
+	let (offset, _length, _rwx) = match mem::size_of_val(&offset_l) {
 		4 => ((offset_h_or_length as u64) << 32 | offset_l as u64, length_or_rwx, rwx),
 		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
 		s => unreachable!("unsupported usize size of {}", s),
@@ -235,10 +198,10 @@ extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_o
 	}
 }
 
-extern "C" fn read_object(handle: usize, base: usize, length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
-	let handle = ObjectHandle::from(handle);
-	let offset = merge_u64(offset_l, offset_h);
-	let base = NonNull::new(base as *mut u8).unwrap();
+extern "C" fn read_object(handle: usize, base: usize, _length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
+	let _handle = ObjectHandle::from(handle);
+	let _offset = merge_u64(offset_l, offset_h);
+	let _base = NonNull::new(base as *mut u8).unwrap();
 	todo!()
 }
 
@@ -259,8 +222,9 @@ extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: 
 	}
 }
 
-extern "C" fn poll_object(handle: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn poll_object(_handle: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	todo!();
+	/*
 	let handle = ObjectHandle::from(handle);
 	let object = Process::current().get_object(handle).unwrap();
 	let event = super::block_on(object.event_listener().unwrap());
@@ -268,6 +232,7 @@ extern "C" fn poll_object(handle: usize, _: usize, _: usize, _: usize, _: usize,
 		status: 0,
 		value: u32::from(event).try_into().unwrap(),
 	}
+	*/
 }
 
 extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: usize, _: usize, _: usize) -> Return {
@@ -280,7 +245,7 @@ extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: us
 	let name = name.into();
 	let tbl = match ty {
 		0 => {
-			let tbl = object_table::StreamingTable::new(name, NonNull::from(Process::current()));
+			let tbl = object_table::StreamingTable::new(name);
 			object_table::add_table(Arc::downgrade(&tbl) as Weak<dyn object_table::Table>);
 			tbl
 		}
@@ -398,21 +363,14 @@ extern "C" fn finish_table_job(handle: usize, job_ptr: usize, _: usize, _: usize
 	}
 }
 
-#[repr(transparent)]
-struct SleepOptions(usize);
-
-impl SleepOptions {
-}
-
 extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
 	dbg!(time);
 	unsafe { for _ in 0..1000000000usize { asm!("") } }
-	use crate::driver::apic::local_apic;
 
-	crate::scheduler::Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
-	unsafe { asm!("int 61") }; // Articifical timer interrupt.
+	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
+	Thread::yield_current();
 
 	Return {
 		status: 0,

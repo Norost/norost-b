@@ -1,11 +1,6 @@
 use super::*;
-use crate::memory::frame::{self, PageFrame, PPN};
-use crate::scheduler::{Thread, process::Process};
 use crate::sync::Mutex;
-use core::cell::{Cell, UnsafeCell};
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
-use core::time::Duration;
+use core::sync::atomic::{AtomicU32, Ordering};
 use alloc::{boxed::Box, sync::{Arc, Weak}, vec::Vec};
 
 #[derive(Default)]
@@ -19,7 +14,7 @@ pub struct StreamingTable {
 }
 
 impl StreamingTable {
-	pub fn new(name: Box<str>, process: NonNull<Process>) -> Arc<Self> {
+	pub fn new(name: Box<str>) -> Arc<Self> {
 		Self { name, ..Default::default() }.into()
 	}
 
@@ -46,7 +41,7 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, _name: Option<&str>, _tags: &[&str]) -> Box<dyn Query> {
 		todo!()
 	}
 
@@ -54,7 +49,7 @@ impl Table for StreamingTable {
 		self.submit_job(StreamJob::Open, id)
 	}
 
-	fn create(self: Arc<Self>, name: &str, tags: &[&str]) -> Ticket {
+	fn create(self: Arc<Self>, _name: &str, _tags: &[&str]) -> Ticket {
 		todo!()
 	}
 
@@ -115,7 +110,7 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
-	fn read(&self, _: u64, data: &mut [u8]) -> Result<Ticket, ()> {
+	fn read(&self, _: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
 		todo!();
 	}
 

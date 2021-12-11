@@ -26,10 +26,6 @@ pub unsafe fn init(boot: &boot::Info) {
 	let acpi = acpi::AcpiTables::from_rsdp(Handler, rsdp).unwrap();
 	dbg!(&acpi.dsdt, &acpi.ssdts);
 
-	for (sig, sdt) in acpi.sdts.iter() {
-		dbg!(sig);
-	}
-
 	super::apic::init_acpi(&acpi);
 
 	#[cfg(feature = "driver-pci")]

@@ -95,10 +95,8 @@ fn handle_double_fault(error: u32, rip: *const ()) {
 
 fn handle_general_protection_fault(error: u32, rip: *const ()) {
 	fatal!("General protection fault!");
-	unsafe {
-		fatal!("  error:   {:#x}", error);
-		fatal!("  RIP:     {:p}", rip);
-	}
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
 	halt();
 }
 

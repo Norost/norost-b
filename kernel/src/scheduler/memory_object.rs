@@ -1,4 +1,4 @@
-use crate::memory::frame::{PageFrame, PPN};
+use crate::memory::frame::PageFrame;
 use alloc::boxed::Box;
 use core::any::Any;
 use core::ops::Range;
@@ -13,5 +13,7 @@ where
 
 	/// Mark a range of physical pages as dirty. May panic if the range
 	/// is invalid.
-	fn mark_dirty(&mut self, range: Range<usize>) {}
+	fn mark_dirty(&mut self, range: Range<usize>) {
+		let _ = range;
+	}
 }

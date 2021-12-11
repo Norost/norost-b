@@ -1,7 +1,6 @@
 mod address_space;
 
 use super::frame::PPN;
-use crate::arch::amd64::r#virtual;
 pub use crate::arch::amd64::r#virtual::{
 	add_identity_mapping, init, phys_to_virt, virt_to_phys, MapError,
 };

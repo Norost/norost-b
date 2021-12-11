@@ -24,9 +24,3 @@ lto = "fat"
 codegen-units = 1
 opt-level = 'z'
 #strip = "symbols"
-
-[unstable]
-build-std = true
-
-[build]
-target = "x86_64-unknown-norostb.json"

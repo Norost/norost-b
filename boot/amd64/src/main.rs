@@ -2,7 +2,6 @@
 #![no_std]
 #![feature(asm, asm_const)]
 #![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
-#![feature(option_result_unwrap_unchecked)]
 
 mod cpuid;
 mod elf64;

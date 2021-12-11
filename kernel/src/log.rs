@@ -3,8 +3,8 @@ use crate::sync::SpinLock;
 
 pub static __LOG: SpinLock<Option<UART>> = SpinLock::new(None);
 
-pub fn init() {
-	*__LOG.lock() = unsafe { Some(UART::new(0x3f8)) };
+pub unsafe fn init() {
+	*__LOG.lock() = Some(UART::new(0x3f8));
 }
 
 pub unsafe fn force_unlock() {

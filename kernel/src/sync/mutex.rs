@@ -1,7 +1,6 @@
 use crate::scheduler::Thread;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::ptr;
 use core::sync::atomic::{AtomicU8, Ordering};
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.
@@ -30,10 +29,6 @@ impl<T> Mutex<T> {
 				Err(_) => Thread::yield_current(),
 			}
 		}
-	}
-
-	pub unsafe fn force_unlock(&self) {
-		self.lock.store(0, Ordering::Relaxed)
 	}
 }
 

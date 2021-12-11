@@ -1,4 +1,5 @@
 const ID_SYSLOG: usize = 0;
+
 const ID_ALLOC_DMA: usize = 3;
 const ID_PHYSICAL_ADDRESS: usize = 4;
 const ID_NEXT_TABLE: usize = 5;
@@ -7,8 +8,9 @@ const ID_QUERY_NEXT: usize = 7;
 const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
 const ID_SLEEP: usize = 10;
+
 const ID_CREATE_TABLE: usize = 13;
-const ID_POLL_OBJECT: usize = 14;
+
 const ID_TAKE_TABLE_JOB: usize = 15;
 const ID_FINISH_TABLE_JOB: usize = 16;
 
@@ -16,7 +18,6 @@ use crate::Page;
 use core::fmt;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
-use core::ops::Deref;
 use core::ptr::NonNull;
 use core::time::Duration;
 
@@ -155,7 +156,7 @@ impl fmt::Debug for ObjectInfo<'_> {
 			I: Iterator<Item = &'a [u8]>,
 		{
 			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-				let mut s = self.0.take().unwrap();
+				let s = self.0.take().unwrap();
 				let mut f = f.debug_list();
 				s.for_each(|e| { f.entry(&ByteStr(e)); });
 				f.finish()
@@ -228,7 +229,7 @@ impl Default for JobId {
 
 #[optimize(size)]
 #[inline]
-pub extern "C" fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -246,7 +247,7 @@ pub extern "C" fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
 }
 
 #[inline]
-pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -264,7 +265,7 @@ pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<
 }
 
 #[inline]
-pub extern "C" fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -281,7 +282,7 @@ pub extern "C" fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZer
 }
 
 #[inline]
-pub extern "C" fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
+pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
 	let (status, value): (usize, usize);
 	let mut info = TableInfo::default();
 	unsafe {
@@ -300,7 +301,7 @@ pub extern "C" fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)
 }
 
 #[inline]
-pub extern "C" fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8>]) -> Result<QueryHandle, (NonZeroUsize, usize)> {
+pub fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8>]) -> Result<QueryHandle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -321,7 +322,7 @@ pub extern "C" fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8
 }
 
 #[inline]
-pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> Result<(), (NonZeroUsize, usize)> {
+pub fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> Result<(), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -341,7 +342,7 @@ pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> Resul
 }
 
 #[inline]
-pub extern "C" fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
+pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -359,7 +360,7 @@ pub extern "C" fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZ
 }
 
 #[inline]
-pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
+pub fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -380,21 +381,20 @@ pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset
 
 
 #[inline]
-pub extern "C" fn sleep(duration: Duration) -> Result<(), (NonZeroUsize, usize)> {
+pub fn sleep(duration: Duration) {
 	let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
-	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_SLEEP,
 			in("rdi") micros,
-			lateout("rax") status,
-			lateout("rdx") value,
+			// Ignore failures and pretend the sleep terminated early
+			lateout("rax") _,
+			lateout("rdx") _,
 			lateout("rcx") _,
 			lateout("r11") _,
 		)
 	}
-	ret(status, value).map(|_| ())
 }
 
 #[inline]
@@ -418,26 +418,6 @@ pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, 
 		)
 	}
 	ret(status, value).map(Handle)
-}
-
-#[inline]
-pub fn poll_object<'a>(handle: Handle) -> Result<Job<'a>, (NonZeroUsize, usize)> {
-	todo!();
-	let (status, value): (usize, usize);
-	let mut job = Job::default();
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_POLL_OBJECT,
-			in("rdi") handle.0,
-			in("rsi") &mut job,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value).map(|v| job)
 }
 
 #[inline]
@@ -488,7 +468,9 @@ pub struct SysLog {
 impl SysLog {
 	#[optimize(size)]
 	fn flush(&mut self) {
-		syslog(&self.buffer[..usize::from(self.index)]);
+		// Ignore errors because what can we do? Panic won't do us any
+		// good either.
+		let _ = syslog(&self.buffer[..usize::from(self.index)]);
 		self.index = 0;
 	}
 }

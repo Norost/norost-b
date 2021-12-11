@@ -69,8 +69,11 @@ impl Features {
 }
 
 struct CPUID {
+	#[allow(dead_code)]
 	eax: u32,
+	#[allow(dead_code)]
 	ebx: u32,
+	#[allow(dead_code)]
 	ecx: u32,
 	edx: u32,
 }

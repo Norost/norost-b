@@ -1,4 +1,4 @@
-use super::{RegR, RegW, RegRW};
+use super::RegRW;
 use crate::memory::frame::PPN;
 use crate::memory::r#virtual::{AddressSpace, phys_to_virt};
 
@@ -8,6 +8,7 @@ struct IoApic {
 	data: RegRW,
 }
 
+#[allow(dead_code)]
 pub fn set_irq(irq: u8, apic_id: u8, vector: u8) {
 	let i = 0x10 + u32::from(irq) * 2;
 

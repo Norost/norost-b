@@ -2,11 +2,8 @@ mod elf;
 
 use super::{MemoryObject, Thread};
 use crate::arch;
-#[cfg(feature = "driver-pci")]
-use crate::driver::pci::PciDevice;
-use crate::ipc::queue::{ClientQueue, NewClientQueueError};
 use crate::memory::frame;
-use crate::memory::r#virtual::{AddressSpace, MapError, Mappable, RWX, MemoryObjectHandle};
+use crate::memory::r#virtual::{AddressSpace, MapError, RWX, MemoryObjectHandle};
 use crate::memory::Page;
 use crate::object_table::{Object, Query};
 use core::ptr::NonNull;
@@ -20,7 +17,6 @@ pub struct Process {
 	//named_ports: Box<[ReverseNamedPort]>,
 	thread: Option<Arc<Thread>>,
 	//threads: Vec<NonNull<Thread>>,
-	client_queue: Option<ClientQueue>,
 	objects: Vec<Arc<dyn Object>>,
 	queries: Vec<Box<dyn Query>>,
 }
@@ -32,7 +28,6 @@ impl Process {
 			address_space,
 			hint_color: 0,
 			thread: None,
-			client_queue: None,
 			objects: Default::default(),
 			queries: Default::default(),
 		})
@@ -45,49 +40,6 @@ impl Process {
 	pub fn run(&mut self) -> ! {
 		self.activate_address_space();
 		self.thread.clone().unwrap().resume()
-	}
-
-	pub fn init_client_queue(
-		&mut self,
-		address: *const Page,
-		submit_p2size: u8,
-		completion_p2size: u8,
-	) -> Result<(), NewQueueError> {
-		match self.client_queue.as_ref() {
-			Some(_) => Err(NewQueueError::QueueAlreadyExists(core::ptr::null())), // TODO return start of queue
-			None => {
-				let queue = ClientQueue::new(submit_p2size.into(), completion_p2size.into())
-					.map_err(NewQueueError::NewClientQueueError)?;
-				unsafe {
-					self.address_space
-						.map(address, queue.frames(), RWX::RW, self.hint_color)
-						.map_err(NewQueueError::MapError)?;
-				}
-				self.client_queue = Some(queue);
-				Ok(())
-			}
-		}
-	}
-
-	pub fn poll_client_queue(&mut self) -> Result<(), PollQueueError> {
-		let queue = self.client_queue.as_mut().ok_or(PollQueueError::NoQueue)?;
-		const OP_SYSLOG: u8 = 127;
-		while let Some(e) = queue.pop_submission() {
-			match e.opcode {
-				OP_SYSLOG => {
-					let ptr = usize::from_le_bytes(e.data[7..15].try_into().unwrap());
-					let len = usize::from_le_bytes(e.data[15..23].try_into().unwrap());
-					let s = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
-					info!("{}", core::str::from_utf8(s).unwrap());
-				}
-				_ => todo!(
-					"handle erroneous opcodes (opcode {}, userdata {})",
-					e.opcode,
-					e.user_data
-				),
-			}
-		}
-		Ok(())
 	}
 
 	/// Add an object to the process' object table.
@@ -120,14 +72,15 @@ impl Process {
 		self.address_space.map_object(base, obj, rwx, self.hint_color)
 	}
 
+	/// Get a reference to a memory object.
+	#[allow(dead_code)]
+	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
+		self.address_space.get_object(handle)
+	}
+
 	/// Get a reference to an object.
 	pub fn get_object(&mut self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
 		self.objects.get(handle.0)
-	}
-
-	/// Get a reference to a memory object.
-	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
-		self.address_space.get_object(handle)
 	}
 
 	/// Map a virtual address to a physical address.
@@ -156,22 +109,6 @@ impl Drop for Process {
 	fn drop(&mut self) {
 		todo!()
 	}
-}
-
-pub struct ProcessID {
-	index: u32,
-}
-
-#[derive(Debug)]
-pub enum NewQueueError {
-	QueueAlreadyExists(*const Page),
-	NewClientQueueError(NewClientQueueError),
-	MapError(MapError),
-}
-
-#[derive(Debug)]
-pub enum PollQueueError {
-	NoQueue,
 }
 
 #[derive(Clone, Copy)]

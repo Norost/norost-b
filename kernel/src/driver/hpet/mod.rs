@@ -1,4 +1,4 @@
-use crate::memory::r#virtual::{phys_to_virt, add_identity_mapping};
+use crate::memory::r#virtual::add_identity_mapping;
 use crate::time::Monotonic;
 use core::cell::UnsafeCell;
 use core::{ptr, fmt};
@@ -54,6 +54,7 @@ impl CapabilitiesId {
 	}
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 pub struct Timer {
 	configuration_capabilities: Reg,

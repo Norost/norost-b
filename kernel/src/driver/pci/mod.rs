@@ -6,15 +6,10 @@
 //!
 //! [osdev pci]: https://wiki.osdev.org/PCI
 
-use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
-use crate::memory::Page;
+use crate::memory::r#virtual::add_identity_mapping;
 use crate::object_table;
 use crate::sync::SpinLock;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
-use core::cell::Cell;
-use core::fmt;
-use core::num::NonZeroU32;
-use core::ptr::NonNull;
 use pci::Pci;
 use alloc::sync::Arc;
 
@@ -34,7 +29,6 @@ where
 	// TODO this is ridiculous. Fork the crate or implement MCFG ourselves.
 	for bus in 0..=255 {
 		// IDK what a segment group is
-		let segment_group = 0;
 		if pci.physical_address(0, bus, 0, 0).is_some() {
 			avail[usize::from(bus >> 7)] |= 1 << (bus & 0x7f);
 		}
@@ -57,5 +51,5 @@ where
 
 	let table = Arc::new(table::PciTable) as Arc<dyn crate::object_table::Table>;
 	object_table::add_table(Arc::downgrade(&table));
-	Arc::into_raw(table); // Intentionally leak the table.
+	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }

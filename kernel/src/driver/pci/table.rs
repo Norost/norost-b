@@ -1,7 +1,5 @@
-use crate::object_table::{Table, Query, NoneQuery, Id, Object, CreateObjectError, Ticket, Data, QueryResult, Error, Events, Unpollable, Job, JobTask};
-use crate::scheduler::Thread;
-use core::pin::Pin;
-use alloc::{boxed::Box, string::String, format, sync::{Arc, Weak}};
+use crate::object_table::{Table, Query, NoneQuery, Id, Object, Ticket, Data, QueryResult, Error, Job, JobTask};
+use alloc::{boxed::Box, string::String, format, sync::Arc};
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -127,7 +125,7 @@ fn bdf_from_string(s: &str) -> Option<(u8, u8, u8)> {
 	Some((bus.parse().ok()?, dev.parse().ok()?, func.parse().ok()?))
 }
 
-fn pci_dev_object(h: pci::Header, bus: u8, dev: u8, func: u8) -> Arc<dyn Object> {
+fn pci_dev_object(_h: pci::Header, bus: u8, dev: u8, _func: u8) -> Arc<dyn Object> {
 	Arc::new(super::PciDevice::new(bus, dev))
 }
 

@@ -9,7 +9,7 @@ use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
 use endian::{u16le, u32le, u64le};
-use virtio::pci::{CommonConfig, DeviceConfig, Notify};
+use virtio::pci::CommonConfig;
 use virtio::queue;
 
 const SIZE_MAX: u32 = 1 << 1;
@@ -98,8 +98,6 @@ impl RequestHeader {
 struct RequestStatus {
 	status: u8,
 }
-
-use virtio::pci::*;
 
 impl<'a, F> BlockDevice<'a, F>
 where

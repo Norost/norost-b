@@ -5,7 +5,6 @@
 use kernel::syscall;
 use kernel::syslog;
 
-use core::mem;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::time::Duration;
@@ -43,7 +42,6 @@ extern "C" fn main() {
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
 
-	use core::fmt::Write;
 	syslog!("handle: {:?}", handle);
 
 	let pci = unsafe {
@@ -57,7 +55,7 @@ extern "C" fn main() {
 
 	let mut dma_addr = 0x2666_0000;
 
-	let mut dev = unsafe {
+	let mut dev = {
 		let h = pci.get(0, 0, 0).unwrap();
 		match h {
 			pci::Header::H0(h) => {
@@ -78,11 +76,11 @@ extern "C" fn main() {
 					map_addr = map_addr.wrapping_add(16);
 					NonNull::new(addr as *mut _).unwrap()
 				};
-				let dma_alloc = |size| unsafe {
+				let dma_alloc = |size| {
 					syslog!("dma: {:#x}", dma_addr);
 					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
 					let res = syscall::alloc_dma(Some(d), size).unwrap();
-					dma_addr += size;
+					dma_addr += res;
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), a))
 				};
@@ -101,31 +99,21 @@ extern "C" fn main() {
 		*w = *r;
 	}
 
-	let h = pci.get(0, 0, 0).unwrap();
 	syslog!("writing the stuff...");
 	dev.write(&sectors, 0, || ()).unwrap();
 	syslog!("done writing the stuff");
-
-	let (mut rd, mut wr) = (
-		core::cell::UnsafeCell::new(P([0; 4096 / 8])),
-		core::cell::UnsafeCell::new(P([0; 4096 / 8])),
-	);
 
 	// Register new table of Streaming type
 	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
 	
 	// Register a new object
-
-	let mut wr_i = 0;
-
-	let mut i = 0;
+	// TODO
 
 	let mut buf = [0; 1024];
 
 	loop {
 		// Wait for events from the table
 		syslog!("ermaghed");
-		//let e = syscall::poll_object(tbl).unwrap();
 
 		let job = syscall::take_table_job(tbl, &mut buf).unwrap();
 
@@ -184,7 +172,7 @@ extern "C" fn main() {
 
 #[naked]
 #[export_name = "_start"]
-unsafe fn start() {
+unsafe extern "C" fn start() {
 	asm!(
 		"
 		lea		rsp, [rip + __stack + 0x8000]
@@ -206,14 +194,9 @@ struct P([u64; 512]);
 #[export_name = "__stack"]
 static mut STACK: [P; 0x8] = [P([0xdeadbeef; 4096 / 8]); 8];
 
-static mut TEST: u8 = 8;
-#[export_name = "test2__"]
-static TEST2: u8 = 5;
-
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
-	use core::fmt::Write;
-	writeln!(syscall::SysLog::default(), "Panic! {:#?}", info);
+	syslog!("Panic! {:#?}", info);
 	loop {
 		syscall::sleep(Duration::MAX);
 	}

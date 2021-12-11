@@ -2,7 +2,6 @@
 
 use super::Thread;
 use crate::sync::SpinLock;
-use core::ops::Deref;
 use core::ptr::NonNull;
 use alloc::{boxed::Box, sync::{Arc, Weak}};
 

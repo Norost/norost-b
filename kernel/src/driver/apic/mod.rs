@@ -12,16 +12,13 @@ use acpi::{AcpiHandler, AcpiTables};
 // No atomic is necessary as the value is read only once anyways.
 static mut TICKS_PER_SECOND: u32 = 0;
 
-pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>)
+pub unsafe fn init_acpi<H>(_: &AcpiTables<H>)
 where
 	H: AcpiHandler,
 {
 	disable_pic();
 	local_apic::init();
 	io_apic::init();
-	let info = acpi.platform_info().unwrap();
-
-	//io_apic::set_irq(8, 0, 40);
 }
 
 pub fn post_init() {

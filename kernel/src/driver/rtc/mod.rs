@@ -1,7 +1,7 @@
 //! # RTC driver
 
 use crate::time::Monotonic;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::AtomicU64;
 
 static RTC_TICKS: AtomicU64 = AtomicU64::new(0);
 
