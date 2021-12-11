@@ -24,7 +24,6 @@ pub unsafe fn init(boot: &boot::Info) {
 		.try_into()
 		.unwrap();
 	let acpi = acpi::AcpiTables::from_rsdp(Handler, rsdp).unwrap();
-	dbg!(&acpi.dsdt, &acpi.ssdts);
 
 	super::apic::init_acpi(&acpi);
 

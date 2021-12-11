@@ -75,7 +75,6 @@ fn handle_timer(rip: *const ()) -> ! {
 				apic::set_timer_oneshot(d, Some(16));
 				unsafe { asm!("sti") }
 				power::halt();
-				dbg!(Monotonic::now());
 			}
 		}
 	}

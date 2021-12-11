@@ -41,12 +41,6 @@ where
 
 	let pci = Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]);
 
-	for bus in pci.iter() {
-		for dev in bus.iter() {
-			dbg!(dev);
-		}
-	}
-
 	*PCI.lock() = Some(pci);
 
 	let table = Arc::new(table::PciTable) as Arc<dyn crate::object_table::Table>;

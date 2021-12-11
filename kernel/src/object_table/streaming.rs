@@ -26,10 +26,10 @@ impl StreamingTable {
 		let j = self.job_handlers.lock().pop();
 		if let Some(w) = j {
 			self.tickets.lock().push((job_id, id, ticket_waker));
-			w.complete(job.into_job(dbg!(job_id), id));
+			w.complete(job.into_job(job_id, id));
 		} else {
 			let mut l = self.jobs.lock();
-			l.push((dbg!(job_id), job, id, ticket_waker));
+			l.push((job_id, job, id, ticket_waker));
 		}
 
 		ticket
@@ -65,7 +65,6 @@ impl Table for StreamingTable {
 
 	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()> {
 		let mut c = self.tickets.lock();
-		dbg!(job.job_id);
 		let mut c = c.drain_filter(|e| e.0 == job.job_id);
 		let (_, id, tw) = c.next().ok_or(())?;
 		match job.ty {
@@ -129,7 +128,6 @@ enum StreamJob {
 
 impl StreamJob {
 	fn into_job(self, job_id: JobId, object_id: Id) -> Job {
-		dbg!(job_id);
 		match self {
 			StreamJob::Open => Job {
 				ty: JobType::Open,

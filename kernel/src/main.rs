@@ -98,7 +98,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
 		processes.push(process);
 	}
-	dbg!(scheduler::thread_count());
 
 	processes.leak()[0].run()
 }

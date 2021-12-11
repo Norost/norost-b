@@ -13,12 +13,17 @@ pub unsafe fn force_unlock() {
 
 #[macro_export]
 macro_rules! debug {
-	($($args:tt)*) => {{
-		#[allow(unused_imports)]
-		use core::fmt::Write;
-		let mut log = $crate::log::__LOG.lock();
-		writeln!(log.as_mut().unwrap(), $($args)*).unwrap();
-	}}
+	($($args:tt)*) => {
+		#[cfg(debug_assertions)]
+		{
+			#[allow(unused_imports)]
+			use core::fmt::Write;
+			let mut log = $crate::log::__LOG.lock();
+			writeln!(log.as_mut().unwrap(), $($args)*).unwrap();
+		}
+		#[cfg(not(debug_assertions))]
+		{}
+	}
 }
 
 #[macro_export]

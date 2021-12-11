@@ -206,19 +206,18 @@ extern "C" fn read_object(handle: usize, base: usize, _length: usize, offset_l: 
 }
 
 extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
-	dbg!(handle, base, length, offset_l);
 	let handle = ObjectHandle::from(handle);
 	let offset = merge_u64(offset_l, offset_h);
 	let base = NonNull::new(base as *mut u8).unwrap();
 	let data = unsafe { core::slice::from_raw_parts(base.as_ptr(), length) };
 
 	let written = Process::current().get_object(handle).unwrap().write(offset, data).unwrap();
-	let written = dbg!(super::block_on(written).unwrap())
+	let written = super::block_on(written).unwrap()
 		.into_usize().unwrap();
 
 	Return {
 		status: 0,
-		value: dbg!(written),
+		value: written,
 	}
 }
 
@@ -240,7 +239,6 @@ extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: us
 	assert!(name_len <= 255, "name too long");
 	let name = unsafe { core::slice::from_raw_parts(name.as_ptr(), name_len) };
 	let name = core::str::from_utf8(name).unwrap();
-	dbg!(name, ty);
 
 	let name = name.into();
 	let tbl = match ty {
@@ -329,7 +327,6 @@ extern "C" fn take_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, 
 	let tbl = Process::current().get_object(handle).unwrap().clone().as_table().unwrap();
 
 	let mut job = unsafe { &mut *(job_ptr as *mut FfiJob) };
-	dbg!(&job);
 	let copy_to = unsafe { core::slice::from_raw_parts_mut(job.buffer.unwrap().as_ptr(), job.buffer_size.try_into().unwrap()) };
 	let info = super::block_on(tbl.take_job());
 	job.ty = info.ty.into();
@@ -366,7 +363,6 @@ extern "C" fn finish_table_job(handle: usize, job_ptr: usize, _: usize, _: usize
 extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
-	dbg!(time);
 	unsafe { for _ in 0..1000000000usize { asm!("") } }
 
 	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));

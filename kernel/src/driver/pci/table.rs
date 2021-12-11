@@ -75,7 +75,6 @@ impl Iterator for QueryName {
 	type Item = QueryResult;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		dbg!(self.item);
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
 			let h = pci.as_ref().unwrap().get(b, d, f)?;

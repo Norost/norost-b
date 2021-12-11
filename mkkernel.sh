@@ -6,7 +6,6 @@ set -e
 
 cd kernel
 cargo rustc \
-	--release \
 	--target $RUST_TARGET_FILE \
 	-- \
 	-C linker=$CC \

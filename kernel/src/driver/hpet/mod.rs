@@ -89,11 +89,7 @@ where
 		// Period is in femtoseconds.
 		MULTIPLIER = u128::from(hpet().capabilities_id().period()) / 1_000_000;
 	}
-	dbg!(format_args!("{:#x}", h.base_address));
-	dbg!(format_args!("{:p}", &hpet().configuration));
-	dbg!(format_args!("{:p}", &hpet().counter));
 	hpet().configuration.set(hpet().configuration.get() | 1);
-	dbg!(hpet());
 }
 
 pub fn hpet() -> &'static Hpet {
