@@ -8,15 +8,17 @@ const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
 const ID_SLEEP: usize = 10;
 const ID_CREATE_TABLE: usize = 13;
+const ID_POLL_OBJECT: usize = 14;
+const ID_TAKE_TABLE_JOB: usize = 15;
+const ID_FINISH_TABLE_JOB: usize = 16;
 
 use crate::Page;
 use core::fmt;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
+use core::ops::Deref;
 use core::ptr::NonNull;
 use core::time::Duration;
-
-type Result = core::result::Result<usize, (NonZeroUsize, usize)>;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
@@ -187,9 +189,46 @@ pub enum TableType {
 #[repr(transparent)]
 pub struct TableHandle(usize);
 
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct Events(u32);
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct Job<'a> {
+	pub ty: u8,
+	pub flags: [u8; 3],
+	pub job_id: JobId,
+	pub buffer_size: u32,
+	pub operation_size: u32,
+	pub object_id: Id,
+	pub buffer: Option<NonNull<u8>>,
+	_marker: PhantomData<&'a ()>,
+}
+
+impl<'a> Job<'a> {
+	pub const OPEN: u8 = 0;
+	pub const READ: u8 = 1;
+	pub const WRITE: u8 = 2;
+
+	pub unsafe fn data(&self) -> &'a [u8] {
+		core::slice::from_raw_parts(self.buffer.unwrap().as_ptr(), self.operation_size.try_into().unwrap())
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct JobId(u32);
+
+impl Default for JobId {
+	fn default() -> Self {
+		Self(u32::MAX)
+	}
+}
+
 #[optimize(size)]
 #[inline]
-pub extern "C" fn syslog(s: &[u8]) -> Result {
+pub extern "C" fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -207,7 +246,7 @@ pub extern "C" fn syslog(s: &[u8]) -> Result {
 }
 
 #[inline]
-pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result {
+pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -225,7 +264,7 @@ pub extern "C" fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result 
 }
 
 #[inline]
-pub extern "C" fn physical_address(base: NonNull<Page>) -> Result {
+pub extern "C" fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -261,7 +300,7 @@ pub extern "C" fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)
 }
 
 #[inline]
-pub extern "C" fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8>]) -> core::result::Result<QueryHandle, (NonZeroUsize, usize)> {
+pub extern "C" fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8>]) -> Result<QueryHandle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -282,7 +321,7 @@ pub extern "C" fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8
 }
 
 #[inline]
-pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> core::result::Result<(), (NonZeroUsize, usize)> {
+pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> Result<(), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -302,7 +341,7 @@ pub extern "C" fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> core:
 }
 
 #[inline]
-pub extern "C" fn open_object(table_id: TableId, id: Id) -> core::result::Result<Handle, (NonZeroUsize, usize)> {
+pub extern "C" fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -320,7 +359,7 @@ pub extern "C" fn open_object(table_id: TableId, id: Id) -> core::result::Result
 }
 
 #[inline]
-pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> core::result::Result<NonNull<Page>, (NonZeroUsize, usize)> {
+pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -341,7 +380,7 @@ pub extern "C" fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset
 
 
 #[inline]
-pub extern "C" fn sleep(duration: Duration) -> core::result::Result<(), (NonZeroUsize, usize)> {
+pub extern "C" fn sleep(duration: Duration) -> Result<(), (NonZeroUsize, usize)> {
 	let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
 	let (status, value): (usize, usize);
 	unsafe {
@@ -359,7 +398,7 @@ pub extern "C" fn sleep(duration: Duration) -> core::result::Result<(), (NonZero
 }
 
 #[inline]
-pub fn create_table(name: &str, ty: TableType) -> core::result::Result<Handle, (NonZeroUsize, usize)> {
+pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, usize)> {
 	let ty = match ty {
 		TableType::Streaming => 0,
 	};
@@ -381,7 +420,66 @@ pub fn create_table(name: &str, ty: TableType) -> core::result::Result<Handle, (
 	ret(status, value).map(Handle)
 }
 
-#[repr(C)]
+#[inline]
+pub fn poll_object<'a>(handle: Handle) -> Result<Job<'a>, (NonZeroUsize, usize)> {
+	todo!();
+	let (status, value): (usize, usize);
+	let mut job = Job::default();
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_POLL_OBJECT,
+			in("rdi") handle.0,
+			in("rsi") &mut job,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|v| job)
+}
+
+#[inline]
+pub fn take_table_job(handle: Handle, buffer: &mut [u8]) -> Result<Job, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	let mut job = Job::default();
+	job.buffer_size = buffer.len().try_into().unwrap();
+	job.buffer = NonNull::new(buffer.as_mut_ptr());
+	//syslog!("{:#?}", &job);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_TAKE_TABLE_JOB,
+			in("rdi") handle.0,
+			in("rsi") &mut job,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|_| job)
+}
+
+#[inline]
+pub fn finish_table_job(handle: Handle, mut job: Job) -> Result<(), (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_FINISH_TABLE_JOB,
+			in("rdi") handle.0,
+			in("rsi") &mut job,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|_| ())
+}
+
 pub struct SysLog {
 	buffer: [u8; 127],
 	pub index: u8,
@@ -399,8 +497,8 @@ impl fmt::Write for SysLog {
 	#[optimize(size)]
 	fn write_str(&mut self, s: &str) -> fmt::Result {
 		for c in s.bytes() {
-			if c == b'\n' {
-				//|| usize::from(self.index) >= self.buffer.len() {
+			if c == b'\n'
+				|| usize::from(self.index) >= self.buffer.len() {
 				self.flush();
 			}
 			if c != b'\n' {
@@ -443,7 +541,7 @@ macro_rules! syslog {
 	};
 }
 
-fn ret(status: usize, value: usize) -> Result {
+fn ret(status: usize, value: usize) -> Result<usize, (NonZeroUsize, usize)> {
 	match NonZeroUsize::new(status) {
 		None => Ok(value),
 		Some(status) => Err((status, value)),

@@ -8,8 +8,9 @@ mod syscall;
 mod tss;
 pub mod r#virtual;
 
-pub use syscall::current_process;
-pub use syscall::set_current_thread;
+pub use idt::{Handler, IDTEntry};
+pub use syscall::{current_process, current_thread, current_thread_weak, set_current_thread};
+use crate::{scheduler, driver::apic, power, time::Monotonic};
 
 use core::mem::MaybeUninit;
 
@@ -52,6 +53,11 @@ pub unsafe fn init() {
 		14,
 		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
 	);
+	IDT.set(
+		16,
+		idt::IDTEntry::new(1 * 8, idt::NOOP, 0),
+	);
+
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
 
@@ -60,9 +66,18 @@ pub unsafe fn init() {
 
 fn handle_timer(rip: *const ()) -> ! {
 	debug!("Timer interrupt!");
-	unsafe {
-		debug!("  RIP:     {:p}", rip);
-		crate::scheduler::next_thread()
+	debug!("  RIP:     {:p}", rip);
+	apic::local_apic::get().eoi.set(0);
+	unsafe { syscall::save_current_thread_state() };
+	loop {
+		if let Err(t) = unsafe { scheduler::next_thread() } {
+			if let Some(d) = Monotonic::now().duration_until(t) {
+				apic::set_timer_oneshot(d, Some(16));
+				unsafe { asm!("sti") }
+				power::halt();
+				dbg!(Monotonic::now());
+			}
+		}
 	}
 }
 
@@ -100,8 +115,17 @@ fn handle_page_fault(error: u32, rip: *const ()) {
 	halt();
 }
 
-pub fn halt() -> ! {
-	loop {
-		unsafe { asm!("hlt") };
-	}
+pub fn halt() {
+	unsafe { asm!("hlt") };
+}
+
+pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
+	IDT.set(
+		irq,
+		entry,
+	);
+}
+
+pub fn yield_current_thread() {
+	unsafe { asm!("int 61") } // Fake timer interrupt
 }

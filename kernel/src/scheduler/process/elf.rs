@@ -1,3 +1,4 @@
+use crate::scheduler::Thread;
 use crate::memory::frame;
 use crate::memory::frame::PPN;
 use crate::memory::r#virtual::{virt_to_phys, MapError, RWX};
@@ -6,7 +7,7 @@ use core::mem;
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::ptr::NonNull;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc};
 
 #[repr(C)]
 struct FileHeader {
@@ -189,8 +190,9 @@ impl super::Process {
 
 		let mut slf = Box::new(slf);
 
-		let thr = super::super::Thread::new(header.entry.try_into().unwrap(), NonNull::from(&*slf))?;
-		let thr = super::super::round_robin::insert(thr);
+		let thr = Thread::new(header.entry.try_into().unwrap(), NonNull::from(&*slf))?;
+		let thr = Arc::new(thr);
+		super::super::round_robin::insert(Arc::downgrade(&thr));
 		slf.thread = Some(thr);
 
 		Ok(slf)

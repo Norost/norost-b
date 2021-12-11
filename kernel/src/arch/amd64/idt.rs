@@ -6,7 +6,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(u32, *const ()) = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					pop		rdi		# Error code
 					pop		rsi		# RIP
@@ -24,7 +24,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(*const ()) = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					# Save thread state
 					push	rax
@@ -88,7 +88,7 @@ macro_rules! __idt_wrap_handler {
 		{
 			const _: fn(*const ()) -> ! = $fn;
 			#[naked]
-			unsafe fn f() {
+			unsafe extern "C" fn f() {
 				asm!("
 					# Save thread state
 					push	rax
@@ -131,10 +131,27 @@ macro_rules! __idt_wrap_handler {
 	};
 }
 
+#[derive(Clone, Copy)]
 pub enum Handler {
-	Int(unsafe fn()),
-	Trap(unsafe fn()),
+	Int(unsafe extern "C" fn()),
+	Trap(unsafe extern "C" fn()),
 }
+
+#[naked]
+unsafe extern "C" fn irq_noop() {
+	asm!("
+		push	rax
+		movabs	rax, {eoi}
+		mov		DWORD PTR [rax], 0
+		pop		rax
+		iretq
+		",
+		eoi = const 0xffff_c000_fee0_00b0u64,
+		options(noreturn),
+	);
+}
+
+pub const NOOP: Handler = Handler::Int(irq_noop);
 
 #[repr(C)]
 pub struct IDTEntry {

@@ -2,7 +2,9 @@ use super::msr;
 use crate::scheduler::process::Process;
 use crate::scheduler::Thread;
 use crate::scheduler::syscall;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
+use core::mem::MaybeUninit;
+use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 pub unsafe fn init() {
 	// Enable syscall/sysenter
@@ -19,10 +21,44 @@ pub unsafe fn init() {
 	// Set LSTAR to handler
 	//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 	msr::wrmsr(msr::LSTAR, handler as u64);
+
+	// Set GS_BASE to a per-cpu structure
+	let data = Box::leak(Box::<CpuData>::new_uninit());
+	msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 }
 
-pub unsafe fn set_current_thread(thread: NonNull<Thread>) {
-	msr::wrmsr(msr::GS_BASE, thread.as_ptr() as u64);
+pub unsafe fn set_current_thread(thread: Arc<Thread>) {
+	// Remove reference to current thread.
+	let old_thr: *const Thread;
+	asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
+	if !old_thr.is_null() {
+		Arc::from_raw(old_thr);
+	}
+	// Set reference to new thread.
+	let user_stack = thread.user_stack.get().map_or_else(ptr::null_mut, NonNull::as_ptr);
+	asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
+	asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
+	asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());
+	asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
+}
+
+/// Copy thread state from the CPU data to the thread.
+pub unsafe fn save_current_thread_state() {
+	let (us, ks, tr): (*mut _, *mut _, *const Thread);
+	asm!("mov {0}, gs:[3 * 8]", lateout(reg) tr);
+	let tr = &*tr;
+	asm!("mov {0}, gs:[0 * 8]", lateout(reg) us);
+	tr.user_stack.set(NonNull::new(us));
+	asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
+	tr.kernel_stack.set(NonNull::new(ks).unwrap_unchecked());
+}
+
+#[repr(C)]
+struct CpuData {
+	user_stack_ptr: *mut usize,
+	kernel_stack_ptr: *mut usize,
+	process: *mut Process,
+	thread: *const Thread,
 }
 
 #[naked]
@@ -102,5 +138,27 @@ pub fn current_process<'a>() -> &'a mut Process {
 		let process: *mut Process;
 		asm!("mov {0}, gs:[0x10]", out(reg) process);
 		&mut *process
+	}
+}
+
+pub fn current_thread() -> Arc<Thread> {
+	unsafe {
+		let thread: *const Thread;
+		asm!("mov {0}, gs:[0x18]", out(reg) thread);
+		let r = Arc::from_raw(thread);
+		let s = r.clone();
+		Arc::into_raw(r);
+		s
+	}
+}
+
+pub fn current_thread_weak() -> Weak<Thread> {
+	unsafe {
+		let thread: *const Thread;
+		asm!("mov {0}, gs:[0x18]", out(reg) thread);
+		let r = Arc::from_raw(thread);
+		let w = Arc::downgrade(&r);
+		Arc::into_raw(r);
+		w
 	}
 }

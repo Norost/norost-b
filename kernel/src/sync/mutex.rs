@@ -5,12 +5,12 @@ use core::ptr;
 use core::sync::atomic::{AtomicU8, Ordering};
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.
-pub struct SpinLock<T> {
+pub struct Mutex<T> {
 	lock: AtomicU8,
 	value: UnsafeCell<T>,
 }
 
-impl<T> SpinLock<T> {
+impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
 			lock: AtomicU8::new(0),
@@ -27,7 +27,7 @@ impl<T> SpinLock<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
-				Err(_) => core::hint::spin_loop(),
+				Err(_) => Thread::yield_current(),
 			}
 		}
 	}
@@ -37,15 +37,15 @@ impl<T> SpinLock<T> {
 	}
 }
 
-unsafe impl<T> Sync for SpinLock<T> {}
+unsafe impl<T> Sync for Mutex<T> {}
 
-impl<T> From<T> for SpinLock<T> {
+impl<T> From<T> for Mutex<T> {
 	fn from(t: T) -> Self {
 		Self::new(t)
 	}
 }
 
-impl<T> Default for SpinLock<T>
+impl<T> Default for Mutex<T>
 where
 	T: Default,
 {
@@ -55,7 +55,7 @@ where
 }
 
 pub struct Guard<'a, T> {
-	lock: &'a SpinLock<T>,
+	lock: &'a Mutex<T>,
 }
 
 impl<T> Deref for Guard<'_, T> {

@@ -57,8 +57,8 @@ _start:
 	test	eax, eax
 	jnz		panic
 
-	# Sleep forever
-	mov		rdi, -1
+	# Sleep for 1 second (1_000_000 µs)
+	mov		rdi, 1000000
 	call	sleep
 
 	jmp		4b

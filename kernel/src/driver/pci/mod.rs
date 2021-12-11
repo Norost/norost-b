@@ -16,6 +16,7 @@ use core::fmt;
 use core::num::NonZeroU32;
 use core::ptr::NonNull;
 use pci::Pci;
+use alloc::sync::Arc;
 
 mod device;
 mod table;
@@ -54,5 +55,7 @@ where
 
 	*PCI.lock() = Some(pci);
 
-	object_table::add_table(table::PciTable);
+	let table = Arc::new(table::PciTable) as Arc<dyn crate::object_table::Table>;
+	object_table::add_table(Arc::downgrade(&table));
+	Arc::into_raw(table); // Intentionally leak the table.
 }
