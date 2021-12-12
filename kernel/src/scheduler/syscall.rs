@@ -1,14 +1,18 @@
-use crate::object_table;
-use crate::object_table::{Id, TableId, Job, JobId, JobType};
-use crate::memory::{frame, Page, r#virtual::RWX};
-use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
-use crate::scheduler::process::ObjectHandle;
 use crate::ffi;
+use crate::memory::{frame, r#virtual::RWX, Page};
+use crate::object_table;
+use crate::object_table::{Id, Job, JobId, JobType, TableId};
+use crate::scheduler::process::ObjectHandle;
+use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+	vec::Vec,
+};
 use core::mem;
 use core::ptr::NonNull;
 use core::time::Duration;
-use alloc::{boxed::Box, vec::Vec, sync::{Arc, Weak}};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -54,25 +58,38 @@ extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: us
 	}
 }
 
-extern "C" fn alloc_dma(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn alloc_dma(
+	base: usize,
+	size: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let rwx = RWX::RW;
 	let base = NonNull::new(base as *mut _);
 	let count = (size + Page::MASK) / Page::SIZE;
 	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
-	Process::current().map_memory_object(base, Box::new(frame), rwx).unwrap();
+	Process::current()
+		.map_memory_object(base, Box::new(frame), rwx)
+		.unwrap();
 	Return {
 		status: 0,
 		value: 0,
 	}
 }
 
-extern "C" fn physical_address(address: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn physical_address(
+	address: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let address = NonNull::new(address as *mut _).unwrap();
 	let value = Process::current().get_physical_address(address).unwrap().0;
-	Return {
-		status: 0,
-		value,
-	}
+	Return { status: 0, value }
 }
 
 #[repr(C)]
@@ -82,13 +99,22 @@ struct TableInfo {
 }
 
 /// Return the name and ID of the table after another table, or the first table if `id == usize::MAX`.
-extern "C" fn next_table(id: usize, info_ptr: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn next_table(
+	id: usize,
+	info_ptr: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let id = (id != usize::MAX).then(|| TableId::from(u32::try_from(id).unwrap()));
 	let (name, id) = match object_table::next_table(id) {
 		Some(p) => p,
-		None => return Return {
-			status: 1,
-			value: 0,
+		None => {
+			return Return {
+				status: 1,
+				value: 0,
+			}
 		}
 	};
 	// SAFETY: FIXME
@@ -104,7 +130,14 @@ extern "C" fn next_table(id: usize, info_ptr: usize, _: usize, _: usize, _: usiz
 	}
 }
 
-extern "C" fn query_table(id: usize, name: usize, name_len: usize, tags: usize, tags_len: usize, _: usize) -> Return {
+extern "C" fn query_table(
+	id: usize,
+	name: usize,
+	name_len: usize,
+	tags: usize,
+	tags_len: usize,
+	_: usize,
+) -> Return {
 	let id = TableId::from(u32::try_from(id).unwrap());
 	// SAFETY: FIXME
 	let (name, tags) = unsafe {
@@ -137,13 +170,23 @@ struct ObjectInfo {
 	tags_offsets: [u32; 255],
 }
 
-extern "C" fn query_next(handle: usize, info: usize, string_buffer: usize, string_buffer_len: usize, _: usize, _: usize) -> Return {
+extern "C" fn query_next(
+	handle: usize,
+	info: usize,
+	string_buffer: usize,
+	string_buffer_len: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	// SAFETY: FIXME
 	let info = unsafe { &mut *(info as *mut ObjectInfo) };
-	let string_buffer = unsafe {
-		core::slice::from_raw_parts_mut(string_buffer as *mut u8, string_buffer_len)
-	};
-	match Process::current().get_query_mut(handle.into()).unwrap().next() {
+	let string_buffer =
+		unsafe { core::slice::from_raw_parts_mut(string_buffer as *mut u8, string_buffer_len) };
+	match Process::current()
+		.get_query_mut(handle.into())
+		.unwrap()
+		.next()
+	{
 		None => Return {
 			status: 1,
 			value: 0,
@@ -168,11 +211,19 @@ extern "C" fn query_next(handle: usize, info: usize, string_buffer: usize, strin
 	}
 }
 
-extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn open_object(
+	table_id: usize,
+	id_l: usize,
+	id_h: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let table_id = match mem::size_of_val(&table_id) {
 		4 | 8 | 16 => u32::try_from(table_id).unwrap(),
 		s => unreachable!("unsupported usize size of {}", s),
-	}.into();
+	}
+	.into();
 	let id = Id::from(merge_u64(id_l, id_h));
 	let ticket = object_table::get(table_id, id).unwrap();
 	let obj = super::block_on(ticket).unwrap().into_object().unwrap();
@@ -183,37 +234,67 @@ extern "C" fn open_object(table_id: usize, id_l: usize, id_h: usize, _: usize, _
 	}
 }
 
-extern "C" fn map_object(handle: usize, base: usize, offset_l: usize, offset_h_or_length: usize, length_or_rwx: usize, rwx: usize) -> Return {
+extern "C" fn map_object(
+	handle: usize,
+	base: usize,
+	offset_l: usize,
+	offset_h_or_length: usize,
+	length_or_rwx: usize,
+	rwx: usize,
+) -> Return {
 	let (offset, _length, _rwx) = match mem::size_of_val(&offset_l) {
-		4 => ((offset_h_or_length as u64) << 32 | offset_l as u64, length_or_rwx, rwx),
+		4 => (
+			(offset_h_or_length as u64) << 32 | offset_l as u64,
+			length_or_rwx,
+			rwx,
+		),
 		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
 		s => unreachable!("unsupported usize size of {}", s),
 	};
 	let handle = ObjectHandle::from(handle);
 	let base = NonNull::new(base as *mut _);
-	Process::current().map_memory_object_2(handle, base, offset, RWX::RW).unwrap();
+	Process::current()
+		.map_memory_object_2(handle, base, offset, RWX::RW)
+		.unwrap();
 	Return {
 		status: 0,
 		value: base.unwrap().as_ptr() as usize,
 	}
 }
 
-extern "C" fn read_object(handle: usize, base: usize, _length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
+extern "C" fn read_object(
+	handle: usize,
+	base: usize,
+	_length: usize,
+	offset_l: usize,
+	offset_h: usize,
+	_: usize,
+) -> Return {
 	let _handle = ObjectHandle::from(handle);
 	let _offset = merge_u64(offset_l, offset_h);
 	let _base = NonNull::new(base as *mut u8).unwrap();
 	todo!()
 }
 
-extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: usize, offset_h: usize, _: usize) -> Return {
+extern "C" fn write_object(
+	handle: usize,
+	base: usize,
+	length: usize,
+	offset_l: usize,
+	offset_h: usize,
+	_: usize,
+) -> Return {
 	let handle = ObjectHandle::from(handle);
 	let offset = merge_u64(offset_l, offset_h);
 	let base = NonNull::new(base as *mut u8).unwrap();
 	let data = unsafe { core::slice::from_raw_parts(base.as_ptr(), length) };
 
-	let written = Process::current().get_object(handle).unwrap().write(offset, data).unwrap();
-	let written = super::block_on(written).unwrap()
-		.into_usize().unwrap();
+	let written = Process::current()
+		.get_object(handle)
+		.unwrap()
+		.write(offset, data)
+		.unwrap();
+	let written = super::block_on(written).unwrap().into_usize().unwrap();
 
 	Return {
 		status: 0,
@@ -221,7 +302,14 @@ extern "C" fn write_object(handle: usize, base: usize, length: usize, offset_l: 
 	}
 }
 
-extern "C" fn poll_object(_handle: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn poll_object(
+	_handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	todo!();
 	/*
 	let handle = ObjectHandle::from(handle);
@@ -234,7 +322,14 @@ extern "C" fn poll_object(_handle: usize, _: usize, _: usize, _: usize, _: usize
 	*/
 }
 
-extern "C" fn create_table(name: usize, name_len: usize, ty: usize, _options: usize, _: usize, _: usize) -> Return {
+extern "C" fn create_table(
+	name: usize,
+	name_len: usize,
+	ty: usize,
+	_options: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let name = NonNull::new(name as *mut u8).unwrap();
 	assert!(name_len <= 255, "name too long");
 	let name = unsafe { core::slice::from_raw_parts(name.as_ptr(), name_len) };
@@ -306,7 +401,7 @@ impl TryFrom<FfiJob> for Job {
 		let buffer = unsafe {
 			core::slice::from_raw_parts(
 				fj.buffer.unwrap().as_ptr(),
-				fj.buffer_size.try_into().unwrap()
+				fj.buffer_size.try_into().unwrap(),
 			)
 		};
 		Ok(Self {
@@ -320,14 +415,31 @@ impl TryFrom<FfiJob> for Job {
 	}
 }
 
-extern "C" fn take_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn take_table_job(
+	handle: usize,
+	job_ptr: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	assert_ne!(job_ptr, 0);
 
 	let handle = ObjectHandle::from(handle);
-	let tbl = Process::current().get_object(handle).unwrap().clone().as_table().unwrap();
+	let tbl = Process::current()
+		.get_object(handle)
+		.unwrap()
+		.clone()
+		.as_table()
+		.unwrap();
 
 	let mut job = unsafe { &mut *(job_ptr as *mut FfiJob) };
-	let copy_to = unsafe { core::slice::from_raw_parts_mut(job.buffer.unwrap().as_ptr(), job.buffer_size.try_into().unwrap()) };
+	let copy_to = unsafe {
+		core::slice::from_raw_parts_mut(
+			job.buffer.unwrap().as_ptr(),
+			job.buffer_size.try_into().unwrap(),
+		)
+	};
 	let info = super::block_on(tbl.take_job());
 	job.ty = info.ty.into();
 	job.flags = info.flags;
@@ -344,11 +456,23 @@ extern "C" fn take_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, 
 	}
 }
 
-extern "C" fn finish_table_job(handle: usize, job_ptr: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn finish_table_job(
+	handle: usize,
+	job_ptr: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	assert_ne!(job_ptr, 0);
 
 	let handle = ObjectHandle::from(handle);
-	let tbl = Process::current().get_object(handle).unwrap().clone().as_table().unwrap();
+	let tbl = Process::current()
+		.get_object(handle)
+		.unwrap()
+		.clone()
+		.as_table()
+		.unwrap();
 
 	let data = unsafe { (job_ptr as *mut FfiJob).read() };
 
@@ -360,10 +484,21 @@ extern "C" fn finish_table_job(handle: usize, job_ptr: usize, _: usize, _: usize
 	}
 }
 
-extern "C" fn sleep(time_l: usize, time_h: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn sleep(
+	time_l: usize,
+	time_h: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
-	unsafe { for _ in 0..1000000000usize { asm!("") } }
+	unsafe {
+		for _ in 0..1000000000usize {
+			asm!("")
+		}
+	}
 
 	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();

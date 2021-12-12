@@ -1,5 +1,7 @@
-use crate::object_table::{Table, Query, NoneQuery, Id, Object, Ticket, Data, QueryResult, Error, Job, JobTask};
-use alloc::{boxed::Box, string::String, format, sync::Arc};
+use crate::object_table::{
+	Data, Error, Id, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
+};
+use alloc::{boxed::Box, format, string::String, sync::Arc};
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -11,8 +13,10 @@ impl Table for PciTable {
 
 	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
 		if let Some(name) = name {
-			Box::new(QueryName { item: bdf_from_string(name) })
-		} else { 
+			Box::new(QueryName {
+				item: bdf_from_string(name),
+			})
+		} else {
 			let (mut vendor_id, mut device_id) = (None, None);
 			for t in tags {
 				let f = |a: &mut Option<u16>, h: &str| {
@@ -42,7 +46,9 @@ impl Table for PciTable {
 		let r = n_to_bdf(id.into())
 			.and_then(|(bus, dev, func)| {
 				let pci = super::PCI.lock();
-				pci.as_ref().unwrap().get(bus, dev, func)
+				pci.as_ref()
+					.unwrap()
+					.get(bus, dev, func)
 					.map(|d| Data::Object(pci_dev_object(d, bus, dev, func)))
 			})
 			.ok_or_else(|| todo!());
@@ -50,7 +56,10 @@ impl Table for PciTable {
 	}
 
 	fn create(self: Arc<Self>, _: &str, _: &[&str]) -> Ticket {
-		let e = Error { code: 1, message: "can't create pci devices".into() };
+		let e = Error {
+			code: 1,
+			message: "can't create pci devices".into(),
+		};
 		Ticket::new_complete(Err(e))
 	}
 
@@ -119,7 +128,7 @@ fn bdf_to_string(bus: u8, dev: u8, func: u8) -> String {
 }
 
 fn bdf_from_string(s: &str) -> Option<(u8, u8, u8)> {
-	let (bus, s)    = s.split_once(':')?;
+	let (bus, s) = s.split_once(':')?;
 	let (dev, func) = s.split_once('.')?;
 	Some((bus.parse().ok()?, dev.parse().ok()?, func.parse().ok()?))
 }
@@ -134,13 +143,14 @@ fn pci_dev_query_result(h: pci::Header, bus: u8, dev: u8, func: u8) -> QueryResu
 	let tags = [
 		format!("vendor-id:{:04x}", h.vendor_id()).into(),
 		format!("device-id:{:04x}", h.device_id()).into(),
-	].into();
+	]
+	.into();
 	QueryResult { id, name, tags }
 }
 
 fn n_to_bdf(n: u64) -> Option<(u8, u8, u8)> {
 	let func = u8::try_from((n >> 0) & 0x07).unwrap();
-	let dev  = u8::try_from((n >> 3) & 0x1f).unwrap();
-	let bus  = u8::try_from((n >> 8) & 0xff).ok()?;
+	let dev = u8::try_from((n >> 3) & 0x1f).unwrap();
+	let bus = u8::try_from((n >> 8) & 0xff).ok()?;
 	Some((bus, dev, func))
 }

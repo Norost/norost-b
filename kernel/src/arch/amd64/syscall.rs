@@ -1,9 +1,12 @@
 use super::msr;
 use crate::scheduler::process::Process;
-use crate::scheduler::Thread;
 use crate::scheduler::syscall;
+use crate::scheduler::Thread;
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+};
 use core::ptr::{self, NonNull};
-use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 pub unsafe fn init() {
 	// Enable syscall/sysenter
@@ -34,7 +37,10 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 		Arc::from_raw(old_thr);
 	}
 	// Set reference to new thread.
-	let user_stack = thread.user_stack.get().map_or_else(ptr::null_mut, NonNull::as_ptr);
+	let user_stack = thread
+		.user_stack
+		.get()
+		.map_or_else(ptr::null_mut, NonNull::as_ptr);
 	asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
 	asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
 	asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());

@@ -4,12 +4,12 @@ pub mod apic;
 pub mod hpet;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
-pub mod uart;
-#[cfg(feature = "driver-vga")]
-pub mod vga;
 #[cfg(feature = "driver-pic")]
 pub mod pic;
 pub mod rtc;
+pub mod uart;
+#[cfg(feature = "driver-vga")]
+pub mod vga;
 
 use crate::boot;
 

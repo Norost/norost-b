@@ -1,19 +1,19 @@
 mod memory_object;
 pub mod process;
+mod round_robin;
 pub mod syscall;
 mod thread;
-mod round_robin;
 mod waker;
 
-use core::time::Duration;
 use crate::time::Monotonic;
+use alloc::sync::Arc;
 use core::future::Future;
-use core::pin::Pin;
 use core::marker::Unpin;
+use core::pin::Pin;
 use core::task::{Context, Poll};
+use core::time::Duration;
 pub use memory_object::*;
 pub use thread::Thread;
-use alloc::sync::Arc;
 
 pub use round_robin::count as thread_count;
 

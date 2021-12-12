@@ -2,11 +2,11 @@ use super::process::Process;
 use crate::arch;
 use crate::memory::frame;
 use crate::time::Monotonic;
+use alloc::sync::{Arc, Weak};
 use core::cell::Cell;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
-use alloc::sync::{Arc, Weak};
 
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
@@ -16,7 +16,10 @@ pub struct Thread {
 }
 
 impl Thread {
-	pub fn new(start: usize, process: NonNull<Process>) -> Result<Self, frame::AllocateContiguousError> {
+	pub fn new(
+		start: usize,
+		process: NonNull<Process>,
+	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
 			let kernel_stack_base = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?
 				.as_ptr()
@@ -53,7 +56,8 @@ impl Thread {
 
 		// iretq is the only way to preserve all registers
 		unsafe {
-			asm!("
+			asm!(
+				"
 				# Set kernel stack
 				mov		rsp, gs:[8]
 
@@ -92,7 +96,7 @@ impl Thread {
 
 				rex64 iretq
 			",
-			options(noreturn),
+				options(noreturn),
 			);
 		}
 	}

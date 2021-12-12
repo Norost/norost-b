@@ -1,13 +1,13 @@
-pub mod local_apic;
 pub mod io_apic;
+pub mod local_apic;
 mod reg;
 
-use reg::*;
 use crate::arch::amd64::msr;
 use crate::memory::Page;
 use crate::time::Monotonic;
-use core::time::Duration;
 use acpi::{AcpiHandler, AcpiTables};
+use core::time::Duration;
+use reg::*;
 
 // No atomic is necessary as the value is read only once anyways.
 static mut TICKS_PER_SECOND: u32 = 0;
@@ -34,7 +34,8 @@ pub fn post_init() {
 /// Smaller durations are more precise. The timer may end early if the duration
 /// is too large.
 pub fn set_timer_oneshot(t: Duration, irq: Option<u8>) {
-	let mut ticks = t.as_nanos()
+	let mut ticks = t
+		.as_nanos()
 		.saturating_mul(unsafe { TICKS_PER_SECOND }.into())
 		.saturating_div(1_000_000_000);
 	// Scale down the resolution until the ticks fit
@@ -61,7 +62,9 @@ pub fn set_timer_oneshot(t: Duration, irq: Option<u8>) {
 
 	if let Some(irq) = irq {
 		let t = local_apic::get().lvt_timer.get();
-		local_apic::get().lvt_timer.set(t & !(1 << 16 | 0xff) | u32::from(irq));
+		local_apic::get()
+			.lvt_timer
+			.set(t & !(1 << 16 | 0xff) | u32::from(irq));
 	}
 
 	local_apic::get().divide_configuration.set(shift);
@@ -75,9 +78,7 @@ fn calibrate_timer(t: Duration) {
 	let lapic = local_apic::get();
 	lapic.divide_configuration.set(0b1011); // Set divisor to 1
 	lapic.initial_count.set(u32::MAX);
-	while Monotonic::now() < end {
-		/* pass */
-	}
+	while Monotonic::now() < end { /* pass */ }
 	let ticks = u32::MAX - lapic.current_count.get();
 	lapic.initial_count.set(0);
 	unsafe {

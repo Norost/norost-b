@@ -3,11 +3,11 @@ mod elf;
 use super::{MemoryObject, Thread};
 use crate::arch;
 use crate::memory::frame;
-use crate::memory::r#virtual::{AddressSpace, MapError, RWX, MemoryObjectHandle};
+use crate::memory::r#virtual::{AddressSpace, MapError, MemoryObjectHandle, RWX};
 use crate::memory::Page;
 use crate::object_table::{Object, Query};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::NonNull;
-use alloc::{boxed::Box, vec::Vec, sync::Arc};
 
 pub struct Process {
 	address_space: AddressSpace,
@@ -54,9 +54,9 @@ impl Process {
 		base: Option<NonNull<Page>>,
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError>
-	{
-		self.address_space.map_object(base, object.into(), rwx, self.hint_color)
+	) -> Result<MemoryObjectHandle, MapError> {
+		self.address_space
+			.map_object(base, object.into(), rwx, self.hint_color)
 	}
 
 	/// Map a memory object to a memory range.
@@ -66,10 +66,10 @@ impl Process {
 		base: Option<NonNull<Page>>,
 		offset: u64,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError>
-	{
+	) -> Result<MemoryObjectHandle, MapError> {
 		let obj = self.objects[handle.0].memory_object(offset).unwrap();
-		self.address_space.map_object(base, obj, rwx, self.hint_color)
+		self.address_space
+			.map_object(base, obj, rwx, self.hint_color)
 	}
 
 	/// Get a reference to a memory object.

@@ -10,8 +10,8 @@ use crate::memory::r#virtual::add_identity_mapping;
 use crate::object_table;
 use crate::sync::SpinLock;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
-use pci::Pci;
 use alloc::sync::Arc;
+use pci::Pci;
 
 mod device;
 mod table;

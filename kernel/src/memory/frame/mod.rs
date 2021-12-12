@@ -9,8 +9,8 @@ pub use dma_frame::*;
 
 use super::Page;
 use core::fmt;
-use core::ptr;
 use core::num::NonZeroUsize;
+use core::ptr;
 
 /// A Physical Page Number.
 ///
@@ -236,7 +236,10 @@ where
 
 /// Allocate a physically contiguous range of pages.
 pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
-	dumb_stack::STACK.lock().pop_contiguous_range(count).ok_or(AllocateContiguousError::OutOfFrames)
+	dumb_stack::STACK
+		.lock()
+		.pop_contiguous_range(count)
+		.ok_or(AllocateContiguousError::OutOfFrames)
 }
 
 /// Free a range of pages.

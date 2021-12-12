@@ -1,6 +1,6 @@
 use super::RegRW;
 use crate::memory::frame::PPN;
-use crate::memory::r#virtual::{AddressSpace, phys_to_virt};
+use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
 
 #[repr(C)]
 struct IoApic {
@@ -17,7 +17,10 @@ pub fn set_irq(irq: u8, apic_id: u8, vector: u8) {
 		write(i + 1, read(i + 1) & 0x00ffffff | (u32::from(apic_id) << 24));
 
 		// ... | mask | ... | delivery status | destination | delivery | vector
-		write(i + 0, read(i + 0) & 0xfffe_0000 | 0 << 12 | 0 << 11 | 0b000 << 8 | u32::from(vector))
+		write(
+			i + 0,
+			read(i + 0) & 0xfffe_0000 | 0 << 12 | 0 << 11 | 0b000 << 8 | u32::from(vector),
+		)
 	}
 }
 

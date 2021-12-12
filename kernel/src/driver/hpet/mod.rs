@@ -1,8 +1,8 @@
 use crate::memory::r#virtual::add_identity_mapping;
 use crate::time::Monotonic;
+use acpi::{hpet::HpetInfo, AcpiHandler, AcpiTables};
 use core::cell::UnsafeCell;
-use core::{ptr, fmt};
-use acpi::{AcpiTables, AcpiHandler, hpet::HpetInfo};
+use core::{fmt, ptr};
 
 // No atomic is strictly necessary since we only read from this after boot.
 static mut ADDRESS: *const Hpet = core::ptr::null();
@@ -38,8 +38,14 @@ impl fmt::Debug for Hpet {
 		f.field("period", &(cap >> 32));
 		f.field("vendor_id", &format_args!("{:#x}", (cap >> 16) as u16));
 		f.field("capabilities", &format_args!("{:#x}", cap & 0xffff_ffff));
-		f.field("configuration", &format_args!("{:#x}", self.configuration.get()));
-		f.field("interrupt_status", &format_args!("{:#x}", self.interrupt_status.get()));
+		f.field(
+			"configuration",
+			&format_args!("{:#x}", self.configuration.get()),
+		);
+		f.field(
+			"interrupt_status",
+			&format_args!("{:#x}", self.interrupt_status.get()),
+		);
 		f.field("counter", &self.counter.get());
 		f.finish()
 	}
@@ -85,7 +91,10 @@ where
 	let h = HpetInfo::new(acpi).unwrap();
 	assert!(h.main_counter_is_64bits());
 	unsafe {
-		ADDRESS = add_identity_mapping(h.base_address.try_into().unwrap(), 4096).unwrap().cast().as_ptr();
+		ADDRESS = add_identity_mapping(h.base_address.try_into().unwrap(), 4096)
+			.unwrap()
+			.cast()
+			.as_ptr();
 		// Period is in femtoseconds.
 		MULTIPLIER = u128::from(hpet().capabilities_id().period()) / 1_000_000;
 	}

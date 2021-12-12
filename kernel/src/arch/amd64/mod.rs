@@ -8,9 +8,9 @@ mod syscall;
 mod tss;
 pub mod r#virtual;
 
+use crate::{driver::apic, power, scheduler, time::Monotonic};
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{current_process, current_thread, current_thread_weak, set_current_thread};
-use crate::{scheduler, driver::apic, power, time::Monotonic};
 
 use core::mem::MaybeUninit;
 
@@ -36,27 +36,27 @@ pub unsafe fn init() {
 	GDT_PTR.assume_init_mut().activate();
 
 	// Setup IDT
-	IDT.set(61, idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0));
+	IDT.set(
+		61,
+		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0),
+	);
 	IDT.set(
 		8,
-		idt::IDTEntry::new(
-			1 * 8,
-			__idt_wrap_handler!(trap handle_double_fault),
-			0,
-		),
+		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
 	);
 	IDT.set(
 		13,
-		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_general_protection_fault), 0),
+		idt::IDTEntry::new(
+			1 * 8,
+			__idt_wrap_handler!(trap handle_general_protection_fault),
+			0,
+		),
 	);
 	IDT.set(
 		14,
 		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
 	);
-	IDT.set(
-		16,
-		idt::IDTEntry::new(1 * 8, idt::NOOP, 0),
-	);
+	IDT.set(16, idt::IDTEntry::new(1 * 8, idt::NOOP, 0));
 
 	IDT_PTR.write(idt::IDTPointer::new(&IDT));
 	IDT_PTR.assume_init_ref().activate();
@@ -117,10 +117,7 @@ pub fn halt() {
 }
 
 pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
-	IDT.set(
-		irq,
-		entry,
-	);
+	IDT.set(irq, entry);
 }
 
 pub fn yield_current_thread() {

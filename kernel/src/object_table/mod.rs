@@ -9,7 +9,11 @@ mod streaming;
 
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
-use alloc::{boxed::Box, vec::Vec, sync::{Arc, Weak}};
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+	vec::Vec,
+};
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
@@ -23,7 +27,7 @@ static TABLES: SpinLock<Vec<Weak<dyn Table>>> = SpinLock::new(Vec::new());
 /// A table of objects.
 pub trait Table
 where
-	Self: Object, // This allows putting tables in the object list of each process.
+	Self: Object,
 {
 	/// The name of this table.
 	fn name(&self) -> &str;
@@ -106,7 +110,12 @@ impl EventListener {
 	#[allow(dead_code)]
 	fn new() -> (Self, EventWaker) {
 		let shared = Arc::new(SpinLock::default());
-		(Self { shared: shared.clone() }, EventWaker { shared })
+		(
+			Self {
+				shared: shared.clone(),
+			},
+			EventWaker { shared },
+		)
 	}
 }
 
@@ -125,7 +134,7 @@ impl Future for EventListener {
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		let mut l = self.shared.lock();
 		if let Some(e) = l.1.take() {
-			return Poll::Ready(e)
+			return Poll::Ready(e);
 		}
 		l.0 = Some(cx.waker().clone());
 		Poll::Pending
@@ -160,8 +169,8 @@ pub struct Job {
 #[repr(u8)]
 pub enum JobType {
 	#[default]
-	Open  = 0,
-	Read  = 1,
+	Open = 0,
+	Read = 1,
 	Write = 2,
 }
 
@@ -231,13 +240,25 @@ pub struct Ticket {
 
 impl Ticket {
 	pub fn new_complete(status: Result<Data, Error>) -> Self {
-		let inner = SpinLock::new(TicketInner { waker: None, status: Some(status) }).into();
+		let inner = SpinLock::new(TicketInner {
+			waker: None,
+			status: Some(status),
+		})
+		.into();
 		Self { inner }
 	}
 
 	pub fn new() -> (Self, TicketWaker) {
-		let inner = Arc::new(SpinLock::new(TicketInner { waker: None, status: None }));
-		(Self { inner: inner.clone() }, TicketWaker { inner })
+		let inner = Arc::new(SpinLock::new(TicketInner {
+			waker: None,
+			status: None,
+		}));
+		(
+			Self {
+				inner: inner.clone(),
+			},
+			TicketWaker { inner },
+		)
 	}
 }
 
@@ -295,7 +316,12 @@ pub struct JobTask {
 impl JobTask {
 	pub fn new(job: Option<Job>) -> (Self, JobWaker) {
 		let shared = Arc::new(SpinLock::new((None, job)));
-		(Self { shared: shared.clone() }, JobWaker { shared })
+		(
+			Self {
+				shared: shared.clone(),
+			},
+			JobWaker { shared },
+		)
 	}
 }
 
@@ -346,7 +372,11 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(table_id: TableId, name: Option<&str>, tags: &[&str]) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(
+	table_id: TableId,
+	name: Option<&str>,
+	tags: &[&str],
+) -> Result<Box<dyn Query>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
@@ -392,10 +422,10 @@ pub fn next_table(id: Option<TableId>) -> Option<(Box<str>, TableId)> {
 			.iter()
 			.enumerate()
 			.find_map(|(i, t)| t.upgrade().map(|t| (i, t))),
-		Some(id) => tbl
-			.iter()
-			.enumerate()
-			.find_map(|(i, t)| t.upgrade().and_then(|t| (i > id.0 as usize).then(|| (i, t)))),
+		Some(id) => tbl.iter().enumerate().find_map(|(i, t)| {
+			t.upgrade()
+				.and_then(|t| (i > id.0 as usize).then(|| (i, t)))
+		}),
 	}?;
 	Some((tbl.name().into(), TableId(id as u32)))
 }

@@ -19,10 +19,8 @@ extern "C" fn main() {
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
 		syslog!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
-			let tags: [syscall::Slice<u8>; 2] = [
-				b"vendor-id:1af4".into(),
-				b"device-id:1001".into(),
-			];
+			let tags: [syscall::Slice<u8>; 2] =
+				[b"vendor-id:1af4".into(), b"device-id:1001".into()];
 			let h = syscall::query_table(i, None, &tags).unwrap();
 			syslog!("{:?}", h);
 			let mut buf = [0; 256];
@@ -44,14 +42,7 @@ extern "C" fn main() {
 
 	syslog!("handle: {:?}", handle);
 
-	let pci = unsafe {
-		pci::Pci::new(
-			pci_config.cast(),
-			0,
-			0,
-			&[],
-		)
-	};
+	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
 	let mut dma_addr = 0x2666_0000;
 
@@ -84,7 +75,8 @@ extern "C" fn main() {
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), a))
 				};
-				let d = virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
+				let d =
+					virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
 
 				syslog!("pci status: {:#x}", h.status());
 
@@ -105,7 +97,7 @@ extern "C" fn main() {
 
 	// Register new table of Streaming type
 	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
-	
+
 	// Register a new object
 	// TODO
 
@@ -131,39 +123,39 @@ extern "C" fn main() {
 
 		// Log events
 		//while let Some(cmd) = cmds.pop_command() {
-			/*
-			{
-				syslog!("[stream-table] {:?}", "open");
-				Response::open(
-					&cmd,
-					NonNull::new(wr.get()).unwrap().cast(),
-					12,
-					NonNull::new(rd.get()).unwrap().cast(),
-					12,
-				)
-			}
-			{
-				syslog!("[stream-table] {:?}", count);
+		/*
+		{
+			syslog!("[stream-table] {:?}", "open");
+			Response::open(
+				&cmd,
+				NonNull::new(wr.get()).unwrap().cast(),
+				12,
+				NonNull::new(rd.get()).unwrap().cast(),
+				12,
+			)
+		}
+		{
+			syslog!("[stream-table] {:?}", count);
 
-				let wr: &[u8] = unsafe {
-					core::slice::from_raw_parts(wr.get().cast(), 4096)
-				};
-				syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
-				syslog!("wr_i {}", wr_i % wr.len());
-				for i in wr_i .. wr_i + count {
-					syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
-				}
-
-				wr_i += count;
-				Response::write(
-					&cmd,
-					count,
-				)
+			let wr: &[u8] = unsafe {
+				core::slice::from_raw_parts(wr.get().cast(), 4096)
+			};
+			syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
+			syslog!("wr_i {}", wr_i % wr.len());
+			for i in wr_i .. wr_i + count {
+				syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
 			}
-			last_cmd = Some(cmd);
-			i += 1;
-			c.unwrap();mds.push_response(rsp);
-			*/
+
+			wr_i += count;
+			Response::write(
+				&cmd,
+				count,
+			)
+		}
+		last_cmd = Some(cmd);
+		i += 1;
+		c.unwrap();mds.push_response(rsp);
+		*/
 		//}
 
 		// Mark events as handled

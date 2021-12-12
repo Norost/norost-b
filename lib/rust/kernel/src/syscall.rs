@@ -92,13 +92,21 @@ impl<T> Slice<T> {
 
 impl<T> From<&[T]> for Slice<T> {
 	fn from(s: &[T]) -> Self {
-		Self { ptr: NonNull::from(s).as_non_null_ptr(), len: s.len(), _marker: PhantomData }
+		Self {
+			ptr: NonNull::from(s).as_non_null_ptr(),
+			len: s.len(),
+			_marker: PhantomData,
+		}
 	}
 }
 
 impl<T, const N: usize> From<&[T; N]> for Slice<T> {
 	fn from(s: &[T; N]) -> Self {
-		Self { ptr: NonNull::new(s.as_ptr() as *mut _).unwrap(), len: s.len(), _marker: PhantomData }
+		Self {
+			ptr: NonNull::new(s.as_ptr() as *mut _).unwrap(),
+			len: s.len(),
+			_marker: PhantomData,
+		}
 	}
 }
 
@@ -114,7 +122,10 @@ pub struct ObjectInfo<'a> {
 
 impl<'a> ObjectInfo<'a> {
 	pub fn new(string_buffer: &'a mut [u8]) -> Self {
-		Self { string_buffer, ..Default::default() }
+		Self {
+			string_buffer,
+			..Default::default()
+		}
 	}
 
 	pub fn name(&self) -> &[u8] {
@@ -124,7 +135,7 @@ impl<'a> ObjectInfo<'a> {
 	pub fn tag(&'a self, index: usize) -> &'a [u8] {
 		let index = self.tags_offsets[index] as usize;
 		let len = usize::from(self.string_buffer[index]);
-		&self.string_buffer[index + 1 .. index + 1 + len]
+		&self.string_buffer[index + 1..index + 1 + len]
 	}
 
 	pub fn tags_count(&self) -> usize {
@@ -158,7 +169,9 @@ impl fmt::Debug for ObjectInfo<'_> {
 			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 				let s = self.0.take().unwrap();
 				let mut f = f.debug_list();
-				s.for_each(|e| { f.entry(&ByteStr(e)); });
+				s.for_each(|e| {
+					f.entry(&ByteStr(e));
+				});
 				f.finish()
 			}
 		}
@@ -166,7 +179,10 @@ impl fmt::Debug for ObjectInfo<'_> {
 		let mut f = f.debug_struct(stringify!(ObjectInfo));
 		f.field("id", &self.id);
 		f.field("name", &ByteStr(self.name()));
-		f.field("tags", &S(Cell::new(Some((0..self.tags_count()).map(|i| self.tag(i))))));
+		f.field(
+			"tags",
+			&S(Cell::new(Some((0..self.tags_count()).map(|i| self.tag(i))))),
+		);
 		f.finish()
 	}
 }
@@ -213,7 +229,10 @@ impl<'a> Job<'a> {
 	pub const WRITE: u8 = 2;
 
 	pub unsafe fn data(&self) -> &'a [u8] {
-		core::slice::from_raw_parts(self.buffer.unwrap().as_ptr(), self.operation_size.try_into().unwrap())
+		core::slice::from_raw_parts(
+			self.buffer.unwrap().as_ptr(),
+			self.operation_size.try_into().unwrap(),
+		)
 	}
 }
 
@@ -301,7 +320,11 @@ pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
 }
 
 #[inline]
-pub fn query_table(id: TableId, name: Option<&[u8]>, tags: &[Slice<u8>]) -> Result<QueryHandle, (NonZeroUsize, usize)> {
+pub fn query_table(
+	id: TableId,
+	name: Option<&[u8]>,
+	tags: &[Slice<u8>],
+) -> Result<QueryHandle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -360,7 +383,12 @@ pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, u
 }
 
 #[inline]
-pub fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, length: usize) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
+pub fn map_object(
+	handle: Handle,
+	base: Option<NonNull<Page>>,
+	offset: u64,
+	length: usize,
+) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -378,7 +406,6 @@ pub fn map_object(handle: Handle, base: Option<NonNull<Page>>, offset: u64, leng
 	}
 	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
 }
-
 
 #[inline]
 pub fn sleep(duration: Duration) {
@@ -479,8 +506,7 @@ impl fmt::Write for SysLog {
 	#[optimize(size)]
 	fn write_str(&mut self, s: &str) -> fmt::Result {
 		for c in s.bytes() {
-			if c == b'\n'
-				|| usize::from(self.index) >= self.buffer.len() {
+			if c == b'\n' || usize::from(self.index) >= self.buffer.len() {
 				self.flush();
 			}
 			if c != b'\n' {

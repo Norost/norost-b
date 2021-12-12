@@ -266,7 +266,6 @@ impl<'a> Queue<'a> {
 	///
 	/// The amount of buffers collected.
 	pub fn collect_used(&mut self, mut callback: impl FnMut(u16, u64, u32)) -> usize {
-
 		atomic::fence(Ordering::Acquire);
 		let (head, ring) = used_ring!(self);
 		let table = descriptors_table!(self);
@@ -305,8 +304,10 @@ impl<'a> Queue<'a> {
 		&mut self,
 		mut callback: impl FnMut(u16, u64, u32),
 		mut wait_fn: impl FnMut(),
-	) { 
-		while usize::from(self.free_count) != self.free_descriptors.len() && self.collect_used(&mut callback) == 0 {
+	) {
+		while usize::from(self.free_count) != self.free_descriptors.len()
+			&& self.collect_used(&mut callback) == 0
+		{
 			//callback(self.free_count, self.free_descriptors.len() as u64, u32::MAX);
 			wait_fn();
 		}

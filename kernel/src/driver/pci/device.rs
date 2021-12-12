@@ -3,8 +3,8 @@ use crate::memory::frame::PageFrame;
 use crate::memory::frame::PPN;
 use crate::object_table::Object;
 use crate::scheduler::MemoryObject;
-use pci::BaseAddress;
 use alloc::boxed::Box;
+use pci::BaseAddress;
 
 /// A single PCI device.
 pub struct PciDevice {
@@ -37,7 +37,10 @@ impl MemoryObject for PciDevice {
 impl Object for PciDevice {
 	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
 		if offset == 0 {
-			return Some(Box::new(PciDevice { device: self.device, bus: self.bus }));
+			return Some(Box::new(PciDevice {
+				device: self.device,
+				bus: self.bus,
+			}));
 		}
 
 		let index = usize::try_from(offset - 1).ok()?;

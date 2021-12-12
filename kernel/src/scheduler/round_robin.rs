@@ -2,8 +2,11 @@
 
 use super::Thread;
 use crate::sync::SpinLock;
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+};
 use core::ptr::NonNull;
-use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 static THREAD_LIST: SpinLock<(usize, Option<NonNull<Node>>)> = SpinLock::new((0, None));
 
@@ -47,7 +50,9 @@ pub fn next() -> Option<Arc<Thread>> {
 			n.next
 		};
 		let c = unsafe { curr.as_mut() };
-		drop(unsafe { Box::from_raw(c.next.as_ptr()); });
+		drop(unsafe {
+			Box::from_raw(c.next.as_ptr());
+		});
 		if c.next == curr {
 			l.1 = None;
 			return None;

@@ -1,23 +1,31 @@
-use core::time::Duration;
 use core::fmt;
+use core::time::Duration;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Monotonic {
-	nanoseconds: u64
+	nanoseconds: u64,
 }
 
 impl Monotonic {
 	pub const ZERO: Self = Self { nanoseconds: 0 };
-	pub const MAX: Self = Self { nanoseconds: u64::MAX };
+	pub const MAX: Self = Self {
+		nanoseconds: u64::MAX,
+	};
 
 	pub fn from_nanoseconds(ns: u128) -> Self {
-		Self { nanoseconds: ns.try_into().expect("nanoseconds too far in the future") }
+		Self {
+			nanoseconds: ns.try_into().expect("nanoseconds too far in the future"),
+		}
 	}
 
 	#[allow(dead_code)]
 	pub fn from_seconds(s: u128) -> Self {
-		Self { nanoseconds: (s * 1_000_000_000).try_into().expect("seconds too far in the future") }
+		Self {
+			nanoseconds: (s * 1_000_000_000)
+				.try_into()
+				.expect("seconds too far in the future"),
+		}
 	}
 
 	pub fn checked_add(self, dt: Duration) -> Option<Self> {
@@ -29,12 +37,15 @@ impl Monotonic {
 
 	pub fn saturating_add(self, dt: Duration) -> Self {
 		self.checked_add(dt).unwrap_or(Self::MAX)
-	}	
+	}
 
 	/// Returns the `Duration` until the given `Monotonic`. This is `None` if the
 	/// given `Monotonic` has already passed.
 	pub fn duration_until(self, until: Self) -> Option<Duration> {
-		until.nanoseconds.checked_sub(self.nanoseconds).map(Duration::from_nanos)
+		until
+			.nanoseconds
+			.checked_sub(self.nanoseconds)
+			.map(Duration::from_nanos)
 	}
 }
 

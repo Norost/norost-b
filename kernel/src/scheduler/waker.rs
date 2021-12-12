@@ -1,8 +1,8 @@
 //! Waker for asynchronous operations.
 
 use super::Thread;
-use core::task::{RawWaker, RawWakerVTable, Waker};
 use alloc::sync::Weak;
+use core::task::{RawWaker, RawWakerVTable, Waker};
 
 static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
 

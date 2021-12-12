@@ -1,7 +1,11 @@
 use super::*;
 use crate::sync::Mutex;
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+	vec::Vec,
+};
 use core::sync::atomic::{AtomicU32, Ordering};
-use alloc::{boxed::Box, sync::{Arc, Weak}, vec::Vec};
 
 #[derive(Default)]
 pub struct StreamingTable {
@@ -15,7 +19,11 @@ pub struct StreamingTable {
 
 impl StreamingTable {
 	pub fn new(name: Box<str>) -> Arc<Self> {
-		Self { name, ..Default::default() }.into()
+		Self {
+			name,
+			..Default::default()
+		}
+		.into()
 	}
 
 	fn submit_job(&self, job: StreamJob, id: Id) -> Ticket {
@@ -69,12 +77,15 @@ impl Table for StreamingTable {
 		let (_, id, tw) = c.next().ok_or(())?;
 		match job.ty {
 			JobType::Open => {
-				let obj = Arc::new(StreamObject { id, table: Arc::downgrade(&self) });
+				let obj = Arc::new(StreamObject {
+					id,
+					table: Arc::downgrade(&self),
+				});
 				tw.complete(Ok(Data::Object(obj)));
 			}
 			JobType::Write => {
 				tw.complete(Ok(Data::Usize(job.operation_size.try_into().unwrap())));
-			},
+			}
 			JobType::Read => todo!(),
 		}
 		assert!(c.next().is_none());
@@ -114,10 +125,13 @@ impl Object for StreamObject {
 	}
 
 	fn write(&self, _: u64, data: &[u8]) -> Result<Ticket, ()> {
-		self.table.upgrade().map(|tbl| {
-			let job = StreamJob::Write { data: data.into() };
-			tbl.submit_job(job, self.id)
-		}).ok_or(())
+		self.table
+			.upgrade()
+			.map(|tbl| {
+				let job = StreamJob::Write { data: data.into() };
+				tbl.submit_job(job, self.id)
+			})
+			.ok_or(())
 	}
 }
 
@@ -135,16 +149,14 @@ impl StreamJob {
 				object_id,
 				..Default::default()
 			},
-			StreamJob::Write { data } => {
-				Job {
-					ty: JobType::Write,
-					job_id,
-					object_id,
-					operation_size: data.len().try_into().unwrap(),
-					buffer: data,
-					..Default::default()
-				}
-			}
+			StreamJob::Write { data } => Job {
+				ty: JobType::Write,
+				job_id,
+				object_id,
+				operation_size: data.len().try_into().unwrap(),
+				buffer: data,
+				..Default::default()
+			},
 		}
 	}
 }

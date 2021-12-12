@@ -1,6 +1,6 @@
 use crate::arch::r#virtual;
 use crate::memory::{
-	r#virtual::{MapError, RWX, PPN},
+	r#virtual::{MapError, PPN, RWX},
 	Page,
 };
 use crate::scheduler::MemoryObject;
@@ -30,7 +30,6 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<MemoryObjectHandle, MapError> {
-
 		let base = base.unwrap(); // TODO
 		let count = object
 			.physical_pages()
@@ -87,9 +86,7 @@ impl AddressSpace {
 	/// `size` must be a multiple of the page size.
 	pub fn identity_map(ppn: PPN, size: usize) -> bool {
 		assert_eq!(size % Page::SIZE, 0);
-		unsafe {
-			r#virtual::add_identity_mapping(ppn.as_phys(), size).is_ok()
-		}
+		unsafe { r#virtual::add_identity_mapping(ppn.as_phys(), size).is_ok() }
 	}
 }
 
