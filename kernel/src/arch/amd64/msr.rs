@@ -1,10 +1,12 @@
 pub const IA32_APIC_BASE_MSR: u32 = 0x1b;
+#[allow(dead_code)]
 pub const IA32_APIC_BASE_MSR_BSP: u64 = 0x100;
 pub const IA32_APIC_BASE_MSR_ENABLE: u64 = 1 << 11;
 
 pub const IA32_EFER: u32 = 0xc0000080;
 pub const IA32_EFER_SCE: u64 = 1;
 
+#[allow(dead_code)]
 pub const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
 
 pub const STAR: u32 = 0xc0000081;

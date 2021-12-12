@@ -3,7 +3,6 @@ use crate::scheduler::process::Process;
 use crate::scheduler::Thread;
 use crate::scheduler::syscall;
 use core::ptr::{self, NonNull};
-use core::mem::MaybeUninit;
 use alloc::{boxed::Box, sync::{Arc, Weak}};
 
 pub unsafe fn init() {
@@ -147,7 +146,7 @@ pub fn current_thread() -> Arc<Thread> {
 		asm!("mov {0}, gs:[0x18]", out(reg) thread);
 		let r = Arc::from_raw(thread);
 		let s = r.clone();
-		Arc::into_raw(r);
+		let _ = Arc::into_raw(r);
 		s
 	}
 }
@@ -158,7 +157,7 @@ pub fn current_thread_weak() -> Weak<Thread> {
 		asm!("mov {0}, gs:[0x18]", out(reg) thread);
 		let r = Arc::from_raw(thread);
 		let w = Arc::downgrade(&r);
-		Arc::into_raw(r);
+		let _ = Arc::into_raw(r);
 		w
 	}
 }

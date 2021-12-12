@@ -1,7 +1,6 @@
 use core::convert::TryFrom;
 use core::fmt;
 use core::marker::PhantomData;
-use core::num::NonZeroU8;
 use core::ptr::NonNull;
 use endian::{u16le, u32le, u64le};
 use volatile::VolatileCell;
@@ -56,6 +55,7 @@ impl Capability {
 	pub const NOTIFY_CONFIGURATION: u8 = 2;
 	pub const ISR_CONFIGURATION: u8 = 3;
 	pub const DEVICE_CONFIGURATION: u8 = 4;
+	#[allow(dead_code)]
 	pub const PCI_CONFIGURATION: u8 = 5;
 }
 

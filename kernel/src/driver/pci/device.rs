@@ -1,13 +1,9 @@
 use super::PCI;
 use crate::memory::frame::PageFrame;
 use crate::memory::frame::PPN;
-use crate::object_table::{Object, Events, Unpollable};
+use crate::object_table::Object;
 use crate::scheduler::MemoryObject;
-use core::pin::Pin;
-use core::ptr::NonNull;
-use core::future::Future;
-use core::task::{Context, Poll};
-use pci::{BaseAddress, Header};
+use pci::BaseAddress;
 use alloc::boxed::Box;
 
 /// A single PCI device.
@@ -28,40 +24,6 @@ impl PciDevice {
 		PageFrame {
 			base: PPN::try_from_usize(addr).unwrap(),
 			p2size: 0,
-		}
-	}
-
-	pub fn bar_region(&self, index: u8) -> Result<BarRegion, BarError> {
-		let index = usize::from(index);
-		let pci = PCI.lock();
-		let pci = pci.as_ref().unwrap();
-		let header = pci.get(self.bus, self.device, 0).unwrap();
-		match header {
-			Header::H0(h) => {
-				h.base_address
-					.get(index)
-					.ok_or(BarError::NonExistent)
-					.and_then(|bar| {
-						let (size, orig) = bar.size();
-						bar.set(orig);
-						if let Some(size) = size {
-							if !BaseAddress::is_mmio(orig) {
-								return Err(BarError::NotMmio);
-							}
-							let upper = || h.base_address.get(index + 1).map(|e| e.get());
-							let addr = BaseAddress::address(orig, upper).unwrap();
-							let frame = PageFrame {
-								base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
-								p2size: size.trailing_zeros() as u8 - 12, // log2
-							};
-							let device = PciDevice { bus: self.bus, device: self.device };
-							Ok(BarRegion { device, frame })
-						} else {
-							Err(BarError::Invalid)
-						}
-					})
-			}
-			_ => todo!(),
 		}
 	}
 }
@@ -95,21 +57,12 @@ impl Object for PciDevice {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			p2size: size.trailing_zeros() as u8 - 12, // log2
 		};
-		let device = PciDevice { bus: self.bus, device: self.device };
-		Some(Box::new(BarRegion { device, frame }))
+		Some(Box::new(BarRegion { frame }))
 	}
-}
-
-#[derive(Debug)]
-pub enum BarError {
-	NonExistent,
-	Invalid,
-	NotMmio,
 }
 
 /// A single MMIO region pointer to by a BAR of a PCI device.
 pub struct BarRegion {
-	device: PciDevice,
 	frame: PageFrame,
 }
 

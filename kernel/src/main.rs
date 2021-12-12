@@ -11,6 +11,7 @@
 #![feature(new_uninit)]
 #![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
+#![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
 #![feature(trait_upcasting)]
 
 extern crate alloc;
@@ -50,7 +51,6 @@ mod arch;
 mod boot;
 mod driver;
 mod ffi;
-mod ipc;
 mod memory;
 mod object_table;
 mod power;
@@ -61,8 +61,6 @@ mod time;
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	unsafe {
-		memory::r#virtual::init();
-		arch::init();
 		log::init();
 	}
 
@@ -84,6 +82,11 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 
 	unsafe {
+		memory::r#virtual::init();
+		arch::init();
+	}
+
+	unsafe {
 		driver::init(boot_info);
 	}
 
@@ -95,7 +98,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
 		processes.push(process);
 	}
-	dbg!(scheduler::thread_count());
 
 	processes.leak()[0].run()
 }

@@ -17,7 +17,8 @@ pub fn init() {
 						for l in 1..=3 {
 							let e = common::get_entry_mut(root, virt, l, 3 - l);
 							let ppn = e.unwrap_or_else(|_| unreachable!()).clear().unwrap();
-							frame::deallocate(1, || frame::PageFrame::from_raw(ppn, 0));
+							frame::deallocate(1, || frame::PageFrame::from_raw(ppn, 0))
+								.unwrap();
 						}
 					}
 					break;
@@ -37,6 +38,7 @@ pub fn init() {
 			.iter()
 			.filter(|e| e.is_present())
 			.count();
+
 	frame::allocate(
 		256 + 128 - i,
 		|frame| {
@@ -50,7 +52,7 @@ pub fn init() {
 		},
 		common::IDENTITY_MAP_ADDRESS,
 		0,
-	);
+	).unwrap();
 }
 
 pub struct DumpCurrent;

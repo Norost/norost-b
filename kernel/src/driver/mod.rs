@@ -5,6 +5,7 @@ pub mod hpet;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
 pub mod uart;
+#[cfg(feature = "driver-vga")]
 pub mod vga;
 #[cfg(feature = "driver-pic")]
 pub mod pic;

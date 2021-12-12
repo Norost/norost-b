@@ -200,7 +200,6 @@ pub enum AllocateError {
 #[derive(Debug)]
 pub enum AllocateContiguousError {
 	OutOfFrames,
-	CountIsZero,
 }
 
 #[derive(Debug)]
@@ -276,6 +275,7 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 }
 
 /// The amount of free memory in bytes.
+#[allow(dead_code)]
 pub fn free_memory() -> u128 {
 	(dumb_stack::STACK.lock().count() * Page::SIZE)
 		.try_into()

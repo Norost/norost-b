@@ -6,7 +6,6 @@ mod round_robin;
 mod waker;
 
 use core::time::Duration;
-use crate::object_table;
 use crate::time::Monotonic;
 use core::future::Future;
 use core::pin::Pin;

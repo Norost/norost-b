@@ -1,6 +1,5 @@
 use super::process::Process;
 use crate::arch;
-use crate::object_table::Job;
 use crate::memory::frame;
 use crate::time::Monotonic;
 use core::cell::Cell;
@@ -13,7 +12,6 @@ pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
 	pub kernel_stack: Cell<NonNull<usize>>,
 	pub process: NonNull<Process>,
-	kernel_stack_base: NonNull<[usize; 512]>,
 	sleep_until: Cell<Monotonic>,
 }
 
@@ -38,7 +36,6 @@ impl Thread {
 			kernel_stack = kernel_stack.sub(15);
 			Ok(Self {
 				user_stack: Cell::new(None),
-				kernel_stack_base: NonNull::new(kernel_stack_base).unwrap(),
 				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
@@ -114,7 +111,7 @@ impl Thread {
 	}
 
 	pub fn yield_current() {
-		unsafe { asm!("int 61") }; // Fake timer interrupt
+		crate::arch::yield_current_thread();
 	}
 
 	/// Cancel sleep

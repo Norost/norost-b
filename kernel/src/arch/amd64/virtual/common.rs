@@ -14,11 +14,16 @@ impl Entry {
 	const PRESENT: u64 = 1 << 0;
 	const READ_WRITE: u64 = 1 << 1;
 	const USER: u64 = 1 << 2;
+	#[allow(dead_code)]
 	const WRITE_THROUGH: u64 = 1 << 3;
+	#[allow(dead_code)]
 	const CACHE_DISABLE: u64 = 1 << 4;
+	#[allow(dead_code)]
 	const ACCESSED: u64 = 1 << 5;
 	const PAGE_SIZE: u64 = 1 << 7;
+	#[allow(dead_code)]
 	const GLOBAL: u64 = 1 << 8;
+	#[allow(dead_code)]
 	const AVAILABLE: u64 = 7 << 9;
 
 	pub fn is_present(&self) -> bool {

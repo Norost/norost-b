@@ -41,12 +41,10 @@ impl AddressSpace {
 		hint_color: u8,
 	) -> Result<(), MapError> {
 		let tbl = self.table_mut();
-		dbg!(address);
 		for (i, f) in frames.enumerate() {
 			loop {
 				match common::get_entry_mut(tbl, address.add(i) as u64, 0, 3) {
 					Ok(e) => {
-						dbg!(format_args!("{:#x}", f.as_phys()));
 						e.set_page(f.as_phys() as u64, true, rwx.w()).unwrap();
 						break;
 					}

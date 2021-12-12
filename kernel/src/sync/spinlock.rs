@@ -1,7 +1,5 @@
-use crate::scheduler::Thread;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::ptr;
 use core::sync::atomic::{AtomicU8, Ordering};
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.

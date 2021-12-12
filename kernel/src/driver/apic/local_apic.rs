@@ -1,10 +1,7 @@
 use super::{RegR, RegW, RegRW};
 use crate::memory::r#virtual::{AddressSpace, phys_to_virt};
 use crate::memory::frame::PPN;
-use core::cell::UnsafeCell;
-use core::ptr::NonNull;
 use core::fmt;
-use core::ops::Deref;
 
 #[repr(C, align(4096))]
 pub struct LocalApic {
@@ -69,8 +66,8 @@ impl fmt::Debug for LocalApic {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		use core::fmt::DebugStruct as DS;
 		let mut f = f.debug_struct(stringify!(LocalApic));
-		let mut hex = |f: &mut DS, n, v: u32| { f.field(n, &format_args!("{:#x}", v)); };
-		let mut set = |f: &mut DS, n, v: BitSet256| { f.field(n, &format_args!("{:?}", v)); };
+		let hex = |f: &mut DS, n, v: u32| { f.field(n, &format_args!("{:#x}", v)); };
+		let set = |f: &mut DS, n, v: BitSet256| { f.field(n, &format_args!("{:?}", v)); };
 
 		hex(&mut f, "id",  self.id.get());
 		hex(&mut f, "version",  self.version.get());

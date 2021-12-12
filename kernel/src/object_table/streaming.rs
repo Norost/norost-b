@@ -1,11 +1,6 @@
 use super::*;
-use crate::memory::frame::{self, PageFrame, PPN};
-use crate::scheduler::{Thread, process::Process};
 use crate::sync::Mutex;
-use core::cell::{Cell, UnsafeCell};
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
-use core::time::Duration;
+use core::sync::atomic::{AtomicU32, Ordering};
 use alloc::{boxed::Box, sync::{Arc, Weak}, vec::Vec};
 
 #[derive(Default)]
@@ -19,7 +14,7 @@ pub struct StreamingTable {
 }
 
 impl StreamingTable {
-	pub fn new(name: Box<str>, process: NonNull<Process>) -> Arc<Self> {
+	pub fn new(name: Box<str>) -> Arc<Self> {
 		Self { name, ..Default::default() }.into()
 	}
 
@@ -31,10 +26,10 @@ impl StreamingTable {
 		let j = self.job_handlers.lock().pop();
 		if let Some(w) = j {
 			self.tickets.lock().push((job_id, id, ticket_waker));
-			w.complete(job.into_job(dbg!(job_id), id));
+			w.complete(job.into_job(job_id, id));
 		} else {
 			let mut l = self.jobs.lock();
-			l.push((dbg!(job_id), job, id, ticket_waker));
+			l.push((job_id, job, id, ticket_waker));
 		}
 
 		ticket
@@ -46,7 +41,7 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, _name: Option<&str>, _tags: &[&str]) -> Box<dyn Query> {
 		todo!()
 	}
 
@@ -54,7 +49,7 @@ impl Table for StreamingTable {
 		self.submit_job(StreamJob::Open, id)
 	}
 
-	fn create(self: Arc<Self>, name: &str, tags: &[&str]) -> Ticket {
+	fn create(self: Arc<Self>, _name: &str, _tags: &[&str]) -> Ticket {
 		todo!()
 	}
 
@@ -70,7 +65,6 @@ impl Table for StreamingTable {
 
 	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()> {
 		let mut c = self.tickets.lock();
-		dbg!(job.job_id);
 		let mut c = c.drain_filter(|e| e.0 == job.job_id);
 		let (_, id, tw) = c.next().ok_or(())?;
 		match job.ty {
@@ -115,7 +109,7 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
-	fn read(&self, _: u64, data: &mut [u8]) -> Result<Ticket, ()> {
+	fn read(&self, _: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
 		todo!();
 	}
 
@@ -134,7 +128,6 @@ enum StreamJob {
 
 impl StreamJob {
 	fn into_job(self, job_id: JobId, object_id: Id) -> Job {
-		dbg!(job_id);
 		match self {
 			StreamJob::Open => Job {
 				ty: JobType::Open,

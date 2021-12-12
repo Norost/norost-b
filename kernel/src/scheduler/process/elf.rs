@@ -158,8 +158,6 @@ impl super::Process {
 				.then(|| ())
 				.ok_or(ElfError::AddressOffsetMismatch)?;
 
-			let offset = header.offset & page_mask;
-
 			let (phys, virt) = (header.physical_address, header.virtual_address);
 			let count = page_count(phys..phys + header.file_size);
 			let alloc = page_count(virt..virt + header.memory_size);
@@ -225,7 +223,6 @@ pub enum ElfError {
 	ProgramHeaderSizeMismatch,
 	OffsetOutOfBounds,
 	AddressOffsetMismatch,
-	AllocateError(frame::AllocateError),
 	AllocateContiguousError(frame::AllocateContiguousError),
 	MapError(MapError),
 }

@@ -15,7 +15,7 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 	struct Iter {
 		phys: PPN,
 		size: usize,
-	};
+	}
 
 	impl Iterator for Iter {
 		type Item = PageFrame;

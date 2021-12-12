@@ -14,6 +14,7 @@ members = [
 
 [profile.dev]
 panic = "abort"
+opt-level = 3
 
 [profile.release]
 panic = "abort"
@@ -24,9 +25,3 @@ lto = "fat"
 codegen-units = 1
 opt-level = 'z'
 #strip = "symbols"
-
-[unstable]
-build-std = true
-
-[build]
-target = "x86_64-unknown-norostb.json"

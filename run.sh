@@ -10,8 +10,7 @@ cpu="--enable-kvm -cpu host"
 qemu-system-x86_64 \
 	$cpu \
 	-drive format=raw,file=norost.iso \
-	-serial mon:stdio $@ \
+	-serial mon:stdio \
 	-machine q35 \
 	-drive file=disk0,format=raw,if=none,id=disk0 \
-	-device virtio-blk-pci,drive=disk0 \
-	#-s
+	-device virtio-blk-pci,drive=disk0

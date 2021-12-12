@@ -1,5 +1,3 @@
-cargo-features = ["edition2021"]
-
 [package]
 name = "driver_virtio_block"
 version = "0.1.0"

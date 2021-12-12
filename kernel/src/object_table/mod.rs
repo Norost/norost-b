@@ -7,16 +7,13 @@
 
 mod streaming;
 
-use crate::scheduler::Thread;
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
 use alloc::{boxed::Box, vec::Vec, sync::{Arc, Weak}};
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
-use core::ptr::NonNull;
 use core::task::{Context, Poll, Waker};
-use core::ops::{Deref, DerefMut};
 
 pub use streaming::StreamingTable;
 
@@ -75,15 +72,15 @@ pub struct QueryResult {
 pub trait Object {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
-	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
+	fn memory_object(&self, _offset: u64) -> Option<Box<dyn MemoryObject>> {
 		None
 	}
 
-	fn read(&self, _: u64, data: &mut [u8]) -> Result<Ticket, ()> {
+	fn read(&self, _offset: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
 		Err(())
 	}
 
-	fn write(&self, _: u64, data: &[u8]) -> Result<Ticket, ()> {
+	fn write(&self, _offset: u64, _data: &[u8]) -> Result<Ticket, ()> {
 		Err(())
 	}
 
@@ -106,6 +103,7 @@ pub struct EventWaker {
 }
 
 impl EventListener {
+	#[allow(dead_code)]
 	fn new() -> (Self, EventWaker) {
 		let shared = Arc::new(SpinLock::default());
 		(Self { shared: shared.clone() }, EventWaker { shared })
@@ -113,6 +111,7 @@ impl EventListener {
 }
 
 impl EventWaker {
+	#[allow(dead_code)]
 	fn complete(self, event: Events) {
 		let mut l = self.shared.lock();
 		l.0.take().map(|w| w.wake());
@@ -176,6 +175,7 @@ bi_from!(newtype JobId <=> u32);
 /// Data submitted as part of a job.
 pub enum Data {
 	Usize(usize),
+	#[allow(dead_code)]
 	Bytes(Box<[u8]>),
 	Object(Arc<dyn Object>),
 }
@@ -188,6 +188,7 @@ impl Data {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub fn into_bytes(self) -> Option<Box<[u8]>> {
 		match self {
 			Self::Bytes(n) => Some(n),
@@ -209,7 +210,7 @@ impl fmt::Debug for Data {
 		match self {
 			Self::Usize(n) => f.field(&n),
 			Self::Bytes(d) => f.field(&d),
-			Self::Object(d) => f.field(&"<object>"),
+			Self::Object(_d) => f.field(&"<object>"),
 		};
 		f.finish()
 	}
@@ -237,10 +238,6 @@ impl Ticket {
 	pub fn new() -> (Self, TicketWaker) {
 		let inner = Arc::new(SpinLock::new(TicketInner { waker: None, status: None }));
 		(Self { inner: inner.clone() }, TicketWaker { inner })
-	}
-
-	pub fn take_result(&self) -> Option<Result<Data, Error>> {
-		self.inner.lock().status.take()
 	}
 }
 
@@ -328,6 +325,7 @@ impl JobWaker {
 }
 
 /// Get a list of all tables with their respective name and ID.
+#[allow(dead_code)]
 pub fn tables() -> Vec<(Box<str>, TableId)> {
 	TABLES
 		.lock()
@@ -338,6 +336,7 @@ pub fn tables() -> Vec<(Box<str>, TableId)> {
 }
 
 /// Get the ID of the table with the given name.
+#[allow(dead_code)]
 pub fn find_table(name: &str) -> Option<TableId> {
 	TABLES
 		.lock()
@@ -367,6 +366,7 @@ pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
 }
 
 /// Create a new object in a table.
+#[allow(dead_code)]
 pub fn create(table_id: TableId, name: &str, tags: &[&str]) -> Result<Ticket, CreateError> {
 	TABLES
 		.lock()
@@ -412,8 +412,8 @@ pub enum GetError {
 
 #[derive(Debug)]
 pub enum CreateError {
+	#[allow(dead_code)]
 	InvalidTableId,
-	CreateObjectError(CreateObjectError),
 }
 
 #[derive(Debug)]
