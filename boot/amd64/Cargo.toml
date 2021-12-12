@@ -1,7 +1,12 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "noraboot"
 version = "0.1.0"
 edition = "2021"
+#default-target = "i686-unknown-norostb.json"
+# FIXME this causes a panic in cargo
+#forced-target = "i686-unknown-norostb.json"
 
 [dependencies]
 rsdp = "*"

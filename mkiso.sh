@@ -14,7 +14,7 @@ cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 (cd drivers/hello_world && ./build.sh)
 cp drivers/hello_world/hello isodir/drivers/hello_world
 (cd drivers/virtio_block && cargo build --release --target $RUST_TARGET_FILE)
-cp target/x86_64-unknown-norostb/release/driver_virtio_block isodir/drivers/virtio_block
+cp target/$RUST_TARGET/release/driver_virtio_block isodir/drivers/virtio_block
 grub-mkrescue -o norost.iso isodir \
 	--locales= \
 	--fonts= \

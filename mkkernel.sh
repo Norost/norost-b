@@ -6,7 +6,7 @@ set -e
 
 cd kernel
 cargo rustc \
-	--target $RUST_TARGET_FILE \
+	--release \
 	-- \
 	-C linker=$CC \
 	-C link-arg=-nostartfiles \
