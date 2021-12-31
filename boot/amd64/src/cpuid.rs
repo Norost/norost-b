@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 pub struct Features {
 	max_basic_eax: u32,
 	max_extended_eax: u32,

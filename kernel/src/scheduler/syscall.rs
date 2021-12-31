@@ -10,6 +10,7 @@ use alloc::{
 	sync::{Arc, Weak},
 	vec::Vec,
 };
+use core::arch::asm;
 use core::mem;
 use core::ptr::NonNull;
 use core::time::Duration;

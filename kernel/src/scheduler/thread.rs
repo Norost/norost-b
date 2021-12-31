@@ -3,6 +3,7 @@ use crate::arch;
 use crate::memory::frame;
 use crate::time::Monotonic;
 use alloc::sync::{Arc, Weak};
+use core::arch::asm;
 use core::cell::Cell;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;

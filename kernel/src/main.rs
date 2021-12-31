@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
-#![feature(asm, asm_const, asm_sym)]
+#![feature(asm_const, asm_sym)]
 #![feature(const_trait_impl)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]

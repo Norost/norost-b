@@ -1,6 +1,6 @@
 #![no_main]
 #![no_std]
-#![feature(asm, asm_const)]
+#![feature(asm_const)]
 #![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
 
 mod cpuid;
@@ -13,6 +13,7 @@ mod multiboot2;
 mod paging;
 mod vga;
 
+use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use core::slice;

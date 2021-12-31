@@ -1,4 +1,5 @@
 //! # RTC driver
+use core::arch::asm;
 
 use crate::time::Monotonic;
 use core::sync::atomic::AtomicU64;

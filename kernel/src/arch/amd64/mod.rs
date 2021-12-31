@@ -9,10 +9,10 @@ mod tss;
 pub mod r#virtual;
 
 use crate::{driver::apic, power, scheduler, time::Monotonic};
+use core::arch::asm;
+use core::mem::MaybeUninit;
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{current_process, current_thread, current_thread_weak, set_current_thread};
-
-use core::mem::MaybeUninit;
 
 static mut TSS: tss::TSS = tss::TSS::new();
 static mut TSS_STACK: [usize; 512] = [0; 512];

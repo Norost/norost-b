@@ -1,4 +1,5 @@
 use super::tss::TSS;
+use core::arch::asm;
 use core::marker::PhantomData;
 use core::mem;
 use core::pin::Pin;

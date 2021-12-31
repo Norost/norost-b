@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 /// # Safety
 ///
 /// MSRs must be supported.

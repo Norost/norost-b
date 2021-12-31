@@ -6,6 +6,7 @@ use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
 };
+use core::arch::asm;
 use core::ptr::{self, NonNull};
 
 pub unsafe fn init() {

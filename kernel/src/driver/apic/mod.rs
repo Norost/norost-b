@@ -6,6 +6,7 @@ use crate::arch::amd64::msr;
 use crate::memory::Page;
 use crate::time::Monotonic;
 use acpi::{AcpiHandler, AcpiTables};
+use core::arch::asm;
 use core::time::Duration;
 use reg::*;
 
