@@ -2,8 +2,8 @@
 //!
 //! An object table is a collection of objects annotated with a name and any number of tags.
 //!
-//! Objects can be searched/filtered by a combination of name and/or tags. Individual objects are
-//! addressed by unique integer IDs.
+//! Objects can be searched/filtered with tags. Individual objects are addressed by unique
+//! integer IDs.
 
 mod streaming;
 
@@ -68,7 +68,6 @@ impl Iterator for NoneQuery {
 /// A single query result
 pub struct QueryResult {
 	pub id: Id,
-	pub name: Box<str>,
 	pub tags: Box<[Box<str>]>,
 }
 

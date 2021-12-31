@@ -1,7 +1,7 @@
 use crate::object_table::{
 	Data, Error, Id, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
 };
-use alloc::{boxed::Box, format, string::String, sync::Arc};
+use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -139,13 +139,13 @@ fn pci_dev_object(_h: pci::Header, bus: u8, dev: u8, _func: u8) -> Arc<dyn Objec
 
 fn pci_dev_query_result(h: pci::Header, bus: u8, dev: u8, func: u8) -> QueryResult {
 	let id = (u64::from(bus) << 8 | u64::from(dev) << 3 | u64::from(func)).into();
-	let name = bdf_to_string(bus, dev, func).into();
 	let tags = [
+		("name:".to_string() + &*bdf_to_string(bus, dev, func)).into(),
 		format!("vendor-id:{:04x}", h.vendor_id()).into(),
 		format!("device-id:{:04x}", h.device_id()).into(),
 	]
 	.into();
-	QueryResult { id, name, tags }
+	QueryResult { id, tags }
 }
 
 fn n_to_bdf(n: u64) -> Option<(u8, u8, u8)> {
