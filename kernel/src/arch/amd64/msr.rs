@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 pub const IA32_APIC_BASE_MSR: u32 = 0x1b;
 #[allow(dead_code)]
 pub const IA32_APIC_BASE_MSR_BSP: u64 = 0x100;

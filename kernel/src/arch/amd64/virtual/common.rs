@@ -1,5 +1,6 @@
 use crate::memory::frame;
 use crate::memory::Page;
+use core::arch::asm;
 use core::fmt;
 use core::ptr;
 

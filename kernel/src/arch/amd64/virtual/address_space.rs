@@ -2,6 +2,7 @@ use super::common;
 use crate::memory::frame;
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
+use core::arch::asm;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
