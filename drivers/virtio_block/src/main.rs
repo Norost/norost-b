@@ -5,6 +5,7 @@
 use kernel::syscall;
 use kernel::syslog;
 
+use core::arch::asm;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::time::Duration;

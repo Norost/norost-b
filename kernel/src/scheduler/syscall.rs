@@ -165,8 +165,6 @@ extern "C" fn query_table(
 #[repr(C)]
 struct ObjectInfo {
 	id: Id,
-	name_len: u8,
-	name: [u8; 255],
 	tags_len: u8,
 	tags_offsets: [u32; 255],
 }
@@ -194,8 +192,6 @@ extern "C" fn query_next(
 		},
 		Some(obj) => {
 			info.id = obj.id;
-			info.name_len = obj.name.len().try_into().unwrap();
-			info.name[..obj.name.len()].copy_from_slice(obj.name.as_bytes());
 			info.tags_len = obj.tags.len().try_into().unwrap();
 			let mut p = 0;
 			for (to, tag) in info.tags_offsets.iter_mut().zip(&*obj.tags) {

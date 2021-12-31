@@ -15,6 +15,7 @@ const ID_TAKE_TABLE_JOB: usize = 15;
 const ID_FINISH_TABLE_JOB: usize = 16;
 
 use crate::Page;
+use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
@@ -113,8 +114,6 @@ impl<T, const N: usize> From<&[T; N]> for Slice<T> {
 #[repr(C)]
 pub struct ObjectInfo<'a> {
 	pub id: Id,
-	name_len: u8,
-	name: [u8; 255],
 	tags_len: u8,
 	tags_offsets: [u32; 255],
 	string_buffer: &'a mut [u8],
@@ -126,10 +125,6 @@ impl<'a> ObjectInfo<'a> {
 			string_buffer,
 			..Default::default()
 		}
-	}
-
-	pub fn name(&self) -> &[u8] {
-		&self.name[..usize::from(self.name_len)]
 	}
 
 	pub fn tag(&'a self, index: usize) -> &'a [u8] {
@@ -147,8 +142,6 @@ impl Default for ObjectInfo<'_> {
 	fn default() -> Self {
 		Self {
 			id: Default::default(),
-			name_len: 0,
-			name: [0; 255],
 			tags_len: 0,
 			tags_offsets: [0; 255],
 			string_buffer: &mut [],
@@ -178,7 +171,6 @@ impl fmt::Debug for ObjectInfo<'_> {
 
 		let mut f = f.debug_struct(stringify!(ObjectInfo));
 		f.field("id", &self.id);
-		f.field("name", &ByteStr(self.name()));
 		f.field(
 			"tags",
 			&S(Cell::new(Some((0..self.tags_count()).map(|i| self.tag(i))))),
