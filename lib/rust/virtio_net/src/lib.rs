@@ -3,6 +3,7 @@
 #![no_std]
 #![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
 
+use core::alloc::Layout;
 use core::convert::TryInto;
 use core::fmt;
 use core::mem::{self, MaybeUninit};
@@ -133,6 +134,34 @@ struct Packet {
 
 impl Packet {
 	const MAX_ETH_SIZE: usize = 1514;
+	/// There is no way to get the real size (_not_ stride), so this'll have to do.
+	const MAX_SIZE: usize = mem::size_of::<PacketHeader>() + Self::MAX_ETH_SIZE;
+}
+
+pub struct Mac([u8; 6]);
+
+impl AsRef<[u8; 6]> for Mac {
+	fn as_ref(&self) -> &[u8; 6] {
+		&self.0
+	}
+}
+
+impl fmt::Debug for Mac {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "Mac({})", self)
+	}
+}
+
+impl fmt::Display for Mac {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		for (i, &e) in self.0.iter().enumerate() {
+			if i > 0 {
+				f.write_str(":")?;
+			}
+			write!(f, "{:02x}", e)?;
+		}
+		Ok(())
+	}
 }
 
 /// A driver for a virtio network (Ethernet) device.
@@ -158,7 +187,7 @@ where
 		get_physical_address: F,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
 		mut dma_alloc: impl FnMut(usize) -> Result<(NonNull<()>, usize), ()>,
-	) -> Result<Self, SetupError> {
+	) -> Result<(Self, Mac), SetupError> {
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
 		dev.common.device_status.set(CommonConfig::STATUS_RESET);
@@ -194,7 +223,6 @@ where
 				| CommonConfig::STATUS_FEATURES_OK,
 		);
 		// TODO check device status to ensure features were enabled correctly.
-		let _ = dev.common.device_status.get();
 
 		// Set up queues.
 		let rx_queue =
@@ -209,6 +237,8 @@ where
 				| CommonConfig::STATUS_DRIVER_OK,
 		);
 
+		let mac = Mac(unsafe { dev.device.cast::<Config>() }.mac);
+
 		let rx_packet = dma_alloc(mem::size_of::<Packet>()).expect("OOM").0.cast();
 
 		let mut s = Self {
@@ -220,7 +250,7 @@ where
 			get_physical_address,
 		};
 		s.insert_buffer(s.rx_packet);
-		Ok(s)
+		Ok((s, mac))
 	}
 
 	/// Send an Ethernet packet
@@ -228,12 +258,7 @@ where
 	/// # Panics
 	///
 	/// The amount of data is larger than `MAX_ETH_SIZE`, i.e. 1514 bytes.
-	pub fn send<'s>(
-		&'s mut self,
-		data: &'s [u8],
-		sector_start: u64,
-		wait: impl FnMut(),
-	) -> Result<(), SendError> {
+	pub fn send<'s>(&'s mut self, data: &'s [u8], wait: impl FnMut()) -> Result<(), SendError> {
 		assert!(
 			data.len() <= Packet::MAX_ETH_SIZE,
 			"data len must be smaller or equal to MAX_ETH_SIZE"
@@ -310,7 +335,7 @@ where
 
 		let data = [(
 			phys.try_into().unwrap(),
-			mem::size_of::<Packet>().try_into().unwrap(),
+			Packet::MAX_SIZE.try_into().unwrap(),
 			true,
 		)];
 

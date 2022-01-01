@@ -1,70 +1,85 @@
-use kernel::syslog;
+use core::cell::RefCell;
+use core::time::Duration;
+use kernel::{syscall, syslog};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::time::Instant;
-use smoltcp::Result;
 
-pub struct Dev {
-	rx_buffer: [u8; 1536],
-	tx_buffer: [u8; 1536],
+pub struct Dev<'d, F>
+where
+	F: Fn(*const ()) -> usize + 'd,
+{
+	virtio: RefCell<virtio_net::Device<'d, F>>,
 }
 
-impl<'a> Dev {
-	fn new() -> Dev {
+impl<'d, F> Dev<'d, F>
+where
+	F: Fn(*const ()) -> usize + 'd,
+{
+	pub fn new(virtio: virtio_net::Device<'d, F>) -> Self {
 		Dev {
-			rx_buffer: [0; 1536],
-			tx_buffer: [0; 1536],
+			virtio: RefCell::new(virtio),
 		}
 	}
 }
 
-impl<'a> Device<'a> for Dev {
-	type RxToken = DevRxToken<'a>;
-	type TxToken = DevTxToken<'a>;
+impl<'a, 'd: 'a, F> Device<'a> for Dev<'d, F>
+where
+	F: Fn(*const ()) -> usize + 'd,
+{
+	type RxToken = DevRxToken;
+	type TxToken = DevTxToken<'a, 'd, F>;
 
 	fn receive(&'a mut self) -> Option<(Self::RxToken, Self::TxToken)> {
-		Some((
-			DevRxToken(&mut self.rx_buffer[..]),
-			DevTxToken(&mut self.tx_buffer[..]),
-		))
+		let mut data = [0; 1514];
+		self.virtio
+			.borrow_mut()
+			.receive(&mut data)
+			.unwrap()
+			.then(|| (DevRxToken(data), DevTxToken(self)))
 	}
 
 	fn transmit(&'a mut self) -> Option<Self::TxToken> {
-		Some(DevTxToken(&mut self.tx_buffer[..]))
+		Some(DevTxToken(self))
 	}
 
 	fn capabilities(&self) -> DeviceCapabilities {
-		let mut caps = DeviceCapabilities::default();
-		caps.max_transmission_unit = 1536;
-		caps.max_burst_size = Some(1);
-		caps.medium = Medium::Ethernet;
-		caps
+		let mut cap = DeviceCapabilities::default();
+		cap.max_transmission_unit = 1000; //1514;
+		cap.max_burst_size = Some(1);
+		cap
 	}
 }
 
-pub struct DevRxToken<'a>(&'a mut [u8]);
+pub struct DevRxToken([u8; 1514]);
 
-impl<'a> RxToken for DevRxToken<'a> {
-	fn consume<R, F>(mut self, _timestamp: Instant, f: F) -> Result<R>
+impl RxToken for DevRxToken {
+	fn consume<R, F>(mut self, _: Instant, f: F) -> smoltcp::Result<R>
 	where
-		F: FnOnce(&mut [u8]) -> Result<R>,
+		F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
 	{
-		// TODO: receive packet into buffer
-		let result = f(&mut self.0);
-		syslog!("rx called");
-		result
+		f(&mut self.0)
 	}
 }
 
-pub struct DevTxToken<'a>(&'a mut [u8]);
+pub struct DevTxToken<'a, 'd: 'a, F>(&'a Dev<'d, F>)
+where
+	F: Fn(*const ()) -> usize + 'd;
 
-impl<'a> TxToken for DevTxToken<'a> {
-	fn consume<R, F>(self, _timestamp: Instant, len: usize, f: F) -> Result<R>
+impl<'a, 'd: 'a, PF> TxToken for DevTxToken<'a, 'd, PF>
+where
+	PF: Fn(*const ()) -> usize + 'd,
+{
+	fn consume<R, F>(self, _: Instant, len: usize, f: F) -> smoltcp::Result<R>
 	where
-		F: FnOnce(&mut [u8]) -> Result<R>,
+		F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
 	{
-		let result = f(&mut self.0[..len]);
-		syslog!("tx called {}", len);
-		// TODO: send packet out
-		result
+		let mut data = [0; 1514];
+		let r = f(&mut data[..len]);
+		self.0
+			.virtio
+			.borrow_mut()
+			.send(&mut data[..len], || ())
+			.unwrap();
+		r
 	}
 }

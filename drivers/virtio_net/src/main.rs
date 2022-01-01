@@ -15,6 +15,7 @@ use kernel::{syscall, syslog};
 fn main() {
 	syslog!("Hello, internet!");
 
+	// Find virtio-net-pci device
 	let mut id = None;
 	let mut dev = None;
 	syslog!("iter tables");
@@ -37,6 +38,8 @@ fn main() {
 	}
 
 	let (tbl, dev) = dev.unwrap();
+
+	// Reserve & initialize device
 	let handle = syscall::open_object(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
@@ -46,11 +49,14 @@ fn main() {
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
+	let dev = pci.get(0, 0, 0).unwrap();
+	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
+	let dev = unsafe { core::mem::transmute::<&_, &_>(&dev) };
+
 	let mut dma_addr = 0x2666_0000;
 
-	let mut dev = {
-		let h = pci.get(0, 0, 0).unwrap();
-		match h {
+	let (mut dev, addr) = {
+		match dev {
 			pci::Header::H0(h) => {
 				for (i, b) in h.base_address.iter().enumerate() {
 					syslog!("{}: {:x}", i, b.get());
@@ -89,23 +95,69 @@ fn main() {
 		}
 	};
 
+	let mut data = [0; 2048];
+
+	// Wrap the device for use with smoltcp
+	use smoltcp::{iface, phy, socket, time, wire};
+	let dev = dev::Dev::new(dev);
+	let dev = phy::Tracer::new(dev, |t, p| syslog!("[{}] {}", t, p));
+	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
+	let mut sockets = [iface::SocketStorage::EMPTY; 8];
+	let mut neighbors = [None; 8];
+	let mut routes = [None; 8];
+	syslog!("{:?}", &addr);
+	let mut iface = iface::InterfaceBuilder::new(dev, &mut sockets[..])
+		.ip_addrs(&mut ip_addrs[..])
+		.hardware_addr(wire::EthernetAddress(*addr.as_ref()).into())
+		.neighbor_cache(iface::NeighborCache::new(&mut neighbors[..]))
+		.routes(iface::Routes::new(&mut routes[..]))
+		.finalize();
+
+	// Get an IP address using DHCP
+	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
+
+	// Create a TCP listener
+	let mut rx @ mut tx = [0; 2048];
+	let rx = socket::TcpSocketBuffer::new(&mut rx[..]);
+	let tx = socket::TcpSocketBuffer::new(&mut tx[..]);
+	let tcp = iface.add_socket(socket::TcpSocket::new(rx, tx));
+
+	let mut t = time::Instant::from_secs(0);
 	loop {
-		let mut data = [0; 2048];
-		if dev.receive(&mut data).unwrap() {
-			use smoltcp::wire::*;
-			syslog!("DATAAAAAAAAA");
-			let fr = EthernetFrame::new_checked(&data[..]).unwrap();
-			syslog!("  {}", fr);
-			match fr.ethertype() {
-				EthernetProtocol::Arp => {
-					let pk = ArpPacket::new_checked(fr.payload()).unwrap();
-					syslog!("  {:#}", pk);
+		iface.poll(t).unwrap();
+		syslog!("ip addrs: {:?}", iface.ip_addrs());
+		syslog!("routes  : {:?}", iface.routes());
+
+		let dhcp = iface.get_socket::<socket::Dhcpv4Socket>(dhcp);
+		if let Some(s) = dhcp.poll() {
+			if let socket::Dhcpv4Event::Configured(s) = s {
+				iface.update_ip_addrs(|i| i[0] = s.address.into());
+				if let Some(r) = s.router {
+					iface.routes_mut().add_default_ipv4_route(r);
 				}
-				_ => todo!(),
 			}
-		} else {
-			syscall::sleep(Duration::from_millis(1000));
+			continue;
 		}
+
+		let tcp = iface.get_socket::<socket::TcpSocket>(tcp);
+
+		syslog!("tcp state: {}", tcp.state());
+		syslog!("tcp keepalive: {:?}", tcp.keep_alive());
+		if !tcp.is_open() {
+			syslog!("open tcp");
+			tcp.listen(333).unwrap();
+		}
+		if tcp.can_send() {
+			syslog!("send tcp");
+			use core::fmt::Write;
+			write!(tcp, "Greetings, alien!").unwrap();
+			syslog!("close tcp");
+			tcp.close();
+		}
+		syslog!("rcv: {:?}", tcp.recv(|b| (b.len(), b.len())));
+
+		syscall::sleep(Duration::from_secs(1));
+		t += time::Duration::from_secs(1);
 	}
 }
 
@@ -119,10 +171,10 @@ fn panic_handler(info: &PanicInfo) -> ! {
 
 #[naked]
 #[export_name = "_start"]
-unsafe extern "C" fn start() {
+unsafe extern "C" fn start() -> ! {
 	asm!(
 		"
-		lea		rsp, [rip + __stack + 4 * 0x1000]
+		lea		rsp, [rip + __stack + 16 * 0x1000]
 		call	main
 		mov		eax, 6
 		xor		edi, edi
@@ -136,4 +188,4 @@ unsafe extern "C" fn start() {
 #[repr(align(4096))]
 struct P([u8; 4096]);
 #[export_name = "__stack"]
-static mut STACK: [P; 4] = [P([0; 4096]); 4];
+static mut STACK: [P; 16] = [P([0; 4096]); 16];

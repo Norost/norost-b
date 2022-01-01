@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 kernel = { path = "../../lib/rust/kernel" }
-smoltcp = { version = "*", default-features = false, features = ["proto-ipv6", "medium-ethernet", "socket-tcp", "proto-ipv4"] }
+smoltcp = { version = "*", default-features = false, features = ["proto-ipv6", "medium-ethernet", "socket-tcp", "proto-ipv4", "socket-dhcpv4"] }
 virtio = { path = "../../lib/rust/virtio" }
 virtio_net = { path = "../../lib/rust/virtio_net" }
 pci = { path = "../../lib/rust/pci" }
