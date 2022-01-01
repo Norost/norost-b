@@ -3,63 +3,84 @@
 #![no_std]
 #![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
 
-use core::alloc::Layout;
 use core::convert::TryInto;
 use core::fmt;
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
-use endian::{u16le, u32le, u64le};
+use endian::{u16le, u32le};
 use virtio::pci::CommonConfig;
 use virtio::queue;
 
-/// Device handles packets with partial checksum. This “checksum offload” is a common feature on
+/// Device handles packets with partial checksum. This "checksum offload" is a common feature on
 /// modern network cards.
+#[allow(dead_code)]
 const CSUM: u32 = 1 << 0;
 /// Driver handles packets with partial checksum.
+#[allow(dead_code)]
 const GUEST_CSUM: u32 = 1 << 1;
 /// Control channel offloads reconfiguration support.
+#[allow(dead_code)]
 const CTRL_GUEST_OFFLOADS: u32 = 1 << 2;
 /// Device maximum MTU reporting is supported. If offered by the device, device advises driver
 /// about the value of its maximum MTU. If negotiated, the driver uses mtu as the maximum MTU
 /// value.
+#[allow(dead_code)]
 const MTU: u32 = 1 << 3;
 /// Device has given MAC address.
 const MAC: u32 = 1 << 5;
 /// Driver can receive TSOv4.
+#[allow(dead_code)]
 const GUEST_TSO4: u32 = 1 << 7;
 /// Driver can receive TSOv6.
+#[allow(dead_code)]
 const GUEST_TSO6: u32 = 1 << 8;
 /// Driver can receive TSO with ECN.
+#[allow(dead_code)]
 const GUEST_ECN: u32 = 1 << 9;
 /// Driver can receive UFO.
+#[allow(dead_code)]
 const GUEST_UFO: u32 = 1 << 10;
 /// Device can receive TSOv4.
+#[allow(dead_code)]
 const HOST_TSO4: u32 = 1 << 11;
 /// Device can receive TSOv6.
+#[allow(dead_code)]
 const HOST_TSO6: u32 = 1 << 12;
 /// Device can receive TSO with ECN.
+#[allow(dead_code)]
 const HOST_ECN: u32 = 1 << 13;
 /// Device can receive UFO.
+#[allow(dead_code)]
 const HOST_UFO: u32 = 1 << 14;
 /// Driver can merge receive buffers.
+#[allow(dead_code)]
 const MRG_RXBUF: u32 = 1 << 15;
 /// Configuration status field is available.
+#[allow(dead_code)]
 const STATUS: u32 = 1 << 16;
 /// Control channel is available.
+#[allow(dead_code)]
 const CTRL_VQ: u32 = 1 << 17;
 /// Control channel RX mode support.
+#[allow(dead_code)]
 const CTRL_RX: u32 = 1 << 18;
 /// Control channel VLAN filtering.
+#[allow(dead_code)]
 const CTRL_VLAN: u32 = 1 << 19;
 /// Driver can send gratuitous packets.
+#[allow(dead_code)]
 const GUEST_ANNOUNCE: u32 = 1 << 21;
 /// Device supports multiqueue with automatic receive steering.
+#[allow(dead_code)]
 const MQ: u32 = 1 << 22;
 /// Set MAC address through control channel.
+#[allow(dead_code)]
 const CTRL_MAC_ADDR: u32 = 1 << 23;
 /// Device can process duplicated ACKs and report number of coalesced segments and duplicated ACKs.
+#[allow(dead_code)]
 const RSC_EXT: u32 = 1 << (61 - 32);
 /// Device may act as a standby for a primary device with the same MAC address.
+#[allow(dead_code)]
 const STANDBY: u32 = 1 << (62 - 32);
 
 #[repr(C)]
@@ -71,7 +92,9 @@ struct Config {
 }
 
 impl Config {
+	#[allow(dead_code)]
 	const STATUS_LINK_UP: u16 = 1 << 0;
+	#[allow(dead_code)]
 	const STATUS_ANNOUNCE: u16 = 1 << 1;
 }
 
@@ -103,14 +126,21 @@ impl fmt::Debug for PacketHeader {
 }
 
 impl PacketHeader {
+	#[allow(dead_code)]
 	const NEEDS_CSUM: u8 = 1 << 0;
+	#[allow(dead_code)]
 	const DATA_VALID: u8 = 1 << 1;
+	#[allow(dead_code)]
 	const RSC_INFO: u8 = 1 << 2;
 
 	const GSO_NONE: u8 = 0;
+	#[allow(dead_code)]
 	const GSO_TCP4: u8 = 1;
+	#[allow(dead_code)]
 	const GSO_UDP: u8 = 3;
+	#[allow(dead_code)]
 	const GSO_TCP6: u8 = 4;
+	#[allow(dead_code)]
 	const GSO_ECN: u8 = 0x80;
 }
 

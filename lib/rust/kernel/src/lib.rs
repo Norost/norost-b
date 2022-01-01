@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(asm)]
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]
 

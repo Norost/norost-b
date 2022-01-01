@@ -5,7 +5,6 @@
 mod dev;
 
 use core::arch::asm;
-use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::time::Duration;
@@ -55,7 +54,7 @@ fn main() {
 
 	let mut dma_addr = 0x2666_0000;
 
-	let (mut dev, addr) = {
+	let (dev, addr) = {
 		match dev {
 			pci::Header::H0(h) => {
 				for (i, b) in h.base_address.iter().enumerate() {
@@ -95,8 +94,6 @@ fn main() {
 		}
 	};
 
-	let mut data = [0; 2048];
-
 	// Wrap the device for use with smoltcp
 	use smoltcp::{iface, phy, socket, time, wire};
 	let dev = dev::Dev::new(dev);
@@ -133,7 +130,7 @@ fn main() {
 			if let socket::Dhcpv4Event::Configured(s) = s {
 				iface.update_ip_addrs(|i| i[0] = s.address.into());
 				if let Some(r) = s.router {
-					iface.routes_mut().add_default_ipv4_route(r);
+					iface.routes_mut().add_default_ipv4_route(r).unwrap();
 				}
 			}
 			continue;

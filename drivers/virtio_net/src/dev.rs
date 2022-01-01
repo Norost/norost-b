@@ -1,6 +1,4 @@
 use core::cell::RefCell;
-use core::time::Duration;
-use kernel::{syscall, syslog};
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
 use smoltcp::time::Instant;
 
@@ -44,8 +42,9 @@ where
 
 	fn capabilities(&self) -> DeviceCapabilities {
 		let mut cap = DeviceCapabilities::default();
-		cap.max_transmission_unit = 1000; //1514;
+		cap.max_transmission_unit = 1514;
 		cap.max_burst_size = Some(1);
+		cap.medium = Medium::Ethernet;
 		cap
 	}
 }
