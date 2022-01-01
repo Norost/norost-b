@@ -9,7 +9,6 @@ use core::sync::atomic::{self, Ordering};
 use endian::{u16le, u32le, u64le};
 
 #[repr(C)]
-#[repr(C)]
 struct Descriptor {
 	address: u64le,
 	length: u32le,
@@ -118,8 +117,6 @@ unsafe fn return_table<'s, T>(ptr: &'s mut NonNull<T>, mask: u16) -> &'s mut [T]
 	slice::from_raw_parts_mut(ptr.as_ptr(), size)
 }
 
-static mut DMA_ADDR: usize = 0x300_0000; // FIXME get rid of this crap.
-
 impl<'a> Queue<'a> {
 	/// Create a new split virtqueue and attach it to the device.
 	///
@@ -131,11 +128,6 @@ impl<'a> Queue<'a> {
 		msix: Option<u16>,
 		dma_alloc: impl FnOnce(usize) -> Result<(NonNull<()>, usize), ()>,
 	) -> Result<Self, OutOfMemory> {
-		// FIXME something very, VERY bad is happening here...
-		if unsafe { DMA_ADDR } == 0 {
-			unsafe { DMA_ADDR = 0x300_0000 };
-		}
-
 		// TODO ensure max_size is a power of 2
 		let size = u16::from(config.queue_size.get()).min(max_size) as usize;
 		let desc_size = mem::size_of::<Descriptor>() * size;
@@ -183,8 +175,6 @@ impl<'a> Queue<'a> {
 		config.queue_enable.set(1.into());
 
 		let notify_offset = config.queue_notify_off.get().into();
-
-		unsafe { DMA_ADDR += 4096 * 0x2 };
 
 		msix.map(|msix| config.queue_msix_vector.set(msix.into()));
 

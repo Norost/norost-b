@@ -114,13 +114,13 @@ where
 	) -> Result<Self, SetupError> {
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
+		dev.common.device_status.set(CommonConfig::STATUS_RESET);
+
 		let features = SIZE_MAX | SEG_MAX | GEOMETRY | BLK_SIZE | TOPOLOGY;
 		dev.common.device_feature_select.set(0.into());
 
 		let features = u32le::from(features) & dev.common.device_feature.get();
 		dev.common.device_feature.set(features);
-		#[allow(dead_code)]
-		const STATUS_DRIVER_OK: u8 = 0x4;
 
 		dev.common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE

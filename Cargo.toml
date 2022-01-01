@@ -6,9 +6,11 @@ members = [
 	"kernel",
 	"boot/amd64",
 	"drivers/virtio_block",
+	"drivers/virtio_net",
 	"lib/rust/endian",
 	"lib/rust/pci",
 	"lib/rust/virtio",
+	"lib/rust/virtio_net",
 	"lib/rust/volatile",
 ]
 

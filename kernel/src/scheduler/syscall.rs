@@ -76,7 +76,7 @@ extern "C" fn alloc_dma(
 		.unwrap();
 	Return {
 		status: 0,
-		value: 0,
+		value: count * Page::SIZE,
 	}
 }
 
