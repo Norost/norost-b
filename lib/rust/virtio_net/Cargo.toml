@@ -1,0 +1,17 @@
+[package]
+name = "virtio_net"
+version = "0.1.0"
+authors = ["David Hoppenbrouwers <david@salt-inc.org>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+virtio = { path = "../virtio" }
+pci = { path = "../pci" }
+endian = { path = "../endian" }
+volatile = { path = "../volatile" }
+#fatfs = { path = "../../../thirdparty/rust/fatfs/", optional = true, default-features = false }
+kernel = { path = "../kernel" }
+
+[features]

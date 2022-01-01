@@ -13,4 +13,7 @@ qemu-system-x86_64 \
 	-serial mon:stdio \
 	-machine q35 \
 	-drive file=disk0,format=raw,if=none,id=disk0 \
-	-device virtio-blk-pci,drive=disk0
+	-device virtio-blk-pci,drive=disk0 \
+	-netdev user,id=net0,hostfwd=tcp::5555-:333 \
+	-device virtio-net-pci,netdev=net0 \
+	$@
