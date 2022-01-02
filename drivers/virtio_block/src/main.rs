@@ -1,14 +1,10 @@
 #![no_std]
 #![no_main]
-#![feature(asm, naked_functions)]
 
 use kernel::syscall;
 use kernel::syslog;
 
-use core::arch::asm;
-use core::panic::PanicInfo;
 use core::ptr::NonNull;
-use core::time::Duration;
 
 #[export_name = "main"]
 extern "C" fn main() {
@@ -160,37 +156,5 @@ extern "C" fn main() {
 		//}
 
 		// Mark events as handled
-	}
-}
-
-#[naked]
-#[export_name = "_start"]
-unsafe extern "C" fn start() {
-	asm!(
-		"
-		lea		rsp, [rip + __stack + 0x8000]
-
-		#push	rax
-		call	main
-
-		mov		eax, 6
-		xor		edi, edi
-		syscall
-	",
-		options(noreturn)
-	);
-}
-
-#[derive(Clone, Copy)]
-#[repr(align(4096))]
-struct P([u64; 512]);
-#[export_name = "__stack"]
-static mut STACK: [P; 0x8] = [P([0xdeadbeef; 4096 / 8]); 8];
-
-#[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
-	syslog!("Panic! {:#?}", info);
-	loop {
-		syscall::sleep(Duration::MAX);
 	}
 }
