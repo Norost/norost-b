@@ -6,10 +6,10 @@ kernel:
 	cargo b --bin nora
 
 boot:
-	cargo b --bin noraboot --target i686-unknown-norostb.json
+	cargo b --bin noraboot
 
 run:
-	cargo r --bin nora
+	./run.sh
 
 disk0:
 	fallocate -l $$((32 * 512)) $@

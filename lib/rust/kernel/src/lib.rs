@@ -1,4 +1,6 @@
 #![no_std]
+#![feature(asm_sym)]
+#![feature(naked_functions)]
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]
 

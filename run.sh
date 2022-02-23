@@ -7,13 +7,13 @@ cpu="--enable-kvm -cpu host"
 
 [ -z ${CPU+x} ] || cpu="-cpu $CPU"
 
-qemu-system-x86_64 \
+exec qemu-system-x86_64 \
 	$cpu \
-	-drive format=raw,file=norost.iso \
-	-serial mon:stdio \
 	-machine q35 \
+	-drive format=raw,media=cdrom,file=norost.iso \
+	-serial mon:stdio \
 	-drive file=disk0,format=raw,if=none,id=disk0 \
 	-device virtio-blk-pci,drive=disk0 \
 	-netdev user,id=net0,hostfwd=tcp::5555-:333 \
 	-device virtio-net-pci,netdev=net0 \
-	$@
+	"$@"

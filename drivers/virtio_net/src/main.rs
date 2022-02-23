@@ -1,14 +1,11 @@
 #![no_std]
 #![no_main]
-#![feature(naked_functions)]
 
 mod dev;
 
-use core::arch::asm;
-use core::panic::PanicInfo;
 use core::ptr::NonNull;
 use core::time::Duration;
-use kernel::{syscall, syslog};
+use norostb_rt::kernel::{self, syscall, syslog};
 
 #[export_name = "main"]
 fn main() {
@@ -159,30 +156,9 @@ fn main() {
 }
 
 #[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	syslog!("Panic! {:#?}", info);
 	loop {
 		syscall::sleep(Duration::MAX);
 	}
 }
-
-#[naked]
-#[export_name = "_start"]
-unsafe extern "C" fn start() -> ! {
-	asm!(
-		"
-		lea		rsp, [rip + __stack + 16 * 0x1000]
-		call	main
-		mov		eax, 6
-		xor		edi, edi
-		syscall
-	",
-		options(noreturn)
-	);
-}
-
-#[derive(Clone, Copy)]
-#[repr(align(4096))]
-struct P([u8; 4096]);
-#[export_name = "__stack"]
-static mut STACK: [P; 16] = [P([0; 4096]); 16];

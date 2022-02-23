@@ -1,6 +1,7 @@
 use core::mem;
 use core::ops::{Deref, DerefMut};
 use core::slice;
+use norostb_kernel as kernel;
 
 /// A single sector. Sectors are 512 bytes large and aligned on a 512 byte boundary.
 ///
