@@ -8,9 +8,6 @@
 #[macro_use]
 pub mod syscall;
 
-#[cfg(feature = "rt")]
-mod rt;
-
 #[repr(align(4096))]
 #[repr(C)]
 pub struct Page([u128; 256]);

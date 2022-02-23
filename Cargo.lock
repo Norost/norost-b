@@ -36,12 +36,25 @@ name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+dependencies = [
+ "compiler_builtins",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "compiler_builtins"
+version = "0.1.70"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80873f979f0a344a4ade87c2f70d9ccf5720b83b10c97ec7cd745895d021e85a"
+dependencies = [
+ "rustc-std-workspace-core",
+]
 
 [[package]]
 name = "driver_virtio_block"
 version = "0.1.0"
 dependencies = [
- "kernel",
+ "norostb_kernel",
  "pci",
  "virtio",
  "virtio_block",
@@ -51,7 +64,7 @@ dependencies = [
 name = "driver_virtio_net"
 version = "0.1.0"
 dependencies = [
- "kernel",
+ "norostb_rt",
  "pci",
  "smoltcp",
  "virtio",
@@ -64,10 +77,6 @@ version = "0.1.0"
 
 [[package]]
 name = "hello_std"
-version = "0.1.0"
-
-[[package]]
-name = "kernel"
 version = "0.1.0"
 
 [[package]]
@@ -102,6 +111,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "norostb_kernel"
+version = "0.1.0"
+dependencies = [
+ "compiler_builtins",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "norostb_rt"
+version = "0.1.0"
+dependencies = [
+ "cfg-if",
+ "compiler_builtins",
+ "norostb_kernel",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
 name = "pci"
 version = "0.1.0"
 dependencies = [
@@ -117,6 +144,12 @@ checksum = "66d3add2fc55ef37511bcf81a08ee7a09eff07b23aae38b06a29024a38c604b1"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "rustc-std-workspace-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1956f5517128a2b6f23ab2dadf1a976f4f5b27962e7724c2bf3d45e539ec098c"
 
 [[package]]
 name = "smoltcp"
@@ -143,7 +176,7 @@ name = "virtio_block"
 version = "0.1.0"
 dependencies = [
  "endian",
- "kernel",
+ "norostb_kernel",
  "pci",
  "virtio",
  "volatile",
@@ -154,7 +187,6 @@ name = "virtio_net"
 version = "0.1.0"
 dependencies = [
  "endian",
- "kernel",
  "pci",
  "virtio",
  "volatile",

@@ -1,8 +1,7 @@
 #![no_std]
 #![no_main]
 
-use kernel::syscall;
-use kernel::syslog;
+use norostb_kernel::{self as kernel, syscall, syslog};
 
 use core::ptr::NonNull;
 
@@ -156,5 +155,13 @@ extern "C" fn main() {
 		//}
 
 		// Mark events as handled
+	}
+}
+
+#[panic_handler]
+fn panic_handler(info: &PanicInfo) -> ! {
+	syslog!("Panic! {:#?}", info);
+	loop {
+		syscall::sleep(Duration::MAX);
 	}
 }

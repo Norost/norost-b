@@ -1,4 +1,3 @@
-.intel_syntax noprefix
 .weak _start
 .weak memcpy
 .weak memmove
@@ -10,17 +9,16 @@
 # - Scratch: rcx, ...
 # - DF is cleared by default
 
-.section .bss
+.section .bss._stack
 .p2align 12
-	.zero 4096
-	.zero 4096
-	.zero 4096
-	.zero 4096
+# align stack beforehand so we can save on a push
+	.zero (1 << 16) - 8
 _stack:
+	.zero 8
 
 .section .text._start
 _start:
-	lea rsp, [_stack + 8]
+	lea rsp, [rip + _stack]
 	call main
 
 	# exit
@@ -53,15 +51,13 @@ memmove:
 2:
 	# rsi < rdi -> copy highest first
 	std
-	add rsi, rcx
-	add rdi, rcx
-	dec rsi
-	dec rdi
+	lea rsi, [rsi + rcx - 1]
+	lea rdi, [rdi + rcx - 1]
 	rep movsb
 	cld
 	ret
 
-.section .text.memmove
+.section .text.memset
 .p2align 4
 # void *memset(void *dest, int c, size_t n)
 memset:

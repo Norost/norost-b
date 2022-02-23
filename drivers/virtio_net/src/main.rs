@@ -5,7 +5,7 @@ mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use kernel::{syscall, syslog};
+use norostb_rt::kernel::{self, syscall, syslog};
 
 #[export_name = "main"]
 fn main() {
@@ -152,5 +152,13 @@ fn main() {
 
 		syscall::sleep(Duration::from_secs(1));
 		t += time::Duration::from_secs(1);
+	}
+}
+
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+	syslog!("Panic! {:#?}", info);
+	loop {
+		syscall::sleep(Duration::MAX);
 	}
 }

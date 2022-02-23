@@ -1,3 +1,64 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 152689953b8..1d02b40453f 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -520,6 +520,10 @@ name = "cfg-if"
+ version = "1.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
++dependencies = [
++ "compiler_builtins",
++ "rustc-std-workspace-core",
++]
+ 
+ [[package]]
+ name = "chalk-derive"
+@@ -2371,6 +2375,24 @@ dependencies = [
+  "version_check",
+ ]
+ 
++[[package]]
++name = "norostb_kernel"
++version = "0.1.0"
++dependencies = [
++ "compiler_builtins",
++ "rustc-std-workspace-core",
++]
++
++[[package]]
++name = "norostb_rt"
++version = "0.1.0"
++dependencies = [
++ "cfg-if 1.0.0",
++ "compiler_builtins",
++ "norostb_kernel",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "ntapi"
+ version = "0.3.6"
+@@ -4794,6 +4816,7 @@ dependencies = [
+  "hermit-abi 0.2.0",
+  "libc",
+  "miniz_oxide",
++ "norostb_rt",
+  "object 0.26.2",
+  "panic_abort",
+  "panic_unwind",
+diff --git a/Cargo.toml b/Cargo.toml
+index cae48d79517..2c885acaa9c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -131,5 +131,8 @@ rustc-std-workspace-core = { path = 'library/rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'library/rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'library/rustc-std-workspace-std' }
+ 
++# No norostb packages are published to crates.io
++norostb_rt = { path = "../../norost/b/lib/rust/rt" }
++
+ [patch."https://github.com/rust-lang/rust-clippy"]
+ clippy_lints = { path = "src/tools/clippy/clippy_lints" }
 diff --git a/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
 new file mode 100644
 index 00000000000..7d5e1b48d81
@@ -49,16 +110,13 @@ index 92678aed5b1..15c65df16c8 100644
  /// Warnings encountered when parsing the target `json`.
 diff --git a/compiler/rustc_target/src/spec/norostb_base.rs b/compiler/rustc_target/src/spec/norostb_base.rs
 new file mode 100644
-index 00000000000..351dc2443c6
+index 00000000000..381bf54beed
 --- /dev/null
 +++ b/compiler/rustc_target/src/spec/norostb_base.rs
-@@ -0,0 +1,19 @@
-+use crate::spec::{LinkArgs, LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
+@@ -0,0 +1,15 @@
++use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
 +
 +pub fn opts() -> TargetOptions {
-+    let mut pre_link_args = LinkArgs::new();
-+    pre_link_args
-+        .insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
 +    TargetOptions {
 +        os: "norostb".into(),
 +        executables: true,
@@ -67,7 +125,6 @@ index 00000000000..351dc2443c6
 +        //linker: Some("rust-lld".into()),
 +        linker: Some("ld.lld".into()),
 +        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
-+        pre_link_args,
 +        panic_strategy: PanicStrategy::Abort,
 +        ..Default::default()
 +    }
@@ -156,14 +213,14 @@ index 5c5632a9d01..26939b2b401 100644
          ))] {
              unsafe fn abort() -> ! {
 diff --git a/library/panic_unwind/src/lib.rs b/library/panic_unwind/src/lib.rs
-index 7f05c82ac28..715e90729c5 100644
+index 7f05c82ac28..0ccf6a783c1 100644
 --- a/library/panic_unwind/src/lib.rs
 +++ b/library/panic_unwind/src/lib.rs
 @@ -43,6 +43,9 @@
          // L4Re is unix family but does not yet support unwinding.
          #[path = "dummy.rs"]
          mod real_imp;
-+	} else if #[cfg(target_os = "norostb")] {
++    } else if #[cfg(target_os = "norostb")] {
 +        #[path = "norostb.rs"]
 +        mod real_imp;
      } else if #[cfg(target_env = "msvc")] {
@@ -195,6 +252,20 @@ index 00000000000..1213919ab9a
 +    }
 +    __rust_abort();
 +}
+diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
+index dd9b035e86d..c3af6a2bf81 100644
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -47,6 +47,9 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
+ [target.wasm32-wasi.dependencies]
+ wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features = false }
+ 
++[target.'cfg(target_os = "norostb")'.dependencies]
++norostb_rt = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
++
+ [features]
+ backtrace = [
+   "gimli-symbolize",
 diff --git a/library/std/build.rs b/library/std/build.rs
 index 43168e77296..830bfb78c43 100644
 --- a/library/std/build.rs
@@ -1720,11 +1791,12 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..94e7be2a1fe
+index 00000000000..3b5d76e665b
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,76 @@
 +use crate::io;
++use norostb_rt::kernel::syscall;
 +
 +pub struct Stdin;
 +pub struct Stdout;
@@ -1750,22 +1822,9 @@ index 00000000000..94e7be2a1fe
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        let status @ len: usize;
-+        unsafe {
-+            crate::arch::asm!(
-+                "syscall",
-+                in("eax") 0,
-+                in("rdi") buf.as_ptr(),
-+                in("rsi") buf.len(),
-+                lateout("rax") status,
-+                lateout("rdx") len,
-+                lateout("rcx") _,
-+                lateout("r11") _,
-+            );
-+        }
-+        (status == 0)
-+            .then(|| len)
-+            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++        syscall::syslog(buf).map_err(|_| {
++            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
++        })
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -1781,22 +1840,9 @@ index 00000000000..94e7be2a1fe
 +
 +impl io::Write for Stderr {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        let status @ len: usize;
-+        unsafe {
-+            crate::arch::asm!(
-+                "syscall",
-+                in("eax") 0,
-+                in("rdi") buf.as_ptr(),
-+                in("rsi") buf.len(),
-+                lateout("rax") status,
-+                lateout("rdx") len,
-+                lateout("rcx") _,
-+                lateout("r11") _,
-+            );
-+        }
-+        (status == 0)
-+            .then(|| len)
-+            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++        syscall::syslog(buf).map_err(|_| {
++            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
++        })
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -1811,7 +1857,19 @@ index 00000000000..94e7be2a1fe
 +}
 +
 +pub fn panic_output() -> Option<impl io::Write> {
-+    Some(Stderr::new())
++    Some(syscall::SysLog::default())
++}
++
++#[unstable(feature = "norostb", issue = "none")]
++impl io::Write for syscall::SysLog {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        self.write_raw(buf);
++        Ok(buf.len())
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(self.flush())
++    }
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644

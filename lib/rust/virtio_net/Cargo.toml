@@ -12,6 +12,6 @@ pci = { path = "../pci" }
 endian = { path = "../endian" }
 volatile = { path = "../volatile" }
 #fatfs = { path = "../../../thirdparty/rust/fatfs/", optional = true, default-features = false }
-kernel = { path = "../kernel" }
+#kernel = { path = "../kernel" }
 
 [features]

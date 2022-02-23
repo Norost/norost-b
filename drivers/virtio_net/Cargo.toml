@@ -6,10 +6,8 @@ version = "0.1.0"
 edition = "2021"
 default-target = "x86_64-unknown-norostb"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-kernel = { path = "../../lib/rust/kernel" }
+norostb_rt = { path = "../../lib/rust/rt" }
 smoltcp = { version = "*", default-features = false, features = ["proto-ipv6", "medium-ethernet", "socket-tcp", "proto-ipv4", "socket-dhcpv4"] }
 virtio = { path = "../../lib/rust/virtio" }
 virtio_net = { path = "../../lib/rust/virtio_net" }

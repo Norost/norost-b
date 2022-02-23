@@ -150,7 +150,7 @@ impl Default for ObjectInfo<'_> {
 }
 
 impl fmt::Debug for ObjectInfo<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		use core::cell::Cell;
 
 		struct S<'a, I: Iterator<Item = &'a [u8]>>(Cell<Option<I>>);
@@ -159,7 +159,7 @@ impl fmt::Debug for ObjectInfo<'_> {
 		where
 			I: Iterator<Item = &'a [u8]>,
 		{
-			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 				let s = self.0.take().unwrap();
 				let mut f = f.debug_list();
 				s.for_each(|e| {
@@ -182,7 +182,7 @@ impl fmt::Debug for ObjectInfo<'_> {
 struct ByteStr<'a>(&'a [u8]);
 
 impl fmt::Debug for ByteStr<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match core::str::from_utf8(self.0) {
 			Ok(s) => s.fmt(f),
 			Err(_) => format_args!("{:?}", self.0).fmt(f),
@@ -337,7 +337,10 @@ pub fn query_table(
 }
 
 #[inline]
-pub fn query_next(query: QueryHandle, info: &mut ObjectInfo) -> Result<(), (NonZeroUsize, usize)> {
+pub fn query_next(
+	query: QueryHandle,
+	info: &mut ObjectInfo<'_>,
+) -> Result<(), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -440,7 +443,10 @@ pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, 
 }
 
 #[inline]
-pub fn take_table_job(handle: Handle, buffer: &mut [u8]) -> Result<Job, (NonZeroUsize, usize)> {
+pub fn take_table_job<'a>(
+	handle: Handle,
+	buffer: &'a mut [u8],
+) -> Result<Job<'a>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	let mut job = Job::default();
 	job.buffer_size = buffer.len().try_into().unwrap();
@@ -462,7 +468,7 @@ pub fn take_table_job(handle: Handle, buffer: &mut [u8]) -> Result<Job, (NonZero
 }
 
 #[inline]
-pub fn finish_table_job(handle: Handle, mut job: Job) -> Result<(), (NonZeroUsize, usize)> {
+pub fn finish_table_job(handle: Handle, mut job: Job<'_>) -> Result<(), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -485,19 +491,19 @@ pub struct SysLog {
 }
 
 impl SysLog {
+	#[doc(hidden)]
 	#[optimize(size)]
-	fn flush(&mut self) {
+	pub fn flush(&mut self) {
 		// Ignore errors because what can we do? Panic won't do us any
 		// good either.
 		let _ = syslog(&self.buffer[..usize::from(self.index)]);
 		self.index = 0;
 	}
-}
 
-impl fmt::Write for SysLog {
+	#[doc(hidden)]
 	#[optimize(size)]
-	fn write_str(&mut self, s: &str) -> fmt::Result {
-		for c in s.bytes() {
+	pub fn write_raw(&mut self, s: &[u8]) {
+		for &c in s {
 			if c == b'\n' || usize::from(self.index) >= self.buffer.len() {
 				self.flush();
 			}
@@ -506,6 +512,13 @@ impl fmt::Write for SysLog {
 				self.index += 1;
 			}
 		}
+	}
+}
+
+impl fmt::Write for SysLog {
+	#[optimize(size)]
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		self.write_raw(s.as_bytes());
 		Ok(())
 	}
 }
