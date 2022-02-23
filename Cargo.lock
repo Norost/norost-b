@@ -63,6 +63,10 @@ name = "endian"
 version = "0.1.0"
 
 [[package]]
+name = "hello_std"
+version = "0.1.0"
+
+[[package]]
 name = "kernel"
 version = "0.1.0"
 

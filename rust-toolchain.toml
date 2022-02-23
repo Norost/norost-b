@@ -1,0 +1,5 @@
+[toolchain]
+channel = "dev-x86_64-unknown-norostb"
+components = [ "rustc-dev" ]
+targets = [ "x86_64-unknown-norostb", "x86_64-unknown-none-norostbkernel", "i686-unknown-none-norostbkernel" ]
+profile = "minimal"

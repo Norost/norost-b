@@ -1,0 +1,14 @@
+profile = "user"
+changelog-seen = 2
+
+[build]
+host = ["x86_64-unknown-linux-gnu"]
+target = [
+	"x86_64-unknown-linux-gnu",
+	"x86_64-unknown-norostb",
+	"x86_64-unknown-none-norostbkernel",
+	"i686-unknown-none-norostbkernel"
+]
+
+[rust]
+incremental = true

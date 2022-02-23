@@ -12,6 +12,7 @@ members = [
 	"lib/rust/virtio",
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",
+	"base/hello_std",
 ]
 
 [profile.dev]

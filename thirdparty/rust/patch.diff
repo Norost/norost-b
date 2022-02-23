@@ -1,0 +1,2001 @@
+diff --git a/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
+new file mode 100644
+index 00000000000..7d5e1b48d81
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
+@@ -0,0 +1,19 @@
++use crate::spec::{Target, TargetOptions};
++
++pub fn target() -> Target {
++    Target {
++        llvm_target: "i686-unknown-none".into(),
++        pointer_width: 32,
++        data_layout:
++            "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-f64:32:64-f80:32-n8:16:32-S128".into(),
++        arch: "x86".into(),
++        options: TargetOptions {
++            cpu: "i686".into(),
++            max_atomic_width: Some(32),
++            features:
++                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
++                    .into(),
++            ..super::norostb_kernel_base::opts()
++        },
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index 92678aed5b1..15c65df16c8 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -73,6 +73,8 @@
+ mod linux_uclibc_base;
+ mod msvc_base;
+ mod netbsd_base;
++mod norostb_base;
++mod norostb_kernel_base;
+ mod openbsd_base;
+ mod redox_base;
+ mod solaris_base;
+@@ -1023,6 +1025,10 @@ fn $module() {
+     ("x86_64-unknown-none", x86_64_unknown_none),
+ 
+     ("mips64-openwrt-linux-musl", mips64_openwrt_linux_musl),
++
++    ("x86_64-unknown-norostb", x86_64_unknown_norostb),
++    ("i686-unknown-none-norostbkernel", i686_unknown_none_norostbkernel),
++    ("x86_64-unknown-none-norostbkernel", x86_64_unknown_none_norostbkernel),
+ }
+ 
+ /// Warnings encountered when parsing the target `json`.
+diff --git a/compiler/rustc_target/src/spec/norostb_base.rs b/compiler/rustc_target/src/spec/norostb_base.rs
+new file mode 100644
+index 00000000000..351dc2443c6
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/norostb_base.rs
+@@ -0,0 +1,19 @@
++use crate::spec::{LinkArgs, LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
++
++pub fn opts() -> TargetOptions {
++    let mut pre_link_args = LinkArgs::new();
++    pre_link_args
++        .insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
++    TargetOptions {
++        os: "norostb".into(),
++        executables: true,
++        // TODO figure out why rust-lld is missing from stage2 folder and/or
++        // why the one in $PATH isn't used.
++        //linker: Some("rust-lld".into()),
++        linker: Some("ld.lld".into()),
++        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
++        pre_link_args,
++        panic_strategy: PanicStrategy::Abort,
++        ..Default::default()
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/norostb_kernel_base.rs b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
+new file mode 100644
+index 00000000000..f1daa1c5e8f
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
+@@ -0,0 +1,16 @@
++use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
++
++pub fn opts() -> TargetOptions {
++    TargetOptions {
++        executables: true,
++        static_position_independent_executables: true,
++        disable_redzone: true,
++        // TODO figure out why rust-lld is missing from stage2 folder and/or
++        // why the one in $PATH isn't used.
++        //linker: Some("rust-lld".into()),
++        linker: Some("ld.lld".into()),
++        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
++        panic_strategy: PanicStrategy::Abort,
++        ..Default::default()
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+new file mode 100644
+index 00000000000..2e71cc9d9a6
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+@@ -0,0 +1,19 @@
++use crate::spec::{Target, TargetOptions};
++
++pub fn target() -> Target {
++    Target {
++        llvm_target: "x86_64-unknown-none".into(),
++        pointer_width: 64,
++        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
++            .into(),
++        arch: "x86_64".into(),
++        options: TargetOptions {
++            cpu: "x86-64".to_string(),
++            max_atomic_width: Some(64),
++            features:
++                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
++                    .into(),
++            ..super::norostb_kernel_base::opts()
++        },
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
+new file mode 100644
+index 00000000000..4bed0d09bb3
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
+@@ -0,0 +1,18 @@
++use crate::spec::{Target, TargetOptions};
++
++pub fn target() -> Target {
++    Target {
++        llvm_target: "x86_64-unknown-none".into(),
++        pointer_width: 64,
++        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
++            .into(),
++        arch: "x86_64".into(),
++        options: TargetOptions {
++            cpu: "x86-64".into(),
++            disable_redzone: true,
++            features: "-mmx,-sse,+soft-float".into(),
++            max_atomic_width: Some(64),
++            ..super::norostb_base::opts()
++        },
++    }
++}
+diff --git a/library/panic_abort/src/lib.rs b/library/panic_abort/src/lib.rs
+index 5c5632a9d01..26939b2b401 100644
+--- a/library/panic_abort/src/lib.rs
++++ b/library/panic_abort/src/lib.rs
+@@ -44,6 +44,7 @@ unsafe fn abort() -> ! {
+             }
+         } else if #[cfg(any(target_os = "hermit",
+                             target_os = "solid_asp3",
++                            target_os = "norostb",
+                             all(target_vendor = "fortanix", target_env = "sgx")
+         ))] {
+             unsafe fn abort() -> ! {
+diff --git a/library/panic_unwind/src/lib.rs b/library/panic_unwind/src/lib.rs
+index 7f05c82ac28..715e90729c5 100644
+--- a/library/panic_unwind/src/lib.rs
++++ b/library/panic_unwind/src/lib.rs
+@@ -43,6 +43,9 @@
+         // L4Re is unix family but does not yet support unwinding.
+         #[path = "dummy.rs"]
+         mod real_imp;
++	} else if #[cfg(target_os = "norostb")] {
++        #[path = "norostb.rs"]
++        mod real_imp;
+     } else if #[cfg(target_env = "msvc")] {
+         #[path = "seh.rs"]
+         mod real_imp;
+diff --git a/library/panic_unwind/src/norostb.rs b/library/panic_unwind/src/norostb.rs
+new file mode 100644
+index 00000000000..1213919ab9a
+--- /dev/null
++++ b/library/panic_unwind/src/norostb.rs
+@@ -0,0 +1,20 @@
++//! Unwinding for *norostb* target.
++//!
++//! Right now we don't support this, so this is just stubs.
++
++use alloc::boxed::Box;
++use core::any::Any;
++
++pub unsafe fn cleanup(_ptr: *mut u8) -> Box<dyn Any + Send> {
++    extern "C" {
++        pub fn __rust_abort() -> !;
++    }
++    __rust_abort();
++}
++
++pub unsafe fn panic(_data: Box<dyn Any + Send>) -> u32 {
++    extern "C" {
++        pub fn __rust_abort() -> !;
++    }
++    __rust_abort();
++}
+diff --git a/library/std/build.rs b/library/std/build.rs
+index 43168e77296..830bfb78c43 100644
+--- a/library/std/build.rs
++++ b/library/std/build.rs
+@@ -29,6 +29,7 @@ fn main() {
+         || target.contains("asmjs")
+         || target.contains("espidf")
+         || target.contains("solid")
++        || target.contains("norostb")
+     {
+         // These platforms don't have any special requirements.
+     } else {
+diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
+index 167c918c94c..dbfba32bd66 100644
+--- a/library/std/src/sys/mod.rs
++++ b/library/std/src/sys/mod.rs
+@@ -46,6 +46,9 @@
+     } else if #[cfg(all(target_vendor = "fortanix", target_env = "sgx"))] {
+         mod sgx;
+         pub use self::sgx::*;
++    } else if #[cfg(target_os = "norostb")] {
++        mod norostb;
++        pub use self::norostb::*;
+     } else {
+         mod unsupported;
+         pub use self::unsupported::*;
+diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
+new file mode 100644
+index 00000000000..6126fc75e15
+--- /dev/null
++++ b/library/std/src/sys/norostb/alloc.rs
+@@ -0,0 +1,34 @@
++use crate::alloc::{GlobalAlloc, Layout, System};
++
++#[repr(align(16))]
++#[derive(Clone, Copy)]
++struct E([u8; 16]);
++static mut HEAP: [E; 4096] = [E([0; 16]); 4096];
++static mut HEAP_I: usize = 0;
++
++#[stable(feature = "alloc_system_type", since = "1.28.0")]
++unsafe impl GlobalAlloc for System {
++    #[inline]
++    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
++        unsafe { self.alloc_zeroed(layout) }
++    }
++
++    #[inline]
++    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
++        unsafe {
++            let s = layout.pad_to_align().size();
++            let s = (s + 15) & !15;
++            let p = HEAP.as_ptr().add(HEAP_I);
++            HEAP_I += s / 16;
++            p as *mut u8
++        }
++    }
++
++    #[inline]
++    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
++
++    #[inline]
++    unsafe fn realloc(&self, _ptr: *mut u8, _layout: Layout, _new_size: usize) -> *mut u8 {
++        0 as *mut u8
++    }
++}
+diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
+new file mode 100644
+index 00000000000..a2d75a61976
+--- /dev/null
++++ b/library/std/src/sys/norostb/args.rs
+@@ -0,0 +1,36 @@
++use crate::ffi::OsString;
++use crate::fmt;
++
++pub struct Args {}
++
++pub fn args() -> Args {
++    Args {}
++}
++
++impl fmt::Debug for Args {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_list().finish()
++    }
++}
++
++impl Iterator for Args {
++    type Item = OsString;
++    fn next(&mut self) -> Option<OsString> {
++        None
++    }
++    fn size_hint(&self) -> (usize, Option<usize>) {
++        (0, Some(0))
++    }
++}
++
++impl ExactSizeIterator for Args {
++    fn len(&self) -> usize {
++        0
++    }
++}
++
++impl DoubleEndedIterator for Args {
++    fn next_back(&mut self) -> Option<OsString> {
++        None
++    }
++}
+diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
+new file mode 100644
+index 00000000000..2f3ea6d2a99
+--- /dev/null
++++ b/library/std/src/sys/norostb/common.rs
+@@ -0,0 +1,54 @@
++use crate::io as std_io;
++
++pub mod memchr {
++    pub use core::slice::memchr::{memchr, memrchr};
++}
++
++// This is not necessarily correct. May want to consider making it part of the
++// spec definition?
++use crate::os::raw::c_char;
++
++// SAFETY: must be called only once during runtime initialization.
++// NOTE: this is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn init(_argc: isize, _argv: *const *const u8) {}
++
++// SAFETY: must be called only once during runtime cleanup.
++// NOTE: this is not guaranteed to run, for example when the program aborts.
++pub unsafe fn cleanup() {}
++
++pub fn unsupported<T>() -> std_io::Result<T> {
++    Err(unsupported_err())
++}
++
++pub fn unsupported_err() -> std_io::Error {
++    std_io::const_io_error!(
++        std_io::ErrorKind::Unsupported,
++        "operation not supported on this platform",
++    )
++}
++
++pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
++    crate::io::ErrorKind::Uncategorized
++}
++
++pub fn abort_internal() -> ! {
++    unsafe {
++        crate::arch::asm!("hlt; hlt; hlt; ud2", options(noreturn));
++    }
++}
++
++pub fn hashmap_random_keys() -> (u64, u64) {
++    (1, 2)
++}
++
++pub unsafe fn strlen(mut s: *const c_char) -> usize {
++    // SAFETY: The caller must guarantee `s` points to a valid 0-terminated string.
++    unsafe {
++        let mut n = 0;
++        while *s != 0 {
++            n += 1;
++            s = s.offset(1);
++        }
++        n
++    }
++}
+diff --git a/library/std/src/sys/norostb/condvar.rs b/library/std/src/sys/norostb/condvar.rs
+new file mode 100644
+index 00000000000..35d12a69c8a
+--- /dev/null
++++ b/library/std/src/sys/norostb/condvar.rs
+@@ -0,0 +1,32 @@
++use crate::sys::mutex::Mutex;
++use crate::time::Duration;
++
++pub struct Condvar {}
++
++pub type MovableCondvar = Condvar;
++
++impl Condvar {
++    pub const fn new() -> Condvar {
++        Condvar {}
++    }
++
++    #[inline]
++    pub unsafe fn init(&mut self) {}
++
++    #[inline]
++    pub unsafe fn notify_one(&self) {}
++
++    #[inline]
++    pub unsafe fn notify_all(&self) {}
++
++    pub unsafe fn wait(&self, _mutex: &Mutex) {
++        panic!("condvar wait not supported")
++    }
++
++    pub unsafe fn wait_timeout(&self, _mutex: &Mutex, _dur: Duration) -> bool {
++        panic!("condvar wait not supported");
++    }
++
++    #[inline]
++    pub unsafe fn destroy(&self) {}
++}
+diff --git a/library/std/src/sys/norostb/env.rs b/library/std/src/sys/norostb/env.rs
+new file mode 100644
+index 00000000000..d2efec506c5
+--- /dev/null
++++ b/library/std/src/sys/norostb/env.rs
+@@ -0,0 +1,9 @@
++pub mod os {
++    pub const FAMILY: &str = "";
++    pub const OS: &str = "";
++    pub const DLL_PREFIX: &str = "";
++    pub const DLL_SUFFIX: &str = "";
++    pub const DLL_EXTENSION: &str = "";
++    pub const EXE_SUFFIX: &str = "";
++    pub const EXE_EXTENSION: &str = "";
++}
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+new file mode 100644
+index 00000000000..d1d2847cd33
+--- /dev/null
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -0,0 +1,312 @@
++use crate::ffi::OsString;
++use crate::fmt;
++use crate::hash::{Hash, Hasher};
++use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
++use crate::path::{Path, PathBuf};
++use crate::sys::time::SystemTime;
++use crate::sys::unsupported;
++
++pub struct File(!);
++
++pub struct FileAttr(!);
++
++pub struct ReadDir(!);
++
++pub struct DirEntry(!);
++
++#[derive(Clone, Debug)]
++pub struct OpenOptions {}
++
++pub struct FilePermissions(!);
++
++pub struct FileType(!);
++
++#[derive(Debug)]
++pub struct DirBuilder {}
++
++impl FileAttr {
++    pub fn size(&self) -> u64 {
++        self.0
++    }
++
++    pub fn perm(&self) -> FilePermissions {
++        self.0
++    }
++
++    pub fn file_type(&self) -> FileType {
++        self.0
++    }
++
++    pub fn modified(&self) -> io::Result<SystemTime> {
++        self.0
++    }
++
++    pub fn accessed(&self) -> io::Result<SystemTime> {
++        self.0
++    }
++
++    pub fn created(&self) -> io::Result<SystemTime> {
++        self.0
++    }
++}
++
++impl Clone for FileAttr {
++    fn clone(&self) -> FileAttr {
++        self.0
++    }
++}
++
++impl FilePermissions {
++    pub fn readonly(&self) -> bool {
++        self.0
++    }
++
++    pub fn set_readonly(&mut self, _readonly: bool) {
++        self.0
++    }
++}
++
++impl Clone for FilePermissions {
++    fn clone(&self) -> FilePermissions {
++        self.0
++    }
++}
++
++impl PartialEq for FilePermissions {
++    fn eq(&self, _other: &FilePermissions) -> bool {
++        self.0
++    }
++}
++
++impl Eq for FilePermissions {}
++
++impl fmt::Debug for FilePermissions {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++impl FileType {
++    pub fn is_dir(&self) -> bool {
++        self.0
++    }
++
++    pub fn is_file(&self) -> bool {
++        self.0
++    }
++
++    pub fn is_symlink(&self) -> bool {
++        self.0
++    }
++}
++
++impl Clone for FileType {
++    fn clone(&self) -> FileType {
++        self.0
++    }
++}
++
++impl Copy for FileType {}
++
++impl PartialEq for FileType {
++    fn eq(&self, _other: &FileType) -> bool {
++        self.0
++    }
++}
++
++impl Eq for FileType {}
++
++impl Hash for FileType {
++    fn hash<H: Hasher>(&self, _h: &mut H) {
++        self.0
++    }
++}
++
++impl fmt::Debug for FileType {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++impl fmt::Debug for ReadDir {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++impl Iterator for ReadDir {
++    type Item = io::Result<DirEntry>;
++
++    fn next(&mut self) -> Option<io::Result<DirEntry>> {
++        self.0
++    }
++}
++
++impl DirEntry {
++    pub fn path(&self) -> PathBuf {
++        self.0
++    }
++
++    pub fn file_name(&self) -> OsString {
++        self.0
++    }
++
++    pub fn metadata(&self) -> io::Result<FileAttr> {
++        self.0
++    }
++
++    pub fn file_type(&self) -> io::Result<FileType> {
++        self.0
++    }
++}
++
++impl OpenOptions {
++    pub fn new() -> OpenOptions {
++        OpenOptions {}
++    }
++
++    pub fn read(&mut self, _read: bool) {}
++    pub fn write(&mut self, _write: bool) {}
++    pub fn append(&mut self, _append: bool) {}
++    pub fn truncate(&mut self, _truncate: bool) {}
++    pub fn create(&mut self, _create: bool) {}
++    pub fn create_new(&mut self, _create_new: bool) {}
++}
++
++impl File {
++    pub fn open(_path: &Path, _opts: &OpenOptions) -> io::Result<File> {
++        unsupported()
++    }
++
++    pub fn file_attr(&self) -> io::Result<FileAttr> {
++        self.0
++    }
++
++    pub fn fsync(&self) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn datasync(&self) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn truncate(&self, _size: u64) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_read_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn read_buf(&self, _buf: &mut ReadBuf<'_>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn write(&self, _buf: &[u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_write_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn flush(&self) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn seek(&self, _pos: SeekFrom) -> io::Result<u64> {
++        self.0
++    }
++
++    pub fn duplicate(&self) -> io::Result<File> {
++        self.0
++    }
++
++    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
++        self.0
++    }
++}
++
++impl DirBuilder {
++    pub fn new() -> DirBuilder {
++        DirBuilder {}
++    }
++
++    pub fn mkdir(&self, _p: &Path) -> io::Result<()> {
++        unsupported()
++    }
++}
++
++impl fmt::Debug for File {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
++    unsupported()
++}
++
++pub fn unlink(_p: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn rename(_old: &Path, _new: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
++    match perm.0 {}
++}
++
++pub fn rmdir(_p: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn try_exists(_path: &Path) -> io::Result<bool> {
++    unsupported()
++}
++
++pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn symlink(_original: &Path, _link: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn link(_src: &Path, _dst: &Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub fn stat(_p: &Path) -> io::Result<FileAttr> {
++    unsupported()
++}
++
++pub fn lstat(_p: &Path) -> io::Result<FileAttr> {
++    unsupported()
++}
++
++pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
++    unsupported()
++}
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+new file mode 100644
+index 00000000000..d5f475b4310
+--- /dev/null
++++ b/library/std/src/sys/norostb/io.rs
+@@ -0,0 +1,47 @@
++use crate::mem;
++
++#[derive(Copy, Clone)]
++pub struct IoSlice<'a>(&'a [u8]);
++
++impl<'a> IoSlice<'a> {
++    #[inline]
++    pub fn new(buf: &'a [u8]) -> IoSlice<'a> {
++        IoSlice(buf)
++    }
++
++    #[inline]
++    pub fn advance(&mut self, n: usize) {
++        self.0 = &self.0[n..]
++    }
++
++    #[inline]
++    pub fn as_slice(&self) -> &[u8] {
++        self.0
++    }
++}
++
++pub struct IoSliceMut<'a>(&'a mut [u8]);
++
++impl<'a> IoSliceMut<'a> {
++    #[inline]
++    pub fn new(buf: &'a mut [u8]) -> IoSliceMut<'a> {
++        IoSliceMut(buf)
++    }
++
++    #[inline]
++    pub fn advance(&mut self, n: usize) {
++        let slice = mem::replace(&mut self.0, &mut []);
++        let (_, remaining) = slice.split_at_mut(n);
++        self.0 = remaining;
++    }
++
++    #[inline]
++    pub fn as_slice(&self) -> &[u8] {
++        self.0
++    }
++
++    #[inline]
++    pub fn as_mut_slice(&mut self) -> &mut [u8] {
++        self.0
++    }
++}
+diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
+new file mode 100644
+index 00000000000..535e7e748ee
+--- /dev/null
++++ b/library/std/src/sys/norostb/mod.rs
+@@ -0,0 +1,38 @@
++#![deny(unsafe_op_in_unsafe_fn)]
++
++pub mod alloc;
++pub mod args;
++#[path = "../unix/cmath.rs"]
++pub mod cmath;
++pub mod condvar;
++pub mod env;
++pub mod fs;
++pub mod io;
++pub mod mutex;
++pub mod net;
++pub mod os;
++#[path = "../unix/os_str.rs"]
++pub mod os_str;
++#[path = "../unix/path.rs"]
++pub mod path;
++pub mod pipe;
++pub mod process;
++pub mod rwlock;
++pub mod stdio;
++pub mod thread;
++#[cfg(target_thread_local)]
++pub mod thread_local_dtor;
++pub mod thread_local_key;
++pub mod time;
++
++mod common;
++pub use common::*;
++
++// This function is needed by the panic runtime. The symbol is named in
++// pre-link args for the target specification, so keep that in sync.
++#[cfg(not(test))]
++#[no_mangle]
++// NB. used by both libunwind and libpanic_abort
++pub extern "C" fn __rust_abort() {
++    abort_internal();
++}
+diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
+new file mode 100644
+index 00000000000..b3203c16c50
+--- /dev/null
++++ b/library/std/src/sys/norostb/mutex.rs
+@@ -0,0 +1,61 @@
++use crate::cell::Cell;
++
++pub struct Mutex {
++    // This platform has no threads, so we can use a Cell here.
++    locked: Cell<bool>,
++}
++
++pub type MovableMutex = Mutex;
++
++unsafe impl Send for Mutex {}
++unsafe impl Sync for Mutex {} // no threads on this platform
++
++impl Mutex {
++    pub const fn new() -> Mutex {
++        Mutex { locked: Cell::new(false) }
++    }
++
++    #[inline]
++    pub unsafe fn init(&mut self) {}
++
++    #[inline]
++    pub unsafe fn lock(&self) {
++        assert_eq!(self.locked.replace(true), false, "cannot recursively acquire mutex");
++    }
++
++    #[inline]
++    pub unsafe fn unlock(&self) {
++        self.locked.set(false);
++    }
++
++    #[inline]
++    pub unsafe fn try_lock(&self) -> bool {
++        self.locked.replace(true) == false
++    }
++
++    #[inline]
++    pub unsafe fn destroy(&self) {}
++}
++
++// All empty stubs because this platform does not yet support threads, so lock
++// acquisition always succeeds.
++pub struct ReentrantMutex {}
++
++impl ReentrantMutex {
++    pub const unsafe fn uninitialized() -> ReentrantMutex {
++        ReentrantMutex {}
++    }
++
++    pub unsafe fn init(&self) {}
++
++    pub unsafe fn lock(&self) {}
++
++    #[inline]
++    pub unsafe fn try_lock(&self) -> bool {
++        true
++    }
++
++    pub unsafe fn unlock(&self) {}
++
++    pub unsafe fn destroy(&self) {}
++}
+diff --git a/library/std/src/sys/norostb/net.rs b/library/std/src/sys/norostb/net.rs
+new file mode 100644
+index 00000000000..dbb6ce22c22
+--- /dev/null
++++ b/library/std/src/sys/norostb/net.rs
+@@ -0,0 +1,369 @@
++use crate::convert::TryFrom;
++use crate::fmt;
++use crate::io::{self, IoSlice, IoSliceMut};
++use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
++use crate::sys::unsupported;
++use crate::time::Duration;
++
++pub struct TcpStream(!);
++
++impl TcpStream {
++    pub fn connect(_: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
++        unsupported()
++    }
++
++    pub fn connect_timeout(_: &SocketAddr, _: Duration) -> io::Result<TcpStream> {
++        unsupported()
++    }
++
++    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
++        self.0
++    }
++
++    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
++        self.0
++    }
++
++    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn read(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn read_vectored(&self, _: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_read_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn write(&self, _: &[u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn write_vectored(&self, _: &[IoSlice<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_write_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
++        self.0
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        self.0
++    }
++
++    pub fn shutdown(&self, _: Shutdown) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn duplicate(&self) -> io::Result<TcpStream> {
++        self.0
++    }
++
++    pub fn set_linger(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn linger(&self) -> io::Result<Option<Duration>> {
++        self.0
++    }
++
++    pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn nodelay(&self) -> io::Result<bool> {
++        self.0
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        self.0
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        self.0
++    }
++
++    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++}
++
++impl fmt::Debug for TcpStream {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++pub struct TcpListener(!);
++
++impl TcpListener {
++    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
++        unsupported()
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        self.0
++    }
++
++    pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
++        self.0
++    }
++
++    pub fn duplicate(&self) -> io::Result<TcpListener> {
++        self.0
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        self.0
++    }
++
++    pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn only_v6(&self) -> io::Result<bool> {
++        self.0
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        self.0
++    }
++
++    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++}
++
++impl fmt::Debug for TcpListener {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++pub struct UdpSocket(!);
++
++impl UdpSocket {
++    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<UdpSocket> {
++        unsupported()
++    }
++
++    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
++        self.0
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        self.0
++    }
++
++    pub fn recv_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        self.0
++    }
++
++    pub fn peek_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
++        self.0
++    }
++
++    pub fn send_to(&self, _: &[u8], _: &SocketAddr) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn duplicate(&self) -> io::Result<UdpSocket> {
++        self.0
++    }
++
++    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
++        self.0
++    }
++
++    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
++        self.0
++    }
++
++    pub fn set_broadcast(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn broadcast(&self) -> io::Result<bool> {
++        self.0
++    }
++
++    pub fn set_multicast_loop_v4(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn multicast_loop_v4(&self) -> io::Result<bool> {
++        self.0
++    }
++
++    pub fn set_multicast_ttl_v4(&self, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn multicast_ttl_v4(&self) -> io::Result<u32> {
++        self.0
++    }
++
++    pub fn set_multicast_loop_v6(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn multicast_loop_v6(&self) -> io::Result<bool> {
++        self.0
++    }
++
++    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        self.0
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        self.0
++    }
++
++    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn recv(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn send(&self, _: &[u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn connect(&self, _: io::Result<&SocketAddr>) -> io::Result<()> {
++        self.0
++    }
++}
++
++impl fmt::Debug for UdpSocket {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++pub struct LookupHost(!);
++
++impl LookupHost {
++    pub fn port(&self) -> u16 {
++        self.0
++    }
++}
++
++impl Iterator for LookupHost {
++    type Item = SocketAddr;
++    fn next(&mut self) -> Option<SocketAddr> {
++        self.0
++    }
++}
++
++impl TryFrom<&str> for LookupHost {
++    type Error = io::Error;
++
++    fn try_from(_v: &str) -> io::Result<LookupHost> {
++        unsupported()
++    }
++}
++
++impl<'a> TryFrom<(&'a str, u16)> for LookupHost {
++    type Error = io::Error;
++
++    fn try_from(_v: (&'a str, u16)) -> io::Result<LookupHost> {
++        unsupported()
++    }
++}
++
++#[allow(nonstandard_style)]
++pub mod netc {
++    pub const AF_INET: u8 = 0;
++    pub const AF_INET6: u8 = 1;
++    pub type sa_family_t = u8;
++
++    #[derive(Copy, Clone)]
++    pub struct in_addr {
++        pub s_addr: u32,
++    }
++
++    #[derive(Copy, Clone)]
++    pub struct sockaddr_in {
++        pub sin_family: sa_family_t,
++        pub sin_port: u16,
++        pub sin_addr: in_addr,
++    }
++
++    #[derive(Copy, Clone)]
++    pub struct in6_addr {
++        pub s6_addr: [u8; 16],
++    }
++
++    #[derive(Copy, Clone)]
++    pub struct sockaddr_in6 {
++        pub sin6_family: sa_family_t,
++        pub sin6_port: u16,
++        pub sin6_addr: in6_addr,
++        pub sin6_flowinfo: u32,
++        pub sin6_scope_id: u32,
++    }
++
++    #[derive(Copy, Clone)]
++    pub struct sockaddr {}
++
++    pub type socklen_t = usize;
++}
+diff --git a/library/std/src/sys/norostb/os.rs b/library/std/src/sys/norostb/os.rs
+new file mode 100644
+index 00000000000..e150ae143ad
+--- /dev/null
++++ b/library/std/src/sys/norostb/os.rs
+@@ -0,0 +1,105 @@
++use super::unsupported;
++use crate::error::Error as StdError;
++use crate::ffi::{OsStr, OsString};
++use crate::fmt;
++use crate::io;
++use crate::marker::PhantomData;
++use crate::path::{self, PathBuf};
++
++pub fn errno() -> i32 {
++    0
++}
++
++pub fn error_string(_errno: i32) -> String {
++    "operation successful".to_string()
++}
++
++pub fn getcwd() -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub fn chdir(_: &path::Path) -> io::Result<()> {
++    unsupported()
++}
++
++pub struct SplitPaths<'a>(!, PhantomData<&'a ()>);
++
++pub fn split_paths(_unparsed: &OsStr) -> SplitPaths<'_> {
++    panic!("unsupported")
++}
++
++impl<'a> Iterator for SplitPaths<'a> {
++    type Item = PathBuf;
++    fn next(&mut self) -> Option<PathBuf> {
++        self.0
++    }
++}
++
++#[derive(Debug)]
++pub struct JoinPathsError;
++
++pub fn join_paths<I, T>(_paths: I) -> Result<OsString, JoinPathsError>
++where
++    I: Iterator<Item = T>,
++    T: AsRef<OsStr>,
++{
++    Err(JoinPathsError)
++}
++
++impl fmt::Display for JoinPathsError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        "not supported on this platform yet".fmt(f)
++    }
++}
++
++impl StdError for JoinPathsError {
++    #[allow(deprecated)]
++    fn description(&self) -> &str {
++        "not supported on this platform yet"
++    }
++}
++
++pub fn current_exe() -> io::Result<PathBuf> {
++    unsupported()
++}
++
++pub struct Env(!);
++
++impl Iterator for Env {
++    type Item = (OsString, OsString);
++    fn next(&mut self) -> Option<(OsString, OsString)> {
++        self.0
++    }
++}
++
++pub fn env() -> Env {
++    panic!("not supported on this platform")
++}
++
++pub fn getenv(_: &OsStr) -> Option<OsString> {
++    None
++}
++
++pub fn setenv(_: &OsStr, _: &OsStr) -> io::Result<()> {
++    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot set env vars on this platform"))
++}
++
++pub fn unsetenv(_: &OsStr) -> io::Result<()> {
++    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot unset env vars on this platform"))
++}
++
++pub fn temp_dir() -> PathBuf {
++    panic!("no filesystem on this platform")
++}
++
++pub fn home_dir() -> Option<PathBuf> {
++    None
++}
++
++pub fn exit(_code: i32) -> ! {
++    crate::intrinsics::abort()
++}
++
++pub fn getpid() -> u32 {
++    panic!("no pids on this platform")
++}
+diff --git a/library/std/src/sys/norostb/pipe.rs b/library/std/src/sys/norostb/pipe.rs
+new file mode 100644
+index 00000000000..25514c2322f
+--- /dev/null
++++ b/library/std/src/sys/norostb/pipe.rs
+@@ -0,0 +1,37 @@
++use crate::io::{self, IoSlice, IoSliceMut};
++
++pub struct AnonPipe(!);
++
++impl AnonPipe {
++    pub fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_read_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn write(&self, _buf: &[u8]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
++        self.0
++    }
++
++    pub fn is_write_vectored(&self) -> bool {
++        self.0
++    }
++
++    pub fn diverge(&self) -> ! {
++        self.0
++    }
++}
++
++pub fn read2(p1: AnonPipe, _v1: &mut Vec<u8>, _p2: AnonPipe, _v2: &mut Vec<u8>) -> io::Result<()> {
++    match p1.0 {}
++}
+diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
+new file mode 100644
+index 00000000000..42a1ff730e3
+--- /dev/null
++++ b/library/std/src/sys/norostb/process.rs
+@@ -0,0 +1,211 @@
++use crate::ffi::OsStr;
++use crate::fmt;
++use crate::io;
++use crate::marker::PhantomData;
++use crate::num::NonZeroI32;
++use crate::path::Path;
++use crate::sys::fs::File;
++use crate::sys::pipe::AnonPipe;
++use crate::sys::unsupported;
++use crate::sys_common::process::{CommandEnv, CommandEnvs};
++
++pub use crate::ffi::OsString as EnvKey;
++
++////////////////////////////////////////////////////////////////////////////////
++// Command
++////////////////////////////////////////////////////////////////////////////////
++
++pub struct Command {
++    env: CommandEnv,
++}
++
++// passed back to std::process with the pipes connected to the child, if any
++// were requested
++pub struct StdioPipes {
++    pub stdin: Option<AnonPipe>,
++    pub stdout: Option<AnonPipe>,
++    pub stderr: Option<AnonPipe>,
++}
++
++pub enum Stdio {
++    Inherit,
++    Null,
++    MakePipe,
++}
++
++impl Command {
++    pub fn new(_program: &OsStr) -> Command {
++        Command { env: Default::default() }
++    }
++
++    pub fn arg(&mut self, _arg: &OsStr) {}
++
++    pub fn env_mut(&mut self) -> &mut CommandEnv {
++        &mut self.env
++    }
++
++    pub fn cwd(&mut self, _dir: &OsStr) {}
++
++    pub fn stdin(&mut self, _stdin: Stdio) {}
++
++    pub fn stdout(&mut self, _stdout: Stdio) {}
++
++    pub fn stderr(&mut self, _stderr: Stdio) {}
++
++    pub fn get_program(&self) -> &OsStr {
++        panic!("unsupported")
++    }
++
++    pub fn get_args(&self) -> CommandArgs<'_> {
++        CommandArgs { _p: PhantomData }
++    }
++
++    pub fn get_envs(&self) -> CommandEnvs<'_> {
++        self.env.iter()
++    }
++
++    pub fn get_current_dir(&self) -> Option<&Path> {
++        None
++    }
++
++    pub fn spawn(
++        &mut self,
++        _default: Stdio,
++        _needs_stdin: bool,
++    ) -> io::Result<(Process, StdioPipes)> {
++        unsupported()
++    }
++}
++
++impl From<AnonPipe> for Stdio {
++    fn from(pipe: AnonPipe) -> Stdio {
++        pipe.diverge()
++    }
++}
++
++impl From<File> for Stdio {
++    fn from(_file: File) -> Stdio {
++        panic!("unsupported")
++    }
++}
++
++impl fmt::Debug for Command {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        Ok(())
++    }
++}
++
++pub struct ExitStatus(!);
++
++impl ExitStatus {
++    pub fn exit_ok(&self) -> Result<(), ExitStatusError> {
++        self.0
++    }
++
++    pub fn code(&self) -> Option<i32> {
++        self.0
++    }
++}
++
++impl Clone for ExitStatus {
++    fn clone(&self) -> ExitStatus {
++        self.0
++    }
++}
++
++impl Copy for ExitStatus {}
++
++impl PartialEq for ExitStatus {
++    fn eq(&self, _other: &ExitStatus) -> bool {
++        self.0
++    }
++}
++
++impl Eq for ExitStatus {}
++
++impl fmt::Debug for ExitStatus {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++impl fmt::Display for ExitStatus {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++#[derive(PartialEq, Eq, Clone, Copy, Debug)]
++pub struct ExitStatusError(ExitStatus);
++
++impl Into<ExitStatus> for ExitStatusError {
++    fn into(self) -> ExitStatus {
++        self.0.0
++    }
++}
++
++impl ExitStatusError {
++    pub fn code(self) -> Option<NonZeroI32> {
++        self.0.0
++    }
++}
++
++#[derive(PartialEq, Eq, Clone, Copy, Debug)]
++pub struct ExitCode(bool);
++
++impl ExitCode {
++    pub const SUCCESS: ExitCode = ExitCode(false);
++    pub const FAILURE: ExitCode = ExitCode(true);
++
++    pub fn as_i32(&self) -> i32 {
++        self.0 as i32
++    }
++}
++
++impl From<u8> for ExitCode {
++    fn from(code: u8) -> Self {
++        match code {
++            0 => Self::SUCCESS,
++            1..=255 => Self::FAILURE,
++        }
++    }
++}
++
++pub struct Process(!);
++
++impl Process {
++    pub fn id(&self) -> u32 {
++        self.0
++    }
++
++    pub fn kill(&mut self) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn wait(&mut self) -> io::Result<ExitStatus> {
++        self.0
++    }
++
++    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
++        self.0
++    }
++}
++
++pub struct CommandArgs<'a> {
++    _p: PhantomData<&'a ()>,
++}
++
++impl<'a> Iterator for CommandArgs<'a> {
++    type Item = &'a OsStr;
++    fn next(&mut self) -> Option<&'a OsStr> {
++        None
++    }
++}
++
++impl<'a> ExactSizeIterator for CommandArgs<'a> {}
++
++impl<'a> fmt::Debug for CommandArgs<'a> {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_list().finish()
++    }
++}
+diff --git a/library/std/src/sys/norostb/rwlock.rs b/library/std/src/sys/norostb/rwlock.rs
+new file mode 100644
+index 00000000000..8438adeb5b5
+--- /dev/null
++++ b/library/std/src/sys/norostb/rwlock.rs
+@@ -0,0 +1,68 @@
++use crate::cell::Cell;
++
++pub struct RWLock {
++    // This platform has no threads, so we can use a Cell here.
++    mode: Cell<isize>,
++}
++
++pub type MovableRWLock = RWLock;
++
++unsafe impl Send for RWLock {}
++unsafe impl Sync for RWLock {} // no threads on this platform
++
++impl RWLock {
++    pub const fn new() -> RWLock {
++        RWLock { mode: Cell::new(0) }
++    }
++
++    #[inline]
++    pub unsafe fn read(&self) {
++        let m = self.mode.get();
++        if m >= 0 {
++            self.mode.set(m + 1);
++        } else {
++            rtabort!("rwlock locked for writing");
++        }
++    }
++
++    #[inline]
++    pub unsafe fn try_read(&self) -> bool {
++        let m = self.mode.get();
++        if m >= 0 {
++            self.mode.set(m + 1);
++            true
++        } else {
++            false
++        }
++    }
++
++    #[inline]
++    pub unsafe fn write(&self) {
++        if self.mode.replace(-1) != 0 {
++            rtabort!("rwlock locked for reading")
++        }
++    }
++
++    #[inline]
++    pub unsafe fn try_write(&self) -> bool {
++        if self.mode.get() == 0 {
++            self.mode.set(-1);
++            true
++        } else {
++            false
++        }
++    }
++
++    #[inline]
++    pub unsafe fn read_unlock(&self) {
++        self.mode.set(self.mode.get() - 1);
++    }
++
++    #[inline]
++    pub unsafe fn write_unlock(&self) {
++        assert_eq!(self.mode.replace(0), -1);
++    }
++
++    #[inline]
++    pub unsafe fn destroy(&self) {}
++}
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+new file mode 100644
+index 00000000000..94e7be2a1fe
+--- /dev/null
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -0,0 +1,89 @@
++use crate::io;
++
++pub struct Stdin;
++pub struct Stdout;
++pub struct Stderr;
++
++impl Stdin {
++    pub const fn new() -> Stdin {
++        Stdin
++    }
++}
++
++impl io::Read for Stdin {
++    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
++        Ok(0)
++    }
++}
++
++impl Stdout {
++    pub const fn new() -> Stdout {
++        Stdout
++    }
++}
++
++impl io::Write for Stdout {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        let status @ len: usize;
++        unsafe {
++            crate::arch::asm!(
++                "syscall",
++                in("eax") 0,
++                in("rdi") buf.as_ptr(),
++                in("rsi") buf.len(),
++                lateout("rax") status,
++                lateout("rdx") len,
++                lateout("rcx") _,
++                lateout("r11") _,
++            );
++        }
++        (status == 0)
++            .then(|| len)
++            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++impl Stderr {
++    pub const fn new() -> Stderr {
++        Stderr
++    }
++}
++
++impl io::Write for Stderr {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        let status @ len: usize;
++        unsafe {
++            crate::arch::asm!(
++                "syscall",
++                in("eax") 0,
++                in("rdi") buf.as_ptr(),
++                in("rsi") buf.len(),
++                lateout("rax") status,
++                lateout("rdx") len,
++                lateout("rcx") _,
++                lateout("r11") _,
++            );
++        }
++        (status == 0)
++            .then(|| len)
++            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(())
++    }
++}
++
++pub const STDIN_BUF_SIZE: usize = 0;
++
++pub fn is_ebadf(_err: &io::Error) -> bool {
++    true
++}
++
++pub fn panic_output() -> Option<impl io::Write> {
++    Some(Stderr::new())
++}
+diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
+new file mode 100644
+index 00000000000..a8db251de20
+--- /dev/null
++++ b/library/std/src/sys/norostb/thread.rs
+@@ -0,0 +1,46 @@
++use super::unsupported;
++use crate::ffi::CStr;
++use crate::io;
++use crate::num::NonZeroUsize;
++use crate::time::Duration;
++
++pub struct Thread(!);
++
++pub const DEFAULT_MIN_STACK_SIZE: usize = 4096;
++
++impl Thread {
++    // unsafe: see thread::Builder::spawn_unchecked for safety requirements
++    pub unsafe fn new(_stack: usize, _p: Box<dyn FnOnce()>) -> io::Result<Thread> {
++        unsupported()
++    }
++
++    pub fn yield_now() {
++        // do nothing
++    }
++
++    pub fn set_name(_name: &CStr) {
++        // nope
++    }
++
++    pub fn sleep(_dur: Duration) {
++        panic!("can't sleep");
++    }
++
++    pub fn join(self) {
++        self.0
++    }
++}
++
++pub fn available_parallelism() -> io::Result<NonZeroUsize> {
++    unsupported()
++}
++
++pub mod guard {
++    pub type Guard = !;
++    pub unsafe fn current() -> Option<Guard> {
++        None
++    }
++    pub unsafe fn init() -> Option<Guard> {
++        None
++    }
++}
+diff --git a/library/std/src/sys/norostb/thread_local_dtor.rs b/library/std/src/sys/norostb/thread_local_dtor.rs
+new file mode 100644
+index 00000000000..85d66098302
+--- /dev/null
++++ b/library/std/src/sys/norostb/thread_local_dtor.rs
+@@ -0,0 +1,9 @@
++#![unstable(feature = "thread_local_internals", issue = "none")]
++
++pub unsafe fn register_dtor(_t: *mut u8, _dtor: unsafe extern "C" fn(*mut u8)) {
++    // FIXME: right now there is no concept of "thread exit", but this is likely
++    // going to show up at some point in the form of an exported symbol that the
++    // wasm runtime is going to be expected to call. For now we basically just
++    // ignore the arguments, but if such a function starts to exist it will
++    // likely look like the OSX implementation in `unix/fast_thread_local.rs`
++}
+diff --git a/library/std/src/sys/norostb/thread_local_key.rs b/library/std/src/sys/norostb/thread_local_key.rs
+new file mode 100644
+index 00000000000..a31a3944a06
+--- /dev/null
++++ b/library/std/src/sys/norostb/thread_local_key.rs
+@@ -0,0 +1,50 @@
++use crate::ptr;
++
++pub type Key = usize;
++
++// FIXME implement real TLS
++static mut TLS: Vec<(*mut u8, Option<unsafe extern "C" fn(*mut u8)>)> = Vec::new();
++
++#[inline]
++pub unsafe fn create(dtor: Option<unsafe extern "C" fn(*mut u8)>) -> Key {
++    unsafe {
++        TLS.push((ptr::null_mut(), dtor));
++        TLS.len() - 1
++    }
++}
++
++#[inline]
++pub unsafe fn set(key: Key, value: *mut u8) {
++    // TODO do we have to call the destructor on the old value?
++    unsafe {
++        debug_assert!(key < TLS.len());
++        TLS.get_unchecked_mut(key).0 = value;
++    }
++}
++
++#[inline]
++pub unsafe fn get(key: Key) -> *mut u8 {
++    unsafe {
++        debug_assert!(key < TLS.len());
++        TLS.get_unchecked(key).0
++    }
++}
++
++#[inline]
++pub unsafe fn destroy(key: Key) {
++    unsafe {
++        debug_assert!(key < TLS.len());
++        let p = TLS.get_unchecked(key);
++        if let Some(f) = p.1 {
++            if !p.0.is_null() {
++                f(p.0);
++            }
++        }
++        let _ = p;
++    }
++}
++
++#[inline]
++pub fn requires_synchronized_create() -> bool {
++    false
++}
+diff --git a/library/std/src/sys/norostb/time.rs b/library/std/src/sys/norostb/time.rs
+new file mode 100644
+index 00000000000..6d67b538a96
+--- /dev/null
++++ b/library/std/src/sys/norostb/time.rs
+@@ -0,0 +1,45 @@
++use crate::time::Duration;
++
++#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
++pub struct Instant(Duration);
++
++#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
++pub struct SystemTime(Duration);
++
++pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
++
++impl Instant {
++    pub fn now() -> Instant {
++        panic!("time not implemented on this platform")
++    }
++
++    pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
++        self.0.checked_sub(other.0)
++    }
++
++    pub fn checked_add_duration(&self, other: &Duration) -> Option<Instant> {
++        Some(Instant(self.0.checked_add(*other)?))
++    }
++
++    pub fn checked_sub_duration(&self, other: &Duration) -> Option<Instant> {
++        Some(Instant(self.0.checked_sub(*other)?))
++    }
++}
++
++impl SystemTime {
++    pub fn now() -> SystemTime {
++        panic!("time not implemented on this platform")
++    }
++
++    pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {
++        self.0.checked_sub(other.0).ok_or_else(|| other.0 - self.0)
++    }
++
++    pub fn checked_add_duration(&self, other: &Duration) -> Option<SystemTime> {
++        Some(SystemTime(self.0.checked_add(*other)?))
++    }
++
++    pub fn checked_sub_duration(&self, other: &Duration) -> Option<SystemTime> {
++        Some(SystemTime(self.0.checked_sub(*other)?))
++    }
++}
+diff --git a/library/std/src/sys_common/mod.rs b/library/std/src/sys_common/mod.rs
+index 804727fbc54..b7fde6e5a4c 100644
+--- a/library/std/src/sys_common/mod.rs
++++ b/library/std/src/sys_common/mod.rs
+@@ -39,6 +39,7 @@
+ cfg_if::cfg_if! {
+     if #[cfg(any(target_os = "l4re",
+                  target_os = "hermit",
++                 target_os = "norostb",
+                  feature = "restricted-std",
+                  all(target_family = "wasm", not(target_os = "emscripten")),
+                  all(target_vendor = "fortanix", target_env = "sgx")))] {

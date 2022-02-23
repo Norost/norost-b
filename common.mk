@@ -7,6 +7,8 @@ CARGO_OUTPUT_DIR = $(_common_mk_dir)target/$(CARGO_TARGET)/release
 CARGO_PROFILE    = release
 export CARGO_BUILD_TARGET = riscv64gc-unknown-none-elf
 
+RUSTC_TARGET = $(_common_mk_dir)x86_64-unknown-norostb.json
+
 CC        = $(TOOLS_DIR)/$(TARGET)-gcc
 AR        = $(TOOLS_DIR)/$(TARGET)-ar
 AS        = $(TOOLS_DIR)/$(TARGET)-as

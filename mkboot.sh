@@ -6,10 +6,7 @@ set -e
 set -x
 
 cd boot/$ARCH
-cargo rustc \
-	--release \
-	--target $RUST_TARGET_FILE_32 \
-	-- \
+cargo rustc --release -- \
 	-C llvm-args=-align-all-blocks=1 \
 	-C linker=$CC \
 	-C link-arg=-m32 \
