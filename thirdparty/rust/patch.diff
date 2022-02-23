@@ -1873,15 +1873,16 @@ index 00000000000..3b5d76e665b
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..a8db251de20
+index 00000000000..1f9475515ca
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,47 @@
 +use super::unsupported;
 +use crate::ffi::CStr;
 +use crate::io;
 +use crate::num::NonZeroUsize;
 +use crate::time::Duration;
++use norostb_rt::kernel::syscall;
 +
 +pub struct Thread(!);
 +
@@ -1894,15 +1895,15 @@ index 00000000000..a8db251de20
 +    }
 +
 +    pub fn yield_now() {
-+        // do nothing
++        syscall::sleep(Duration::ZERO);
 +    }
 +
 +    pub fn set_name(_name: &CStr) {
 +        // nope
 +    }
 +
-+    pub fn sleep(_dur: Duration) {
-+        panic!("can't sleep");
++    pub fn sleep(dur: Duration) {
++        syscall::sleep(dur);
 +    }
 +
 +    pub fn join(self) {

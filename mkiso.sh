@@ -20,8 +20,8 @@ cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 #cp drivers/hello_world/hello isodir/drivers/hello_world
 #(cd drivers/virtio_block && cargo build --release --target $TARGET_USER)
 #cp target/$TARGET_USER/release/driver_virtio_block isodir/drivers/virtio_block
-#(cd drivers/virtio_net && cargo build --release --target $TARGET_USER)
-#cp target/$TARGET_USER/release/driver_virtio_net isodir/drivers/virtio_net
+(cd drivers/virtio_net && cargo build --release --target $TARGET_USER)
+cp target/$TARGET_USER/release/driver_virtio_net isodir/drivers/virtio_net
 (cd base/hello_std && cargo build --release --target $TARGET_USER)
 cp target/$TARGET_USER/release/hello_std isodir/drivers/hello_std
 
