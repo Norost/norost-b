@@ -294,11 +294,12 @@ index 167c918c94c..dbfba32bd66 100644
          pub use self::unsupported::*;
 diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
 new file mode 100644
-index 00000000000..6126fc75e15
+index 00000000000..5a589bd14b4
 --- /dev/null
 +++ b/library/std/src/sys/norostb/alloc.rs
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,48 @@
 +use crate::alloc::{GlobalAlloc, Layout, System};
++use crate::ptr;
 +
 +#[repr(align(16))]
 +#[derive(Clone, Copy)]
@@ -328,8 +329,21 @@ index 00000000000..6126fc75e15
 +    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 +
 +    #[inline]
-+    unsafe fn realloc(&self, _ptr: *mut u8, _layout: Layout, _new_size: usize) -> *mut u8 {
-+        0 as *mut u8
++    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
++        if layout.size() >= new_size {
++            return ptr;
++        }
++        // SAFETY: the caller has to ensure new_size doesn't overflow
++        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
++        // SAFETY: the caller has to ensure new_size is non-zero
++        let new_ptr = unsafe { self.alloc_zeroed(new_layout) };
++        if !new_ptr.is_null() {
++            // SAFETY: the old and new pointer are both valid and cannot overlap.
++            unsafe {
++                ptr::copy_nonoverlapping(ptr, new_ptr, layout.size().min(new_size));
++            }
++        }
++        new_ptr
 +    }
 +}
 diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
@@ -376,10 +390,10 @@ index 00000000000..a2d75a61976
 +}
 diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
 new file mode 100644
-index 00000000000..2f3ea6d2a99
+index 00000000000..1db6a49a522
 --- /dev/null
 +++ b/library/std/src/sys/norostb/common.rs
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,46 @@
 +use crate::io as std_io;
 +
 +pub mod memchr {
@@ -389,14 +403,6 @@ index 00000000000..2f3ea6d2a99
 +// This is not necessarily correct. May want to consider making it part of the
 +// spec definition?
 +use crate::os::raw::c_char;
-+
-+// SAFETY: must be called only once during runtime initialization.
-+// NOTE: this is not guaranteed to run, for example when Rust code is called externally.
-+pub unsafe fn init(_argc: isize, _argv: *const *const u8) {}
-+
-+// SAFETY: must be called only once during runtime cleanup.
-+// NOTE: this is not guaranteed to run, for example when the program aborts.
-+pub unsafe fn cleanup() {}
 +
 +pub fn unsupported<T>() -> std_io::Result<T> {
 +    Err(unsupported_err())
@@ -860,10 +866,10 @@ index 00000000000..d5f475b4310
 +}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..535e7e748ee
+index 00000000000..1b551f8c087
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,58 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -902,6 +908,26 @@ index 00000000000..535e7e748ee
 +pub extern "C" fn __rust_abort() {
 +    abort_internal();
 +}
++
++/// # Safety
++///
++/// Must be called only once during runtime initialization.
++///
++/// # Note
++///
++/// This is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
++    unsafe { stdio::init() }
++}
++
++/// # Safety
++///
++/// Must be called only once during runtime cleanup.
++///
++/// # Note
++///
++/// This is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn cleanup() {}
 diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
 new file mode 100644
 index 00000000000..b3203c16c50
@@ -1791,16 +1817,22 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..3b5d76e665b
+index 00000000000..4fc917cf4e1
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,92 @@
 +use crate::io;
 +use norostb_rt::kernel::syscall;
++
++static STDIN: syscall::Handle = syscall::Handle(0);
++static STDOUT: syscall::Handle = syscall::Handle(1);
++static STDERR: syscall::Handle = syscall::Handle(2);
 +
 +pub struct Stdin;
 +pub struct Stdout;
 +pub struct Stderr;
++
++pub const STDIN_BUF_SIZE: usize = 512;
 +
 +impl Stdin {
 +    pub const fn new() -> Stdin {
@@ -1809,8 +1841,9 @@ index 00000000000..3b5d76e665b
 +}
 +
 +impl io::Read for Stdin {
-+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-+        Ok(0)
++    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
++        syscall::read(STDIN, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to read"))
 +    }
 +}
 +
@@ -1822,9 +1855,8 @@ index 00000000000..3b5d76e665b
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        syscall::syslog(buf).map_err(|_| {
-+            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
-+        })
++        syscall::write(STDOUT, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -1840,17 +1872,14 @@ index 00000000000..3b5d76e665b
 +
 +impl io::Write for Stderr {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        syscall::syslog(buf).map_err(|_| {
-+            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
-+        })
++        syscall::write(STDERR, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
 +        Ok(())
 +    }
 +}
-+
-+pub const STDIN_BUF_SIZE: usize = 0;
 +
 +pub fn is_ebadf(_err: &io::Error) -> bool {
 +    true
@@ -1870,6 +1899,19 @@ index 00000000000..3b5d76e665b
 +    fn flush(&mut self) -> io::Result<()> {
 +        Ok(self.flush())
 +    }
++}
++
++/// # Safety
++///
++/// Must be called only once during runtime initialization.
++pub(super) unsafe fn init() {
++    use syscall::{Id, TableId};
++    let stdin = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stdin, STDIN);
++    let stdout = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stdout, STDOUT);
++    let stderr = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stderr, STDERR);
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644

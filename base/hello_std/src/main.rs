@@ -1,6 +1,12 @@
 fn main() {
+	let mut s = String::with_capacity(128);
+	println!("Hello, world!");
 	loop {
-		println!("Hello, world!");
-		std::thread::sleep(std::time::Duration::new(1, 500 * 1_000_000));
+		print!("> ");
+		use std::io::Write;
+		std::io::stdout().flush().unwrap();
+		std::io::stdin().read_line(&mut s).unwrap();
+		println!("You wrote: {:?}", s);
+		s.clear()
 	}
 }

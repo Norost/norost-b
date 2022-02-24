@@ -100,7 +100,6 @@ fn handle_general_protection_fault(error: u32, rip: *const ()) {
 }
 
 fn handle_page_fault(error: u32, rip: *const ()) {
-	unsafe { crate::log::force_unlock() };
 	fatal!("Page fault!");
 	unsafe {
 		let addr: *const ();

@@ -262,15 +262,27 @@ extern "C" fn map_object(
 extern "C" fn read_object(
 	handle: usize,
 	base: usize,
-	_length: usize,
+	length: usize,
 	offset_l: usize,
 	offset_h: usize,
 	_: usize,
 ) -> Return {
-	let _handle = ObjectHandle::from(handle);
-	let _offset = merge_u64(offset_l, offset_h);
-	let _base = NonNull::new(base as *mut u8).unwrap();
-	todo!()
+	let handle = ObjectHandle::from(handle);
+	let offset = merge_u64(offset_l, offset_h);
+	let base = NonNull::new(base as *mut u8).unwrap();
+	let data = unsafe { core::slice::from_raw_parts_mut(base.as_ptr(), length) };
+
+	let read = Process::current()
+		.get_object(handle)
+		.unwrap()
+		.read(offset, data)
+		.unwrap();
+	let read = super::block_on(read).unwrap().into_usize().unwrap();
+
+	Return {
+		status: 0,
+		value: read,
+	}
 }
 
 extern "C" fn write_object(

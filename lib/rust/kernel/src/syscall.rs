@@ -8,7 +8,8 @@ const ID_QUERY_NEXT: usize = 7;
 const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
 const ID_SLEEP: usize = 10;
-
+const ID_READ: usize = 11;
+const ID_WRITE: usize = 12;
 const ID_CREATE_TABLE: usize = 13;
 
 const ID_TAKE_TABLE_JOB: usize = 15;
@@ -22,9 +23,9 @@ use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Id(pub(crate) u64);
+pub struct Id(pub u64);
 
 impl Default for Id {
 	fn default() -> Self {
@@ -32,9 +33,9 @@ impl Default for Id {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct TableId(u32);
+pub struct TableId(pub u32);
 
 impl Default for TableId {
 	fn default() -> Self {
@@ -42,9 +43,9 @@ impl Default for TableId {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Handle(usize);
+pub struct Handle(pub usize);
 
 #[repr(C)]
 pub struct TableInfo {
@@ -360,7 +361,7 @@ pub fn query_next(
 }
 
 #[inline]
-pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
+pub fn open(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -375,6 +376,12 @@ pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, u
 		)
 	}
 	ret(status, value).map(|v| Handle(v))
+}
+
+#[deprecated(note = "use open()")]
+#[inline]
+pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
+	open(table_id, id)
 }
 
 #[inline]
@@ -417,6 +424,44 @@ pub fn sleep(duration: Duration) {
 			lateout("r11") _,
 		)
 	}
+}
+
+#[inline]
+pub fn read(object: Handle, data: &mut [u8]) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_READ,
+			in("rdi") object.0,
+			in("rsi") data.as_mut_ptr(),
+			in("rdx") data.len(),
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value)
+}
+
+#[inline]
+pub fn write(object: Handle, data: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_WRITE,
+			in("rdi") object.0,
+			in("rsi") data.as_ptr(),
+			in("rdx") data.len(),
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value)
 }
 
 #[inline]

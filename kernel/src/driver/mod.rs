@@ -18,6 +18,7 @@ use crate::boot;
 /// This function may only be called once at boot time
 pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
+	uart::init();
 
 	acpi::init(boot);
 
