@@ -495,143 +495,108 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..d1d2847cd33
+index 00000000000..2327f328a9e
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,312 @@
+@@ -0,0 +1,302 @@
 +use crate::ffi::OsString;
 +use crate::fmt;
-+use crate::hash::{Hash, Hasher};
++use crate::hash::Hash;
 +use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
++use crate::mem;
 +use crate::path::{Path, PathBuf};
++use crate::sys::os_str::Buf;
 +use crate::sys::time::SystemTime;
 +use crate::sys::unsupported;
++use crate::sys_common::FromInner;
++use norostb_rt::kernel::syscall;
 +
 +pub struct File(!);
 +
-+pub struct FileAttr(!);
++#[derive(Clone, Debug)]
++pub enum FileAttr {
++    Table { entries: u64 },
++}
 +
-+pub struct ReadDir(!);
++#[derive(Debug)]
++pub enum ReadDir {
++    None,
++    Tables(Option<syscall::TableId>),
++}
 +
-+pub struct DirEntry(!);
++pub enum DirEntry {
++    Table(syscall::TableInfo),
++}
 +
 +#[derive(Clone, Debug)]
 +pub struct OpenOptions {}
 +
-+pub struct FilePermissions(!);
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct FilePermissions(());
 +
-+pub struct FileType(!);
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++pub enum FileType {
++    Table,
++}
 +
 +#[derive(Debug)]
 +pub struct DirBuilder {}
 +
 +impl FileAttr {
 +    pub fn size(&self) -> u64 {
-+        self.0
++        match self {
++            Self::Table { entries, .. } => *entries,
++        }
 +    }
 +
 +    pub fn perm(&self) -> FilePermissions {
-+        self.0
++        FilePermissions(())
 +    }
 +
 +    pub fn file_type(&self) -> FileType {
-+        self.0
++        match self {
++            Self::Table { .. } => FileType::Table,
++        }
 +    }
 +
 +    pub fn modified(&self) -> io::Result<SystemTime> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn accessed(&self) -> io::Result<SystemTime> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn created(&self) -> io::Result<SystemTime> {
-+        self.0
-+    }
-+}
-+
-+impl Clone for FileAttr {
-+    fn clone(&self) -> FileAttr {
-+        self.0
++        unsupported()
 +    }
 +}
 +
 +impl FilePermissions {
 +    pub fn readonly(&self) -> bool {
-+        self.0
++        false
 +    }
 +
-+    pub fn set_readonly(&mut self, _readonly: bool) {
-+        self.0
-+    }
-+}
-+
-+impl Clone for FilePermissions {
-+    fn clone(&self) -> FilePermissions {
-+        self.0
-+    }
-+}
-+
-+impl PartialEq for FilePermissions {
-+    fn eq(&self, _other: &FilePermissions) -> bool {
-+        self.0
-+    }
-+}
-+
-+impl Eq for FilePermissions {}
-+
-+impl fmt::Debug for FilePermissions {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
-+    }
++    pub fn set_readonly(&mut self, _readonly: bool) {}
 +}
 +
 +impl FileType {
 +    pub fn is_dir(&self) -> bool {
-+        self.0
++        match self {
++            Self::Table => true,
++        }
 +    }
 +
 +    pub fn is_file(&self) -> bool {
-+        self.0
++        match self {
++            Self::Table => false,
++        }
 +    }
 +
 +    pub fn is_symlink(&self) -> bool {
-+        self.0
-+    }
-+}
-+
-+impl Clone for FileType {
-+    fn clone(&self) -> FileType {
-+        self.0
-+    }
-+}
-+
-+impl Copy for FileType {}
-+
-+impl PartialEq for FileType {
-+    fn eq(&self, _other: &FileType) -> bool {
-+        self.0
-+    }
-+}
-+
-+impl Eq for FileType {}
-+
-+impl Hash for FileType {
-+    fn hash<H: Hasher>(&self, _h: &mut H) {
-+        self.0
-+    }
-+}
-+
-+impl fmt::Debug for FileType {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
-+    }
-+}
-+
-+impl fmt::Debug for ReadDir {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
++        match self {
++            Self::Table => false,
++        }
 +    }
 +}
 +
@@ -639,25 +604,45 @@ index 00000000000..d1d2847cd33
 +    type Item = io::Result<DirEntry>;
 +
 +    fn next(&mut self) -> Option<io::Result<DirEntry>> {
-+        self.0
++        match mem::replace(self, Self::None) {
++            Self::None => None,
++            Self::Tables(tbl) => syscall::next_table(tbl).map(|(id, info)| {
++                *self = Self::Tables(Some(id));
++                Ok(DirEntry::Table(info))
++            }),
++        }
 +    }
 +}
 +
 +impl DirEntry {
 +    pub fn path(&self) -> PathBuf {
-+        self.0
++        match self {
++            Self::Table(tbl) => {
++                let inner = tbl.name().iter().chain(b":").copied().collect();
++                OsString::from_inner(Buf { inner }).into()
++            }
++        }
 +    }
 +
 +    pub fn file_name(&self) -> OsString {
-+        self.0
++        match self {
++            Self::Table(tbl) => {
++                let inner = tbl.name().iter().copied().collect();
++                OsString::from_inner(Buf { inner }).into()
++            }
++        }
 +    }
 +
 +    pub fn metadata(&self) -> io::Result<FileAttr> {
-+        self.0
++        match self {
++            Self::Table(_) => Ok(FileAttr::Table { entries: 0 }),
++        }
 +    }
 +
 +    pub fn file_type(&self) -> io::Result<FileType> {
-+        self.0
++        match self {
++            Self::Table(_) => Ok(FileType::Table),
++        }
 +    }
 +}
 +
@@ -756,8 +741,13 @@ index 00000000000..d1d2847cd33
 +    }
 +}
 +
-+pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
-+    unsupported()
++pub fn readdir(p: &Path) -> io::Result<ReadDir> {
++    if p.as_os_str().is_empty() {
++        // List all tables.
++        Ok(ReadDir::Tables(None))
++    } else {
++        todo!()
++    }
 +}
 +
 +pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -768,8 +758,8 @@ index 00000000000..d1d2847cd33
 +    unsupported()
 +}
 +
-+pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
-+    match perm.0 {}
++pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
++    unsupported()
 +}
 +
 +pub fn rmdir(_p: &Path) -> io::Result<()> {

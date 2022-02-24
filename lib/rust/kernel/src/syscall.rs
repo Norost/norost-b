@@ -47,6 +47,7 @@ impl Default for TableId {
 #[repr(transparent)]
 pub struct Handle(pub usize);
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct TableInfo {
 	name_len: u8,
