@@ -1,7 +1,8 @@
-.weak _start
-.weak memcpy
-.weak memmove
-.weak memset
+.globl _start
+.globl memcpy
+.globl memmove
+.globl memset
+.globl memcmp
 
 # SysV ABI:
 # - Parameter: rdi, rsi, rdx, ...
@@ -65,4 +66,52 @@ memset:
 	xchg rax, rsi
 	rep stosb
 	mov rax, rsi
+	ret
+
+.section .text.memcmp
+.p2align 4
+# int memset(void *a, void *b, size_t n)
+# rep cmpsb is very slow, so implement something manually
+#  - benchmark on 2G data: 65ms manual version vs 810ms rep cmpsb
+memcmp:
+	mov r8, rdx
+	and r8, ~0x7
+	add r8, rdi
+
+	add rdx, rdi
+
+	# make equal so if n == 0 then eax - ecx == 0 too
+	mov eax, ecx
+
+	# Compare in chunks of 8 bytes
+	jmp 3f
+2:
+	mov rax, QWORD PTR [rdi]
+	# if non-zero, one of the bytes differs
+	# don't increase rdi/rsi & rescan with byte loads
+	cmp rax, QWORD PTR [rsi]
+	jne 4f
+	# see above
+	add rdi, 8
+	add rsi, 8
+3:
+	cmp rdi, r8
+	jnz 2b
+4:
+
+	# Compare individual bytes
+	jmp 3f
+2:
+	movsx eax, BYTE PTR [rdi]
+	movsx ecx, BYTE PTR [rsi]
+	cmp eax, ecx
+	jne 4f
+	inc rdi
+	inc rsi
+3:
+	cmp rdi, rdx
+	jnz 2b
+4:
+
+	sub eax, ecx
 	ret
