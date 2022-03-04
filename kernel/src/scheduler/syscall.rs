@@ -196,9 +196,15 @@ extern "C" fn query_next(
 			let mut p = 0;
 			for (to, tag) in info.tags_offsets.iter_mut().zip(&*obj.tags) {
 				*to = p as u32;
+				let q = p + 1 + tag.len();
+				if q >= string_buffer.len() {
+					// There is not enough space to copy the tag, so just skip it and
+					// the remaining tags.
+					break;
+				}
 				string_buffer[p] = tag.len().try_into().unwrap();
-				string_buffer[p + 1..p + 1 + tag.len()].copy_from_slice(tag.as_bytes());
-				p += 1 + tag.len();
+				string_buffer[p + 1..q].copy_from_slice(tag.as_bytes());
+				p = q;
 			}
 			Return {
 				status: 0,

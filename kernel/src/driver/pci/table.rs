@@ -28,6 +28,12 @@ impl Table for PciTable {
 				let r = match t.split_once(':') {
 					Some(("vendor-id", h)) => f(&mut vendor_id, h),
 					Some(("device-id", h)) => f(&mut device_id, h),
+					Some(("name", h)) => {
+						// Names are unique
+						return Box::new(QueryName {
+							item: bdf_from_string(h),
+						});
+					}
 					_ => false,
 				};
 				if !r {
