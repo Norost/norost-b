@@ -8,23 +8,50 @@ const ID_QUERY_NEXT: usize = 7;
 const ID_OPEN_OBJECT: usize = 8;
 const ID_MAP_OBJECT: usize = 9;
 const ID_SLEEP: usize = 10;
-
+const ID_READ: usize = 11;
+const ID_WRITE: usize = 12;
 const ID_CREATE_TABLE: usize = 13;
 
 const ID_TAKE_TABLE_JOB: usize = 15;
 const ID_FINISH_TABLE_JOB: usize = 16;
 
 use crate::Page;
+use core::alloc::Layout;
 use core::arch::asm;
 use core::fmt;
 use core::marker::PhantomData;
+use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use core::str;
 use core::time::Duration;
 
-#[derive(Clone, Copy, Debug)]
+struct DebugLossy<'a>(&'a [u8]);
+
+impl fmt::Debug for DebugLossy<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		use core::fmt::Write;
+		let mut s = self.0;
+		f.write_char('"')?;
+		loop {
+			match str::from_utf8(s) {
+				Ok(s) => break s.escape_debug().try_for_each(|c| f.write_char(c))?,
+				Err(e) => {
+					str::from_utf8(&s[..e.valid_up_to()])
+						.unwrap()
+						.escape_debug()
+						.try_for_each(|c| f.write_char(c))?;
+					s = &s[e.valid_up_to()..];
+				}
+			}
+		}
+		f.write_char('"')
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Id(pub(crate) u64);
+pub struct Id(pub u64);
 
 impl Default for Id {
 	fn default() -> Self {
@@ -32,9 +59,9 @@ impl Default for Id {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct TableId(u32);
+pub struct TableId(pub u32);
 
 impl Default for TableId {
 	fn default() -> Self {
@@ -42,10 +69,11 @@ impl Default for TableId {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Handle(usize);
+pub struct Handle(pub usize);
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct TableInfo {
 	name_len: u8,
@@ -67,22 +95,31 @@ impl Default for TableInfo {
 	}
 }
 
+impl fmt::Debug for TableInfo {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct(stringify!(TableInfo))
+			.field("name", &DebugLossy(self.name()))
+			.finish()
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct QueryHandle(usize);
 
+#[derive(Clone, Copy)]
 #[repr(C)]
-pub struct Slice<T> {
+pub struct Slice<'a, T> {
 	ptr: NonNull<T>,
 	len: usize,
-	_marker: PhantomData<T>,
+	_marker: PhantomData<&'a T>,
 }
 
-impl<T> Slice<T> {
+impl<'a, T> Slice<'a, T> {
 	/// # Safety
 	///
 	/// `ptr` and `len` must be valid.
-	pub unsafe fn unchecked_as_slice(&self) -> &[T] {
+	pub unsafe fn unchecked_as_slice(&self) -> &'a [T] {
 		core::slice::from_raw_parts(self.ptr.as_ptr(), self.len)
 	}
 
@@ -91,7 +128,7 @@ impl<T> Slice<T> {
 	}
 }
 
-impl<T> From<&[T]> for Slice<T> {
+impl<'a, T> From<&[T]> for Slice<'a, T> {
 	fn from(s: &[T]) -> Self {
 		Self {
 			ptr: NonNull::from(s).as_non_null_ptr(),
@@ -101,11 +138,22 @@ impl<T> From<&[T]> for Slice<T> {
 	}
 }
 
-impl<T, const N: usize> From<&[T; N]> for Slice<T> {
+impl<'a, T, const N: usize> From<&'a [T; N]> for Slice<'a, T> {
 	fn from(s: &[T; N]) -> Self {
 		Self {
 			ptr: NonNull::new(s.as_ptr() as *mut _).unwrap(),
 			len: s.len(),
+			_marker: PhantomData,
+		}
+	}
+}
+
+impl<'a, T> Default for Slice<'a, T> {
+	fn default() -> Self {
+		Self {
+			ptr: NonNull::new(Layout::new::<T>().align() as *mut _)
+				.unwrap_or(NonNull::new(1 as *mut _).unwrap()),
+			len: 0,
 			_marker: PhantomData,
 		}
 	}
@@ -315,7 +363,7 @@ pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
 pub fn query_table(
 	id: TableId,
 	name: Option<&[u8]>,
-	tags: &[Slice<u8>],
+	tags: &[Slice<'_, u8>],
 ) -> Result<QueryHandle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
@@ -360,7 +408,7 @@ pub fn query_next(
 }
 
 #[inline]
-pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
+pub fn open(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -375,6 +423,12 @@ pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, u
 		)
 	}
 	ret(status, value).map(|v| Handle(v))
+}
+
+#[deprecated(note = "use open()")]
+#[inline]
+pub fn open_object(table_id: TableId, id: Id) -> Result<Handle, (NonZeroUsize, usize)> {
+	open(table_id, id)
 }
 
 #[inline]
@@ -417,6 +471,54 @@ pub fn sleep(duration: Duration) {
 			lateout("r11") _,
 		)
 	}
+}
+
+#[inline]
+pub fn read(object: Handle, data: &mut [u8]) -> Result<usize, (NonZeroUsize, usize)> {
+	// SAFETY: MaybeUninit has the same layout as data.
+	let data = unsafe { mem::transmute(data) };
+	read_uninit(object, data)
+}
+
+#[inline]
+pub fn read_uninit(
+	object: Handle,
+	data: &mut [MaybeUninit<u8>],
+) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_READ,
+			in("rdi") object.0,
+			in("rsi") data.as_mut_ptr(),
+			in("rdx") data.len(),
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value)
+}
+
+#[inline]
+pub fn write(object: Handle, data: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_WRITE,
+			in("rdi") object.0,
+			in("rsi") data.as_ptr(),
+			in("rdx") data.len(),
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value)
 }
 
 #[inline]

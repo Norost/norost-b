@@ -2,7 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
-#![feature(const_trait_impl)]
+#![feature(const_trait_impl, inline_const)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
@@ -11,6 +11,7 @@
 #![feature(new_uninit)]
 #![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
+#![feature(stmt_expr_attributes)]
 #![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
 #![feature(trait_upcasting)]
 

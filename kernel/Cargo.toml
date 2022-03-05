@@ -10,6 +10,7 @@ default-target = "x86_64-unknown-none-norostbkernel"
 acpi = "*"
 rsdp = "*"
 pci = { path = "../lib/rust/pci" }
+cfg-if = "1.0"
 
 [features]
 default = ["mem-max-16t", "driver-pci", "driver-hpet"]

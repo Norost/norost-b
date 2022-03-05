@@ -53,6 +53,7 @@ where
 {
 }
 
+/// A query that returns no results.
 pub struct NoneQuery;
 
 impl Query for NoneQuery {}
@@ -62,6 +63,24 @@ impl Iterator for NoneQuery {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		None
+	}
+}
+
+/// A query that returns a single result.
+pub struct OneQuery {
+	pub id: Id,
+	pub tags: Option<Box<[Box<str>]>>,
+}
+
+impl Query for OneQuery {}
+
+impl Iterator for OneQuery {
+	type Item = QueryResult;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.tags
+			.take()
+			.map(|tags| QueryResult { id: self.id, tags })
 	}
 }
 
@@ -296,7 +315,7 @@ impl Future for Ticket {
 /// The unique identifier of an object.
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
-pub struct Id(u64);
+pub struct Id(pub u64);
 
 default!(newtype Id = u64::MAX);
 bi_from!(newtype Id <=> u64);
