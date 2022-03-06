@@ -16,13 +16,21 @@ use alloc::{
 };
 use core::fmt;
 use core::future::Future;
+use core::mem;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
+use core::time::Duration;
 
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
 static TABLES: SpinLock<Vec<Weak<dyn Table>>> = SpinLock::new(Vec::new());
+
+#[derive(Clone, Copy)]
+pub struct Timeout;
+
+#[derive(Clone, Copy)]
+pub struct Cancelled;
 
 /// A table of objects.
 pub trait Table
@@ -39,11 +47,13 @@ where
 	fn get(self: Arc<Self>, id: Id) -> Ticket;
 
 	/// Create a new object.
-	fn create(self: Arc<Self>, name: &str, tags: &[&str]) -> Ticket;
+	fn create(self: Arc<Self>, tags: &[u8]) -> Ticket;
 
-	fn take_job(&self) -> JobTask;
+	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
 
 	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()>;
+
+	fn cancel_job(self: Arc<Self>, job: Job);
 }
 
 /// A query into a table.
@@ -190,6 +200,8 @@ pub enum JobType {
 	Open = 0,
 	Read = 1,
 	Write = 2,
+	Query = 3,
+	Create = 4,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -323,17 +335,30 @@ bi_from!(newtype Id <=> u64);
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct TableId(u32);
+pub struct TableId(pub u32);
 
 bi_from!(newtype TableId <=> u32);
 
+enum JobInner {
+	Active {
+		waker: Option<Waker>,
+		result: Option<Job>,
+		table: Weak<dyn Table>,
+	},
+	Cancelled,
+}
+
 pub struct JobTask {
-	shared: Arc<SpinLock<(Option<Waker>, Option<Job>)>>,
+	shared: Arc<SpinLock<JobInner>>,
 }
 
 impl JobTask {
-	pub fn new(job: Option<Job>) -> (Self, JobWaker) {
-		let shared = Arc::new(SpinLock::new((None, job)));
+	pub fn new(table: Weak<dyn Table>, result: Option<Job>) -> (Self, JobWaker) {
+		let shared = Arc::new(SpinLock::new(JobInner::Active {
+			waker: None,
+			result,
+			table,
+		}));
 		(
 			Self {
 				shared: shared.clone(),
@@ -343,28 +368,60 @@ impl JobTask {
 	}
 }
 
+impl Drop for JobTask {
+	fn drop(&mut self) {
+		match mem::replace(&mut *self.shared.lock(), JobInner::Cancelled) {
+			JobInner::Active { result, table, .. } => {
+				result.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job)));
+			}
+			JobInner::Cancelled => (),
+		}
+	}
+}
+
 impl Future for JobTask {
-	type Output = Job;
+	type Output = Result<Job, Cancelled>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		let mut t = self.shared.lock();
-		if let Some(s) = t.1.take() {
-			return Poll::Ready(s);
+		match &mut *self.shared.lock() {
+			JobInner::Active { waker, result, .. } => {
+				if let Some(s) = result.take() {
+					Poll::Ready(Ok(s))
+				} else {
+					*waker = Some(cx.waker().clone());
+					Poll::Pending
+				}
+			}
+			JobInner::Cancelled => Poll::Ready(Err(Cancelled)),
 		}
-		t.0 = Some(cx.waker().clone());
-		Poll::Pending
 	}
 }
 
 pub struct JobWaker {
-	shared: Arc<SpinLock<(Option<Waker>, Option<Job>)>>,
+	shared: Arc<SpinLock<JobInner>>,
 }
 
 impl JobWaker {
-	fn complete(self, job: Job) {
-		let mut l = self.shared.lock();
-		l.0.take().map(|w| w.wake());
-		l.1 = Some(job);
+	pub fn lock(&self) -> Result<JobWakerGuard<'_>, Cancelled> {
+		let lock = self.shared.lock();
+		match &*lock {
+			JobInner::Active { .. } => Ok(JobWakerGuard(lock)),
+			JobInner::Cancelled => Err(Cancelled),
+		}
+	}
+}
+
+pub struct JobWakerGuard<'a>(crate::sync::spinlock::Guard<'a, JobInner>);
+
+impl JobWakerGuard<'_> {
+	pub fn complete(&mut self, job: Job) {
+		match &mut *self.0 {
+			JobInner::Active { waker, result, .. } => {
+				*result = Some(job);
+				waker.take().map(|w| w.wake());
+			}
+			JobInner::Cancelled => unreachable!(),
+		}
 	}
 }
 
@@ -415,13 +472,13 @@ pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
 
 /// Create a new object in a table.
 #[allow(dead_code)]
-pub fn create(table_id: TableId, name: &str, tags: &[&str]) -> Result<Ticket, CreateError> {
+pub fn create(table_id: TableId, tags: &[u8]) -> Result<Ticket, CreateError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
 		.ok_or(CreateError::InvalidTableId)
-		.map(|tbl| tbl.create(name, tags))
+		.map(|tbl| tbl.create(tags))
 }
 
 /// Add a new table.

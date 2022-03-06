@@ -1,23 +1,36 @@
 #![feature(path_try_exists)]
 
 fn main() {
-	dbg!(dbg!(std::fs::read_dir("")).unwrap().collect::<Vec<_>>());
-	dbg!(dbg!(std::fs::read_dir("pci/")).unwrap().collect::<Vec<_>>());
+	let table = 'tbl: loop {
+		for f in std::fs::read_dir("").unwrap().map(Result::unwrap) {
+			if &*f.file_name() == std::ffi::OsStr::new("virtio-net") {
+				break 'tbl f;
+			}
+		}
+		std::thread::sleep(std::time::Duration::from_secs(1));
+	};
+	let mut path = table.path();
+	path.push("tcp&::ffff:10.0.2.2&6666");
+	let mut f = std::fs::File::create(path).unwrap();
 
-	dbg!(std::fs::File::open("pci/name:0:00.0,vendor-id:8086,device-id:29c0/0").unwrap());
-	dbg!(std::fs::File::open("pci/name:0:00.0,vendor-id:8086,device-id:29c0").unwrap());
-
-	dbg!(std::fs::try_exists("pci/vendor-id:8086,device-id:29c0").unwrap());
-	dbg!(std::fs::try_exists("pci/vendor-id:ffff,device-id:29c0").unwrap());
-
-	use std::io::{BufRead, BufReader, Write};
-	let mut f = std::fs::File::open("uart//0").unwrap();
-	writeln!(
-		f,
-		"I write this to an opened file and now I will read a single line"
-	)
-	.unwrap();
-	let mut s = String::new();
-	BufReader::new(f).read_line(&mut s).unwrap();
-	println!("The line is {:?}", s);
+	let mut buf = [0; 1024];
+	let mut len = 0;
+	loop {
+		use std::io::{Read, Write};
+		len += std::io::stdin().read(&mut buf[len..]).unwrap();
+		if buf[..len].contains(&b'\n') {
+			eprintln!();
+			f.write(&buf[..len]).unwrap();
+			len = 0;
+		}
+		eprint!("\rirc < ");
+		for _ in 0..len {
+			eprint!(" ");
+		}
+		eprint!(
+			"\rirc < {}",
+			std::str::from_utf8(&buf[..len]).unwrap_or("<invalid utf-8>")
+		);
+		std::thread::sleep(std::time::Duration::from_millis(10));
+	}
 }

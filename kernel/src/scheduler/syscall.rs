@@ -24,7 +24,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 17;
+pub const SYSCALLS_LEN: usize = 18;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -44,6 +44,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	poll_object,
 	take_table_job,
 	finish_table_job,
+	create_object,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -211,6 +212,25 @@ extern "C" fn query_next(
 				value: 0,
 			}
 		}
+	}
+}
+
+extern "C" fn create_object(
+	table_id: usize,
+	tags_ptr: usize,
+	tags_len: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let table_id = TableId(table_id as u32);
+	let tags = unsafe { core::slice::from_raw_parts(tags_ptr as *const u8, tags_len) };
+	let ticket = object_table::create(table_id, tags).unwrap();
+	let obj = super::block_on(ticket).unwrap().into_object().unwrap();
+	let handle = Process::current().add_object(obj);
+	Return {
+		status: 0,
+		value: handle.unwrap().into(),
 	}
 }
 
@@ -403,6 +423,8 @@ impl TryFrom<FfiJobType> for JobType {
 			0 => Ok(Self::Open),
 			1 => Ok(Self::Read),
 			2 => Ok(Self::Write),
+			3 => Ok(Self::Query),
+			4 => Ok(Self::Create),
 			_ => Err(UnknownJobType),
 		}
 	}
@@ -433,7 +455,7 @@ impl TryFrom<FfiJob> for Job {
 extern "C" fn take_table_job(
 	handle: usize,
 	job_ptr: usize,
-	_: usize,
+	timeout_micros: usize,
 	_: usize,
 	_: usize,
 	_: usize,
@@ -455,7 +477,10 @@ extern "C" fn take_table_job(
 			job.buffer_size.try_into().unwrap(),
 		)
 	};
-	let info = super::block_on(tbl.take_job());
+	let timeout = Duration::from_micros(timeout_micros.try_into().unwrap());
+	let Ok(Ok(info)) = super::block_on_timeout(tbl.take_job(timeout), timeout) else {
+		return Return { status: 1, value: 0 };
+	};
 	job.ty = info.ty.into();
 	job.flags = info.flags;
 	job.job_id = info.job_id;

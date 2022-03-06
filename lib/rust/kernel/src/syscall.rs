@@ -14,6 +14,7 @@ const ID_CREATE_TABLE: usize = 13;
 
 const ID_TAKE_TABLE_JOB: usize = 15;
 const ID_FINISH_TABLE_JOB: usize = 16;
+const ID_CREATE: usize = 17;
 
 use crate::Page;
 use core::alloc::Layout;
@@ -267,6 +268,8 @@ impl<'a> Job<'a> {
 	pub const OPEN: u8 = 0;
 	pub const READ: u8 = 1;
 	pub const WRITE: u8 = 2;
+	pub const QUERY: u8 = 3;
+	pub const CREATE: u8 = 4;
 
 	pub unsafe fn data(&self) -> &'a [u8] {
 		core::slice::from_raw_parts(
@@ -405,6 +408,31 @@ pub fn query_next(
 		)
 	}
 	ret(status, value).map(|_| ())
+}
+
+#[inline]
+pub fn create(
+	table_id: TableId,
+	tags: &[u8],
+	timeout: Duration,
+) -> Result<Handle, (NonZeroUsize, usize)> {
+	let timeout = timeout.as_micros().try_into().unwrap_or(usize::MAX);
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_CREATE,
+			in("rdi") table_id.0,
+			in("rsi") tags.as_ptr(),
+			in("rdx") tags.len(),
+			in("rcx") timeout,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value).map(|v| Handle(v))
 }
 
 #[inline]
@@ -548,18 +576,20 @@ pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, 
 pub fn take_table_job<'a>(
 	handle: Handle,
 	buffer: &'a mut [u8],
+	timeout: Duration,
 ) -> Result<Job<'a>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	let mut job = Job::default();
 	job.buffer_size = buffer.len().try_into().unwrap();
 	job.buffer = NonNull::new(buffer.as_mut_ptr());
-	//syslog!("{:#?}", &job);
+	let timeout = timeout.as_micros().try_into().unwrap_or(usize::MAX);
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_TAKE_TABLE_JOB,
 			in("rdi") handle.0,
 			in("rsi") &mut job,
+			in("rdx") timeout,
 			lateout("rax") status,
 			lateout("rdx") value,
 			lateout("rcx") _,

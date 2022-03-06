@@ -14,6 +14,8 @@ pub struct Thread {
 	pub kernel_stack: Cell<NonNull<usize>>,
 	pub process: NonNull<Process>,
 	sleep_until: Cell<Monotonic>,
+	/// Async deadline set by [`super::waker::sleep`].
+	async_deadline: Cell<Option<Monotonic>>,
 }
 
 impl Thread {
@@ -43,8 +45,14 @@ impl Thread {
 				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
+				async_deadline: Cell::new(None),
 			})
 		}
+	}
+
+	/// Async deadline set by [`super::waker::sleep`].
+	pub(super) fn set_async_deadline(&self, time: Monotonic) {
+		self.async_deadline.set(Some(time));
 	}
 
 	/// Suspend the currently running thread & begin running this thread.
@@ -110,8 +118,15 @@ impl Thread {
 		self.sleep_until.get()
 	}
 
-	pub fn sleep(duration: Duration) {
-		Self::current().set_sleep_until(Monotonic::now().saturating_add(duration));
+	/// Sleep until the given duration.
+	///
+	/// The thread may wake earlier if [`wake`] is called or if an asynchronous deadline is set.
+	pub fn sleep(&self, duration: Duration) {
+		let t = self
+			.async_deadline
+			.replace(None)
+			.unwrap_or_else(|| Monotonic::now().saturating_add(duration));
+		Self::current().set_sleep_until(t);
 		Self::yield_current();
 	}
 

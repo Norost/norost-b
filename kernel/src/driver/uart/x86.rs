@@ -11,19 +11,39 @@ impl Uart {
 	}
 
 	pub fn send(&mut self, byte: u8) {
-		while !self.transmit_empty() {}
-		unsafe { io::outb(self.port, byte) }
+		while !self.try_send(byte) {}
 	}
 
-	pub fn read(&mut self) -> u8 {
-		while self.receive_empty() {}
-		let b = unsafe { io::inb(self.port) };
-		// TODO figure out how to get QEMU to send us the literal newlines instead.
-		if b == b'\r' {
-			b'\n'
+	#[must_use = "data may not be written"]
+	pub fn try_send(&mut self, byte: u8) -> bool {
+		if self.transmit_empty() {
+			unsafe { io::outb(self.port, byte) }
+			true
 		} else {
-			b
+			false
 		}
+	}
+
+	#[must_use = "data may be lost if not processed"]
+	pub fn read(&mut self) -> u8 {
+		loop {
+			if let Some(b) = self.try_read() {
+				return b;
+			}
+		}
+	}
+
+	#[must_use = "data may be lost if not processed"]
+	pub fn try_read(&mut self) -> Option<u8> {
+		(!self.receive_empty()).then(|| {
+			let b = unsafe { io::inb(self.port) };
+			// TODO figure out how to get QEMU to send us the literal newlines instead.
+			if b == b'\r' {
+				b'\n'
+			} else {
+				b
+			}
+		})
 	}
 
 	#[must_use = "I/O port space accesses cannot be optimized out"]

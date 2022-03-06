@@ -61,7 +61,7 @@ impl Table for PciTable {
 		Ticket::new_complete(r)
 	}
 
-	fn create(self: Arc<Self>, _: &str, _: &[&str]) -> Ticket {
+	fn create(self: Arc<Self>, _: &[u8]) -> Ticket {
 		let e = Error {
 			code: 1,
 			message: "can't create pci devices".into(),
@@ -69,11 +69,15 @@ impl Table for PciTable {
 		Ticket::new_complete(Err(e))
 	}
 
-	fn take_job(&self) -> JobTask {
+	fn take_job(self: Arc<Self>, _: core::time::Duration) -> JobTask {
 		unreachable!("kernel only table")
 	}
 
 	fn finish_job(self: Arc<Self>, _: Job) -> Result<(), ()> {
+		unreachable!("kernel only table")
+	}
+
+	fn cancel_job(self: Arc<Self>, _: Job) {
 		unreachable!("kernel only table")
 	}
 }

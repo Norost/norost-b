@@ -6,7 +6,7 @@ mod thread;
 mod waker;
 
 use crate::time::Monotonic;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::future::Future;
 use core::marker::Unpin;
 use core::pin::Pin;
@@ -49,6 +49,32 @@ fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
 		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
 			return res;
 		}
-		Thread::sleep(Duration::MAX);
+		Weak::upgrade(&waker::thread(&waker).expect("waker type changed"))
+			.expect("no thread")
+			.sleep(Duration::MAX);
+	}
+}
+
+/// Wait for an asynchronous task to finish or until the timeout expires.
+fn block_on_timeout<T>(
+	mut task: impl Future<Output = T> + Unpin,
+	timeout: Duration,
+) -> Result<T, ()> {
+	let waker = waker::new_waker(Thread::current_weak());
+	let mut context = Context::from_waker(&waker);
+	if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
+		return Ok(res);
+	}
+	let mut sleep = waker::Sleep::new(timeout);
+	loop {
+		if let Poll::Ready(()) = Pin::new(&mut sleep).poll(&mut context) {
+			return Err(());
+		}
+		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
+			return Ok(res);
+		}
+		Weak::upgrade(&waker::thread(&waker).expect("waker type changed"))
+			.expect("no thread")
+			.sleep(Duration::MAX);
 	}
 }

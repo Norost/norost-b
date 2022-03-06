@@ -28,7 +28,7 @@ impl Table for UartTable {
 		}
 	}
 
-	fn create(self: Arc<Self>, _: &str, _: &[&str]) -> Ticket {
+	fn create(self: Arc<Self>, _: &[u8]) -> Ticket {
 		let e = Error {
 			code: 1,
 			message: "can't create uart devices".into(),
@@ -36,11 +36,15 @@ impl Table for UartTable {
 		Ticket::new_complete(Err(e))
 	}
 
-	fn take_job(&self) -> JobTask {
+	fn take_job(self: Arc<Self>, _: core::time::Duration) -> JobTask {
 		unreachable!("kernel only table")
 	}
 
 	fn finish_job(self: Arc<Self>, _: Job) -> Result<(), ()> {
+		unreachable!("kernel only table")
+	}
+
+	fn cancel_job(self: Arc<Self>, _: Job) {
 		unreachable!("kernel only table")
 	}
 }
@@ -53,9 +57,12 @@ impl Object for UartId {
 	fn read(&self, _offset: u64, data: &mut [u8]) -> Result<Ticket, ()> {
 		// TODO make read non-blocking.
 		// TODO read more than one byte doofus.
-		data.get_mut(0)
-			.map(|b| *b = super::get(self.0.into()).read());
-		Ok(Ticket::new_complete(Ok(Data::Usize(data.len().min(1)))))
+		if let (Some(w), Some(r)) = (data.get_mut(0), super::get(self.0.into()).try_read()) {
+			*w = r;
+			Ok(Ticket::new_complete(Ok(Data::Usize(data.len().min(1)))))
+		} else {
+			Ok(Ticket::new_complete(Ok(Data::Usize(data.len().min(0)))))
+		}
 	}
 
 	fn write(&self, _offset: u64, data: &[u8]) -> Result<Ticket, ()> {
