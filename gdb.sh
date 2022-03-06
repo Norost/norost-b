@@ -4,4 +4,4 @@
 
 gdb \
 	-ex='target extended-remote localhost:1234' \
-	"target/$RUST_TARGET/release/nora"
+	"target/x86_64-unknown-none-norostbkernel/release/nora"

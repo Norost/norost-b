@@ -534,11 +534,6 @@ extern "C" fn sleep(
 ) -> Return {
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
-	unsafe {
-		for _ in 0..1000000000usize {
-			asm!("")
-		}
-	}
 
 	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();
