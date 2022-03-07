@@ -54,14 +54,15 @@ impl Object for UartTable {}
 pub struct UartId(u8);
 
 impl Object for UartId {
-	fn read(&self, _offset: u64, data: &mut [u8]) -> Result<Ticket, ()> {
-		// TODO make read non-blocking.
+	fn read(&self, _offset: u64, length: u32) -> Result<Ticket, ()> {
 		// TODO read more than one byte doofus.
-		if let (Some(w), Some(r)) = (data.get_mut(0), super::get(self.0.into()).try_read()) {
-			*w = r;
-			Ok(Ticket::new_complete(Ok(Data::Usize(data.len().min(1)))))
+		if let Some(r) = (length > 0)
+			.then(|| super::get(self.0.into()).try_read())
+			.flatten()
+		{
+			Ok(Ticket::new_complete(Ok(Data::Bytes([r].into()))))
 		} else {
-			Ok(Ticket::new_complete(Ok(Data::Usize(data.len().min(0)))))
+			Ok(Ticket::new_complete(Ok(Data::Bytes([].into()))))
 		}
 	}
 

@@ -108,7 +108,7 @@ pub trait Object {
 		None
 	}
 
-	fn read(&self, _offset: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
+	fn read(&self, _offset: u64, _length: u32) -> Result<Ticket, ()> {
 		Err(())
 	}
 
@@ -193,7 +193,7 @@ pub struct Job {
 	pub buffer: Box<[u8]>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum JobType {
 	#[default]

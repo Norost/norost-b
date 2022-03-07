@@ -129,10 +129,10 @@ fn main() {
 	let mut objects = Vec::new();
 
 	loop {
-		if let Ok(mut job) = syscall::take_table_job(tbl, &mut buf, Duration::new(0, 0)) {
+		while let Ok(mut job) = syscall::take_table_job(tbl, &mut buf, Duration::new(0, 0)) {
 			match job.ty {
 				syscall::Job::CREATE => {
-					let s = unsafe { job.data() };
+					let s = &buf[..job.operation_size as usize];
 
 					let mut protocol = None;
 					let mut port = None;
@@ -195,17 +195,40 @@ fn main() {
 
 					job.object_id = syscall::Id((objects.len() - 1).try_into().unwrap());
 				}
+				syscall::Job::READ => {
+					let (sock, addr, prot) = objects[job.object_id.0 as usize];
+					match prot {
+						Protocol::Udp => {
+							todo!("address");
+							/*
+							let sock = iface.get_socket::<socket::UdpSocket>(sock);
+							let data = unsafe { job.data() };
+							sock.recv_slice(data, addr).unwrap();
+							*/
+						}
+						Protocol::Tcp => {
+							let sock = iface.get_socket::<socket::TcpSocket>(sock);
+							let len = (job.operation_size as usize).min(buf.len());
+							if let Ok(len) = sock.recv_slice(&mut buf[..len]) {
+								job.buffer = NonNull::new(buf.as_mut_ptr());
+								job.buffer_size = len.try_into().unwrap();
+							} else {
+								job.buffer_size = 0;
+							}
+						}
+					}
+				}
 				syscall::Job::WRITE => {
 					let (sock, addr, prot) = objects[job.object_id.0 as usize];
 					match prot {
 						Protocol::Udp => {
 							let sock = iface.get_socket::<socket::UdpSocket>(sock);
-							let data = unsafe { job.data() };
+							let data = &buf[..job.operation_size as usize];
 							sock.send_slice(data, addr).unwrap();
 						}
 						Protocol::Tcp => {
 							let sock = iface.get_socket::<socket::TcpSocket>(sock);
-							let data = unsafe { job.data() };
+							let data = &buf[..job.operation_size as usize];
 							let e = sock.send_slice(data);
 						}
 					}

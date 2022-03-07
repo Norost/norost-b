@@ -106,7 +106,8 @@ fn main() {
 		match job.ty {
 			syscall::Job::OPEN => (),
 			syscall::Job::WRITE => {
-				println!("write: {:?}", core::str::from_utf8(unsafe { job.data() }));
+				let data = &buf[..job.operation_size as usize];
+				println!("write: {:?}", core::str::from_utf8(data));
 			}
 			_ => todo!(),
 		}

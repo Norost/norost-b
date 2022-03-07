@@ -14,7 +14,9 @@ pub const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
 pub const STAR: u32 = 0xc0000081;
 pub const LSTAR: u32 = 0xc0000082;
 
+pub const FS_BASE: u32 = 0xc0000100;
 pub const GS_BASE: u32 = 0xc0000101;
+pub const KERNEL_GS_BASE: u32 = 0xc0000102;
 
 pub unsafe fn wrmsr(reg: u32, value: u64) {
 	let (high, low) = ((value >> 32) as u32, value as u32);

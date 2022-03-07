@@ -24,7 +24,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 18;
+pub const SYSCALLS_LEN: usize = 20;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -45,6 +45,8 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	take_table_job,
 	finish_table_job,
 	create_object,
+	duplicate_handle,
+	spawn_thread,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -301,13 +303,15 @@ extern "C" fn read_object(
 	let read = Process::current()
 		.get_object(handle)
 		.unwrap()
-		.read(offset, data)
+		.read(offset, data.len().try_into().unwrap())
 		.unwrap();
-	let read = super::block_on(read).unwrap().into_usize().unwrap();
+	let read = super::block_on(read).unwrap().into_bytes().unwrap();
+	let len = read.len().min(data.len());
+	data[..len].copy_from_slice(&read[..len]);
 
 	Return {
 		status: 0,
-		value: read,
+		value: len,
 	}
 }
 
@@ -355,6 +359,28 @@ extern "C" fn poll_object(
 		value: u32::from(event).try_into().unwrap(),
 	}
 	*/
+}
+
+extern "C" fn duplicate_handle(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let handle = ObjectHandle::from(handle);
+
+	Process::current().duplicate_object_handle(handle).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|handle| Return {
+			status: 0,
+			value: handle.into(),
+		},
+	)
 }
 
 extern "C" fn create_table(
@@ -486,9 +512,14 @@ extern "C" fn take_table_job(
 	job.job_id = info.job_id;
 	job.object_id = info.object_id;
 	job.operation_size = info.operation_size;
-	let size = usize::try_from(info.operation_size).unwrap();
-	assert!(copy_to.len() >= size, "todo");
-	copy_to[..size].copy_from_slice(&info.buffer[..size]);
+	match info.ty {
+		JobType::Create | JobType::Write => {
+			let size = usize::try_from(info.operation_size).unwrap();
+			assert!(copy_to.len() >= size, "todo");
+			copy_to[..size].copy_from_slice(&info.buffer[..size]);
+		}
+		_ => {}
+	}
 
 	Return {
 		status: 0,
@@ -542,6 +573,26 @@ extern "C" fn sleep(
 		status: 0,
 		value: 0,
 	}
+}
+
+extern "C" fn spawn_thread(
+	start: usize,
+	stack: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	Process::current().spawn_thread(start, stack).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|handle| Return {
+			status: 0,
+			value: handle,
+		},
+	)
 }
 
 #[allow(dead_code)]

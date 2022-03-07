@@ -7,6 +7,7 @@ use alloc::{
 	sync::{Arc, Weak},
 };
 use core::arch::asm;
+use core::cell::Cell;
 use core::ptr::{self, NonNull};
 
 pub unsafe fn init() {
@@ -37,6 +38,11 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 	if !old_thr.is_null() {
 		Arc::from_raw(old_thr);
 	}
+
+	// Load fs, gs
+	msr::wrmsr(msr::FS_BASE, thread.arch_specific.fs.get());
+	msr::wrmsr(msr::KERNEL_GS_BASE, thread.arch_specific.gs.get());
+
 	// Set reference to new thread.
 	let user_stack = thread
 		.user_stack
@@ -57,6 +63,10 @@ pub unsafe fn save_current_thread_state() {
 	tr.user_stack.set(NonNull::new(us));
 	asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
 	tr.kernel_stack.set(NonNull::new(ks).unwrap_unchecked());
+
+	// Save fs, gs
+	tr.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
+	tr.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
 }
 
 #[repr(C)]
@@ -65,6 +75,12 @@ struct CpuData {
 	kernel_stack_ptr: *mut usize,
 	process: *mut Process,
 	thread: *const Thread,
+}
+
+#[derive(Default)]
+pub struct ThreadData {
+	fs: Cell<u64>,
+	gs: Cell<u64>,
 }
 
 #[naked]

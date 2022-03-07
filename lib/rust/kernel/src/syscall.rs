@@ -15,6 +15,8 @@ const ID_CREATE_TABLE: usize = 13;
 const ID_TAKE_TABLE_JOB: usize = 15;
 const ID_FINISH_TABLE_JOB: usize = 16;
 const ID_CREATE: usize = 17;
+const ID_DUPLICATE_HANDLE: usize = 18;
+const ID_SPAWN_THREAD: usize = 19;
 
 use crate::Page;
 use core::alloc::Layout;
@@ -253,7 +255,7 @@ pub struct Events(u32);
 
 #[derive(Debug, Default)]
 #[repr(C)]
-pub struct Job<'a> {
+pub struct Job {
 	pub ty: u8,
 	pub flags: [u8; 3],
 	pub job_id: JobId,
@@ -261,22 +263,14 @@ pub struct Job<'a> {
 	pub operation_size: u32,
 	pub object_id: Id,
 	pub buffer: Option<NonNull<u8>>,
-	_marker: PhantomData<&'a ()>,
 }
 
-impl<'a> Job<'a> {
+impl Job {
 	pub const OPEN: u8 = 0;
 	pub const READ: u8 = 1;
 	pub const WRITE: u8 = 2;
 	pub const QUERY: u8 = 3;
 	pub const CREATE: u8 = 4;
-
-	pub unsafe fn data(&self) -> &'a [u8] {
-		core::slice::from_raw_parts(
-			self.buffer.unwrap().as_ptr(),
-			self.operation_size.try_into().unwrap(),
-		)
-	}
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -502,6 +496,25 @@ pub fn sleep(duration: Duration) {
 }
 
 #[inline]
+pub unsafe fn spawn_thread(
+	start: unsafe extern "C" fn() -> !,
+	stack: *const (),
+) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	asm!(
+		"syscall",
+		in("eax") ID_SPAWN_THREAD,
+		in("rdi") start,
+		in("rsi") stack,
+		lateout("rax") status,
+		lateout("rdx") value,
+		lateout("rcx") _,
+		lateout("r11") _,
+	);
+	ret(status, value)
+}
+
+#[inline]
 pub fn read(object: Handle, data: &mut [u8]) -> Result<usize, (NonZeroUsize, usize)> {
 	// SAFETY: MaybeUninit has the same layout as data.
 	let data = unsafe { mem::transmute(data) };
@@ -550,6 +563,23 @@ pub fn write(object: Handle, data: &[u8]) -> Result<usize, (NonZeroUsize, usize)
 }
 
 #[inline]
+pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_DUPLICATE_HANDLE,
+			in("rdi") handle.0,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value).map(Handle)
+}
+
+#[inline]
 pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, usize)> {
 	let ty = match ty {
 		TableType::Streaming => 0,
@@ -573,11 +603,11 @@ pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, 
 }
 
 #[inline]
-pub fn take_table_job<'a>(
+pub fn take_table_job(
 	handle: Handle,
-	buffer: &'a mut [u8],
+	buffer: &mut [u8],
 	timeout: Duration,
-) -> Result<Job<'a>, (NonZeroUsize, usize)> {
+) -> Result<Job, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	let mut job = Job::default();
 	job.buffer_size = buffer.len().try_into().unwrap();
@@ -600,7 +630,7 @@ pub fn take_table_job<'a>(
 }
 
 #[inline]
-pub fn finish_table_job(handle: Handle, mut job: Job<'_>) -> Result<(), (NonZeroUsize, usize)> {
+pub fn finish_table_job(handle: Handle, mut job: Job) -> Result<(), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(

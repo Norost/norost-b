@@ -114,7 +114,9 @@ impl Table for StreamingTable {
 			JobType::Write => {
 				tw.complete(Ok(Data::Usize(job.operation_size.try_into().unwrap())));
 			}
-			JobType::Read => todo!(),
+			JobType::Read => {
+				tw.complete(Ok(Data::Bytes(job.buffer)));
+			}
 			JobType::Query => {
 				todo!()
 			}
@@ -163,8 +165,17 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
-	fn read(&self, _: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
-		todo!();
+	fn read(&self, _: u64, length: u32) -> Result<Ticket, ()> {
+		self.table
+			.upgrade()
+			.map(|tbl| {
+				let job = StreamJob::Read {
+					object_id: self.id,
+					length,
+				};
+				tbl.submit_job(job)
+			})
+			.ok_or(())
 	}
 
 	fn write(&self, _: u64, data: &[u8]) -> Result<Ticket, ()> {
@@ -183,6 +194,7 @@ impl Object for StreamObject {
 
 enum StreamJob {
 	Open { object_id: Id },
+	Read { object_id: Id, length: u32 },
 	Write { object_id: Id, data: Box<[u8]> },
 	Query { tags: Box<[u8]> },
 	Create { tags: Box<[u8]> },
@@ -195,6 +207,13 @@ impl StreamJob {
 				ty: JobType::Open,
 				job_id,
 				object_id,
+				..Default::default()
+			},
+			StreamJob::Read { object_id, length } => Job {
+				ty: JobType::Read,
+				job_id,
+				object_id,
+				operation_size: length,
 				..Default::default()
 			},
 			StreamJob::Write { object_id, data } => Job {

@@ -16,11 +16,14 @@ pub struct Thread {
 	sleep_until: Cell<Monotonic>,
 	/// Async deadline set by [`super::waker::sleep`].
 	async_deadline: Cell<Option<Monotonic>>,
+	/// Architecture-specific data.
+	pub arch_specific: arch::ThreadData,
 }
 
 impl Thread {
 	pub fn new(
 		start: usize,
+		stack: usize,
 		process: NonNull<Process>,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
@@ -33,19 +36,22 @@ impl Thread {
 				kernel_stack.write(val);
 			};
 			push(4 * 8 | 3); // ss
-			push(0); // rsp
-		 //push(0x202);     // rflags: Set reserved bit 1, enable interrupts (IF)
+			push(stack); // rsp
+			 //push(0x202);     // rflags: Set reserved bit 1, enable interrupts (IF)
 			push(0x2); // rflags: Set reserved bit 1
 			push(3 * 8 | 3); // cs
 			push(start); // rip
 			 // Reserve space for (zeroed) registers
+			 // 15 GP registers without RSP
+			 // FIXME save RFLAGS
 			kernel_stack = kernel_stack.sub(15);
 			Ok(Self {
-				user_stack: Cell::new(None),
+				user_stack: Cell::new(NonNull::new(stack as *mut _)),
 				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
+				arch_specific: Default::default(),
 			})
 		}
 	}

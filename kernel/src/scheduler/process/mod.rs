@@ -15,8 +15,8 @@ pub struct Process {
 	//in_ports: Vec<Option<InPort>>,:
 	//out_ports: Vec<Option<OutPort>>,
 	//named_ports: Box<[ReverseNamedPort]>,
-	thread: Option<Arc<Thread>>,
-	//threads: Vec<NonNull<Thread>>,
+	//thread: Option<Arc<Thread>>,
+	threads: Vec<Arc<Thread>>,
 	objects: Vec<Arc<dyn Object>>,
 	queries: Vec<Box<dyn Query>>,
 }
@@ -27,7 +27,7 @@ impl Process {
 		Ok(Self {
 			address_space,
 			hint_color: 0,
-			thread: None,
+			threads: Default::default(),
 			objects: Default::default(),
 			queries: Default::default(),
 		})
@@ -39,7 +39,7 @@ impl Process {
 
 	pub fn run(&mut self) -> ! {
 		self.activate_address_space();
-		self.thread.clone().unwrap().resume()
+		self.threads[0].clone().resume()
 	}
 
 	/// Add an object to the process' object table.
@@ -79,8 +79,18 @@ impl Process {
 	}
 
 	/// Get a reference to an object.
-	pub fn get_object(&mut self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
+	pub fn get_object(&self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
 		self.objects.get(handle.0)
+	}
+
+	/// Duplicate a reference to an object.
+	pub fn duplicate_object_handle(&mut self, handle: ObjectHandle) -> Option<ObjectHandle> {
+		if let Some(obj) = self.objects.get(handle.0) {
+			self.objects.push(obj.clone());
+			Some((self.objects.len() - 1).into())
+		} else {
+			None
+		}
 	}
 
 	/// Map a virtual address to a physical address.
@@ -97,6 +107,23 @@ impl Process {
 	/// Get a mutable reference to a query.
 	pub fn get_query_mut(&mut self, handle: QueryHandle) -> Option<&mut (dyn Query + 'static)> {
 		self.queries.get_mut(handle.0).map(|q| &mut **q)
+	}
+
+	/// Spawn a new thread.
+	pub fn spawn_thread(
+		&mut self,
+		start: usize,
+		stack: usize,
+	) -> Result<usize, crate::memory::frame::AllocateContiguousError> {
+		let thr = Arc::new(Thread::new(
+			start,
+			stack,
+			NonNull::new(self as *mut _).unwrap(),
+		)?);
+		let thr_weak = Arc::downgrade(&thr);
+		self.threads.push(thr);
+		super::round_robin::insert(thr_weak);
+		Ok(self.threads.len() - 1)
 	}
 
 	// FIXME wildly unsafe!

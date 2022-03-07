@@ -188,10 +188,10 @@ impl super::Process {
 
 		let mut slf = Box::new(slf);
 
-		let thr = Thread::new(header.entry.try_into().unwrap(), NonNull::from(&*slf))?;
+		let thr = Thread::new(header.entry.try_into().unwrap(), 0, NonNull::from(&*slf))?;
 		let thr = Arc::new(thr);
 		super::super::round_robin::insert(Arc::downgrade(&thr));
-		slf.thread = Some(thr);
+		slf.threads.push(thr);
 
 		Ok(slf)
 	}
