@@ -523,7 +523,7 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..0a849a630a4
+index 00000000000..407cc0b5207
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
 @@ -0,0 +1,564 @@
@@ -886,7 +886,7 @@ index 00000000000..0a849a630a4
 +        SplitPath::None => Ok(ReadDir::Tables(None)),
 +        SplitPath::Table { table } => {
 +            let (table_id, table_info) = find_table(table)?;
-+            let query = syscall::query_table(table_id, None, &[])
++            let query = syscall::query_table(table_id, &[])
 +                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
 +            Ok(ReadDir::Objects { table_id, table_info, query })
 +        }
@@ -894,7 +894,7 @@ index 00000000000..0a849a630a4
 +            let mut t = [Default::default(); 256];
 +            let tags = split_tags(tags, &mut t)?;
 +            let (table_id, table_info) = find_table(table)?;
-+            let query = syscall::query_table(table_id, None, tags)
++            let query = syscall::query_table(table_id, tags)
 +                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
 +            Ok(ReadDir::Objects { table_id, table_info, query })
 +        }
@@ -1048,7 +1048,7 @@ index 00000000000..0a849a630a4
 +fn find_unique_object(table_id: TableId, tags: &[u8]) -> io::Result<Id> {
 +    let mut t = [Default::default(); 256];
 +    let tags = split_tags(tags, &mut t)?;
-+    let query = syscall::query_table(table_id, None, tags)
++    let query = syscall::query_table(table_id, tags)
 +        .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
 +    let mut info = ObjectInfo::default();
 +    syscall::query_next(query, &mut info)

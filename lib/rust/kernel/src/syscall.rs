@@ -359,7 +359,6 @@ pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
 #[inline]
 pub fn query_table(
 	id: TableId,
-	name: Option<&[u8]>,
 	tags: &[Slice<'_, u8>],
 ) -> Result<QueryHandle, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
@@ -368,10 +367,8 @@ pub fn query_table(
 			"syscall",
 			in("eax") ID_QUERY_TABLE,
 			in("rdi") usize::try_from(id.0).unwrap(),
-			in("rsi") name.map_or_else(core::ptr::null, |n| n.as_ptr()),
-			in("rdx") name.map_or(0, |n| n.len()),
-			in("r10") tags.as_ptr(),
-			in("r8") tags.len(),
+			in("rsi") tags.as_ptr(),
+			in("rdx") tags.len(),
 			lateout("rax") status,
 			lateout("rdx") value,
 			lateout("rcx") _,

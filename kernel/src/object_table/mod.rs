@@ -41,7 +41,7 @@ where
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query>;
+	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query>;
 
 	/// Get a single object based on ID.
 	fn get(self: Arc<Self>, id: Id) -> Ticket;
@@ -447,16 +447,12 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(
-	table_id: TableId,
-	name: Option<&str>,
-	tags: &[&str],
-) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(table_id: TableId, tags: &[&str]) -> Result<Box<dyn Query>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.query(name, tags))
+		.map(|tbl| tbl.query(tags))
 		.ok_or(QueryError::InvalidTableId)
 }
 

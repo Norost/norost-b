@@ -11,41 +11,35 @@ impl Table for PciTable {
 		"pci"
 	}
 
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
-		if let Some(name) = name {
-			Box::new(QueryName {
-				item: bdf_from_string(name),
-			})
-		} else {
-			let (mut vendor_id, mut device_id) = (None, None);
-			for t in tags {
-				let f = |a: &mut Option<u16>, h: &str| {
-					u16::from_str_radix(h, 16)
-						.ok()
-						.and_then(|v| a.replace(v))
-						.is_none()
-				};
-				let r = match t.split_once(':') {
-					Some(("vendor-id", h)) => f(&mut vendor_id, h),
-					Some(("device-id", h)) => f(&mut device_id, h),
-					Some(("name", h)) => {
-						// Names are unique
-						return Box::new(QueryName {
-							item: bdf_from_string(h),
-						});
-					}
-					_ => false,
-				};
-				if !r {
-					return Box::new(NoneQuery);
+	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
+		let (mut vendor_id, mut device_id) = (None, None);
+		for t in tags {
+			let f = |a: &mut Option<u16>, h: &str| {
+				u16::from_str_radix(h, 16)
+					.ok()
+					.and_then(|v| a.replace(v))
+					.is_none()
+			};
+			let r = match t.split_once(':') {
+				Some(("vendor-id", h)) => f(&mut vendor_id, h),
+				Some(("device-id", h)) => f(&mut device_id, h),
+				Some(("name", h)) => {
+					// Names are unique
+					return Box::new(QueryName {
+						item: bdf_from_string(h),
+					});
 				}
+				_ => false,
+			};
+			if !r {
+				return Box::new(NoneQuery);
 			}
-			Box::new(QueryTags {
-				vendor_id,
-				device_id,
-				index: 0,
-			})
 		}
+		Box::new(QueryTags {
+			vendor_id,
+			device_id,
+			index: 0,
+		})
 	}
 
 	fn get(self: Arc<Self>, id: Id) -> Ticket {

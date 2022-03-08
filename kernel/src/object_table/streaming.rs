@@ -55,7 +55,7 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, _name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
 		todo!();
 		let tags = {
 			let l = 2 + tags.len() * 2 + tags.iter().map(|s| s.len()).sum::<usize>();

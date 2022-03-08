@@ -136,28 +136,24 @@ extern "C" fn next_table(
 
 extern "C" fn query_table(
 	id: usize,
-	name: usize,
-	name_len: usize,
 	tags: usize,
 	tags_len: usize,
+	_: usize,
+	_: usize,
 	_: usize,
 ) -> Return {
 	let id = TableId::from(u32::try_from(id).unwrap());
 	// SAFETY: FIXME
-	let (name, tags) = unsafe {
-		let name = (name != 0)
-			.then(|| core::slice::from_raw_parts(name as *const u8, name_len))
-			.map(|s| core::str::from_utf8(s).unwrap());
-		let tags = (tags != 0)
+	let tags = unsafe {
+		(tags != 0)
 			.then(|| core::slice::from_raw_parts(tags as *const ffi::Slice<u8>, tags_len))
 			.unwrap_or(&[])
 			.iter()
 			.map(|f| f.unchecked_as_slice())
 			.map(|s| core::str::from_utf8(s).unwrap())
-			.collect::<Vec<_>>();
-		(name, tags)
+			.collect::<Vec<_>>()
 	};
-	let query = object_table::query(id, name, &tags).unwrap();
+	let query = object_table::query(id, &tags).unwrap();
 	let handle = Process::current().add_query(query);
 	Return {
 		status: 0,

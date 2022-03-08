@@ -13,7 +13,7 @@ fn main() {
 		if inf.name() == b"pci" {
 			let tags: [syscall::Slice<u8>; 2] =
 				[b"vendor-id:1af4".into(), b"device-id:1001".into()];
-			let h = syscall::query_table(i, None, &tags).unwrap();
+			let h = syscall::query_table(i, &tags).unwrap();
 			println!("{:?}", h);
 			let mut buf = [0; 256];
 			let mut obj = syscall::ObjectInfo::new(&mut buf);

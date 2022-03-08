@@ -13,9 +13,9 @@ impl Table for UartTable {
 		"uart"
 	}
 
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
-		match (name, tags) {
-			(None, &[]) => todo!(),
+	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
+		match tags {
+			&[] => todo!(),
 			_ => Box::new(NoneQuery),
 		}
 	}
