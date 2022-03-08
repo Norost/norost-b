@@ -13,7 +13,7 @@
 .section .bss._stack
 .p2align 12
 # align stack beforehand so we can save on a push
-	.zero (1 << 16) - 8
+	.zero (1 << 17) - 8
 _stack:
 	.zero 8
 

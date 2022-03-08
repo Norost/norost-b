@@ -1,4 +1,5 @@
 pub mod asm;
+mod cpuid;
 mod gdt;
 #[macro_use]
 mod idt;
@@ -12,7 +13,9 @@ use crate::{driver::apic, power, scheduler, time::Monotonic};
 use core::arch::asm;
 use core::mem::MaybeUninit;
 pub use idt::{Handler, IDTEntry};
-pub use syscall::{current_process, current_thread, current_thread_weak, set_current_thread};
+pub use syscall::{
+	current_process, current_thread, current_thread_weak, set_current_thread, ThreadData,
+};
 
 static mut TSS: tss::TSS = tss::TSS::new();
 static mut TSS_STACK: [usize; 512] = [0; 512];
@@ -62,6 +65,8 @@ pub unsafe fn init() {
 	IDT_PTR.assume_init_ref().activate();
 
 	syscall::init();
+
+	cpuid::enable_fsgsbase();
 }
 
 fn handle_timer(rip: *const ()) -> ! {

@@ -24,7 +24,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 17;
+pub const SYSCALLS_LEN: usize = 20;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	syslog,
@@ -44,6 +44,9 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	poll_object,
 	take_table_job,
 	finish_table_job,
+	create_object,
+	duplicate_handle,
+	spawn_thread,
 ];
 
 extern "C" fn syslog(ptr: usize, len: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -214,6 +217,25 @@ extern "C" fn query_next(
 	}
 }
 
+extern "C" fn create_object(
+	table_id: usize,
+	tags_ptr: usize,
+	tags_len: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let table_id = TableId(table_id as u32);
+	let tags = unsafe { core::slice::from_raw_parts(tags_ptr as *const u8, tags_len) };
+	let ticket = object_table::create(table_id, tags).unwrap();
+	let obj = super::block_on(ticket).unwrap().into_object().unwrap();
+	let handle = Process::current().add_object(obj);
+	Return {
+		status: 0,
+		value: handle.unwrap().into(),
+	}
+}
+
 extern "C" fn open_object(
 	table_id: usize,
 	id_l: usize,
@@ -281,13 +303,15 @@ extern "C" fn read_object(
 	let read = Process::current()
 		.get_object(handle)
 		.unwrap()
-		.read(offset, data)
+		.read(offset, data.len().try_into().unwrap())
 		.unwrap();
-	let read = super::block_on(read).unwrap().into_usize().unwrap();
+	let read = super::block_on(read).unwrap().into_bytes().unwrap();
+	let len = read.len().min(data.len());
+	data[..len].copy_from_slice(&read[..len]);
 
 	Return {
 		status: 0,
-		value: read,
+		value: len,
 	}
 }
 
@@ -335,6 +359,28 @@ extern "C" fn poll_object(
 		value: u32::from(event).try_into().unwrap(),
 	}
 	*/
+}
+
+extern "C" fn duplicate_handle(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let handle = ObjectHandle::from(handle);
+
+	Process::current().duplicate_object_handle(handle).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|handle| Return {
+			status: 0,
+			value: handle.into(),
+		},
+	)
 }
 
 extern "C" fn create_table(
@@ -403,6 +449,8 @@ impl TryFrom<FfiJobType> for JobType {
 			0 => Ok(Self::Open),
 			1 => Ok(Self::Read),
 			2 => Ok(Self::Write),
+			3 => Ok(Self::Query),
+			4 => Ok(Self::Create),
 			_ => Err(UnknownJobType),
 		}
 	}
@@ -415,7 +463,8 @@ impl TryFrom<FfiJob> for Job {
 		// TODO don't panic
 		let buffer = unsafe {
 			core::slice::from_raw_parts(
-				fj.buffer.unwrap().as_ptr(),
+				fj.buffer
+					.map_or(mem::align_of::<u8>() as *const _, |p| p.as_ptr()),
 				fj.buffer_size.try_into().unwrap(),
 			)
 		};
@@ -433,7 +482,7 @@ impl TryFrom<FfiJob> for Job {
 extern "C" fn take_table_job(
 	handle: usize,
 	job_ptr: usize,
-	_: usize,
+	timeout_micros: usize,
 	_: usize,
 	_: usize,
 	_: usize,
@@ -455,15 +504,23 @@ extern "C" fn take_table_job(
 			job.buffer_size.try_into().unwrap(),
 		)
 	};
-	let info = super::block_on(tbl.take_job());
+	let timeout = Duration::from_micros(timeout_micros.try_into().unwrap());
+	let Ok(Ok(info)) = super::block_on_timeout(tbl.take_job(timeout), timeout) else {
+		return Return { status: 1, value: 0 };
+	};
 	job.ty = info.ty.into();
 	job.flags = info.flags;
 	job.job_id = info.job_id;
 	job.object_id = info.object_id;
 	job.operation_size = info.operation_size;
-	let size = usize::try_from(info.operation_size).unwrap();
-	assert!(copy_to.len() >= size, "todo");
-	copy_to[..size].copy_from_slice(&info.buffer[..size]);
+	match info.ty {
+		JobType::Create | JobType::Write => {
+			let size = usize::try_from(info.operation_size).unwrap();
+			assert!(copy_to.len() >= size, "todo");
+			copy_to[..size].copy_from_slice(&info.buffer[..size]);
+		}
+		_ => {}
+	}
 
 	Return {
 		status: 0,
@@ -509,11 +566,6 @@ extern "C" fn sleep(
 ) -> Return {
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
-	unsafe {
-		for _ in 0..1000000000usize {
-			asm!("")
-		}
-	}
 
 	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();
@@ -522,6 +574,26 @@ extern "C" fn sleep(
 		status: 0,
 		value: 0,
 	}
+}
+
+extern "C" fn spawn_thread(
+	start: usize,
+	stack: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	Process::current().spawn_thread(start, stack).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|handle| Return {
+			status: 0,
+			value: handle,
+		},
+	)
 }
 
 #[allow(dead_code)]

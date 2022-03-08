@@ -64,7 +64,7 @@ dependencies = [
 name = "driver_virtio_net"
 version = "0.1.0"
 dependencies = [
- "norostb_rt",
+ "norostb_kernel",
  "pci",
  "smoltcp",
  "virtio",

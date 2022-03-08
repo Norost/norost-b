@@ -12,8 +12,8 @@ pub struct StreamingTable {
 	name: Box<str>,
 	//event_wakers: Mutex<(usize, Vec<EventWaker>)>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(JobId, StreamJob, Id, TicketWaker)>>,
-	tickets: Mutex<Vec<(JobId, Id, TicketWaker)>>,
+	jobs: Mutex<Vec<(JobId, StreamJob, TicketWaker)>>,
+	tickets: Mutex<Vec<(JobId, TicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
 }
 
@@ -26,18 +26,24 @@ impl StreamingTable {
 		.into()
 	}
 
-	fn submit_job(&self, job: StreamJob, id: Id) -> Ticket {
+	fn submit_job(&self, job: StreamJob) -> Ticket {
 		let (ticket, ticket_waker) = Ticket::new();
 
 		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed).into();
 
-		let j = self.job_handlers.lock().pop();
-		if let Some(w) = j {
-			self.tickets.lock().push((job_id, id, ticket_waker));
-			w.complete(job.into_job(job_id, id));
-		} else {
-			let mut l = self.jobs.lock();
-			l.push((job_id, job, id, ticket_waker));
+		loop {
+			let j = self.job_handlers.lock().pop();
+			if let Some(w) = j {
+				if let Ok(mut w) = w.lock() {
+					self.tickets.lock().push((job_id, ticket_waker));
+					w.complete(job.into_job(job_id));
+					break;
+				}
+			} else {
+				let mut l = self.jobs.lock();
+				l.push((job_id, job, ticket_waker));
+				break;
+			}
 		}
 
 		ticket
@@ -49,24 +55,46 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, _name: Option<&str>, _tags: &[&str]) -> Box<dyn Query> {
-		todo!()
+	fn query(self: Arc<Self>, _name: Option<&str>, tags: &[&str]) -> Box<dyn Query> {
+		todo!();
+		let tags = {
+			let l = 2 + tags.len() * 2 + tags.iter().map(|s| s.len()).sum::<usize>();
+			let mut t = Vec::with_capacity(l);
+			let [a, b] = u16::try_from(tags.len()).unwrap().to_ne_bytes();
+			t.push(a);
+			t.push(b);
+			let mut s = u16::try_from(2 + tags.len() * 2).unwrap();
+			for tag in tags {
+				s += u16::try_from(tag.len()).unwrap();
+				let [a, b] = s.to_ne_bytes();
+				t.push(a);
+				t.push(b);
+			}
+			tags.iter().for_each(|s| t.extend(s.as_bytes()));
+			t.into()
+		};
+		let job = self.submit_job(StreamJob::Query { tags });
+		Box::new(StreamQuery {
+	//		job,
+		})
 	}
 
 	fn get(self: Arc<Self>, id: Id) -> Ticket {
-		self.submit_job(StreamJob::Open, id)
+		self.submit_job(StreamJob::Open { object_id: id })
 	}
 
-	fn create(self: Arc<Self>, _name: &str, _tags: &[&str]) -> Ticket {
-		todo!()
+	fn create(self: Arc<Self>, tags: &[u8]) -> Ticket {
+		let tags = tags.into();
+		self.submit_job(StreamJob::Create { tags })
 	}
 
-	fn take_job(&self) -> JobTask {
-		let job = self.jobs.lock().pop().map(|(job_id, job, id, tkt)| {
-			self.tickets.lock().push((job_id, id, tkt));
-			job.into_job(job_id, id)
+	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+		let job = self.jobs.lock().pop().map(|(job_id, job, tkt)| {
+			self.tickets.lock().push((job_id, tkt));
+			job.into_job(job_id)
 		});
-		let (job, waker) = JobTask::new(job);
+		let s = Arc::downgrade(&self);
+		let (job, waker) = JobTask::new(s, job);
 		self.job_handlers.lock().push(waker);
 		job
 	}
@@ -74,11 +102,11 @@ impl Table for StreamingTable {
 	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()> {
 		let mut c = self.tickets.lock();
 		let mut c = c.drain_filter(|e| e.0 == job.job_id);
-		let (_, id, tw) = c.next().ok_or(())?;
+		let (_, tw) = c.next().ok_or(())?;
 		match job.ty {
 			JobType::Open => {
 				let obj = Arc::new(StreamObject {
-					id,
+					id: job.object_id,
 					table: Arc::downgrade(&self),
 				});
 				tw.complete(Ok(Data::Object(obj)));
@@ -86,10 +114,27 @@ impl Table for StreamingTable {
 			JobType::Write => {
 				tw.complete(Ok(Data::Usize(job.operation_size.try_into().unwrap())));
 			}
-			JobType::Read => todo!(),
+			JobType::Read => {
+				tw.complete(Ok(Data::Bytes(job.buffer)));
+			}
+			JobType::Query => {
+				todo!()
+			}
+			JobType::Create => {
+				let obj = Arc::new(StreamObject {
+					id: job.object_id,
+					table: Arc::downgrade(&self),
+				});
+				tw.complete(Ok(Data::Object(obj)));
+			}
 		}
 		assert!(c.next().is_none());
 		Ok(())
+	}
+
+	fn cancel_job(self: Arc<Self>, job: Job) {
+		// Re-queue
+		self.submit_job(job.into());
 	}
 }
 
@@ -120,36 +165,58 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
-	fn read(&self, _: u64, _data: &mut [u8]) -> Result<Ticket, ()> {
-		todo!();
+	fn read(&self, _: u64, length: u32) -> Result<Ticket, ()> {
+		self.table
+			.upgrade()
+			.map(|tbl| {
+				let job = StreamJob::Read {
+					object_id: self.id,
+					length,
+				};
+				tbl.submit_job(job)
+			})
+			.ok_or(())
 	}
 
 	fn write(&self, _: u64, data: &[u8]) -> Result<Ticket, ()> {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				let job = StreamJob::Write { data: data.into() };
-				tbl.submit_job(job, self.id)
+				let job = StreamJob::Write {
+					object_id: self.id,
+					data: data.into(),
+				};
+				tbl.submit_job(job)
 			})
 			.ok_or(())
 	}
 }
 
 enum StreamJob {
-	Open,
-	Write { data: Box<[u8]> },
+	Open { object_id: Id },
+	Read { object_id: Id, length: u32 },
+	Write { object_id: Id, data: Box<[u8]> },
+	Query { tags: Box<[u8]> },
+	Create { tags: Box<[u8]> },
 }
 
 impl StreamJob {
-	fn into_job(self, job_id: JobId, object_id: Id) -> Job {
+	fn into_job(self, job_id: JobId) -> Job {
 		match self {
-			StreamJob::Open => Job {
+			StreamJob::Open { object_id } => Job {
 				ty: JobType::Open,
 				job_id,
 				object_id,
 				..Default::default()
 			},
-			StreamJob::Write { data } => Job {
+			StreamJob::Read { object_id, length } => Job {
+				ty: JobType::Read,
+				job_id,
+				object_id,
+				operation_size: length,
+				..Default::default()
+			},
+			StreamJob::Write { object_id, data } => Job {
 				ty: JobType::Write,
 				job_id,
 				object_id,
@@ -157,6 +224,56 @@ impl StreamJob {
 				buffer: data,
 				..Default::default()
 			},
+			StreamJob::Query { .. } => todo!(),
+			StreamJob::Create { tags } => Job {
+				ty: JobType::Create,
+				job_id,
+				operation_size: tags.len().try_into().unwrap(),
+				buffer: tags,
+				..Default::default()
+			},
 		}
 	}
 }
+
+impl From<Job> for StreamJob {
+	fn from(
+		Job {
+			ty,
+			flags,
+			job_id: _,
+			operation_size,
+			object_id,
+			buffer,
+		}: Job,
+	) -> Self {
+		match ty {
+			JobType::Open => StreamJob::Open { object_id },
+			JobType::Read => todo!(),
+			JobType::Write => StreamJob::Write {
+				object_id,
+				data: buffer,
+			},
+			JobType::Query => StreamJob::Query { tags: buffer },
+			JobType::Create => StreamJob::Create { tags: buffer },
+		}
+	}
+}
+
+struct StreamQueryInner {}
+
+struct StreamQuery {
+	//inner: Arc<StreamQueryInner>,
+}
+
+impl Iterator for StreamQuery {
+	type Item = QueryResult;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		None
+	}
+}
+
+impl Query for StreamQuery {}
+
+struct QueryHandle(u32);

@@ -1,28 +1,24 @@
-#![no_std]
-#![no_main]
-
-use norostb_kernel::{self as kernel, syscall, syslog};
+use norostb_kernel::{self as kernel, syscall};
 
 use core::ptr::NonNull;
 
-#[export_name = "main"]
-extern "C" fn main() {
-	syslog!("Hello, world! from Rust");
+fn main() {
+	println!("Hello, world! from Rust");
 
 	let mut id = None;
 	let mut dev = None;
-	syslog!("iter tables");
+	println!("iter tables");
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		syslog!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
+		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
 			let tags: [syscall::Slice<u8>; 2] =
 				[b"vendor-id:1af4".into(), b"device-id:1001".into()];
 			let h = syscall::query_table(i, None, &tags).unwrap();
-			syslog!("{:?}", h);
+			println!("{:?}", h);
 			let mut buf = [0; 256];
 			let mut obj = syscall::ObjectInfo::new(&mut buf);
 			while let Ok(()) = syscall::query_next(h, &mut obj) {
-				syslog!("{:#?}", &obj);
+				println!("{:#?}", &obj);
 				dev = Some((i, obj.id));
 				break 'found_dev;
 			}
@@ -36,7 +32,7 @@ extern "C" fn main() {
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
 
-	syslog!("handle: {:?}", handle);
+	println!("handle: {:?}", handle);
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -47,7 +43,7 @@ extern "C" fn main() {
 		match h {
 			pci::Header::H0(h) => {
 				for (i, b) in h.base_address.iter().enumerate() {
-					syslog!("{}: {:x}", i, b.get());
+					println!("{}: {:x}", i, b.get());
 				}
 
 				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
@@ -64,7 +60,7 @@ extern "C" fn main() {
 					NonNull::new(addr as *mut _).unwrap()
 				};
 				let dma_alloc = |size| {
-					syslog!("dma: {:#x}", dma_addr);
+					println!("dma: {:#x}", dma_addr);
 					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
 					let res = syscall::alloc_dma(Some(d), size).unwrap();
 					dma_addr += res;
@@ -74,7 +70,7 @@ extern "C" fn main() {
 				let d =
 					virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
 
-				syslog!("pci status: {:#x}", h.status());
+				println!("pci status: {:#x}", h.status());
 
 				d
 			}
@@ -87,9 +83,9 @@ extern "C" fn main() {
 		*w = *r;
 	}
 
-	syslog!("writing the stuff...");
+	println!("writing the stuff...");
 	dev.write(&sectors, 0, || ()).unwrap();
-	syslog!("done writing the stuff");
+	println!("done writing the stuff");
 
 	// Register new table of Streaming type
 	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
@@ -101,16 +97,17 @@ extern "C" fn main() {
 
 	loop {
 		// Wait for events from the table
-		syslog!("ermaghed");
+		println!("ermaghed");
 
-		let job = syscall::take_table_job(tbl, &mut buf).unwrap();
+		let job = syscall::take_table_job(tbl, &mut buf, std::time::Duration::MAX).unwrap();
 
-		syslog!("job: {:#?}", &job);
+		println!("job: {:#?}", &job);
 
 		match job.ty {
 			syscall::Job::OPEN => (),
 			syscall::Job::WRITE => {
-				syslog!("write: {:?}", core::str::from_utf8(unsafe { job.data() }));
+				let data = &buf[..job.operation_size as usize];
+				println!("write: {:?}", core::str::from_utf8(data));
 			}
 			_ => todo!(),
 		}
@@ -121,7 +118,7 @@ extern "C" fn main() {
 		//while let Some(cmd) = cmds.pop_command() {
 		/*
 		{
-			syslog!("[stream-table] {:?}", "open");
+			println!("[stream-table] {:?}", "open");
 			Response::open(
 				&cmd,
 				NonNull::new(wr.get()).unwrap().cast(),
@@ -131,15 +128,15 @@ extern "C" fn main() {
 			)
 		}
 		{
-			syslog!("[stream-table] {:?}", count);
+			println!("[stream-table] {:?}", count);
 
 			let wr: &[u8] = unsafe {
 				core::slice::from_raw_parts(wr.get().cast(), 4096)
 			};
-			syslog!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
-			syslog!("wr_i {}", wr_i % wr.len());
+			println!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
+			println!("wr_i {}", wr_i % wr.len());
 			for i in wr_i .. wr_i + count {
-				syslog!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
+				println!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
 			}
 
 			wr_i += count;
@@ -155,13 +152,5 @@ extern "C" fn main() {
 		//}
 
 		// Mark events as handled
-	}
-}
-
-#[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
-	syslog!("Panic! {:#?}", info);
-	loop {
-		syscall::sleep(Duration::MAX);
 	}
 }
