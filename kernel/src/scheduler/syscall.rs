@@ -463,7 +463,8 @@ impl TryFrom<FfiJob> for Job {
 		// TODO don't panic
 		let buffer = unsafe {
 			core::slice::from_raw_parts(
-				fj.buffer.unwrap().as_ptr(),
+				fj.buffer
+					.map_or(mem::align_of::<u8>() as *const _, |p| p.as_ptr()),
 				fj.buffer_size.try_into().unwrap(),
 			)
 		};

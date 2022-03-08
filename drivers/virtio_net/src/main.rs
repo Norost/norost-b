@@ -5,6 +5,7 @@ mod dev;
 use core::ptr::NonNull;
 use core::time::Duration;
 use norostb_kernel::{self as kernel, syscall};
+use smoltcp::socket::TcpState;
 use std::str::FromStr;
 
 fn main() {
@@ -124,11 +125,54 @@ fn main() {
 		Tcp,
 	}
 
+	/*
+	enum Socket {
+		Udp {
+			socket: socket::UdpSocket,
+			address: IpEndpoint,
+		},
+		Tcp {
+			socket: socket::TcpSocket,
+			state: TcpState
+		},
+	}
+	*/
+
 	let mut t = time::Instant::from_secs(0);
 	let mut buf = [0; 2048];
 	let mut objects = Vec::new();
 
+	let mut connecting_tcp_sockets = Vec::new();
+
 	loop {
+		// Advance TCP connection state.
+		for i in (0..connecting_tcp_sockets.len()).rev() {
+			let (sock_h, job_id) = connecting_tcp_sockets[i];
+			let sock = iface.get_socket::<socket::TcpSocket>(sock_h);
+			match sock.state() {
+				TcpState::SynSent | TcpState::SynReceived => {}
+				TcpState::Established => {
+					connecting_tcp_sockets.remove(i);
+					objects.push((
+						sock_h,
+						smoltcp::wire::IpEndpoint::UNSPECIFIED,
+						Protocol::Tcp,
+					));
+					let job = syscall::Job {
+						ty: syscall::Job::CREATE,
+						job_id,
+						flags: [0; 3],
+						object_id: syscall::Id((objects.len() - 1).try_into().unwrap()),
+						buffer: None,
+						buffer_size: 0,
+						operation_size: 0,
+					};
+					syscall::finish_table_job(tbl, job).unwrap();
+				}
+				s => todo!("{:?}", s),
+			}
+		}
+
 		while let Ok(mut job) = syscall::take_table_job(tbl, &mut buf, Duration::new(0, 0)) {
 			match job.ty {
 				syscall::Job::CREATE => {
@@ -186,10 +230,11 @@ fn main() {
 							};
 							let sock = socket::TcpSocket::new(rx, tx);
 							let sock = iface.add_socket(sock);
-							objects.push((sock, addr, Protocol::Tcp));
+							connecting_tcp_sockets.push((sock, job.job_id));
 							let (sock, cx) =
 								iface.get_socket_and_context::<socket::TcpSocket>(sock);
 							sock.connect(cx, addr, local_addr).unwrap();
+							continue;
 						}
 					}
 

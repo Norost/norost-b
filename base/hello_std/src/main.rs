@@ -18,30 +18,30 @@ fn main() {
 		thread::sleep(Duration::from_millis(1));
 	};
 	let mut path = table.path();
+	eprintln!("creating connection");
 	//path.push("tcp&::ffff:10.0.2.2&6666");
 	path.push("tcp&::ffff:172.106.11.86&6667"); // irc.libera.chat
 	let mut f = File::create(path).unwrap();
+	eprintln!("created connection");
 
 	{
 		let mut f = f.try_clone().unwrap();
 		thread::spawn(move || {
-			let mut registered = false;
 			let mut buf = [0; 1024];
 			let pre = b"\r\x1b[2K";
 			buf[..pre.len()].copy_from_slice(pre);
 			loop {
 				eprint!("\r");
 				let l = f.read(&mut buf[1..]).unwrap();
-				if l > 0 && !registered {
-					f.write(b"NICK norostb\nUSER norostb * * :norostb\n")
-						.unwrap();
-					registered = true;
-				}
 				io::stderr().write(&buf[..1 + l]).unwrap();
 				thread::sleep(Duration::from_millis(50));
 			}
 		});
 	}
+
+	eprintln!("sending nick & user");
+	f.write(b"NICK norostb\nUSER norostb * * :norostb\n")
+		.unwrap();
 
 	let mut buf = [0; 1024];
 	let mut len = 0;
