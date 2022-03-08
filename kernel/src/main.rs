@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
+#![forbid(unused_must_use)]
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
 #![feature(const_trait_impl, inline_const)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
+#![feature(let_else)]
 #![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
@@ -14,6 +16,7 @@
 #![feature(stmt_expr_attributes)]
 #![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
 #![feature(trait_upcasting)]
+#![feature(waker_getters)]
 
 extern crate alloc;
 

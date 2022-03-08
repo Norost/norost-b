@@ -1,23 +1,69 @@
 #![feature(path_try_exists)]
 
+use std::ffi;
+use std::fs::{self, File};
+use std::io::{self, Read, Write};
+use std::str;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
 fn main() {
-	dbg!(dbg!(std::fs::read_dir("")).unwrap().collect::<Vec<_>>());
-	dbg!(dbg!(std::fs::read_dir("pci/")).unwrap().collect::<Vec<_>>());
+	let table = 'tbl: loop {
+		for f in fs::read_dir("").unwrap().map(Result::unwrap) {
+			if &*f.file_name() == ffi::OsStr::new("virtio-net") {
+				break 'tbl f;
+			}
+		}
+		thread::sleep(Duration::from_millis(1));
+	};
+	let mut path = table.path();
+	//path.push("tcp&::ffff:10.0.2.2&6666");
+	path.push("tcp&::ffff:172.106.11.86&6667"); // irc.libera.chat
+	let mut f = File::create(path).unwrap();
 
-	dbg!(std::fs::File::open("pci/name:0:00.0,vendor-id:8086,device-id:29c0/0").unwrap());
-	dbg!(std::fs::File::open("pci/name:0:00.0,vendor-id:8086,device-id:29c0").unwrap());
+	{
+		let mut f = f.try_clone().unwrap();
+		thread::spawn(move || {
+			let mut registered = false;
+			let mut buf = [0; 1024];
+			let pre = b"\r\x1b[2K";
+			buf[..pre.len()].copy_from_slice(pre);
+			loop {
+				eprint!("\r");
+				let l = f.read(&mut buf[1..]).unwrap();
+				if l > 0 && !registered {
+					f.write(b"NICK norostb\nUSER norostb * * :norostb\n")
+						.unwrap();
+					registered = true;
+				}
+				io::stderr().write(&buf[..1 + l]).unwrap();
+				thread::sleep(Duration::from_millis(50));
+			}
+		});
+	}
 
-	dbg!(std::fs::try_exists("pci/vendor-id:8086,device-id:29c0").unwrap());
-	dbg!(std::fs::try_exists("pci/vendor-id:ffff,device-id:29c0").unwrap());
-
-	use std::io::{BufRead, BufReader, Write};
-	let mut f = std::fs::File::open("uart//0").unwrap();
-	writeln!(
-		f,
-		"I write this to an opened file and now I will read a single line"
-	)
-	.unwrap();
-	let mut s = String::new();
-	BufReader::new(f).read_line(&mut s).unwrap();
-	println!("The line is {:?}", s);
+	let mut buf = [0; 1024];
+	let mut len = 0;
+	loop {
+		let prev_len = len;
+		len += io::stdin().read(&mut buf[len..]).unwrap();
+		for i in (prev_len..len).rev() {
+			if buf[i] == 0x7f {
+				// backspace
+				buf.copy_within(i + 1.., i.saturating_sub(1));
+				len = len.saturating_sub(2);
+			}
+		}
+		if prev_len < len && buf[prev_len..len].contains(&b'\n') {
+			eprintln!();
+			f.write(&buf[..len]).unwrap();
+			len = 0;
+		}
+		eprint!(
+			"\r\x1b[2Kirc < {}",
+			str::from_utf8(&buf[..len]).unwrap_or("<invalid utf-8>")
+		);
+		thread::sleep(Duration::from_millis(50));
+	}
 }
