@@ -1,4 +1,8 @@
 #![feature(if_let_guard)]
+#![feature(norostb)]
+// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
+// stdlib
+#![feature(rustc_private)]
 
 mod dev;
 
@@ -18,13 +22,12 @@ fn main() {
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
 		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
-			let tags: [syscall::Slice<u8>; 2] =
-				[b"vendor-id:1af4".into(), b"device-id:1000".into()];
-			let h = syscall::query_table(i, &tags).unwrap();
+			let tags = b"vendor-id:1af4&device-id:1000";
+			let h = std::os::norostb::query(i, tags).unwrap();
 			println!("{:?}", h);
 			let mut buf = [0; 256];
-			let mut obj = syscall::ObjectInfo::new(&mut buf);
-			while let Ok(()) = syscall::query_next(h, &mut obj) {
+			let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
+			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
 				println!("{:#?}", &obj);
 				dev = Some((i, obj.id));
 				break 'found_dev;
@@ -36,7 +39,7 @@ fn main() {
 	let (tbl, dev) = dev.unwrap();
 
 	// Reserve & initialize device
-	let handle = syscall::open(tbl, dev).unwrap();
+	let handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
@@ -144,6 +147,10 @@ fn main() {
 
 	let mut connecting_tcp_sockets = Vec::new();
 
+	let mut job = std::os::norostb::Job::default();
+	job.buffer = NonNull::new(buf.as_mut_ptr());
+	job.buffer_size = buf.len().try_into().unwrap();
+
 	loop {
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
@@ -158,22 +165,22 @@ fn main() {
 						smoltcp::wire::IpEndpoint::UNSPECIFIED,
 						Protocol::Tcp,
 					));
-					let job = syscall::Job {
+					let job = std::os::norostb::Job {
 						ty: syscall::Job::CREATE,
 						job_id,
 						flags: [0; 3],
-						object_id: syscall::Id((objects.len() - 1).try_into().unwrap()),
+						object_id: (objects.len() - 1).try_into().unwrap(),
 						buffer: None,
 						buffer_size: 0,
 						operation_size: 0,
 					};
-					syscall::finish_table_job(tbl, job).unwrap();
+					std::os::norostb::finish_job(tbl, &job).unwrap();
 				}
 				s => todo!("{:?}", s),
 			}
 		}
 
-		while let Ok(mut job) = syscall::take_table_job(tbl, &mut buf, Duration::new(0, 0)) {
+		while let Ok(()) = std::os::norostb::take_job(tbl, &mut job) {
 			match job.ty {
 				syscall::Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];
@@ -238,10 +245,10 @@ fn main() {
 						}
 					}
 
-					job.object_id = syscall::Id((objects.len() - 1).try_into().unwrap());
+					job.object_id = (objects.len() - 1).try_into().unwrap();
 				}
 				syscall::Job::READ => {
-					let (sock, addr, prot) = objects[job.object_id.0 as usize];
+					let (sock, addr, prot) = objects[job.object_id as usize];
 					match prot {
 						Protocol::Udp => {
 							todo!("address");
@@ -264,7 +271,7 @@ fn main() {
 					}
 				}
 				syscall::Job::WRITE => {
-					let (sock, addr, prot) = objects[job.object_id.0 as usize];
+					let (sock, addr, prot) = objects[job.object_id as usize];
 					match prot {
 						Protocol::Udp => {
 							let sock = iface.get_socket::<socket::UdpSocket>(sock);
@@ -281,7 +288,7 @@ fn main() {
 				t => todo!("job type {}", t),
 			}
 
-			syscall::finish_table_job(tbl, job).unwrap();
+			std::os::norostb::finish_job(tbl, &job).unwrap();
 		}
 
 		iface.poll(t).unwrap();

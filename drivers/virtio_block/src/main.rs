@@ -1,6 +1,10 @@
-use norostb_kernel::{self as kernel, syscall};
+#![feature(norostb)]
+// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
+// stdlib
+#![feature(rustc_private)]
 
 use core::ptr::NonNull;
+use norostb_kernel::{self as kernel, io, syscall};
 
 fn main() {
 	println!("Hello, world! from Rust");
@@ -11,13 +15,13 @@ fn main() {
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
 		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
-			let tags: [syscall::Slice<u8>; 2] =
-				[b"vendor-id:1af4".into(), b"device-id:1001".into()];
-			let h = syscall::query_table(i, &tags).unwrap();
+			let tags = b"vendor-id:1af4&device-id:1001";
+			let h = std::os::norostb::query(i, tags).unwrap();
 			println!("{:?}", h);
 			let mut buf = [0; 256];
-			let mut obj = syscall::ObjectInfo::new(&mut buf);
-			while let Ok(()) = syscall::query_next(h, &mut obj) {
+			//let mut obj = syscall::ObjectInfo::new(&mut buf);
+			let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
+			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
 				println!("{:#?}", &obj);
 				dev = Some((i, obj.id));
 				break 'found_dev;
@@ -27,7 +31,7 @@ fn main() {
 	}
 
 	let (tbl, dev) = dev.unwrap();
-	let handle = syscall::open_object(tbl, dev).unwrap();
+	let handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
@@ -94,12 +98,16 @@ fn main() {
 	// TODO
 
 	let mut buf = [0; 1024];
+	let buf = &mut buf;
+	let mut job = std::os::norostb::Job::default();
+	job.buffer = NonNull::new(buf.as_mut_ptr());
+	job.buffer_size = buf.len().try_into().unwrap();
 
 	loop {
 		// Wait for events from the table
 		println!("ermaghed");
 
-		let job = syscall::take_table_job(tbl, &mut buf, std::time::Duration::MAX).unwrap();
+		std::os::norostb::take_job(tbl, &mut job).unwrap();
 
 		println!("job: {:#?}", &job);
 
@@ -112,7 +120,7 @@ fn main() {
 			_ => todo!(),
 		}
 
-		syscall::finish_table_job(tbl, job).unwrap();
+		std::os::norostb::finish_job(tbl, &job).unwrap();
 
 		// Log events
 		//while let Some(cmd) = cmds.pop_command() {

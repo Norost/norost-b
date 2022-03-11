@@ -1,4 +1,5 @@
 mod elf;
+mod io;
 
 use super::{MemoryObject, Thread};
 use crate::arch;
@@ -12,13 +13,10 @@ use core::ptr::NonNull;
 pub struct Process {
 	address_space: AddressSpace,
 	hint_color: u8,
-	//in_ports: Vec<Option<InPort>>,:
-	//out_ports: Vec<Option<OutPort>>,
-	//named_ports: Box<[ReverseNamedPort]>,
-	//thread: Option<Arc<Thread>>,
 	threads: Vec<Arc<Thread>>,
 	objects: Vec<Arc<dyn Object>>,
 	queries: Vec<Box<dyn Query>>,
+	io_queues: Vec<io::Queue>,
 }
 
 impl Process {
@@ -30,6 +28,7 @@ impl Process {
 			threads: Default::default(),
 			objects: Default::default(),
 			queries: Default::default(),
+			io_queues: Default::default(),
 		})
 	}
 

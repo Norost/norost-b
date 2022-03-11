@@ -11,6 +11,7 @@ acpi = "*"
 rsdp = "*"
 pci = { path = "../lib/rust/pci" }
 cfg-if = "1.0"
+norostb_kernel = { path = "../lib/rust/kernel" }
 
 [features]
 default = ["mem-max-16t", "driver-pci", "driver-hpet"]
