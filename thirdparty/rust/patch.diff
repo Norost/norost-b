@@ -319,13 +319,28 @@ index 90c30313dbb..1051aee1636 100644
  #[cfg(target_os = "openbsd")]
  pub mod openbsd;
  #[cfg(target_os = "redox")]
+diff --git a/library/std/src/os/norostb/ffi.rs b/library/std/src/os/norostb/ffi.rs
+new file mode 100644
+index 00000000000..17243a4af12
+--- /dev/null
++++ b/library/std/src/os/norostb/ffi.rs
+@@ -0,0 +1,7 @@
++#![unstable(feature = "norostb", issue = "none")]
++
++#[path = "../unix/ffi/os_str.rs"]
++mod os_str;
++
++#[unstable(feature = "norostb", issue = "none")]
++pub use self::os_str::{OsStrExt, OsStringExt};
 diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
 new file mode 100644
-index 00000000000..2af8960bedd
+index 00000000000..5adf797f4b4
 --- /dev/null
 +++ b/library/std/src/os/norostb/mod.rs
-@@ -0,0 +1,4 @@
+@@ -0,0 +1,6 @@
 +#![unstable(feature = "norostb", issue = "none")]
++
++pub mod ffi;
 +
 +pub use crate::sys::io::{create, finish_job, open, query, query_next, read, take_job, write};
 +pub use norostb_rt::kernel::syscall::{Job, ObjectInfo};
