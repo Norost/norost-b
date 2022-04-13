@@ -114,7 +114,7 @@ fn main() {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table("virtio-net", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(b"virtio-net", syscall::TableType::Streaming).unwrap();
 
 	// Create a TCP listener
 	let mut rx @ mut tx = [0; 2048];
@@ -148,8 +148,6 @@ fn main() {
 	let mut connecting_tcp_sockets = Vec::new();
 
 	let mut job = std::os::norostb::Job::default();
-	job.buffer = NonNull::new(buf.as_mut_ptr());
-	job.buffer_size = buf.len().try_into().unwrap();
 
 	loop {
 		// Advance TCP connection state.
@@ -180,7 +178,11 @@ fn main() {
 			}
 		}
 
-		while let Ok(()) = std::os::norostb::take_job(tbl, &mut job) {
+		while let Ok(()) = {
+			job.buffer = NonNull::new(buf.as_mut_ptr());
+			job.buffer_size = buf.len().try_into().unwrap();
+			std::os::norostb::take_job(tbl, &mut job)
+		} {
 			match job.ty {
 				syscall::Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];

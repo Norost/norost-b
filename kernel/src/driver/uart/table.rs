@@ -13,7 +13,7 @@ impl Table for UartTable {
 		"uart"
 	}
 
-	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, tags: &[u8]) -> Box<dyn Query> {
 		match tags {
 			&[] => todo!(),
 			_ => Box::new(NoneQuery),

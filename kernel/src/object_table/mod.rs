@@ -41,13 +41,13 @@ where
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query>;
+	fn query(self: Arc<Self>, path: &[u8]) -> Box<dyn Query>;
 
 	/// Get a single object based on ID.
 	fn get(self: Arc<Self>, id: Id) -> Ticket;
 
 	/// Create a new object.
-	fn create(self: Arc<Self>, tags: &[u8]) -> Ticket;
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket;
 
 	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
 
@@ -79,7 +79,7 @@ impl Iterator for NoneQuery {
 /// A query that returns a single result.
 pub struct OneQuery {
 	pub id: Id,
-	pub tags: Option<Box<[Box<str>]>>,
+	pub path: Option<Box<[u8]>>,
 }
 
 impl Query for OneQuery {}
@@ -88,16 +88,16 @@ impl Iterator for OneQuery {
 	type Item = QueryResult;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.tags
+		self.path
 			.take()
-			.map(|tags| QueryResult { id: self.id, tags })
+			.map(|path| QueryResult { id: self.id, path })
 	}
 }
 
 /// A single query result
 pub struct QueryResult {
 	pub id: Id,
-	pub tags: Box<[Box<str>]>,
+	pub path: Box<[u8]>,
 }
 
 /// A single object.
@@ -447,12 +447,12 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(table_id: TableId, tags: &[&str]) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(table_id: TableId, path: &[u8]) -> Result<Box<dyn Query>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.query(tags))
+		.map(|tbl| tbl.query(path))
 		.ok_or(QueryError::InvalidTableId)
 }
 
@@ -468,13 +468,13 @@ pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
 
 /// Create a new object in a table.
 #[allow(dead_code)]
-pub fn create(table_id: TableId, tags: &[u8]) -> Result<Ticket, CreateError> {
+pub fn create(table_id: TableId, path: &[u8]) -> Result<Ticket, CreateError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
 		.ok_or(CreateError::InvalidTableId)
-		.map(|tbl| tbl.create(tags))
+		.map(|tbl| tbl.create(path))
 }
 
 /// Add a new table.

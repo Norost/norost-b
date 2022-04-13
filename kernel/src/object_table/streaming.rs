@@ -59,25 +59,9 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, path: &[u8]) -> Box<dyn Query> {
 		todo!();
-		let tags = {
-			let l = 2 + tags.len() * 2 + tags.iter().map(|s| s.len()).sum::<usize>();
-			let mut t = Vec::with_capacity(l);
-			let [a, b] = u16::try_from(tags.len()).unwrap().to_ne_bytes();
-			t.push(a);
-			t.push(b);
-			let mut s = u16::try_from(2 + tags.len() * 2).unwrap();
-			for tag in tags {
-				s += u16::try_from(tag.len()).unwrap();
-				let [a, b] = s.to_ne_bytes();
-				t.push(a);
-				t.push(b);
-			}
-			tags.iter().for_each(|s| t.extend(s.as_bytes()));
-			t.into()
-		};
-		let job = self.submit_job(StreamJob::Query { tags });
+		let job = self.submit_job(StreamJob::Query { path: path.into() });
 		Box::new(StreamQuery {
 	//		job,
 		})
@@ -87,9 +71,8 @@ impl Table for StreamingTable {
 		self.submit_job(StreamJob::Open { object_id: id })
 	}
 
-	fn create(self: Arc<Self>, tags: &[u8]) -> Ticket {
-		let tags = tags.into();
-		self.submit_job(StreamJob::Create { tags })
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket {
+		self.submit_job(StreamJob::Create { path: path.into() })
 	}
 
 	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
@@ -200,8 +183,8 @@ enum StreamJob {
 	Open { object_id: Id },
 	Read { object_id: Id, length: u32 },
 	Write { object_id: Id, data: Box<[u8]> },
-	Query { tags: Box<[u8]> },
-	Create { tags: Box<[u8]> },
+	Query { path: Box<[u8]> },
+	Create { path: Box<[u8]> },
 }
 
 impl StreamJob {
@@ -229,11 +212,11 @@ impl StreamJob {
 				..Default::default()
 			},
 			StreamJob::Query { .. } => todo!(),
-			StreamJob::Create { tags } => Job {
+			StreamJob::Create { path } => Job {
 				ty: JobType::Create,
 				job_id,
-				operation_size: tags.len().try_into().unwrap(),
-				buffer: tags,
+				operation_size: path.len().try_into().unwrap(),
+				buffer: path,
 				..Default::default()
 			},
 		}
@@ -258,8 +241,8 @@ impl From<Job> for StreamJob {
 				object_id,
 				data: buffer,
 			},
-			JobType::Query => StreamJob::Query { tags: buffer },
-			JobType::Create => StreamJob::Create { tags: buffer },
+			JobType::Query => StreamJob::Query { path: buffer },
+			JobType::Create => StreamJob::Create { path: buffer },
 		}
 	}
 }
