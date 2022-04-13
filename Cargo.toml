@@ -13,7 +13,6 @@ members = [
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",
 	"lib/rust/rt",
-	"base/hello_std",
 	"base/minish",
 ]
 
