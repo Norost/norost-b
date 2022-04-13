@@ -4,7 +4,6 @@ use std::ffi;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::str;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 

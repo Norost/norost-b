@@ -14,6 +14,7 @@ members = [
 	"lib/rust/volatile",
 	"lib/rust/rt",
 	"base/hello_std",
+	"base/minish",
 ]
 
 [profile.dev]
@@ -29,3 +30,8 @@ lto = "fat"
 codegen-units = 1
 opt-level = 'z'
 #strip = "symbols"
+
+[patch.crates-io]
+os_str_bytes = { git = "https://git.sr.ht/~demindiro/os_str_bytes", branch = "norost" }
+atty = { git = "https://git.sr.ht/~demindiro/atty", branch = "norost" }
+dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
