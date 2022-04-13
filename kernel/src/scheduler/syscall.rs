@@ -1,7 +1,7 @@
 use crate::ffi;
 use crate::memory::{frame, r#virtual::RWX, Page};
 use crate::object_table;
-use crate::object_table::{Id, Job, JobId, JobType, TableId};
+use crate::object_table::{Id, Job, JobId, JobType, QueryId, TableId};
 use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
@@ -224,6 +224,7 @@ pub struct FfiJob {
 	pub operation_size: u32,
 	pub object_id: Id,
 	pub buffer: Option<NonNull<u8>>,
+	pub query_id: QueryId,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -251,6 +252,7 @@ impl TryFrom<FfiJobType> for JobType {
 			2 => Ok(Self::Write),
 			3 => Ok(Self::Query),
 			4 => Ok(Self::Create),
+			5 => Ok(Self::QueryNext),
 			_ => Err(UnknownJobType),
 		}
 	}
@@ -275,6 +277,7 @@ impl TryFrom<FfiJob> for Job {
 			object_id: fj.object_id,
 			operation_size: fj.operation_size,
 			buffer: buffer.into(),
+			query_id: fj.query_id,
 		})
 	}
 }

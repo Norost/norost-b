@@ -200,6 +200,7 @@ pub struct Job {
 	pub operation_size: u32,
 	pub object_id: Id,
 	pub buffer: Option<NonNull<u8>>,
+	pub query_id: u32,
 }
 
 impl Job {
@@ -208,6 +209,7 @@ impl Job {
 	pub const WRITE: u8 = 2;
 	pub const QUERY: u8 = 3;
 	pub const CREATE: u8 = 4;
+	pub const QUERY_NEXT: u8 = 5;
 }
 
 #[derive(Clone, Copy, Debug)]

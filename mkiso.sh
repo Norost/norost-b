@@ -16,6 +16,8 @@ cp target/$TARGET_KERNEL/release/nora isodir/boot/nora
 cp target/$TARGET_BOOT/release/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 
+(cd drivers/fs_fat && cargo build --release --target $TARGET_USER)
+cp target/$TARGET_USER/release/driver_fs_fat isodir/drivers/fs_fat
 (cd drivers/virtio_block && cargo build --release --target $TARGET_USER)
 cp target/$TARGET_USER/release/driver_virtio_block isodir/drivers/virtio_block
 (cd drivers/virtio_net && cargo build --release --target $TARGET_USER)

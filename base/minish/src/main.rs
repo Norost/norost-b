@@ -70,11 +70,10 @@ fn main() -> std::io::Result<()> {
 					Ok(l) => {
 						for e in l {
 							match e {
-								Ok(e) => writeln!(
-									term,
-									"{}",
-									e.file_name().to_str().unwrap_or("<invalid utf-8>")
-								)?,
+								Ok(e) => match e.path().to_str() {
+									Some(e) => writeln!(term, "{}", e),
+									None => writeln!(term, "{:?}", e),
+								}?,
 								Err(e) => writeln!(term, "{}", e)?,
 							}
 						}

@@ -88,15 +88,14 @@ impl super::Process {
 						let data_len = e.arguments_ptr[1];
 						let data = unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) };
 						let object = self.objects.get(handle.0).unwrap();
-						let ticket = object.read(0, data_len.try_into().unwrap()).unwrap();
+						let ticket = object.read(0, data_len.try_into().unwrap());
 						let result = super::super::block_on(ticket);
 						match result {
-							Ok(crate::object_table::Data::Bytes(b)) => {
+							Ok(b) => {
 								let len = b.len().min(data.len());
 								data[..len].copy_from_slice(&b[..len]);
 								push_resp(len.try_into().unwrap())
 							}
-							Ok(_) => unreachable!("invalid ok result"),
 							Err(_) => push_resp(-1),
 						}
 					}
@@ -107,13 +106,10 @@ impl super::Process {
 						let data_len = e.arguments_ptr[1];
 						let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 						let object = self.objects.get(handle.0).unwrap();
-						let ticket = object.write(0, data).unwrap();
+						let ticket = object.write(0, data);
 						let result = super::super::block_on(ticket);
 						match result {
-							Ok(crate::object_table::Data::Usize(n)) => {
-								push_resp(n.try_into().unwrap())
-							}
-							Ok(_) => unreachable!("invalid ok result"),
+							Ok(n) => push_resp(n.try_into().unwrap()),
 							Err(_) => push_resp(-1),
 						}
 					}
@@ -127,11 +123,10 @@ impl super::Process {
 						.unwrap();
 						let result = super::super::block_on(ticket);
 						match result {
-							Ok(crate::object_table::Data::Object(o)) => {
+							Ok(o) => {
 								self.objects.push(o);
 								push_resp(self.objects.len() as isize - 1);
 							}
-							Ok(_) => unreachable!("invalid ok result"),
 							Err(_) => push_resp(-1),
 						}
 					}
@@ -145,11 +140,10 @@ impl super::Process {
 								.unwrap();
 						let result = super::super::block_on(ticket);
 						match result {
-							Ok(crate::object_table::Data::Object(o)) => {
+							Ok(o) => {
 								self.objects.push(o);
 								push_resp(self.objects.len() as isize - 1);
 							}
-							Ok(_) => unreachable!("invalid ok result"),
 							Err(_) => push_resp(-1),
 						}
 					}
@@ -161,9 +155,15 @@ impl super::Process {
 						// SAFETY: FIXME
 						let path =
 							unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
-						let query = crate::object_table::query(id, path).unwrap();
-						self.queries.push(query);
-						push_resp(self.queries.len() as isize - 1);
+						let ticket = crate::object_table::query(id, path).unwrap();
+						let result = super::super::block_on(ticket);
+						match result {
+							Ok(query) => {
+								self.queries.push(query);
+								push_resp(0);
+							}
+							Err(_) => push_resp(-1),
+						}
 					}
 					Request::QUERY_NEXT => {
 						// SAFETY: FIXME
@@ -177,11 +177,16 @@ impl super::Process {
 						let query = &mut self.queries[handle as usize];
 						match query.next() {
 							None => push_resp(0),
-							Some(obj) => {
-								let len = obj.path.len().min(path_buffer.len());
-								info.id = obj.id.0;
-								path_buffer[..len].copy_from_slice(&obj.path[..len]);
-								push_resp(1)
+							Some(ticket) => {
+								if let Ok(obj) = super::super::block_on(ticket) {
+									let len = obj.path.len().min(path_buffer.len());
+									info.id = obj.id.0;
+									info.path_len = len;
+									path_buffer[..len].copy_from_slice(&obj.path[..len]);
+									push_resp(1)
+								} else {
+									push_resp(0)
+								}
 							}
 						}
 					}
@@ -211,13 +216,13 @@ impl super::Process {
 						job.object_id = info.object_id;
 						job.operation_size = info.operation_size;
 						match info.ty {
-							JobType::Create | JobType::Write => {
+							JobType::Create | JobType::Write | JobType::Query => {
 								let size = usize::try_from(info.operation_size).unwrap();
-								dbg!(copy_to.len(), size);
 								assert!(copy_to.len() >= size, "todo");
 								copy_to[..size].copy_from_slice(&info.buffer[..size]);
 							}
-							_ => {}
+							JobType::Open | JobType::Read | JobType::Write | JobType::QueryNext => {
+							}
 						}
 
 						push_resp(0);

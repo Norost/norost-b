@@ -100,6 +100,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_fs_fat"
+version = "0.1.0"
+
+[[package]]
 name = "driver_virtio_block"
 version = "0.1.0"
 dependencies = [

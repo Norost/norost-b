@@ -171,6 +171,7 @@ fn main() {
 						buffer: None,
 						buffer_size: 0,
 						operation_size: 0,
+						query_id: 0,
 					};
 					std::os::norostb::finish_job(tbl, &job).unwrap();
 				}

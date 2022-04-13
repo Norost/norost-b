@@ -103,6 +103,14 @@ fn main() {
 	job.buffer = NonNull::new(buf.as_mut_ptr());
 	job.buffer_size = buf.len().try_into().unwrap();
 
+	let mut query_id_counter = 0u32;
+	let mut queries = std::collections::BTreeMap::new();
+
+	enum QueryState {
+		Data,
+		Info,
+	}
+
 	loop {
 		// Wait for events from the table
 		if std::os::norostb::take_job(tbl, &mut job).is_err() {
@@ -110,13 +118,35 @@ fn main() {
 			continue;
 		}
 
-		println!("job: {:#?}", &job);
-
 		match job.ty {
 			syscall::Job::OPEN => (),
 			syscall::Job::WRITE => {
 				let data = &buf[..job.operation_size as usize];
 				println!("write: {:?}", core::str::from_utf8(data));
+			}
+			syscall::Job::QUERY => {
+				queries.insert(query_id_counter, QueryState::Data);
+				job.query_id = query_id_counter;
+				query_id_counter += 1;
+			}
+			syscall::Job::QUERY_NEXT => {
+				match queries.get(&job.query_id) {
+					Some(QueryState::Data) => {
+						buf[..4].copy_from_slice(b"data");
+						job.operation_size = 4;
+						job.object_id = 0;
+						queries.insert(job.query_id, QueryState::Info);
+					}
+					Some(QueryState::Info) => {
+						buf[..4].copy_from_slice(b"info");
+						job.operation_size = 4;
+						job.object_id = 1;
+						queries.remove(&job.query_id);
+					}
+					None => {
+						job.operation_size = 0;
+					}
+				};
 			}
 			_ => todo!(),
 		}

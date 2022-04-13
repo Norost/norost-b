@@ -1,5 +1,5 @@
 use crate::object_table::{
-	Data, Error, Id, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
+	Error, Id, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
 };
 use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
 use core::str;
@@ -12,7 +12,7 @@ impl Table for PciTable {
 		"pci"
 	}
 
-	fn query(self: Arc<Self>, path: &[u8]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>> {
 		let (mut vendor_id, mut device_id) = (None, None);
 		for t in path.split(|c| *c == b'&') {
 			let f = |a: &mut Option<u16>, h: &[u8]| {
@@ -34,40 +34,43 @@ impl Table for PciTable {
 				Some((b"device-id", h)) => f(&mut device_id, &h[1..]),
 				Some((b"name", h)) => {
 					// Names are unique
-					return str::from_utf8(&h[1..]).map_or(Box::new(NoneQuery), |h| {
-						Box::new(QueryName {
-							item: bdf_from_string(h),
-						})
-					});
+					return Ticket::new_complete(Ok(str::from_utf8(&h[1..]).map_or(
+						Box::new(NoneQuery),
+						|h| {
+							Box::new(QueryName {
+								item: bdf_from_string(h),
+							})
+						},
+					)));
 				}
 				_ => None,
 			};
 			dbg!(&r, &vendor_id, &device_id);
 			if r.is_none() {
-				return Box::new(NoneQuery);
+				return Ticket::new_complete(Ok(Box::new(NoneQuery)));
 			}
 		}
-		Box::new(QueryTags {
+		Ticket::new_complete(Ok(Box::new(QueryTags {
 			vendor_id,
 			device_id,
 			index: 0,
-		})
+		})))
 	}
 
-	fn get(self: Arc<Self>, id: Id) -> Ticket {
+	fn get(self: Arc<Self>, id: Id) -> Ticket<Arc<dyn Object>> {
 		let r = n_to_bdf(id.into())
 			.and_then(|(bus, dev, func)| {
 				let pci = super::PCI.lock();
 				pci.as_ref()
 					.unwrap()
 					.get(bus, dev, func)
-					.map(|d| Data::Object(pci_dev_object(d, bus, dev, func)))
+					.map(|d| pci_dev_object(d, bus, dev, func))
 			})
 			.ok_or_else(|| todo!());
 		Ticket::new_complete(r)
 	}
 
-	fn create(self: Arc<Self>, _: &[u8]) -> Ticket {
+	fn create(self: Arc<Self>, _: &[u8]) -> Ticket<Arc<dyn Object>> {
 		let e = Error {
 			code: 1,
 			message: "can't create pci devices".into(),
@@ -97,13 +100,13 @@ struct QueryName {
 impl Query for QueryName {}
 
 impl Iterator for QueryName {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
 			let h = pci.as_ref().unwrap().get(b, d, f)?;
-			Some(pci_dev_query_result(h, b, d, f))
+			Some(Ticket::new_complete(Ok(pci_dev_query_result(h, b, d, f))))
 		})
 	}
 }
@@ -117,7 +120,7 @@ struct QueryTags {
 impl Query for QueryTags {}
 
 impl Iterator for QueryTags {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let pci = super::PCI.lock();
@@ -132,7 +135,9 @@ impl Iterator for QueryTags {
 				if self.device_id.map_or(false, |v| v != h.device_id()) {
 					continue;
 				}
-				return Some(pci_dev_query_result(h, bus, dev, func));
+				return Some(Ticket::new_complete(Ok(pci_dev_query_result(
+					h, bus, dev, func,
+				))));
 			}
 		}
 		None
