@@ -420,11 +420,21 @@ impl Queue {
 	}
 
 	/// Wait for the kernel to return a response or until the closure returns `false`.
+	#[inline]
 	pub fn wait_response_any<F>(&self, f: F)
 	where
 		F: FnMut() -> bool,
 	{
 		unsafe { self.response_ring().wait_any(f) }
+	}
+
+	/// Get how many responses are in the queue.
+	#[inline]
+	pub fn responses_available(&self) -> u32 {
+		let ring = unsafe { self.response_ring() };
+		ring.user_index
+			.load(Ordering::Relaxed)
+			.wrapping_sub(ring.kernel_index.load(Ordering::Relaxed))
 	}
 }
 

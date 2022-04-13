@@ -24,7 +24,7 @@ pub struct Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 22;
+pub const SYSCALLS_LEN: usize = 23;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	undefined,
@@ -49,6 +49,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	spawn_thread,
 	create_io_rings,
 	submit_io,
+	wait_io,
 ];
 
 extern "C" fn alloc_dma(
@@ -347,6 +348,20 @@ extern "C" fn create_io_rings(
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
 	Process::current().process_io_queue(base).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|_| Return {
+			status: 0,
+			value: 0,
+		},
+	)
+}
+
+extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
+	Process::current().wait_io_queue(base).map_or(
 		Return {
 			status: 1,
 			value: 0,

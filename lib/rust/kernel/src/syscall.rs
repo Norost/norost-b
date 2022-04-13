@@ -12,6 +12,7 @@ const ID_DUPLICATE_HANDLE: usize = 18;
 const ID_SPAWN_THREAD: usize = 19;
 const ID_CREATE_IO_QUEUE: usize = 20;
 const ID_PROCESS_IO_QUEUE: usize = 21;
+const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::Page;
 use core::alloc::Layout;
@@ -499,6 +500,23 @@ pub fn process_io_queue(base: *mut Page) -> Result<usize, (NonZeroUsize, usize)>
 		asm!(
 			"syscall",
 			in("eax") ID_PROCESS_IO_QUEUE,
+			in("rdi") base,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		)
+	}
+	ret(status, value)
+}
+
+#[inline]
+pub fn wait_io_queue(base: *mut Page) -> Result<usize, (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_WAIT_IO_QUEUE,
 			in("rdi") base,
 			lateout("rax") status,
 			lateout("rdx") value,

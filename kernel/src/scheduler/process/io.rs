@@ -18,6 +18,10 @@ pub enum ProcessQueueError {
 	InvalidAddress,
 }
 
+pub enum WaitQueueError {
+	InvalidAddress,
+}
+
 const MAX_SIZE_P2: u8 = 15;
 
 impl super::Process {
@@ -258,6 +262,18 @@ impl super::Process {
 					}
 				}
 			}
+		}
+		Ok(())
+	}
+
+	pub fn wait_io_queue(&mut self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
+		let queue = self
+			.io_queues
+			.iter()
+			.find(|q| q.base == base.cast())
+			.ok_or(WaitQueueError::InvalidAddress)?;
+		while queue.responses_available() == 0 {
+			super::super::Thread::current().sleep(core::time::Duration::MAX);
 		}
 		Ok(())
 	}
