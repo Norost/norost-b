@@ -148,8 +148,6 @@ fn main() {
 	let mut connecting_tcp_sockets = Vec::new();
 
 	let mut job = std::os::norostb::Job::default();
-	job.buffer = NonNull::new(buf.as_mut_ptr());
-	job.buffer_size = buf.len().try_into().unwrap();
 
 	loop {
 		// Advance TCP connection state.
@@ -180,7 +178,11 @@ fn main() {
 			}
 		}
 
-		while let Ok(()) = std::os::norostb::take_job(tbl, &mut job) {
+		while let Ok(()) = {
+			job.buffer = NonNull::new(buf.as_mut_ptr());
+			job.buffer_size = buf.len().try_into().unwrap();
+			std::os::norostb::take_job(tbl, &mut job)
+		} {
 			match job.ty {
 				syscall::Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];
