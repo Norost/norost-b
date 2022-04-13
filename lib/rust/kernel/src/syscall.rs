@@ -136,79 +136,34 @@ impl<'a, T> Default for Slice<'a, T> {
 	}
 }
 
+#[derive(Debug)]
 #[repr(C)]
-pub struct ObjectInfo<'a> {
+pub struct ObjectInfo {
 	pub id: Id,
-	pub tags_len: u8,
-	pub tags_offsets: [u32; 255],
 	// FIXME potentially UB if modified
-	pub string_buffer_ptr: *mut u8,
-	pub string_buffer_len: usize,
-	_marker: PhantomData<&'a [u8]>,
+	pub path_ptr: *mut u8,
+	pub path_len: usize,
+	pub path_capacity: usize,
 }
 
-impl<'a> ObjectInfo<'a> {
-	pub fn new(string_buffer: &'a mut [u8]) -> Self {
+impl ObjectInfo {
+	pub fn new<'a>(path_buffer: &'a mut [u8]) -> Self {
 		Self {
-			string_buffer_ptr: string_buffer.as_mut_ptr(),
-			string_buffer_len: string_buffer.len(),
+			path_ptr: path_buffer.as_mut_ptr(),
+			path_capacity: path_buffer.len(),
 			..Default::default()
 		}
 	}
-
-	pub fn tag(&'a self, index: usize) -> &'a [u8] {
-		let string_buffer =
-			unsafe { core::slice::from_raw_parts(self.string_buffer_ptr, self.string_buffer_len) };
-		let index = self.tags_offsets[index] as usize;
-		let len = usize::from(string_buffer[index]);
-		&string_buffer[index + 1..index + 1 + len]
-	}
-
-	pub fn tags_count(&self) -> usize {
-		self.tags_len.into()
-	}
 }
 
-impl Default for ObjectInfo<'_> {
+impl Default for ObjectInfo {
 	fn default() -> Self {
 		Self {
 			id: Default::default(),
-			tags_len: 0,
-			tags_offsets: [0; 255],
-			string_buffer_ptr: NonNull::dangling().as_ptr(),
-			string_buffer_len: 0,
-			_marker: PhantomData,
+			path_ptr: core::ptr::null_mut(),
+			path_len: Default::default(),
+			path_capacity: Default::default(),
 		}
-	}
-}
-
-impl fmt::Debug for ObjectInfo<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		use core::cell::Cell;
-
-		struct S<'a, I: Iterator<Item = &'a [u8]>>(Cell<Option<I>>);
-
-		impl<'a, I> fmt::Debug for S<'a, I>
-		where
-			I: Iterator<Item = &'a [u8]>,
-		{
-			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-				let s = self.0.take().unwrap();
-				let mut f = f.debug_list();
-				s.for_each(|e| {
-					f.entry(&ByteStr(e));
-				});
-				f.finish()
-			}
-		}
-
-		let mut f = f.debug_struct(stringify!(ObjectInfo));
-		f.field("id", &self.id);
-		f.field(
-			"tags",
-			&S(Cell::new(Some((0..self.tags_count()).map(|i| self.tag(i))))),
-		);
-		f.finish()
 	}
 }
 
@@ -448,7 +403,7 @@ pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)>
 }
 
 #[inline]
-pub fn create_table(name: &str, ty: TableType) -> Result<Handle, (NonZeroUsize, usize)> {
+pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize, usize)> {
 	let ty = match ty {
 		TableType::Streaming => 0,
 	};

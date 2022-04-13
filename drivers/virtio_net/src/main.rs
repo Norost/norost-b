@@ -114,7 +114,7 @@ fn main() {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table("virtio-net", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(b"virtio-net", syscall::TableType::Streaming).unwrap();
 
 	// Create a TCP listener
 	let mut rx @ mut tx = [0; 2048];

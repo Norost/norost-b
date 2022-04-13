@@ -92,7 +92,7 @@ fn main() {
 	println!("done writing the stuff");
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table("virtio-blk", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
 	// Register a new object
 	// TODO

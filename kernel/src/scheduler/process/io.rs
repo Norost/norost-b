@@ -156,22 +156,12 @@ impl super::Process {
 					Request::QUERY => {
 						let id = e.arguments_32[0];
 						let id = crate::object_table::TableId::from(id);
-						let tags_ptr = e.arguments_ptr[0] as *const u8;
-						let tags_len = e.arguments_ptr[1];
-						let mut tags_split = [""; 32];
+						let path_ptr = e.arguments_ptr[0] as *const u8;
+						let path_len = e.arguments_ptr[1];
 						// SAFETY: FIXME
-						let tags = unsafe {
-							let mut len = 0;
-							for (r, w) in core::slice::from_raw_parts(tags_ptr, tags_len)
-								.split(|c| *c == b'&')
-								.zip(tags_split.iter_mut())
-							{
-								*w = core::str::from_utf8(r).unwrap();
-								len += 1;
-							}
-							&tags_split[..len]
-						};
-						let query = crate::object_table::query(id, tags).unwrap();
+						let path =
+							unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
+						let query = crate::object_table::query(id, path).unwrap();
 						self.queries.push(query);
 						push_resp(self.queries.len() as isize - 1);
 					}
@@ -180,32 +170,17 @@ impl super::Process {
 						let info = e.arguments_ptr[0];
 						let handle = e.arguments_32[0];
 						let info =
-							unsafe { &mut *(info as *mut norostb_kernel::syscall::ObjectInfo<'_>) };
-						let string_buffer = unsafe {
-							core::slice::from_raw_parts_mut(
-								info.string_buffer_ptr,
-								info.string_buffer_len,
-							)
+							unsafe { &mut *(info as *mut norostb_kernel::syscall::ObjectInfo) };
+						let path_buffer = unsafe {
+							core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity)
 						};
 						let query = &mut self.queries[handle as usize];
 						match query.next() {
 							None => push_resp(0),
 							Some(obj) => {
+								let len = obj.path.len().min(path_buffer.len());
 								info.id = obj.id.0;
-								info.tags_len = obj.tags.len().try_into().unwrap();
-								let mut p = 0;
-								for (to, tag) in info.tags_offsets.iter_mut().zip(&*obj.tags) {
-									*to = p as u32;
-									let q = p + 1 + tag.len();
-									if q >= string_buffer.len() {
-										// There is not enough space to copy the tag, so just skip it and
-										// the remaining tags.
-										break;
-									}
-									string_buffer[p] = tag.len().try_into().unwrap();
-									string_buffer[p + 1..q].copy_from_slice(tag.as_bytes());
-									p = q;
-								}
+								path_buffer[..len].copy_from_slice(&obj.path[..len]);
 								push_resp(1)
 							}
 						}
@@ -238,6 +213,7 @@ impl super::Process {
 						match info.ty {
 							JobType::Create | JobType::Write => {
 								let size = usize::try_from(info.operation_size).unwrap();
+								dbg!(copy_to.len(), size);
 								assert!(copy_to.len() >= size, "todo");
 								copy_to[..size].copy_from_slice(&info.buffer[..size]);
 							}

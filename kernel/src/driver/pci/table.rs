@@ -2,6 +2,7 @@ use crate::object_table::{
 	Data, Error, Id, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
 };
 use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
+use core::str;
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -11,27 +12,38 @@ impl Table for PciTable {
 		"pci"
 	}
 
-	fn query(self: Arc<Self>, tags: &[&str]) -> Box<dyn Query> {
+	fn query(self: Arc<Self>, path: &[u8]) -> Box<dyn Query> {
 		let (mut vendor_id, mut device_id) = (None, None);
-		for t in tags {
-			let f = |a: &mut Option<u16>, h: &str| {
-				u16::from_str_radix(h, 16)
-					.ok()
-					.and_then(|v| a.replace(v))
-					.is_none()
+		for t in path.split(|c| *c == b'&') {
+			let f = |a: &mut Option<u16>, h: &[u8]| {
+				let n = u16::from_str_radix(str::from_utf8(h).ok()?, 16).ok()?;
+				if a.is_some() && *a != Some(n) {
+					None
+				} else {
+					*a = Some(n);
+					Some(())
+				}
 			};
-			let r = match t.split_once(':') {
-				Some(("vendor-id", h)) => f(&mut vendor_id, h),
-				Some(("device-id", h)) => f(&mut device_id, h),
-				Some(("name", h)) => {
+			let _ = dbg!(core::str::from_utf8(t));
+			let r = match t
+				.iter()
+				.position(|c| *c == b':')
+				.map(|i| t.split_at(i.into()))
+			{
+				Some((b"vendor-id", h)) => f(&mut vendor_id, &h[1..]),
+				Some((b"device-id", h)) => f(&mut device_id, &h[1..]),
+				Some((b"name", h)) => {
 					// Names are unique
-					return Box::new(QueryName {
-						item: bdf_from_string(h),
+					return str::from_utf8(&h[1..]).map_or(Box::new(NoneQuery), |h| {
+						Box::new(QueryName {
+							item: bdf_from_string(h),
+						})
 					});
 				}
-				_ => false,
+				_ => None,
 			};
-			if !r {
+			dbg!(&r, &vendor_id, &device_id);
+			if r.is_none() {
 				return Box::new(NoneQuery);
 			}
 		}
@@ -143,13 +155,17 @@ fn pci_dev_object(_h: pci::Header, bus: u8, dev: u8, _func: u8) -> Arc<dyn Objec
 
 fn pci_dev_query_result(h: pci::Header, bus: u8, dev: u8, func: u8) -> QueryResult {
 	let id = (u64::from(bus) << 8 | u64::from(dev) << 3 | u64::from(func)).into();
-	let tags = [
-		("name:".to_string() + &*bdf_to_string(bus, dev, func)).into(),
-		format!("vendor-id:{:04x}", h.vendor_id()).into(),
-		format!("device-id:{:04x}", h.device_id()).into(),
-	]
+	let path = format!(
+		"name:{}:{:02}.{}&vendor-id:{:04x}&device-id:{:04x}",
+		bus,
+		dev,
+		func,
+		h.vendor_id(),
+		h.device_id(),
+	)
+	.into_boxed_str()
 	.into();
-	QueryResult { id, tags }
+	QueryResult { id, path }
 }
 
 fn n_to_bdf(n: u64) -> Option<(u8, u8, u8)> {

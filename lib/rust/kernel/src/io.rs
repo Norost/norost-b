@@ -125,7 +125,7 @@ impl Request {
 		}
 	}
 
-	pub fn query_next(user_data: usize, handle: QueryHandle, info: &mut ObjectInfo<'_>) -> Self {
+	pub fn query_next(user_data: usize, handle: QueryHandle, info: &mut ObjectInfo) -> Self {
 		Self {
 			ty: Self::QUERY_NEXT,
 			// FIXME use u32 for handles.
