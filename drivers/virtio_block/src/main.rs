@@ -105,9 +105,10 @@ fn main() {
 
 	loop {
 		// Wait for events from the table
-		println!("ermaghed");
-
-		std::os::norostb::take_job(tbl, &mut job).unwrap();
+		if std::os::norostb::take_job(tbl, &mut job).is_err() {
+			std::thread::sleep(std::time::Duration::from_millis(100));
+			continue;
+		}
 
 		println!("job: {:#?}", &job);
 
