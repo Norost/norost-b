@@ -12,6 +12,6 @@ run:
 	./run.sh
 
 disk0:
-	fallocate -l $$((32 * 512)) $@
+	fallocate -l $$((128 * 512)) $@
 
 .PHONY: kernel boot run

@@ -5,6 +5,7 @@ cargo-features = ["strip"]
 members = [
 	"kernel",
 	"boot/amd64",
+	"drivers/fs_fat",
 	"drivers/virtio_block",
 	"drivers/virtio_net",
 	"lib/rust/endian",

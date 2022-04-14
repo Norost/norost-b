@@ -225,6 +225,8 @@ pub struct FfiJob {
 	pub object_id: Id,
 	pub buffer: Option<NonNull<u8>>,
 	pub query_id: QueryId,
+	pub from_anchor: u8,
+	pub from_offset: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -253,6 +255,7 @@ impl TryFrom<FfiJobType> for JobType {
 			3 => Ok(Self::Query),
 			4 => Ok(Self::Create),
 			5 => Ok(Self::QueryNext),
+			6 => Ok(Self::Seek),
 			_ => Err(UnknownJobType),
 		}
 	}
@@ -278,6 +281,8 @@ impl TryFrom<FfiJob> for Job {
 			operation_size: fj.operation_size,
 			buffer: buffer.into(),
 			query_id: fj.query_id,
+			from_anchor: fj.from_anchor,
+			from_offset: fj.from_offset,
 		})
 	}
 }

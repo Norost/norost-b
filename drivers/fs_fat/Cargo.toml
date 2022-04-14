@@ -1,0 +1,12 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "driver_fs_fat"
+version = "0.1.0"
+edition = "2021"
+default-target = "x86_64-unknown-norostb"
+
+[dependencies]
+fatfs = { git = "https://github.com/rafalh/rust-fatfs", default-features = false, features = ["std", "alloc"] }
+norostb_kernel = { path = "../../lib/rust/kernel" }
+fscommon = "0.1"

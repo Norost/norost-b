@@ -6,6 +6,7 @@ use alloc::{
 	vec::Vec,
 };
 use core::sync::atomic::{AtomicU32, Ordering};
+use norostb_kernel::{io::SeekFrom, syscall::Handle};
 
 #[derive(Default)]
 pub struct StreamingTable {
@@ -131,6 +132,9 @@ impl Table for StreamingTable {
 				});
 				tw.into_object().complete(Ok(obj));
 			}
+			JobType::Seek => {
+				tw.into_u64().complete(Ok(job.from_offset));
+			}
 		}
 		Ok(())
 	}
@@ -198,6 +202,21 @@ impl Object for StreamObject {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
 			})
 	}
+
+	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
+		self.table
+			.upgrade()
+			.map(|tbl| {
+				let job = StreamJob::Seek {
+					object_id: self.id,
+					from,
+				};
+				tbl.submit_job(job)
+			})
+			.unwrap_or_else(|| {
+				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
+			})
+	}
 }
 
 enum StreamJob {
@@ -207,6 +226,7 @@ enum StreamJob {
 	Query { path: Box<[u8]> },
 	Create { path: Box<[u8]> },
 	QueryNext { query_id: QueryId },
+	Seek { object_id: Id, from: SeekFrom },
 }
 
 impl StreamJob {
@@ -253,6 +273,14 @@ impl StreamJob {
 				query_id,
 				..Default::default()
 			},
+			StreamJob::Seek { object_id, from } => Job {
+				ty: JobType::Seek,
+				job_id,
+				object_id,
+				from_anchor: from.into_raw().0,
+				from_offset: from.into_raw().1,
+				..Default::default()
+			},
 		}
 	}
 }
@@ -267,6 +295,8 @@ impl From<Job> for StreamJob {
 			object_id,
 			buffer,
 			query_id,
+			from_anchor,
+			from_offset,
 		}: Job,
 	) -> Self {
 		match ty {
@@ -279,6 +309,10 @@ impl From<Job> for StreamJob {
 			JobType::Query => StreamJob::Query { path: buffer },
 			JobType::QueryNext => StreamJob::QueryNext { query_id },
 			JobType::Create => StreamJob::Create { path: buffer },
+			JobType::Seek => StreamJob::Seek {
+				object_id,
+				from: SeekFrom::try_from_raw(from_anchor, from_offset).unwrap(),
+			},
 		}
 	}
 }
@@ -309,6 +343,7 @@ impl Drop for StreamQuery {
 enum StreamTicketWaker {
 	Object(TicketWaker<Arc<dyn Object>>),
 	Usize(TicketWaker<usize>),
+	U64(TicketWaker<u64>),
 	Data(TicketWaker<Box<[u8]>>),
 	Query(TicketWaker<Box<dyn Query>>),
 	QueryResult(TicketWaker<QueryResult>),
@@ -335,6 +370,7 @@ macro_rules! stream_ticket {
 }
 stream_ticket!(Arc<dyn Object> => Object, into_object);
 stream_ticket!(usize => Usize, into_usize);
+stream_ticket!(u64 => U64, into_u64);
 stream_ticket!(Box<[u8]> => Data, into_data);
 stream_ticket!(Box<dyn Query> => Query, into_query);
 stream_ticket!(QueryResult => QueryResult, into_query_result);

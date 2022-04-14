@@ -116,6 +116,10 @@ pub trait Object {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
+	fn seek(&self, _from: norostb_kernel::io::SeekFrom) -> Ticket<u64> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
+	}
+
 	fn event_listener(&self) -> Result<EventListener, Unpollable> {
 		Err(Unpollable)
 	}
@@ -192,6 +196,8 @@ pub struct Job {
 	pub object_id: Id,
 	pub buffer: Box<[u8]>,
 	pub query_id: QueryId,
+	pub from_anchor: u8,
+	pub from_offset: u64,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -204,6 +210,7 @@ pub enum JobType {
 	Query = 3,
 	Create = 4,
 	QueryNext = 5,
+	Seek = 6,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

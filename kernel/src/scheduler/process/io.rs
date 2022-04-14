@@ -215,14 +215,19 @@ impl super::Process {
 						job.job_id = info.job_id;
 						job.object_id = info.object_id;
 						job.operation_size = info.operation_size;
+						job.from_anchor = info.from_anchor;
+						job.from_offset = info.from_offset;
 						match info.ty {
 							JobType::Create | JobType::Write | JobType::Query => {
 								let size = usize::try_from(info.operation_size).unwrap();
 								assert!(copy_to.len() >= size, "todo");
 								copy_to[..size].copy_from_slice(&info.buffer[..size]);
 							}
-							JobType::Open | JobType::Read | JobType::Write | JobType::QueryNext => {
-							}
+							JobType::Open
+							| JobType::Read
+							| JobType::Write
+							| JobType::QueryNext
+							| JobType::Seek => {}
 						}
 
 						push_resp(0);
@@ -238,7 +243,32 @@ impl super::Process {
 
 						push_resp(0);
 					}
-					_ => {
+					Request::SEEK => {
+						let handle = e.arguments_32[0];
+						let direction = e.arguments_8[0];
+						let offset = e.arguments_64[0];
+						let write_offset = e.arguments_ptr[0];
+
+						let Ok(from) = SeekFrom::try_from_raw(direction, offset) else {
+							warn!("Invalid offset ({}, {})", direction, offset);
+							push_resp(-1);
+							continue;
+						};
+						let object = self.objects.get(usize::try_from(handle).unwrap()).unwrap();
+						let ticket = object.seek(from);
+						let result = super::super::block_on(ticket);
+						match result {
+							Ok(b) => {
+								unsafe {
+									(write_offset as *mut u64).write(b);
+								}
+								push_resp(0)
+							}
+							Err(_) => push_resp(-1),
+						}
+					}
+					op => {
+						warn!("Unknown I/O queue operation {}", op);
 						push_resp(-1);
 					}
 				}

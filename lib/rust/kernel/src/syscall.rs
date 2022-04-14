@@ -201,6 +201,8 @@ pub struct Job {
 	pub object_id: Id,
 	pub buffer: Option<NonNull<u8>>,
 	pub query_id: u32,
+	pub from_anchor: u8,
+	pub from_offset: u64,
 }
 
 impl Job {
@@ -210,6 +212,7 @@ impl Job {
 	pub const QUERY: u8 = 3;
 	pub const CREATE: u8 = 4;
 	pub const QUERY_NEXT: u8 = 5;
+	pub const SEEK: u8 = 6;
 }
 
 #[derive(Clone, Copy, Debug)]
