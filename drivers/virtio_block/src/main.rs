@@ -139,9 +139,26 @@ fn main() {
 				buf[..size].copy_from_slice(&Sector::slice_as_u8(&sectors)[offset..][..size]);
 			}
 			syscall::Job::WRITE => {
-				todo!()
-				//let data = &buf[..job.operation_size as usize];
-				//println!("write: {:?}", core::str::from_utf8(data));
+				let offset = data_handles[job.handle];
+				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
+				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
+				let offset = u16::try_from(offset).unwrap();
+
+				dev.read(&mut sectors, sector, || {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				})
+				.unwrap();
+
+				let data = &buf[..job.operation_size as usize];
+				Sector::slice_as_u8_mut(&mut sectors)[offset.into()..][..data.len()]
+					.copy_from_slice(data);
+
+				dev.write(&sectors, sector, || {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				})
+				.unwrap();
+
+				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
 			}
 			syscall::Job::QUERY => {
 				job.query_id = queries.insert(Some(QueryState::Data));

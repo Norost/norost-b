@@ -17,12 +17,9 @@ fn main() {
 		.open("virtio-blk/disk/0")
 		.expect("failed to open disk");
 
-	let disk = driver_utils::io::Monitor::new(disk, driver_utils::io::monitor::log_stderr);
 	let disk = driver_utils::io::BufBlock::new(disk);
 	let fs =
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
-
-	dbg!(fs.stats());
 
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"fat", syscall::TableType::Streaming).unwrap();
@@ -47,7 +44,6 @@ fn main() {
 			syscall::Job::OPEN => {
 				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
 					.expect("what do?");
-				dbg!(path);
 				if fs.root_dir().open_file(path).is_ok() {
 					job.handle = open_files.insert((path.to_string(), 0u64));
 				} else {
@@ -59,19 +55,36 @@ fn main() {
 				}
 			}
 			syscall::Job::CREATE => {
-				todo!()
+				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
+					.expect("what do?");
+				if fs.root_dir().create_file(path).is_ok() {
+					job.handle = open_files.insert((path.to_string(), 0u64));
+				} else {
+					match fs.root_dir().open_file(path) {
+						Ok(_) => unreachable!(),
+						Err(e) => dbg!(e),
+					};
+					todo!("how do I return an error?");
+				}
 			}
 			syscall::Job::READ => {
 				let (path, offset) = &open_files[job.handle];
 				let mut file = fs.root_dir().open_file(path).unwrap();
 				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+				buf[..8].copy_from_slice(b"~~~~~~~~");
 				let l = file
 					.read(&mut buf[..job.operation_size.try_into().unwrap()])
 					.unwrap();
 				job.operation_size = l.try_into().unwrap();
 			}
 			syscall::Job::WRITE => {
-				todo!()
+				let (path, offset) = &open_files[job.handle];
+				let mut file = fs.root_dir().open_file(path).unwrap();
+				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+				let l = file
+					.write(&buf[..job.operation_size.try_into().unwrap()])
+					.unwrap();
+				job.operation_size = l.try_into().unwrap();
 			}
 			syscall::Job::QUERY => {
 				let entries = fs

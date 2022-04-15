@@ -107,7 +107,9 @@ impl Table for StreamingTable {
 					.complete(Ok(job.operation_size.try_into().unwrap()));
 			}
 			JobType::Read => {
-				tw.into_data().complete(Ok(job.buffer));
+				tw.into_data().complete(Ok(
+					job.buffer[..job.operation_size.try_into().unwrap()].into()
+				));
 			}
 			JobType::Query => {
 				tw.into_query().complete(Ok(Box::new(StreamQuery {
