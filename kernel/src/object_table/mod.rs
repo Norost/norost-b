@@ -21,6 +21,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
+pub use norostb_kernel::syscall::Handle;
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
@@ -43,10 +44,10 @@ where
 	/// Search for objects based on a name and/or tags.
 	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>>;
 
-	/// Get a single object based on ID.
-	fn get(self: Arc<Self>, id: Id) -> Ticket<Arc<dyn Object>>;
+	/// Open a single object based on path.
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	/// Create a new object.
+	/// Create a new object with the given path.
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
 	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
@@ -78,7 +79,6 @@ impl Iterator for NoneQuery {
 
 /// A query that returns a single result.
 pub struct OneQuery {
-	pub id: Id,
 	pub path: Option<Box<[u8]>>,
 }
 
@@ -90,13 +90,12 @@ impl Iterator for OneQuery {
 	fn next(&mut self) -> Option<Self::Item> {
 		self.path
 			.take()
-			.map(|path| Ticket::new_complete(Ok(QueryResult { id: self.id, path })))
+			.map(|path| Ticket::new_complete(Ok(QueryResult { path })))
 	}
 }
 
 /// A single query result
 pub struct QueryResult {
-	pub id: Id,
 	pub path: Box<[u8]>,
 }
 
@@ -193,7 +192,7 @@ pub struct Job {
 	pub flags: [u8; 3],
 	pub job_id: JobId,
 	pub operation_size: u32,
-	pub object_id: Id,
+	pub handle: Handle,
 	pub buffer: Box<[u8]>,
 	pub query_id: QueryId,
 	pub from_anchor: u8,
@@ -298,14 +297,6 @@ impl<T> Future for Ticket<T> {
 		Poll::Pending
 	}
 }
-
-/// The unique identifier of an object.
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct Id(pub u64);
-
-default!(newtype Id = u64::MAX);
-bi_from!(newtype Id <=> u64);
 
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
@@ -431,18 +422,17 @@ pub fn query(table_id: TableId, path: &[u8]) -> Result<Ticket<Box<dyn Query>>, Q
 		.ok_or(QueryError::InvalidTableId)
 }
 
-/// Get an object from a table.
-pub fn get(table_id: TableId, id: Id) -> Result<Ticket<Arc<dyn Object>>, GetError> {
+/// Open an object from a table.
+pub fn open(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, GetError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.get(id))
+		.map(|tbl| tbl.open(path))
 		.ok_or(GetError::InvalidTableId)
 }
 
 /// Create a new object in a table.
-#[allow(dead_code)]
 pub fn create(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, CreateError> {
 	TABLES
 		.lock()

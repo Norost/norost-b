@@ -15,6 +15,9 @@ use std::str::FromStr;
 fn main() {
 	println!("Hello, internet!");
 
+	let mut buf = [0; 256];
+	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
+
 	// Find virtio-net-pci device
 	let mut id = None;
 	let mut dev = None;
@@ -25,11 +28,9 @@ fn main() {
 			let tags = b"vendor-id:1af4&device-id:1000";
 			let h = std::os::norostb::query(i, tags).unwrap();
 			println!("{:?}", h);
-			let mut buf = [0; 256];
-			let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
 				println!("{:#?}", &obj);
-				dev = Some((i, obj.id));
+				dev = Some((i, &buf[..obj.path_len]));
 				break 'found_dev;
 			}
 		}
@@ -167,7 +168,7 @@ fn main() {
 						ty: syscall::Job::CREATE,
 						job_id,
 						flags: [0; 3],
-						object_id: (objects.len() - 1).try_into().unwrap(),
+						handle: (objects.len() - 1).try_into().unwrap(),
 						buffer: None,
 						buffer_size: 0,
 						operation_size: 0,
@@ -250,10 +251,10 @@ fn main() {
 						}
 					}
 
-					job.object_id = (objects.len() - 1).try_into().unwrap();
+					job.handle = (objects.len() - 1).try_into().unwrap();
 				}
 				syscall::Job::READ => {
-					let (sock, addr, prot) = objects[job.object_id as usize];
+					let (sock, addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {
 							todo!("address");
@@ -276,7 +277,7 @@ fn main() {
 					}
 				}
 				syscall::Job::WRITE => {
-					let (sock, addr, prot) = objects[job.object_id as usize];
+					let (sock, addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {
 							let sock = iface.get_socket::<socket::UdpSocket>(sock);

@@ -11,7 +11,7 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::{Handle, Id, Job, ObjectInfo, QueryHandle, TableId};
+use super::syscall::{Handle, Job, ObjectInfo, QueryHandle, TableId};
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -95,32 +95,32 @@ impl Request {
 		}
 	}
 
-	pub fn open(user_data: usize, table: TableId, object: Id) -> Self {
+	pub fn open(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
 			arguments_32: [table, 0],
-			arguments_64: [object],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn create(user_data: usize, table: TableId, tags: &[u8]) -> Self {
+	pub fn create(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
 			arguments_32: [table, 0],
-			arguments_ptr: [tags.as_ptr() as usize, tags.len()],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query(user_data: usize, table: TableId, tags: &[u8]) -> Self {
+	pub fn query(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::QUERY,
 			// FIXME use u32 for handles.
 			arguments_32: [table.try_into().unwrap(), 0],
-			arguments_ptr: [tags.as_ptr() as usize, tags.len()],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}

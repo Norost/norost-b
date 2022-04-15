@@ -67,8 +67,8 @@ impl Table for StreamingTable {
 		self.submit_job(StreamJob::Query { path: path.into() })
 	}
 
-	fn get(self: Arc<Self>, id: Id) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(StreamJob::Open { object_id: id })
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		self.submit_job(StreamJob::Open { path: path.into() })
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
@@ -97,7 +97,7 @@ impl Table for StreamingTable {
 		match job.ty {
 			JobType::Open => {
 				let obj = Arc::new(StreamObject {
-					id: job.object_id,
+					handle: job.handle,
 					table: Arc::downgrade(&self),
 				});
 				tw.into_object().complete(Ok(obj));
@@ -119,7 +119,6 @@ impl Table for StreamingTable {
 				tw.into_query_result().complete(if job.operation_size > 0 {
 					Ok(QueryResult {
 						path: job.buffer[..job.operation_size.try_into().unwrap()].into(),
-						id: job.object_id,
 					})
 				} else {
 					Err(Error::new(0, "".into()))
@@ -127,7 +126,7 @@ impl Table for StreamingTable {
 			}
 			JobType::Create => {
 				let obj = Arc::new(StreamObject {
-					id: job.object_id,
+					handle: job.handle,
 					table: Arc::downgrade(&self),
 				});
 				tw.into_object().complete(Ok(obj));
@@ -168,7 +167,7 @@ impl Object for StreamingTable {
 }
 
 struct StreamObject {
-	id: Id,
+	handle: Handle,
 	table: Weak<StreamingTable>,
 }
 
@@ -178,7 +177,7 @@ impl Object for StreamObject {
 			.upgrade()
 			.map(|tbl| {
 				let job = StreamJob::Read {
-					object_id: self.id,
+					handle: self.handle,
 					length,
 				};
 				tbl.submit_job(job)
@@ -193,7 +192,7 @@ impl Object for StreamObject {
 			.upgrade()
 			.map(|tbl| {
 				let job = StreamJob::Write {
-					object_id: self.id,
+					handle: self.handle,
 					data: data.into(),
 				};
 				tbl.submit_job(job)
@@ -208,7 +207,7 @@ impl Object for StreamObject {
 			.upgrade()
 			.map(|tbl| {
 				let job = StreamJob::Seek {
-					object_id: self.id,
+					handle: self.handle,
 					from,
 				};
 				tbl.submit_job(job)
@@ -220,35 +219,36 @@ impl Object for StreamObject {
 }
 
 enum StreamJob {
-	Open { object_id: Id },
-	Read { object_id: Id, length: u32 },
-	Write { object_id: Id, data: Box<[u8]> },
+	Open { path: Box<[u8]> },
+	Read { handle: Handle, length: u32 },
+	Write { handle: Handle, data: Box<[u8]> },
 	Query { path: Box<[u8]> },
 	Create { path: Box<[u8]> },
 	QueryNext { query_id: QueryId },
-	Seek { object_id: Id, from: SeekFrom },
+	Seek { handle: Handle, from: SeekFrom },
 }
 
 impl StreamJob {
 	fn into_job(self, job_id: JobId) -> Job {
 		match self {
-			StreamJob::Open { object_id } => Job {
+			StreamJob::Open { path } => Job {
 				ty: JobType::Open,
 				job_id,
-				object_id,
+				operation_size: path.len().try_into().unwrap(),
+				buffer: path.into(),
 				..Default::default()
 			},
-			StreamJob::Read { object_id, length } => Job {
+			StreamJob::Read { handle, length } => Job {
 				ty: JobType::Read,
 				job_id,
-				object_id,
+				handle,
 				operation_size: length,
 				..Default::default()
 			},
-			StreamJob::Write { object_id, data } => Job {
+			StreamJob::Write { handle, data } => Job {
 				ty: JobType::Write,
 				job_id,
-				object_id,
+				handle,
 				operation_size: data.len().try_into().unwrap(),
 				buffer: data,
 				..Default::default()
@@ -273,45 +273,13 @@ impl StreamJob {
 				query_id,
 				..Default::default()
 			},
-			StreamJob::Seek { object_id, from } => Job {
+			StreamJob::Seek { handle, from } => Job {
 				ty: JobType::Seek,
 				job_id,
-				object_id,
+				handle,
 				from_anchor: from.into_raw().0,
 				from_offset: from.into_raw().1,
 				..Default::default()
-			},
-		}
-	}
-}
-
-impl From<Job> for StreamJob {
-	fn from(
-		Job {
-			ty,
-			flags,
-			job_id: _,
-			operation_size,
-			object_id,
-			buffer,
-			query_id,
-			from_anchor,
-			from_offset,
-		}: Job,
-	) -> Self {
-		match ty {
-			JobType::Open => StreamJob::Open { object_id },
-			JobType::Read => todo!(),
-			JobType::Write => StreamJob::Write {
-				object_id,
-				data: buffer,
-			},
-			JobType::Query => StreamJob::Query { path: buffer },
-			JobType::QueryNext => StreamJob::QueryNext { query_id },
-			JobType::Create => StreamJob::Create { path: buffer },
-			JobType::Seek => StreamJob::Seek {
-				object_id,
-				from: SeekFrom::try_from_raw(from_anchor, from_offset).unwrap(),
 			},
 		}
 	}

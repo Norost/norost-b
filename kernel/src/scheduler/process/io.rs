@@ -115,12 +115,12 @@ impl super::Process {
 					}
 					Request::OPEN => {
 						let table = e.arguments_32[0];
-						let id = e.arguments_64[0];
-						let ticket = crate::object_table::get(
-							crate::object_table::TableId(table),
-							crate::object_table::Id(id),
-						)
-						.unwrap();
+						let path_ptr = e.arguments_ptr[0] as *const u8;
+						let path_len = e.arguments_ptr[1];
+						let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
+						let ticket =
+							crate::object_table::open(crate::object_table::TableId(table), path)
+								.unwrap();
 						let result = super::super::block_on(ticket);
 						match result {
 							Ok(o) => {
@@ -160,7 +160,7 @@ impl super::Process {
 						match result {
 							Ok(query) => {
 								self.queries.push(query);
-								push_resp(0);
+								push_resp(self.queries.len() as isize - 1);
 							}
 							Err(_) => push_resp(-1),
 						}
@@ -180,7 +180,6 @@ impl super::Process {
 							Some(ticket) => {
 								if let Ok(obj) = super::super::block_on(ticket) {
 									let len = obj.path.len().min(path_buffer.len());
-									info.id = obj.id.0;
 									info.path_len = len;
 									path_buffer[..len].copy_from_slice(&obj.path[..len]);
 									push_resp(1)
@@ -213,12 +212,13 @@ impl super::Process {
 						job.ty = info.ty.into();
 						job.flags = info.flags;
 						job.job_id = info.job_id;
-						job.object_id = info.object_id;
+						job.handle = info.handle;
 						job.operation_size = info.operation_size;
 						job.from_anchor = info.from_anchor;
 						job.from_offset = info.from_offset;
+						job.query_id = info.query_id;
 						match info.ty {
-							JobType::Create | JobType::Write | JobType::Query => {
+							JobType::Open | JobType::Create | JobType::Write | JobType::Query => {
 								let size = usize::try_from(info.operation_size).unwrap();
 								assert!(copy_to.len() >= size, "todo");
 								copy_to[..size].copy_from_slice(&info.buffer[..size]);

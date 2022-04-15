@@ -1,7 +1,7 @@
 use super::Uart;
 use super::DEVICES;
 use crate::object_table::{
-	Error, Id, Job, JobTask, NoneQuery, Object, OneQuery, Query, QueryResult, Table, Ticket,
+	Error, Job, JobTask, NoneQuery, Object, OneQuery, Query, QueryResult, Table, Ticket,
 };
 use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
 
@@ -20,9 +20,9 @@ impl Table for UartTable {
 		}
 	}
 
-	fn get(self: Arc<Self>, id: Id) -> Ticket<Arc<dyn Object>> {
-		if id.0 == 0 {
-			Ticket::new_complete(Ok(Arc::new(UartId(id.0.try_into().unwrap()))))
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		if path == b"0" {
+			Ticket::new_complete(Ok(Arc::new(UartId(0))))
 		} else {
 			todo!()
 		}

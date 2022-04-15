@@ -10,6 +10,9 @@ use virtio_block::Sector;
 fn main() {
 	println!("Hello, world! from Rust");
 
+	let mut buf = [0; 256];
+	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
+
 	let mut id = None;
 	let mut dev = None;
 	println!("iter tables");
@@ -19,12 +22,9 @@ fn main() {
 			let tags = b"vendor-id:1af4&device-id:1001";
 			let h = std::os::norostb::query(i, tags).unwrap();
 			println!("{:?}", h);
-			let mut buf = [0; 256];
-			//let mut obj = syscall::ObjectInfo::new(&mut buf);
-			let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
 				println!("{:#?}", &obj);
-				dev = Some((i, obj.id));
+				dev = Some((i, &buf[..obj.path_len]));
 				break 'found_dev;
 			}
 		}
@@ -32,6 +32,7 @@ fn main() {
 	}
 
 	let (tbl, dev) = dev.unwrap();
+	dbg!(core::str::from_utf8(dev));
 	let handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
@@ -121,7 +122,7 @@ fn main() {
 				data_handle_id_counter += 1;
 			}
 			syscall::Job::READ => {
-				let offset = data_handles[&u32::try_from(job.object_id).unwrap()];
+				let offset = data_handles[&job.handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -139,7 +140,7 @@ fn main() {
 
 				job.operation_size = size;
 				data_handles.insert(
-					u32::try_from(job.object_id).unwrap(),
+					u32::try_from(job.handle).unwrap(),
 					u64::from(offset) + u64::from(job.operation_size),
 				);
 
@@ -162,13 +163,11 @@ fn main() {
 					Some(QueryState::Data) => {
 						buf[..4].copy_from_slice(b"data");
 						job.operation_size = 4;
-						job.object_id = 0;
 						queries.insert(job.query_id, QueryState::Info);
 					}
 					Some(QueryState::Info) => {
 						buf[..4].copy_from_slice(b"info");
 						job.operation_size = 4;
-						job.object_id = 1;
 						queries.remove(&job.query_id);
 					}
 					None => {
@@ -183,8 +182,8 @@ fn main() {
 					SeekFrom::Start(n) => n,
 					_ => todo!(),
 				};
-				data_handles[&u32::try_from(job.object_id).unwrap()];
-				data_handles.insert(u32::try_from(job.object_id).unwrap(), offset);
+				data_handles[&job.handle];
+				data_handles.insert(job.handle, offset);
 			}
 			t => todo!("job type {}", t),
 		}

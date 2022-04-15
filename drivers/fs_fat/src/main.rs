@@ -91,15 +91,19 @@ fn main() {
 		}
 	}
 
+	/*
 	let disk = IoMonitor {
 		prefix: "disk",
 		io: disk,
 	};
+	*/
 	let disk = fscommon::BufStream::new(disk);
+	/*
 	let disk = IoMonitor {
 		prefix: "fat",
 		io: disk,
 	};
+	*/
 	let fs =
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
 
@@ -155,7 +159,6 @@ fn main() {
 					Some(f) => {
 						buf[..f.len()].copy_from_slice(f.as_bytes());
 						job.operation_size = f.len().try_into().unwrap();
-						job.object_id = 0;
 					}
 					None => {
 						queries.remove(&job.query_id);

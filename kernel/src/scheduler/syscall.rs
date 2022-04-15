@@ -1,7 +1,7 @@
 use crate::ffi;
 use crate::memory::{frame, r#virtual::RWX, Page};
 use crate::object_table;
-use crate::object_table::{Id, Job, JobId, JobType, QueryId, TableId};
+use crate::object_table::{Handle, Job, JobId, JobType, QueryId, TableId};
 use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
@@ -124,15 +124,6 @@ extern "C" fn next_table(
 	}
 }
 
-#[repr(C)]
-struct ObjectInfo {
-	id: Id,
-	tags_len: u8,
-	tags_offsets: [u32; 255],
-	string_buffer_ptr: *mut u8,
-	string_buffer_len: usize,
-}
-
 extern "C" fn map_object(
 	handle: usize,
 	base: usize,
@@ -222,7 +213,7 @@ pub struct FfiJob {
 	pub job_id: JobId,
 	pub buffer_size: u32,
 	pub operation_size: u32,
-	pub object_id: Id,
+	pub handle: Handle,
 	pub buffer: Option<NonNull<u8>>,
 	pub query_id: QueryId,
 	pub from_anchor: u8,
@@ -277,7 +268,7 @@ impl TryFrom<FfiJob> for Job {
 			ty: fj.ty.try_into()?,
 			flags: fj.flags,
 			job_id: fj.job_id,
-			object_id: fj.object_id,
+			handle: fj.handle,
 			operation_size: fj.operation_size,
 			buffer: buffer.into(),
 			query_id: fj.query_id,
