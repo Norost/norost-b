@@ -240,6 +240,7 @@ impl super::Process {
 							}
 							JobRequest::Seek { handle, from } => {
 								job.ty = Job::SEEK;
+								job.handle = handle;
 								(job.from_anchor, job.from_offset) = from.into_raw();
 							}
 							JobRequest::Query { filter } => {
