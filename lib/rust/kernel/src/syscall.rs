@@ -135,35 +135,6 @@ impl<'a, T> Default for Slice<'a, T> {
 	}
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct ObjectInfo {
-	// FIXME potentially UB if modified
-	pub path_ptr: *mut u8,
-	pub path_len: usize,
-	pub path_capacity: usize,
-}
-
-impl ObjectInfo {
-	pub fn new<'a>(path_buffer: &'a mut [u8]) -> Self {
-		Self {
-			path_ptr: path_buffer.as_mut_ptr(),
-			path_capacity: path_buffer.len(),
-			..Default::default()
-		}
-	}
-}
-
-impl Default for ObjectInfo {
-	fn default() -> Self {
-		Self {
-			path_ptr: core::ptr::null_mut(),
-			path_len: Default::default(),
-			path_capacity: Default::default(),
-		}
-	}
-}
-
 struct ByteStr<'a>(&'a [u8]);
 
 impl fmt::Debug for ByteStr<'_> {
@@ -186,41 +157,6 @@ pub struct TableHandle(usize);
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct Events(u32);
-
-#[derive(Debug, Default)]
-#[repr(C)]
-pub struct Job {
-	pub ty: u8,
-	pub flags: [u8; 3],
-	pub job_id: JobId,
-	pub buffer_size: u32,
-	pub operation_size: u32,
-	pub handle: Handle,
-	pub buffer: Option<NonNull<u8>>,
-	pub query_id: u32,
-	pub from_anchor: u8,
-	pub from_offset: u64,
-}
-
-impl Job {
-	pub const OPEN: u8 = 0;
-	pub const READ: u8 = 1;
-	pub const WRITE: u8 = 2;
-	pub const QUERY: u8 = 3;
-	pub const CREATE: u8 = 4;
-	pub const QUERY_NEXT: u8 = 5;
-	pub const SEEK: u8 = 6;
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct JobId(u32);
-
-impl Default for JobId {
-	fn default() -> Self {
-		Self(u32::MAX)
-	}
-}
 
 #[optimize(size)]
 #[inline]

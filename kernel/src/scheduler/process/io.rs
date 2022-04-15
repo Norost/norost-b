@@ -3,11 +3,10 @@
 use crate::memory::frame;
 use crate::memory::r#virtual::RWX;
 use crate::memory::Page;
-use core::future::Future;
+use crate::object_table::{JobRequest, JobResult};
 use core::ptr::NonNull;
-use norostb_kernel::io::*;
-
 pub use norostb_kernel::io::Queue;
+use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
 	TooLarge,
@@ -169,8 +168,7 @@ impl super::Process {
 						// SAFETY: FIXME
 						let info = e.arguments_ptr[0];
 						let handle = e.arguments_32[0];
-						let info =
-							unsafe { &mut *(info as *mut norostb_kernel::syscall::ObjectInfo) };
+						let info = unsafe { &mut *(info as *mut ObjectInfo) };
 						let path_buffer = unsafe {
 							core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity)
 						};
@@ -190,10 +188,9 @@ impl super::Process {
 						}
 					}
 					Request::TAKE_JOB => {
-						use crate::object_table::JobType;
 						use core::time::Duration;
 						let handle = e.arguments_32[0];
-						let job = e.arguments_ptr[0] as *mut super::super::syscall::FfiJob;
+						let job = e.arguments_ptr[0] as *mut Job;
 
 						let tbl = self.objects[handle as usize].clone().as_table().unwrap();
 						let job = unsafe { &mut *job };
@@ -209,37 +206,93 @@ impl super::Process {
 							push_resp(-1);
 							continue;
 						};
-						job.ty = info.ty.into();
-						job.flags = info.flags;
-						job.job_id = info.job_id;
-						job.handle = info.handle;
-						job.operation_size = info.operation_size;
-						job.from_anchor = info.from_anchor;
-						job.from_offset = info.from_offset;
-						job.query_id = info.query_id;
-						match info.ty {
-							JobType::Open | JobType::Create | JobType::Write | JobType::Query => {
-								let size = usize::try_from(info.operation_size).unwrap();
-								assert!(copy_to.len() >= size, "todo");
-								copy_to[..size].copy_from_slice(&info.buffer[..size]);
+						job.job_id = info.0;
+
+						let mut copy_buf = |p: &[u8]| unsafe {
+							let ptr = job.buffer.expect("no buffer ptr");
+							let buf = core::slice::from_raw_parts_mut(
+								ptr.as_ptr(),
+								job.buffer_size.try_into().unwrap(),
+							);
+							buf[..p.len()].copy_from_slice(p);
+							job.operation_size = p.len().try_into().unwrap();
+						};
+
+						match info.1 {
+							JobRequest::Open { path } => {
+								job.ty = Job::OPEN;
+								copy_buf(&path);
 							}
-							JobType::Open
-							| JobType::Read
-							| JobType::Write
-							| JobType::QueryNext
-							| JobType::Seek => {}
+							JobRequest::Create { path } => {
+								job.ty = Job::CREATE;
+								copy_buf(&path);
+							}
+							JobRequest::Read { handle, amount } => {
+								job.ty = Job::READ;
+								job.handle = handle;
+								job.operation_size = amount.try_into().unwrap();
+							}
+							JobRequest::Write { handle, data } => {
+								job.ty = Job::WRITE;
+								job.handle = handle;
+								let len = data.len().max(job.buffer_size.try_into().unwrap());
+								copy_buf(&data[..len]);
+							}
+							JobRequest::Seek { handle, from } => {
+								job.ty = Job::SEEK;
+								(job.from_anchor, job.from_offset) = from.into_raw();
+							}
+							JobRequest::Query { filter } => {
+								job.ty = Job::QUERY;
+								copy_buf(&filter);
+							}
+							JobRequest::QueryNext { handle } => {
+								job.ty = Job::QUERY_NEXT;
+								job.handle = handle;
+							}
 						}
 
 						push_resp(0);
 					}
 					Request::FINISH_JOB => {
 						let handle = e.arguments_32[0];
-						let job = e.arguments_ptr[0] as *mut super::super::syscall::FfiJob;
+						let job = e.arguments_ptr[0] as *mut Job;
 
 						let tbl = self.objects[handle as usize].clone().as_table().unwrap();
 						let job = unsafe { job.read() };
 
-						tbl.finish_job(job.try_into().unwrap()).unwrap();
+						let get_buf = || unsafe {
+							let ptr = job.buffer.unwrap_or(NonNull::dangling());
+							core::slice::from_raw_parts(
+								ptr.as_ptr(),
+								job.buffer_size.try_into().unwrap(),
+							)
+						};
+
+						let job_id = job.job_id;
+						let job = match job.ty {
+							Job::OPEN => JobResult::Open { handle: job.handle },
+							Job::CREATE => JobResult::Create { handle: job.handle },
+							Job::READ => JobResult::Read {
+								data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+							},
+							Job::WRITE => JobResult::Write {
+								amount: job.operation_size.try_into().unwrap(),
+							},
+							Job::SEEK => JobResult::Seek {
+								position: job.from_offset,
+							},
+							Job::QUERY => JobResult::Query { handle: job.handle },
+							Job::QUERY_NEXT => JobResult::QueryNext {
+								path: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+							},
+							_ => {
+								push_resp(-1);
+								continue;
+							}
+						};
+
+						tbl.finish_job(job, job_id).unwrap();
 
 						push_resp(0);
 					}

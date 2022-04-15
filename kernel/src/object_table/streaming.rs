@@ -13,7 +13,7 @@ pub struct StreamingTable {
 	name: Box<str>,
 	//event_wakers: Mutex<(usize, Vec<EventWaker>)>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(JobId, StreamJob, StreamTicketWaker)>>,
+	jobs: Mutex<Vec<(StreamJob, StreamTicketWaker)>>,
 	tickets: Mutex<Vec<(JobId, StreamTicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
 	/// A self reference is necessary for taking/finishing jos, which correspond to read/write
@@ -31,25 +31,25 @@ impl StreamingTable {
 		})
 	}
 
-	fn submit_job<T>(&self, job: StreamJob) -> Ticket<T>
+	fn submit_job<T>(&self, job: JobRequest) -> Ticket<T>
 	where
 		StreamTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
 
-		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed).into();
+		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
 
 		loop {
 			let j = self.job_handlers.lock().pop();
 			if let Some(w) = j {
 				if let Ok(mut w) = w.lock() {
 					self.tickets.lock().push((job_id, ticket_waker.into()));
-					w.complete(job.into_job(job_id));
+					w.complete((job_id, job));
 					break;
 				}
 			} else {
 				let mut l = self.jobs.lock();
-				l.push((job_id, job, ticket_waker.into()));
+				l.push((StreamJob { job_id, job }, ticket_waker.into()));
 				break;
 			}
 		}
@@ -63,22 +63,24 @@ impl Table for StreamingTable {
 		&self.name
 	}
 
-	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(StreamJob::Query { path: path.into() })
+	fn query(self: Arc<Self>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
+		self.submit_job(JobRequest::Query {
+			filter: filter.into(),
+		})
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(StreamJob::Open { path: path.into() })
+		self.submit_job(JobRequest::Open { path: path.into() })
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(StreamJob::Create { path: path.into() })
+		self.submit_job(JobRequest::Create { path: path.into() })
 	}
 
 	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
-		let job = self.jobs.lock().pop().map(|(job_id, job, tkt)| {
-			self.tickets.lock().push((job_id, tkt));
-			job.into_job(job_id)
+		let job = self.jobs.lock().pop().map(|(job, tkt)| {
+			self.tickets.lock().push((job.job_id, tkt));
+			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
 		let (job, waker) = JobTask::new(s, job);
@@ -86,64 +88,40 @@ impl Table for StreamingTable {
 		job
 	}
 
-	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()> {
+	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
 		let tw;
 		{
 			let mut c = self.tickets.lock();
-			let mut c = c.drain_filter(|e| e.0 == job.job_id);
+			let mut c = c.drain_filter(|e| e.0 == job_id);
 			(_, tw) = c.next().ok_or(())?;
 			assert!(c.next().is_none());
 		}
-		match job.ty {
-			JobType::Open => {
+		match job {
+			JobResult::Open { handle } | JobResult::Create { handle } => {
 				let obj = Arc::new(StreamObject {
-					handle: job.handle,
+					handle,
 					table: Arc::downgrade(&self),
 				});
-				tw.into_object().complete(Ok(obj));
+				tw.into_object().complete(Ok(obj))
 			}
-			JobType::Write => {
-				tw.into_usize()
-					.complete(Ok(job.operation_size.try_into().unwrap()));
-			}
-			JobType::Read => {
-				tw.into_data().complete(Ok(
-					job.buffer[..job.operation_size.try_into().unwrap()].into()
-				));
-			}
-			JobType::Query => {
-				tw.into_query().complete(Ok(Box::new(StreamQuery {
-					table: self,
-					query_id: job.query_id,
-				})));
-			}
-			JobType::QueryNext => {
-				tw.into_query_result().complete(if job.operation_size > 0 {
-					Ok(QueryResult {
-						path: job.buffer[..job.operation_size.try_into().unwrap()].into(),
-					})
+			JobResult::Write { amount } => tw.into_usize().complete(Ok(amount)),
+			JobResult::Read { data } => tw.into_data().complete(Ok(data)),
+			JobResult::Query { handle } => tw.into_query().complete(Ok(Box::new(StreamQuery {
+				table: self,
+				handle,
+			}))),
+			JobResult::QueryNext { path } => {
+				tw.into_query_result().complete(if path.len() > 0 {
+					Ok(QueryResult { path })
 				} else {
 					Err(Error::new(0, "".into()))
 				});
 			}
-			JobType::Create => {
-				let obj = Arc::new(StreamObject {
-					handle: job.handle,
-					table: Arc::downgrade(&self),
-				});
-				tw.into_object().complete(Ok(obj));
-			}
-			JobType::Seek => {
-				tw.into_u64().complete(Ok(job.from_offset));
+			JobResult::Seek { position } => {
+				tw.into_u64().complete(Ok(position));
 			}
 		}
 		Ok(())
-	}
-
-	fn cancel_job(self: Arc<Self>, job: Job) {
-		// Re-queue
-		todo!();
-		//self.submit_job(job.into()); // FIXME this is broken as the ticket itself is lost
 	}
 }
 
@@ -174,15 +152,14 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
-	fn read(&self, _: u64, length: u32) -> Ticket<Box<[u8]>> {
+	fn read(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				let job = StreamJob::Read {
+				tbl.submit_job(JobRequest::Read {
 					handle: self.handle,
-					length,
-				};
-				tbl.submit_job(job)
+					amount: length,
+				})
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -193,11 +170,10 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				let job = StreamJob::Write {
+				tbl.submit_job(JobRequest::Write {
 					handle: self.handle,
 					data: data.into(),
-				};
-				tbl.submit_job(job)
+				})
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -208,11 +184,10 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				let job = StreamJob::Seek {
+				tbl.submit_job(JobRequest::Seek {
 					handle: self.handle,
 					from,
-				};
-				tbl.submit_job(job)
+				})
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -220,84 +195,17 @@ impl Object for StreamObject {
 	}
 }
 
-enum StreamJob {
-	Open { path: Box<[u8]> },
-	Read { handle: Handle, length: u32 },
-	Write { handle: Handle, data: Box<[u8]> },
-	Query { path: Box<[u8]> },
-	Create { path: Box<[u8]> },
-	QueryNext { query_id: QueryId },
-	Seek { handle: Handle, from: SeekFrom },
-}
-
-impl StreamJob {
-	fn into_job(self, job_id: JobId) -> Job {
-		match self {
-			StreamJob::Open { path } => Job {
-				ty: JobType::Open,
-				job_id,
-				operation_size: path.len().try_into().unwrap(),
-				buffer: path.into(),
-				..Default::default()
-			},
-			StreamJob::Read { handle, length } => Job {
-				ty: JobType::Read,
-				job_id,
-				handle,
-				operation_size: length,
-				..Default::default()
-			},
-			StreamJob::Write { handle, data } => Job {
-				ty: JobType::Write,
-				job_id,
-				handle,
-				operation_size: data.len().try_into().unwrap(),
-				buffer: data,
-				..Default::default()
-			},
-			StreamJob::Query { path } => Job {
-				ty: JobType::Query,
-				job_id,
-				operation_size: path.len().try_into().unwrap(),
-				buffer: path,
-				..Default::default()
-			},
-			StreamJob::Create { path } => Job {
-				ty: JobType::Create,
-				job_id,
-				operation_size: path.len().try_into().unwrap(),
-				buffer: path,
-				..Default::default()
-			},
-			StreamJob::QueryNext { query_id } => Job {
-				ty: JobType::QueryNext,
-				job_id,
-				query_id,
-				..Default::default()
-			},
-			StreamJob::Seek { handle, from } => Job {
-				ty: JobType::Seek,
-				job_id,
-				handle,
-				from_anchor: from.into_raw().0,
-				from_offset: from.into_raw().1,
-				..Default::default()
-			},
-		}
-	}
-}
-
 struct StreamQuery {
 	table: Arc<StreamingTable>,
-	query_id: QueryId,
+	handle: Handle,
 }
 
 impl Iterator for StreamQuery {
 	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		Some(self.table.submit_job(StreamJob::QueryNext {
-			query_id: self.query_id,
+		Some(self.table.submit_job(JobRequest::QueryNext {
+			handle: self.handle,
 		}))
 	}
 }
@@ -344,3 +252,8 @@ stream_ticket!(u64 => U64, into_u64);
 stream_ticket!(Box<[u8]> => Data, into_data);
 stream_ticket!(Box<dyn Query> => Query, into_query);
 stream_ticket!(QueryResult => QueryResult, into_query_result);
+
+struct StreamJob {
+	job_id: JobId,
+	job: JobRequest,
+}

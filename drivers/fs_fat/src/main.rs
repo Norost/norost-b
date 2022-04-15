@@ -3,7 +3,7 @@
 // stdlib
 #![feature(rustc_private)]
 
-use norostb_kernel::syscall;
+use norostb_kernel::{io::Job, syscall};
 use std::fs;
 use std::io::{Read, Seek, Write};
 use std::ptr::NonNull;
@@ -41,7 +41,7 @@ fn main() {
 		}
 
 		match job.ty {
-			syscall::Job::OPEN => {
+			Job::OPEN => {
 				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
 					.expect("what do?");
 				if fs.root_dir().open_file(path).is_ok() {
@@ -54,7 +54,7 @@ fn main() {
 					todo!("how do I return an error?");
 				}
 			}
-			syscall::Job::CREATE => {
+			Job::CREATE => {
 				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
 					.expect("what do?");
 				if fs.root_dir().create_file(path).is_ok() {
@@ -67,7 +67,7 @@ fn main() {
 					todo!("how do I return an error?");
 				}
 			}
-			syscall::Job::READ => {
+			Job::READ => {
 				let (path, offset) = &open_files[job.handle];
 				let mut file = fs.root_dir().open_file(path).unwrap();
 				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
@@ -77,7 +77,7 @@ fn main() {
 				job.operation_size = l.try_into().unwrap();
 				open_files[job.handle].1 += u64::try_from(l).unwrap();
 			}
-			syscall::Job::WRITE => {
+			Job::WRITE => {
 				let (path, offset) = &open_files[job.handle];
 				let mut file = fs.root_dir().open_file(path).unwrap();
 				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
@@ -87,27 +87,27 @@ fn main() {
 				job.operation_size = l.try_into().unwrap();
 				open_files[job.handle].1 += u64::try_from(l).unwrap();
 			}
-			syscall::Job::QUERY => {
+			Job::QUERY => {
 				let entries = fs
 					.root_dir()
 					.iter()
 					.filter_map(|e| e.ok().map(|e| e.file_name()))
 					.collect::<Vec<_>>();
-				job.query_id = queries.insert(entries);
+				job.handle = queries.insert(entries);
 			}
-			syscall::Job::QUERY_NEXT => {
-				match queries[job.query_id].pop() {
+			Job::QUERY_NEXT => {
+				match queries[job.handle].pop() {
 					Some(f) => {
 						buf[..f.len()].copy_from_slice(f.as_bytes());
 						job.operation_size = f.len().try_into().unwrap();
 					}
 					None => {
-						queries.remove(job.query_id);
+						queries.remove(job.handle);
 						job.operation_size = 0;
 					}
 				};
 			}
-			syscall::Job::SEEK => {
+			Job::SEEK => {
 				todo!()
 			}
 			t => todo!("job type {}", t),

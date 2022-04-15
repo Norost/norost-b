@@ -11,10 +11,12 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::{Handle, Job, ObjectInfo, QueryHandle, TableId};
+use super::syscall::{QueryHandle, TableId};
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
+
+pub type Handle = u32;
 
 #[derive(Debug)]
 pub struct Full;
@@ -510,6 +512,61 @@ impl SeekFrom {
 			1 => Ok(Self::End(n as i64)),
 			2 => Ok(Self::Current(n as i64)),
 			_ => Err(()),
+		}
+	}
+}
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct Job {
+	pub ty: u8,
+	pub flags: [u8; 3],
+	pub job_id: JobId,
+	pub buffer_size: u32,
+	pub operation_size: u32,
+	pub handle: Handle,
+	pub buffer: Option<NonNull<u8>>,
+	pub from_anchor: u8,
+	pub from_offset: u64,
+}
+
+impl Job {
+	pub const OPEN: u8 = 0;
+	pub const READ: u8 = 1;
+	pub const WRITE: u8 = 2;
+	pub const QUERY: u8 = 3;
+	pub const CREATE: u8 = 4;
+	pub const QUERY_NEXT: u8 = 5;
+	pub const SEEK: u8 = 6;
+}
+
+pub type JobId = u32;
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct ObjectInfo {
+	// FIXME potentially UB if modified
+	pub path_ptr: *mut u8,
+	pub path_len: usize,
+	pub path_capacity: usize,
+}
+
+impl ObjectInfo {
+	pub fn new<'a>(path_buffer: &'a mut [u8]) -> Self {
+		Self {
+			path_ptr: path_buffer.as_mut_ptr(),
+			path_capacity: path_buffer.len(),
+			..Default::default()
+		}
+	}
+}
+
+impl Default for ObjectInfo {
+	fn default() -> Self {
+		Self {
+			path_ptr: core::ptr::null_mut(),
+			path_len: Default::default(),
+			path_capacity: Default::default(),
 		}
 	}
 }

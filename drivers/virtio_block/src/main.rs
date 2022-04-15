@@ -4,7 +4,7 @@
 #![feature(rustc_private)]
 
 use core::ptr::NonNull;
-use norostb_kernel::{self as kernel, io, syscall};
+use norostb_kernel::{self as kernel, io::Job, syscall};
 use virtio_block::Sector;
 
 fn main() {
@@ -111,10 +111,10 @@ fn main() {
 		}
 
 		match job.ty {
-			syscall::Job::OPEN => {
+			Job::OPEN => {
 				job.handle = data_handles.insert(0);
 			}
-			syscall::Job::READ => {
+			Job::READ => {
 				let offset = data_handles[job.handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
@@ -138,7 +138,7 @@ fn main() {
 				let offset = usize::from(offset);
 				buf[..size].copy_from_slice(&Sector::slice_as_u8(&sectors)[offset..][..size]);
 			}
-			syscall::Job::WRITE => {
+			Job::WRITE => {
 				let offset = data_handles[job.handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
@@ -160,28 +160,28 @@ fn main() {
 
 				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
 			}
-			syscall::Job::QUERY => {
-				job.query_id = queries.insert(Some(QueryState::Data));
+			Job::QUERY => {
+				job.handle = queries.insert(Some(QueryState::Data));
 			}
-			syscall::Job::QUERY_NEXT => {
-				match queries[job.query_id] {
+			Job::QUERY_NEXT => {
+				match queries[job.handle] {
 					Some(QueryState::Data) => {
 						buf[..4].copy_from_slice(b"data");
 						job.operation_size = 4;
-						queries[job.query_id] = Some(QueryState::Info);
+						queries[job.handle] = Some(QueryState::Info);
 					}
 					Some(QueryState::Info) => {
 						buf[..4].copy_from_slice(b"info");
 						job.operation_size = 4;
-						queries[job.query_id] = None;
+						queries[job.handle] = None;
 					}
 					None => {
-						queries.remove(job.query_id);
+						queries.remove(job.handle);
 						job.operation_size = 0;
 					}
 				};
 			}
-			syscall::Job::SEEK => {
+			Job::SEEK => {
 				use norostb_kernel::io::SeekFrom;
 				let from = SeekFrom::try_from_raw(job.from_anchor, job.from_offset).unwrap();
 				let offset = match from {

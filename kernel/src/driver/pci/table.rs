@@ -1,7 +1,5 @@
-use crate::object_table::{
-	Error, Job, JobTask, NoneQuery, Object, Query, QueryResult, Table, Ticket,
-};
-use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
+use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Table, Ticket};
+use alloc::{boxed::Box, format, string::String, sync::Arc};
 use core::str;
 
 /// Table with all PCI devices.
@@ -77,18 +75,6 @@ impl Table for PciTable {
 			message: "can't create pci devices".into(),
 		};
 		Ticket::new_complete(Err(e))
-	}
-
-	fn take_job(self: Arc<Self>, _: core::time::Duration) -> JobTask {
-		unreachable!("kernel only table")
-	}
-
-	fn finish_job(self: Arc<Self>, _: Job) -> Result<(), ()> {
-		unreachable!("kernel only table")
-	}
-
-	fn cancel_job(self: Arc<Self>, _: Job) {
-		unreachable!("kernel only table")
 	}
 }
 

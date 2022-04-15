@@ -8,7 +8,7 @@ mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{self as kernel, syscall};
+use norostb_kernel::{self as kernel, io::Job, syscall};
 use smoltcp::socket::TcpState;
 use std::str::FromStr;
 
@@ -165,14 +165,13 @@ fn main() {
 						Protocol::Tcp,
 					));
 					let job = std::os::norostb::Job {
-						ty: syscall::Job::CREATE,
+						ty: Job::CREATE,
 						job_id,
 						flags: [0; 3],
 						handle: (objects.len() - 1).try_into().unwrap(),
 						buffer: None,
 						buffer_size: 0,
 						operation_size: 0,
-						query_id: 0,
 						from_anchor: 0,
 						from_offset: 0,
 					};
@@ -188,7 +187,7 @@ fn main() {
 			std::os::norostb::take_job(tbl, &mut job)
 		} {
 			match job.ty {
-				syscall::Job::CREATE => {
+				Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];
 
 					let mut protocol = None;
@@ -253,7 +252,7 @@ fn main() {
 
 					job.handle = (objects.len() - 1).try_into().unwrap();
 				}
-				syscall::Job::READ => {
+				Job::READ => {
 					let (sock, addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {
@@ -276,7 +275,7 @@ fn main() {
 						}
 					}
 				}
-				syscall::Job::WRITE => {
+				Job::WRITE => {
 					let (sock, addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {

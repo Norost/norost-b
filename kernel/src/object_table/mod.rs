@@ -21,7 +21,10 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
-pub use norostb_kernel::syscall::Handle;
+pub use norostb_kernel::{
+	io::{JobId, SeekFrom},
+	syscall::Handle,
+};
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
@@ -50,11 +53,17 @@ where
 	/// Create a new object with the given path.
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
+	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+		unimplemented!()
+	}
 
-	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()>;
+	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
+		unimplemented!()
+	}
 
-	fn cancel_job(self: Arc<Self>, job: Job);
+	fn cancel_job(self: Arc<Self>, job_id: JobId) {
+		unimplemented!()
+	}
 }
 
 /// A query into a table.
@@ -107,7 +116,7 @@ pub trait Object {
 		None
 	}
 
-	fn read(&self, _offset: u64, _length: u32) -> Ticket<Box<[u8]>> {
+	fn read(&self, _offset: u64, _length: usize) -> Ticket<Box<[u8]>> {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
@@ -186,42 +195,28 @@ bi_from!(newtype Events <=> u32);
 pub struct Unpollable;
 
 /// A job submitted by a client to be fulfilled by a server (i.e. table owner).
-#[derive(Default, Debug)]
-pub struct Job {
-	pub ty: JobType,
-	pub flags: [u8; 3],
-	pub job_id: JobId,
-	pub operation_size: u32,
-	pub handle: Handle,
-	pub buffer: Box<[u8]>,
-	pub query_id: QueryId,
-	pub from_anchor: u8,
-	pub from_offset: u64,
+#[derive(Debug)]
+pub enum JobRequest {
+	Open { path: Box<[u8]> },
+	Create { path: Box<[u8]> },
+	Read { handle: Handle, amount: usize },
+	Write { handle: Handle, data: Box<[u8]> },
+	Seek { handle: Handle, from: SeekFrom },
+	Query { filter: Box<[u8]> },
+	QueryNext { handle: Handle },
 }
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum JobType {
-	#[default]
-	Open = 0,
-	Read = 1,
-	Write = 2,
-	Query = 3,
-	Create = 4,
-	QueryNext = 5,
-	Seek = 6,
+/// A finished job.
+#[derive(Debug)]
+pub enum JobResult {
+	Open { handle: Handle },
+	Create { handle: Handle },
+	Read { data: Box<[u8]> },
+	Write { amount: usize },
+	Seek { position: u64 },
+	Query { handle: Handle },
+	QueryNext { path: Box<[u8]> },
 }
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct JobId(u32);
-
-default!(newtype JobId = u32::MAX);
-bi_from!(newtype JobId <=> u32);
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct QueryId(pub u32);
 
 /// An error that occured during a job.
 #[derive(Debug)]
@@ -308,7 +303,7 @@ bi_from!(newtype TableId <=> u32);
 enum JobInner {
 	Active {
 		waker: Option<Waker>,
-		result: Option<Job>,
+		job: Option<(JobId, JobRequest)>,
 		table: Weak<dyn Table>,
 	},
 	Cancelled,
@@ -319,10 +314,10 @@ pub struct JobTask {
 }
 
 impl JobTask {
-	pub fn new(table: Weak<dyn Table>, result: Option<Job>) -> (Self, JobWaker) {
+	pub fn new(table: Weak<dyn Table>, job: Option<(JobId, JobRequest)>) -> (Self, JobWaker) {
 		let shared = Arc::new(SpinLock::new(JobInner::Active {
 			waker: None,
-			result,
+			job,
 			table,
 		}));
 		(
@@ -337,8 +332,8 @@ impl JobTask {
 impl Drop for JobTask {
 	fn drop(&mut self) {
 		match mem::replace(&mut *self.shared.lock(), JobInner::Cancelled) {
-			JobInner::Active { result, table, .. } => {
-				result.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job)));
+			JobInner::Active { job, table, .. } => {
+				job.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job.0)));
 			}
 			JobInner::Cancelled => (),
 		}
@@ -346,12 +341,12 @@ impl Drop for JobTask {
 }
 
 impl Future for JobTask {
-	type Output = Result<Job, Cancelled>;
+	type Output = Result<(JobId, JobRequest), Cancelled>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		match &mut *self.shared.lock() {
-			JobInner::Active { waker, result, .. } => {
-				if let Some(s) = result.take() {
+			JobInner::Active { waker, job, .. } => {
+				if let Some(s) = job.take() {
 					Poll::Ready(Ok(s))
 				} else {
 					*waker = Some(cx.waker().clone());
@@ -372,7 +367,7 @@ impl JobWaker {
 		let lock = self.shared.lock();
 		match &*lock {
 			JobInner::Active { .. } => Ok(JobWakerGuard(lock)),
-			JobInner::Cancelled => Err(Cancelled),
+			JobInner::Cancelled { .. } => Err(Cancelled),
 		}
 	}
 }
@@ -380,13 +375,15 @@ impl JobWaker {
 pub struct JobWakerGuard<'a>(crate::sync::spinlock::Guard<'a, JobInner>);
 
 impl JobWakerGuard<'_> {
-	pub fn complete(&mut self, job: Job) {
+	pub fn complete(&mut self, job: (JobId, JobRequest)) {
 		match &mut *self.0 {
-			JobInner::Active { waker, result, .. } => {
-				*result = Some(job);
+			JobInner::Active {
+				waker, job: p_job, ..
+			} => {
+				*p_job = Some(job);
 				waker.take().map(|w| w.wake());
 			}
-			JobInner::Cancelled => unreachable!(),
+			JobInner::Cancelled { .. } => unreachable!(),
 		}
 	}
 }

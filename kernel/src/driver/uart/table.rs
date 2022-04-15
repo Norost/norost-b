@@ -1,9 +1,5 @@
-use super::Uart;
-use super::DEVICES;
-use crate::object_table::{
-	Error, Job, JobTask, NoneQuery, Object, OneQuery, Query, QueryResult, Table, Ticket,
-};
-use alloc::{boxed::Box, format, string::String, string::ToString, sync::Arc};
+use crate::object_table::{Error, NoneQuery, Object, Query, Table, Ticket};
+use alloc::{boxed::Box, sync::Arc};
 
 /// Table with all UART devices.
 pub struct UartTable;
@@ -35,18 +31,6 @@ impl Table for UartTable {
 		};
 		Ticket::new_complete(Err(e))
 	}
-
-	fn take_job(self: Arc<Self>, _: core::time::Duration) -> JobTask {
-		unreachable!("kernel only table")
-	}
-
-	fn finish_job(self: Arc<Self>, _: Job) -> Result<(), ()> {
-		unreachable!("kernel only table")
-	}
-
-	fn cancel_job(self: Arc<Self>, _: Job) {
-		unreachable!("kernel only table")
-	}
 }
 
 impl Object for UartTable {}
@@ -54,7 +38,7 @@ impl Object for UartTable {}
 pub struct UartId(u8);
 
 impl Object for UartId {
-	fn read(&self, _offset: u64, length: u32) -> Ticket<Box<[u8]>> {
+	fn read(&self, _offset: u64, length: usize) -> Ticket<Box<[u8]>> {
 		// TODO read more than one byte doofus.
 		if let Some(r) = (length > 0)
 			.then(|| super::get(self.0.into()).try_read())

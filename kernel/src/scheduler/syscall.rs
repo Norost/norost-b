@@ -1,16 +1,13 @@
-use crate::ffi;
 use crate::memory::{frame, r#virtual::RWX, Page};
 use crate::object_table;
-use crate::object_table::{Handle, Job, JobId, JobType, QueryId, TableId};
+use crate::object_table::TableId;
 use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
-	vec::Vec,
 };
-use core::arch::asm;
 use core::mem;
 use core::ptr::NonNull;
 use core::time::Duration;
@@ -202,79 +199,6 @@ extern "C" fn create_table(
 	Return {
 		status: 0,
 		value: handle.into(),
-	}
-}
-
-#[derive(Default, Debug)]
-#[repr(C)]
-pub struct FfiJob {
-	pub ty: FfiJobType,
-	pub flags: [u8; 3],
-	pub job_id: JobId,
-	pub buffer_size: u32,
-	pub operation_size: u32,
-	pub handle: Handle,
-	pub buffer: Option<NonNull<u8>>,
-	pub query_id: QueryId,
-	pub from_anchor: u8,
-	pub from_offset: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct FfiJobType(u8);
-
-default!(newtype FfiJobType = u8::MAX);
-
-impl From<JobType> for FfiJobType {
-	fn from(jt: JobType) -> Self {
-		FfiJobType(jt as u8)
-	}
-}
-
-#[derive(Debug)]
-pub struct UnknownJobType;
-
-impl TryFrom<FfiJobType> for JobType {
-	type Error = UnknownJobType;
-
-	fn try_from(fjt: FfiJobType) -> Result<Self, Self::Error> {
-		match fjt.0 {
-			0 => Ok(Self::Open),
-			1 => Ok(Self::Read),
-			2 => Ok(Self::Write),
-			3 => Ok(Self::Query),
-			4 => Ok(Self::Create),
-			5 => Ok(Self::QueryNext),
-			6 => Ok(Self::Seek),
-			_ => Err(UnknownJobType),
-		}
-	}
-}
-
-impl TryFrom<FfiJob> for Job {
-	type Error = UnknownJobType;
-
-	fn try_from(fj: FfiJob) -> Result<Self, Self::Error> {
-		// TODO don't panic
-		let buffer = unsafe {
-			core::slice::from_raw_parts(
-				fj.buffer
-					.map_or(mem::align_of::<u8>() as *const _, |p| p.as_ptr()),
-				fj.buffer_size.try_into().unwrap(),
-			)
-		};
-		Ok(Self {
-			ty: fj.ty.try_into()?,
-			flags: fj.flags,
-			job_id: fj.job_id,
-			handle: fj.handle,
-			operation_size: fj.operation_size,
-			buffer: buffer.into(),
-			query_id: fj.query_id,
-			from_anchor: fj.from_anchor,
-			from_offset: fj.from_offset,
-		})
 	}
 }
 
