@@ -87,16 +87,10 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
-	// Register a new object
-	// TODO
-
 	let mut sectors = [Sector::default(); 8];
 
-	let mut query_id_counter = 0u32;
-	let mut queries = std::collections::BTreeMap::new();
-
-	let mut data_handle_id_counter = 0u32;
-	let mut data_handles = std::collections::BTreeMap::new();
+	let mut queries = driver_utils::Arena::new();
+	let mut data_handles = driver_utils::Arena::new();
 
 	let mut buf = [0; 4096];
 	let buf = &mut buf;
@@ -118,11 +112,10 @@ fn main() {
 
 		match job.ty {
 			syscall::Job::OPEN => {
-				data_handles.insert(data_handle_id_counter, 0);
-				data_handle_id_counter += 1;
+				job.handle = data_handles.insert(0);
 			}
 			syscall::Job::READ => {
-				let offset = data_handles[&job.handle];
+				let offset = data_handles[job.handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -139,10 +132,7 @@ fn main() {
 				);
 
 				job.operation_size = size;
-				data_handles.insert(
-					u32::try_from(job.handle).unwrap(),
-					u64::from(offset) + u64::from(job.operation_size),
-				);
+				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
 
 				let size = usize::try_from(size).unwrap();
 				let offset = usize::from(offset);
@@ -154,23 +144,22 @@ fn main() {
 				//println!("write: {:?}", core::str::from_utf8(data));
 			}
 			syscall::Job::QUERY => {
-				queries.insert(query_id_counter, QueryState::Data);
-				job.query_id = query_id_counter;
-				query_id_counter += 1;
+				job.query_id = queries.insert(Some(QueryState::Data));
 			}
 			syscall::Job::QUERY_NEXT => {
-				match queries.get(&job.query_id) {
+				match queries[job.query_id] {
 					Some(QueryState::Data) => {
 						buf[..4].copy_from_slice(b"data");
 						job.operation_size = 4;
-						queries.insert(job.query_id, QueryState::Info);
+						queries[job.query_id] = Some(QueryState::Info);
 					}
 					Some(QueryState::Info) => {
 						buf[..4].copy_from_slice(b"info");
 						job.operation_size = 4;
-						queries.remove(&job.query_id);
+						queries[job.query_id] = None;
 					}
 					None => {
+						queries.remove(job.query_id);
 						job.operation_size = 0;
 					}
 				};
@@ -182,8 +171,7 @@ fn main() {
 					SeekFrom::Start(n) => n,
 					_ => todo!(),
 				};
-				data_handles[&job.handle];
-				data_handles.insert(job.handle, offset);
+				data_handles[job.handle] = offset;
 			}
 			t => todo!("job type {}", t),
 		}

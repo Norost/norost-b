@@ -14,6 +14,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "arena"
+version = "0.1.0"
+
+[[package]]
 name = "bit_field"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -72,15 +76,23 @@ dependencies = [
 name = "driver_fs_fat"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "fatfs",
- "fscommon",
  "norostb_kernel",
+]
+
+[[package]]
+name = "driver_utils"
+version = "0.1.0"
+dependencies = [
+ "arena",
 ]
 
 [[package]]
 name = "driver_virtio_block"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "norostb_kernel",
  "pci",
  "virtio",
@@ -108,15 +120,6 @@ version = "0.4.0"
 source = "git+https://github.com/rafalh/rust-fatfs#87fc1ed5074a32b4e0344fcdde77359ef9e75432"
 dependencies = [
  "bitflags",
- "log",
-]
-
-[[package]]
-name = "fscommon"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "315ce685aca5ddcc5a3e7e436ef47d4a5d0064462849b6f0f628c28140103531"
-dependencies = [
  "log",
 ]
 
