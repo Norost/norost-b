@@ -115,6 +115,9 @@ fn main() {
 	let mut query_id_counter = 0u32;
 	let mut queries = std::collections::BTreeMap::new();
 
+	let mut open_file_id_counter = 0u32;
+	let mut open_files = std::collections::BTreeMap::new();
+
 	let mut buf = [0; 4096];
 	let buf = &mut buf;
 
@@ -130,16 +133,31 @@ fn main() {
 
 		match job.ty {
 			syscall::Job::OPEN => {
-				dbg!(std::str::from_utf8(
-					&buf[..job.operation_size.try_into().unwrap()]
-				));
-				todo!()
+				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
+					.expect("what do?");
+				dbg!(path);
+				if fs.root_dir().open_file(path).is_ok() {
+					open_files.insert(open_file_id_counter, (path.to_string(), 0u64));
+					open_file_id_counter += 1
+				} else {
+					match fs.root_dir().open_file(path) {
+						Ok(_) => unreachable!(),
+						Err(e) => dbg!(e),
+					};
+					todo!("how do I return an error?");
+				}
 			}
 			syscall::Job::CREATE => {
 				todo!()
 			}
 			syscall::Job::READ => {
-				todo!()
+				let (path, offset) = &open_files[&job.handle.try_into().unwrap()];
+				let mut file = fs.root_dir().open_file(path).unwrap();
+				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+				let l = file
+					.read(&mut buf[..job.operation_size.try_into().unwrap()])
+					.unwrap();
+				job.operation_size = l.try_into().unwrap();
 			}
 			syscall::Job::WRITE => {
 				todo!()
