@@ -16,14 +16,15 @@ cp target/$TARGET_KERNEL/release/nora isodir/boot/nora
 cp target/$TARGET_BOOT/release/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 
-#(cd drivers/hello_world && ./build.sh)
-#cp drivers/hello_world/hello isodir/drivers/hello_world
-(cd drivers/virtio_block && cargo build --release --target $TARGET_USER)
-cp target/$TARGET_USER/release/driver_virtio_block isodir/drivers/virtio_block
-(cd drivers/virtio_net && cargo build --release --target $TARGET_USER)
-cp target/$TARGET_USER/release/driver_virtio_net isodir/drivers/virtio_net
-(cd base/minish && cargo build --release --target $TARGET_USER)
-cp target/$TARGET_USER/release/minish isodir/drivers/minish
+install () {
+	(cd $1/$2 && cargo build --release --target $TARGET_USER)
+	cp target/$TARGET_USER/release/$3 isodir/drivers/$2
+}
+
+install drivers fs_fat       driver_fs_fat
+install drivers virtio_block driver_virtio_block
+install drivers virtio_net   driver_virtio_net
+install base    minish       minish
 
 # Note: make sure grub-pc-bin is installed! Otherwise QEMU may hang on
 # "Booting from disk" or return error code 0009

@@ -5,8 +5,11 @@ cargo-features = ["strip"]
 members = [
 	"kernel",
 	"boot/amd64",
+	"drivers/fs_fat",
 	"drivers/virtio_block",
 	"drivers/virtio_net",
+	"lib/rust/arena",
+	"lib/rust/driver_utils",
 	"lib/rust/endian",
 	"lib/rust/pci",
 	"lib/rust/virtio",
@@ -23,6 +26,7 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 lto = "fat"
+debug = true
 #strip = "symbols"
 
 [profile.release.package.noraboot]

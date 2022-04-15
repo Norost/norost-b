@@ -21,6 +21,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
+pub use norostb_kernel::syscall::Handle;
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
@@ -41,13 +42,13 @@ where
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(self: Arc<Self>, path: &[u8]) -> Box<dyn Query>;
+	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>>;
 
-	/// Get a single object based on ID.
-	fn get(self: Arc<Self>, id: Id) -> Ticket;
+	/// Open a single object based on path.
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	/// Create a new object.
-	fn create(self: Arc<Self>, path: &[u8]) -> Ticket;
+	/// Create a new object with the given path.
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
 	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
 
@@ -59,7 +60,7 @@ where
 /// A query into a table.
 pub trait Query
 where
-	Self: Iterator<Item = QueryResult>,
+	Self: Iterator<Item = Ticket<QueryResult>>,
 {
 }
 
@@ -69,7 +70,7 @@ pub struct NoneQuery;
 impl Query for NoneQuery {}
 
 impl Iterator for NoneQuery {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		None
@@ -78,25 +79,23 @@ impl Iterator for NoneQuery {
 
 /// A query that returns a single result.
 pub struct OneQuery {
-	pub id: Id,
 	pub path: Option<Box<[u8]>>,
 }
 
 impl Query for OneQuery {}
 
 impl Iterator for OneQuery {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.path
 			.take()
-			.map(|path| QueryResult { id: self.id, path })
+			.map(|path| Ticket::new_complete(Ok(QueryResult { path })))
 	}
 }
 
 /// A single query result
 pub struct QueryResult {
-	pub id: Id,
 	pub path: Box<[u8]>,
 }
 
@@ -108,12 +107,16 @@ pub trait Object {
 		None
 	}
 
-	fn read(&self, _offset: u64, _length: u32) -> Result<Ticket, ()> {
-		Err(())
+	fn read(&self, _offset: u64, _length: u32) -> Ticket<Box<[u8]>> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
-	fn write(&self, _offset: u64, _data: &[u8]) -> Result<Ticket, ()> {
-		Err(())
+	fn write(&self, _offset: u64, _data: &[u8]) -> Ticket<usize> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
+	}
+
+	fn seek(&self, _from: norostb_kernel::io::SeekFrom) -> Ticket<u64> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
 	fn event_listener(&self) -> Result<EventListener, Unpollable> {
@@ -189,8 +192,11 @@ pub struct Job {
 	pub flags: [u8; 3],
 	pub job_id: JobId,
 	pub operation_size: u32,
-	pub object_id: Id,
+	pub handle: Handle,
 	pub buffer: Box<[u8]>,
+	pub query_id: QueryId,
+	pub from_anchor: u8,
+	pub from_offset: u64,
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -202,6 +208,8 @@ pub enum JobType {
 	Write = 2,
 	Query = 3,
 	Create = 4,
+	QueryNext = 5,
+	Seek = 6,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -211,49 +219,9 @@ pub struct JobId(u32);
 default!(newtype JobId = u32::MAX);
 bi_from!(newtype JobId <=> u32);
 
-/// Data submitted as part of a job.
-pub enum Data {
-	Usize(usize),
-	#[allow(dead_code)]
-	Bytes(Box<[u8]>),
-	Object(Arc<dyn Object>),
-}
-
-impl Data {
-	pub fn into_usize(self) -> Option<usize> {
-		match self {
-			Self::Usize(n) => Some(n),
-			_ => None,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn into_bytes(self) -> Option<Box<[u8]>> {
-		match self {
-			Self::Bytes(n) => Some(n),
-			_ => None,
-		}
-	}
-
-	pub fn into_object(self) -> Option<Arc<dyn Object>> {
-		match self {
-			Self::Object(n) => Some(n),
-			_ => None,
-		}
-	}
-}
-
-impl fmt::Debug for Data {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = f.debug_tuple(stringify!(Data));
-		match self {
-			Self::Usize(n) => f.field(&n),
-			Self::Bytes(d) => f.field(&d),
-			Self::Object(_d) => f.field(&"<object>"),
-		};
-		f.finish()
-	}
-}
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct QueryId(pub u32);
 
 /// An error that occured during a job.
 #[derive(Debug)]
@@ -262,14 +230,20 @@ pub struct Error {
 	pub message: Box<str>,
 }
 
-/// A ticket referring to a job to be completed.
-#[derive(Default)]
-pub struct Ticket {
-	inner: Arc<SpinLock<TicketInner>>,
+impl Error {
+	pub fn new(code: u32, message: Box<str>) -> Self {
+		Self { code, message }
+	}
 }
 
-impl Ticket {
-	pub fn new_complete(status: Result<Data, Error>) -> Self {
+/// A ticket referring to a job to be completed.
+#[derive(Default)]
+pub struct Ticket<T> {
+	inner: Arc<SpinLock<TicketInner<T>>>,
+}
+
+impl<T> Ticket<T> {
+	pub fn new_complete(status: Result<T, Error>) -> Self {
 		let inner = SpinLock::new(TicketInner {
 			waker: None,
 			status: Some(status),
@@ -278,7 +252,7 @@ impl Ticket {
 		Self { inner }
 	}
 
-	pub fn new() -> (Self, TicketWaker) {
+	pub fn new() -> (Self, TicketWaker<T>) {
 		let inner = Arc::new(SpinLock::new(TicketInner {
 			waker: None,
 			status: None,
@@ -292,12 +266,12 @@ impl Ticket {
 	}
 }
 
-pub struct TicketWaker {
-	inner: Arc<SpinLock<TicketInner>>,
+pub struct TicketWaker<T> {
+	inner: Arc<SpinLock<TicketInner<T>>>,
 }
 
-impl TicketWaker {
-	fn complete(self, status: Result<Data, Error>) {
+impl<T> TicketWaker<T> {
+	fn complete(self, status: Result<T, Error>) {
 		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
@@ -305,14 +279,14 @@ impl TicketWaker {
 }
 
 #[derive(Default)]
-pub struct TicketInner {
+pub struct TicketInner<T> {
 	waker: Option<Waker>,
 	/// The completion status of this job.
-	status: Option<Result<Data, Error>>,
+	status: Option<Result<T, Error>>,
 }
 
-impl Future for Ticket {
-	type Output = Result<Data, Error>;
+impl<T> Future for Ticket<T> {
+	type Output = Result<T, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		let mut t = self.inner.lock();
@@ -323,14 +297,6 @@ impl Future for Ticket {
 		Poll::Pending
 	}
 }
-
-/// The unique identifier of an object.
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct Id(pub u64);
-
-default!(newtype Id = u64::MAX);
-bi_from!(newtype Id <=> u64);
 
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
@@ -447,7 +413,7 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(table_id: TableId, path: &[u8]) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(table_id: TableId, path: &[u8]) -> Result<Ticket<Box<dyn Query>>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
@@ -456,19 +422,18 @@ pub fn query(table_id: TableId, path: &[u8]) -> Result<Box<dyn Query>, QueryErro
 		.ok_or(QueryError::InvalidTableId)
 }
 
-/// Get an object from a table.
-pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
+/// Open an object from a table.
+pub fn open(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, GetError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.get(id))
+		.map(|tbl| tbl.open(path))
 		.ok_or(GetError::InvalidTableId)
 }
 
 /// Create a new object in a table.
-#[allow(dead_code)]
-pub fn create(table_id: TableId, path: &[u8]) -> Result<Ticket, CreateError> {
+pub fn create(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, CreateError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())

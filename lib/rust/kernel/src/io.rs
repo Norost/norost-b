@@ -11,7 +11,7 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::{Handle, Id, Job, ObjectInfo, QueryHandle, TableId};
+use super::syscall::{Handle, Job, ObjectInfo, QueryHandle, TableId};
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -60,6 +60,7 @@ impl Request {
 	pub const QUERY_NEXT: u8 = 5;
 	pub const TAKE_JOB: u8 = 6;
 	pub const FINISH_JOB: u8 = 7;
+	pub const SEEK: u8 = 8;
 
 	pub fn read(user_data: usize, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
@@ -94,32 +95,32 @@ impl Request {
 		}
 	}
 
-	pub fn open(user_data: usize, table: TableId, object: Id) -> Self {
+	pub fn open(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
 			arguments_32: [table, 0],
-			arguments_64: [object],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn create(user_data: usize, table: TableId, tags: &[u8]) -> Self {
+	pub fn create(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
 			arguments_32: [table, 0],
-			arguments_ptr: [tags.as_ptr() as usize, tags.len()],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query(user_data: usize, table: TableId, tags: &[u8]) -> Self {
+	pub fn query(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::QUERY,
 			// FIXME use u32 for handles.
 			arguments_32: [table.try_into().unwrap(), 0],
-			arguments_ptr: [tags.as_ptr() as usize, tags.len()],
+			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
@@ -153,6 +154,20 @@ impl Request {
 			// FIXME use u32 for handles.
 			arguments_32: [table.try_into().unwrap(), 0],
 			arguments_ptr: [job as *const _ as usize, 0],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn seek(user_data: usize, handle: Handle, from: SeekFrom, offset: &mut u64) -> Self {
+		let (t, n) = from.into_raw();
+		Self {
+			ty: Self::SEEK,
+			arguments_8: [t, 0, 0],
+			// FIXME use u32 for handles.
+			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_64: [n],
+			arguments_ptr: [offset as *mut _ as usize, 0],
 			user_data,
 			..Default::default()
 		}
@@ -471,4 +486,30 @@ unsafe fn dequeue<E>(
 	let e = unsafe { entries.add((r & mask).try_into().unwrap()).read() };
 	read.store(r + 1, Ordering::Release);
 	Ok(e)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SeekFrom {
+	Start(u64),
+	End(i64),
+	Current(i64),
+}
+
+impl SeekFrom {
+	pub fn into_raw(self) -> (u8, u64) {
+		match self {
+			Self::Start(n) => (0, n),
+			Self::End(n) => (1, n as u64),
+			Self::Current(n) => (2, n as u64),
+		}
+	}
+
+	pub fn try_from_raw(t: u8, n: u64) -> Result<Self, ()> {
+		match t {
+			0 => Ok(Self::Start(n)),
+			1 => Ok(Self::End(n as i64)),
+			2 => Ok(Self::Current(n as i64)),
+			_ => Err(()),
+		}
+	}
 }

@@ -5,9 +5,13 @@
 
 use core::ptr::NonNull;
 use norostb_kernel::{self as kernel, io, syscall};
+use virtio_block::Sector;
 
 fn main() {
 	println!("Hello, world! from Rust");
+
+	let mut buf = [0; 256];
+	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 
 	let mut id = None;
 	let mut dev = None;
@@ -18,12 +22,9 @@ fn main() {
 			let tags = b"vendor-id:1af4&device-id:1001";
 			let h = std::os::norostb::query(i, tags).unwrap();
 			println!("{:?}", h);
-			let mut buf = [0; 256];
-			//let mut obj = syscall::ObjectInfo::new(&mut buf);
-			let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
 				println!("{:#?}", &obj);
-				dev = Some((i, obj.id));
+				dev = Some((i, &buf[..obj.path_len]));
 				break 'found_dev;
 			}
 		}
@@ -31,6 +32,7 @@ fn main() {
 	}
 
 	let (tbl, dev) = dev.unwrap();
+	dbg!(core::str::from_utf8(dev));
 	let handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
@@ -82,83 +84,115 @@ fn main() {
 		}
 	};
 
-	let mut sectors = virtio_block::Sector::default();
-	for (w, r) in sectors.0.iter_mut().zip(b"Greetings, fellow developers!") {
-		*w = *r;
-	}
-
-	println!("writing the stuff...");
-	dev.write(&sectors, 0, || ()).unwrap();
-	println!("done writing the stuff");
-
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
-	// Register a new object
-	// TODO
+	let mut sectors = [Sector::default(); 8];
 
-	let mut buf = [0; 1024];
+	let mut queries = driver_utils::Arena::new();
+	let mut data_handles = driver_utils::Arena::new();
+
+	let mut buf = [0; 4096];
 	let buf = &mut buf;
-	let mut job = std::os::norostb::Job::default();
-	job.buffer = NonNull::new(buf.as_mut_ptr());
-	job.buffer_size = buf.len().try_into().unwrap();
+
+	enum QueryState {
+		Data,
+		Info,
+	}
 
 	loop {
 		// Wait for events from the table
-		println!("ermaghed");
-
-		std::os::norostb::take_job(tbl, &mut job).unwrap();
-
-		println!("job: {:#?}", &job);
+		let mut job = std::os::norostb::Job::default();
+		job.buffer = NonNull::new(buf.as_mut_ptr());
+		job.buffer_size = buf.len().try_into().unwrap();
+		if std::os::norostb::take_job(tbl, &mut job).is_err() {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+			continue;
+		}
 
 		match job.ty {
-			syscall::Job::OPEN => (),
-			syscall::Job::WRITE => {
-				let data = &buf[..job.operation_size as usize];
-				println!("write: {:?}", core::str::from_utf8(data));
+			syscall::Job::OPEN => {
+				job.handle = data_handles.insert(0);
 			}
-			_ => todo!(),
+			syscall::Job::READ => {
+				let offset = data_handles[job.handle];
+				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
+				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
+				let offset = u16::try_from(offset).unwrap();
+
+				dev.read(&mut sectors, sector, || {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				})
+				.unwrap();
+
+				let size = job.operation_size.min(
+					(Sector::slice_as_u8(&sectors).len() - usize::from(offset))
+						.try_into()
+						.unwrap(),
+				);
+
+				job.operation_size = size;
+				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
+
+				let size = usize::try_from(size).unwrap();
+				let offset = usize::from(offset);
+				buf[..size].copy_from_slice(&Sector::slice_as_u8(&sectors)[offset..][..size]);
+			}
+			syscall::Job::WRITE => {
+				let offset = data_handles[job.handle];
+				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
+				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
+				let offset = u16::try_from(offset).unwrap();
+
+				dev.read(&mut sectors, sector, || {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				})
+				.unwrap();
+
+				let data = &buf[..job.operation_size as usize];
+				Sector::slice_as_u8_mut(&mut sectors)[offset.into()..][..data.len()]
+					.copy_from_slice(data);
+
+				dev.write(&sectors, sector, || {
+					std::thread::sleep(std::time::Duration::from_millis(1));
+				})
+				.unwrap();
+
+				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
+			}
+			syscall::Job::QUERY => {
+				job.query_id = queries.insert(Some(QueryState::Data));
+			}
+			syscall::Job::QUERY_NEXT => {
+				match queries[job.query_id] {
+					Some(QueryState::Data) => {
+						buf[..4].copy_from_slice(b"data");
+						job.operation_size = 4;
+						queries[job.query_id] = Some(QueryState::Info);
+					}
+					Some(QueryState::Info) => {
+						buf[..4].copy_from_slice(b"info");
+						job.operation_size = 4;
+						queries[job.query_id] = None;
+					}
+					None => {
+						queries.remove(job.query_id);
+						job.operation_size = 0;
+					}
+				};
+			}
+			syscall::Job::SEEK => {
+				use norostb_kernel::io::SeekFrom;
+				let from = SeekFrom::try_from_raw(job.from_anchor, job.from_offset).unwrap();
+				let offset = match from {
+					SeekFrom::Start(n) => n,
+					_ => todo!(),
+				};
+				data_handles[job.handle] = offset;
+			}
+			t => todo!("job type {}", t),
 		}
 
 		std::os::norostb::finish_job(tbl, &job).unwrap();
-
-		// Log events
-		//while let Some(cmd) = cmds.pop_command() {
-		/*
-		{
-			println!("[stream-table] {:?}", "open");
-			Response::open(
-				&cmd,
-				NonNull::new(wr.get()).unwrap().cast(),
-				12,
-				NonNull::new(rd.get()).unwrap().cast(),
-				12,
-			)
-		}
-		{
-			println!("[stream-table] {:?}", count);
-
-			let wr: &[u8] = unsafe {
-				core::slice::from_raw_parts(wr.get().cast(), 4096)
-			};
-			println!("{:#x?}", syscall::physical_address(NonNull::from(wr).cast()));
-			println!("wr_i {}", wr_i % wr.len());
-			for i in wr_i .. wr_i + count {
-				println!("  > {:?}", char::try_from(wr[i % wr.len()]).unwrap());
-			}
-
-			wr_i += count;
-			Response::write(
-				&cmd,
-				count,
-			)
-		}
-		last_cmd = Some(cmd);
-		i += 1;
-		c.unwrap();mds.push_response(rsp);
-		*/
-		//}
-
-		// Mark events as handled
 	}
 }

@@ -14,20 +14,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "atty"
-version = "0.2.14"
-source = "git+https://git.sr.ht/~demindiro/atty?branch=norost#43eb5300a832e0ffa0e18396de74356acc997db2"
-dependencies = [
- "hermit-abi",
- "libc",
- "winapi",
-]
-
-[[package]]
-name = "autocfg"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
+name = "arena"
+version = "0.1.0"
 
 [[package]]
 name = "bit_field"
@@ -58,21 +46,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clap"
-version = "3.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71c47df61d9e16dc010b55dba1952a57d8c215dbb533fd13cdd13369aac73b1c"
-dependencies = [
- "atty",
- "bitflags",
- "indexmap",
- "os_str_bytes",
- "strsim",
- "termcolor",
- "textwrap",
-]
-
-[[package]]
 name = "compiler_builtins"
 version = "0.1.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -100,9 +73,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_fs_fat"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "fatfs",
+ "norostb_kernel",
+]
+
+[[package]]
+name = "driver_utils"
+version = "0.1.0"
+dependencies = [
+ "arena",
+]
+
+[[package]]
 name = "driver_virtio_block"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "norostb_kernel",
  "pci",
  "virtio",
@@ -125,6 +115,15 @@ name = "endian"
 version = "0.1.0"
 
 [[package]]
+name = "fatfs"
+version = "0.4.0"
+source = "git+https://github.com/rafalh/rust-fatfs#87fc1ed5074a32b4e0344fcdde77359ef9e75432"
+dependencies = [
+ "bitflags",
+ "log",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -133,31 +132,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
-]
-
-[[package]]
-name = "hashbrown"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
-
-[[package]]
-name = "hermit-abi"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "indexmap"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f647032dfaa1f8b6dc29bd3edb7bbef4861b8b8007ebb118d6db284fd59f6ee"
-dependencies = [
- "autocfg",
- "hashbrown",
 ]
 
 [[package]]
@@ -182,16 +156,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
 
 [[package]]
-name = "memchr"
-version = "2.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
-
-[[package]]
 name = "minish"
 version = "0.1.0"
 dependencies = [
- "clap",
  "term",
 ]
 
@@ -229,14 +196,6 @@ dependencies = [
  "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-core",
-]
-
-[[package]]
-name = "os_str_bytes"
-version = "6.0.0"
-source = "git+https://git.sr.ht/~demindiro/os_str_bytes?branch=norost#59ac45c7b1377894a3015079aab2fb008c8925f7"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
@@ -318,12 +277,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strsim"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
-
-[[package]]
 name = "syn"
 version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -344,21 +297,6 @@ dependencies = [
  "rustversion",
  "winapi",
 ]
-
-[[package]]
-name = "termcolor"
-version = "1.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bab24d30b911b2376f3a13cc2cd443142f0c81dda04c118693e35b3835757755"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
-name = "textwrap"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
 
 [[package]]
 name = "thiserror"
@@ -443,16 +381,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 
 [[package]]
-name = "winapi-util"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70ec6ce85bb158151cae5e5c87f95a8e97d2c0c4b001223f33a334e3ce5de178"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[patch.unused]]
+name = "atty"
+version = "0.2.14"
+source = "git+https://git.sr.ht/~demindiro/atty?branch=norost#43eb5300a832e0ffa0e18396de74356acc997db2"
+
+[[patch.unused]]
+name = "os_str_bytes"
+version = "6.0.0"
+source = "git+https://git.sr.ht/~demindiro/os_str_bytes?branch=norost#59ac45c7b1377894a3015079aab2fb008c8925f7"

@@ -48,9 +48,8 @@ impl fmt::Debug for DebugLossy<'_> {
 	}
 }
 
-pub type Id = u64;
 pub type TableId = u32;
-pub type Handle = usize;
+pub type Handle = u32;
 
 #[derive(Clone)]
 #[repr(C)]
@@ -139,7 +138,6 @@ impl<'a, T> Default for Slice<'a, T> {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectInfo {
-	pub id: Id,
 	// FIXME potentially UB if modified
 	pub path_ptr: *mut u8,
 	pub path_len: usize,
@@ -159,7 +157,6 @@ impl ObjectInfo {
 impl Default for ObjectInfo {
 	fn default() -> Self {
 		Self {
-			id: Default::default(),
 			path_ptr: core::ptr::null_mut(),
 			path_len: Default::default(),
 			path_capacity: Default::default(),
@@ -198,8 +195,11 @@ pub struct Job {
 	pub job_id: JobId,
 	pub buffer_size: u32,
 	pub operation_size: u32,
-	pub object_id: Id,
+	pub handle: Handle,
 	pub buffer: Option<NonNull<u8>>,
+	pub query_id: u32,
+	pub from_anchor: u8,
+	pub from_offset: u64,
 }
 
 impl Job {
@@ -208,6 +208,8 @@ impl Job {
 	pub const WRITE: u8 = 2;
 	pub const QUERY: u8 = 3;
 	pub const CREATE: u8 = 4;
+	pub const QUERY_NEXT: u8 = 5;
+	pub const SEEK: u8 = 6;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -399,7 +401,7 @@ pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)>
 			lateout("r11") _,
 		);
 	}
-	ret(status, value)
+	ret(status, value).map(|v| v as u32)
 }
 
 #[inline]
@@ -422,7 +424,7 @@ pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize,
 			lateout("r11") _,
 		)
 	}
-	ret(status, value)
+	ret(status, value).map(|v| v as u32)
 }
 
 #[inline]
