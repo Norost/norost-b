@@ -71,11 +71,11 @@ fn main() {
 				let (path, offset) = &open_files[job.handle];
 				let mut file = fs.root_dir().open_file(path).unwrap();
 				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-				buf[..8].copy_from_slice(b"~~~~~~~~");
 				let l = file
 					.read(&mut buf[..job.operation_size.try_into().unwrap()])
 					.unwrap();
 				job.operation_size = l.try_into().unwrap();
+				open_files[job.handle].1 += u64::try_from(l).unwrap();
 			}
 			syscall::Job::WRITE => {
 				let (path, offset) = &open_files[job.handle];
@@ -85,6 +85,7 @@ fn main() {
 					.write(&buf[..job.operation_size.try_into().unwrap()])
 					.unwrap();
 				job.operation_size = l.try_into().unwrap();
+				open_files[job.handle].1 += u64::try_from(l).unwrap();
 			}
 			syscall::Job::QUERY => {
 				let entries = fs
