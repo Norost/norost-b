@@ -5,6 +5,7 @@ use crate::memory::r#virtual::RWX;
 use crate::memory::Page;
 use crate::object_table::{JobRequest, JobResult};
 use core::ptr::NonNull;
+use core::time::Duration;
 pub use norostb_kernel::io::Queue;
 use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
 
@@ -188,7 +189,6 @@ impl super::Process {
 						}
 					}
 					Request::TAKE_JOB => {
-						use core::time::Duration;
 						let handle = e.arguments_32[0];
 						let job = e.arguments_ptr[0] as *mut Job;
 
@@ -201,7 +201,7 @@ impl super::Process {
 								job.buffer_size.try_into().unwrap(),
 							)
 						};
-						let timeout = Duration::new(0, 0);
+						let timeout = Duration::MAX;
 						let Ok(Ok(info)) = super::super::block_on_timeout(tbl.take_job(timeout), timeout) else {
 							push_resp(-1);
 							continue;

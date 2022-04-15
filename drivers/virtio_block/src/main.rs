@@ -106,7 +106,6 @@ fn main() {
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
 		if std::os::norostb::take_job(tbl, &mut job).is_err() {
-			std::thread::sleep(std::time::Duration::from_millis(10));
 			continue;
 		}
 
