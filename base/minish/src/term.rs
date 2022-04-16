@@ -51,11 +51,6 @@ where
 			// Read
 			let prev_len = len;
 			len += self.reader.read(&mut data[len..])?;
-			if prev_len == len {
-				// TODO the kernel is kinda shit and doesn't block when it should.
-				std::thread::sleep(std::time::Duration::from_millis(50));
-				continue;
-			}
 
 			// Parse backspace & any annoying special characters
 			for i in (prev_len..len).rev() {

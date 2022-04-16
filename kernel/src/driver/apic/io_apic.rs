@@ -9,7 +9,7 @@ struct IoApic {
 }
 
 #[allow(dead_code)]
-pub fn set_irq(irq: u8, apic_id: u8, vector: u8) {
+pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8) {
 	let i = 0x10 + u32::from(irq) * 2;
 
 	unsafe {

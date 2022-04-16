@@ -2,7 +2,7 @@ pub mod asm;
 mod cpuid;
 mod gdt;
 #[macro_use]
-mod idt;
+pub mod idt;
 pub mod msr;
 mod multiboot;
 mod syscall;
@@ -69,7 +69,7 @@ pub unsafe fn init() {
 	cpuid::enable_fsgsbase();
 }
 
-fn handle_timer(rip: *const ()) -> ! {
+extern "C" fn handle_timer(rip: *const ()) -> ! {
 	debug!("Timer interrupt!");
 	debug!("  RIP:     {:p}", rip);
 	apic::local_apic::get().eoi.set(0);
@@ -85,7 +85,7 @@ fn handle_timer(rip: *const ()) -> ! {
 	}
 }
 
-fn handle_double_fault(error: u32, rip: *const ()) {
+extern "C" fn handle_double_fault(error: u32, rip: *const ()) {
 	fatal!("Double fault!");
 	unsafe {
 		let addr: *const ();
@@ -97,14 +97,14 @@ fn handle_double_fault(error: u32, rip: *const ()) {
 	halt();
 }
 
-fn handle_general_protection_fault(error: u32, rip: *const ()) {
+extern "C" fn handle_general_protection_fault(error: u32, rip: *const ()) {
 	fatal!("General protection fault!");
 	fatal!("  error:   {:#x}", error);
 	fatal!("  RIP:     {:p}", rip);
 	halt();
 }
 
-fn handle_page_fault(error: u32, rip: *const ()) {
+extern "C" fn handle_page_fault(error: u32, rip: *const ()) {
 	fatal!("Page fault!");
 	unsafe {
 		let addr: *const ();

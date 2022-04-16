@@ -266,7 +266,7 @@ pub struct TicketWaker<T> {
 }
 
 impl<T> TicketWaker<T> {
-	fn complete(self, status: Result<T, Error>) {
+	pub fn complete(self, status: Result<T, Error>) {
 		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
