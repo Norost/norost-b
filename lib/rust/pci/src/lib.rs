@@ -12,6 +12,7 @@
 use core::cell::Cell;
 use core::convert::TryInto;
 use core::fmt;
+use core::marker::PhantomData;
 use core::num::NonZeroU32;
 use core::ptr::NonNull;
 use endian::{u16le, u32le};
@@ -112,6 +113,12 @@ impl BaseAddress {
 	}
 }
 
+impl fmt::Debug for BaseAddress {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "0x{:08x}", self.get())
+	}
+}
+
 /// Common header fields.
 #[repr(C)]
 pub struct HeaderCommon {
@@ -132,6 +139,14 @@ pub struct HeaderCommon {
 	bist: VolatileCell<u8>,
 }
 
+macro_rules! get_volatile {
+	($f:ident -> $t:ty) => {
+		pub fn $f(&self) -> $t {
+			self.$f.get().into()
+		}
+	};
+}
+
 impl HeaderCommon {
 	/// Flag used to enable MMIO
 	pub const COMMAND_MMIO_MASK: u16 = 0x2;
@@ -140,14 +155,41 @@ impl HeaderCommon {
 	/// Flag used to disable interrupts.
 	pub const COMMAND_INTERRUPT_DISABLE: u16 = 1 << 10;
 
+	get_volatile!(vendor_id -> u16);
+	get_volatile!(device_id -> u16);
+	get_volatile!(command -> u16);
+	get_volatile!(status -> u16);
+	get_volatile!(revision_id -> u8);
+	get_volatile!(prog_if -> u8);
+	get_volatile!(subclass -> u8);
+	get_volatile!(class_code -> u8);
+	get_volatile!(cache_line_size -> u8);
+	get_volatile!(latency_timer -> u8);
+	get_volatile!(header_type -> u8);
+	get_volatile!(bist -> u8);
+
 	/// Set the flags in the command register.
 	pub fn set_command(&self, flags: u16) {
 		self.command.set(flags.into());
 	}
+}
 
-	/// Read the status register
-	pub fn status(&self) -> u16 {
-		self.status.get().into()
+impl fmt::Debug for HeaderCommon {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(HeaderCommon))
+			.field("vendor_id", &format_args!("0x{:04x}", self.vendor_id()))
+			.field("device_id", &format_args!("0x{:04x}", self.device_id()))
+			.field("command", &format_args!("0b{:016b}", self.command()))
+			.field("status", &format_args!("0b{:016b}", self.status()))
+			.field("revision_id", &self.revision_id())
+			.field("prog_if", &self.prog_if())
+			.field("subclass", &self.subclass())
+			.field("class_code", &self.class_code())
+			.field("cache_line_size", &self.cache_line_size())
+			.field("latency_timer", &self.latency_timer())
+			.field("header_type", &self.header_type())
+			.field("bist", &self.bist())
+			.finish()
 	}
 }
 
@@ -184,11 +226,21 @@ impl Header0 {
 			let next = (self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
 			let next = Some(NonNull::new_unchecked(next as *mut Capability).cast());
 			CapabilityIter {
-				_header: self,
+				marker: PhantomData,
 				next,
 			}
 		}
 	}
+
+	get_volatile!(cardbus_cis_pointer -> u32);
+	get_volatile!(subsystem_vendor_id -> u16);
+	get_volatile!(subsystem_id -> u16);
+	get_volatile!(expansion_rom_base_address -> u32);
+	get_volatile!(capabilities_pointer -> u8);
+	get_volatile!(interrupt_line -> u8);
+	get_volatile!(interrupt_pin -> u8);
+	get_volatile!(min_grant -> u8);
+	get_volatile!(max_latency -> u8);
 
 	pub fn base_address(&self, index: usize) -> u32 {
 		self.base_address[usize::from(index)].get().into()
@@ -208,12 +260,48 @@ impl Header0 {
 	}
 }
 
+impl fmt::Debug for Header0 {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(Header0))
+			.field("common", &self.common)
+			.field("base_address", &self.base_address)
+			.field("cardbus_cis_pointer", &self.cardbus_cis_pointer())
+			.field(
+				"subsystem_vendor_id",
+				&format_args!("0x{:04x}", self.subsystem_vendor_id()),
+			)
+			.field(
+				"subsystem_id",
+				&format_args!("0x{:04x}", self.subsystem_id()),
+			)
+			.field(
+				"expansion_rom_base_address",
+				&format_args!("0x{:08x}", self.expansion_rom_base_address()),
+			)
+			.field(
+				"capabilities_pointer",
+				&format_args!("0x{:02x}", self.capabilities_pointer()),
+			)
+			.field(
+				"interrupt_line",
+				&format_args!("0x{:02x}", self.interrupt_line()),
+			)
+			.field(
+				"interrupt_pin",
+				&format_args!("0x{:02x}", self.interrupt_pin()),
+			)
+			.field("min_grant", &format_args!("0x{:02x}", self.min_grant()))
+			.field("max_latency", &format_args!("0x{:02x}", self.max_latency()))
+			.finish()
+	}
+}
+
 /// Header type 0x01 (Pci-to-PCI bridge)
 #[repr(C)]
 pub struct Header1 {
-	common: HeaderCommon,
+	pub common: HeaderCommon,
 
-	base_address: [BaseAddress; 2],
+	pub base_address: [BaseAddress; 2],
 
 	primary_bus_number: VolatileCell<u8>,
 	secondary_bus_number: VolatileCell<u8>,
@@ -247,7 +335,31 @@ pub struct Header1 {
 	bridge_control: VolatileCell<u16le>,
 }
 
+impl Header1 {
+	/// Return the capability structures attached to this header.
+	pub fn capabilities<'a>(&'a self) -> CapabilityIter<'a> {
+		unsafe {
+			let next = (self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
+			let next = Some(NonNull::new_unchecked(next as *mut Capability).cast());
+			CapabilityIter {
+				marker: PhantomData,
+				next,
+			}
+		}
+	}
+}
+
+impl fmt::Debug for Header1 {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(Header1))
+			.field("common", &self.common)
+			.field("base_address", &self.base_address)
+			.finish_non_exhaustive()
+	}
+}
+
 /// Enum of possible headers.
+#[derive(Clone, Copy, Debug)]
 pub enum Header<'a> {
 	H0(&'a Header0),
 	H1(&'a Header1),
@@ -269,6 +381,18 @@ impl<'a> Header<'a> {
 
 	pub fn device_id(&self) -> u16 {
 		self.common().device_id.get().into()
+	}
+
+	/// Return the capability structures attached to this header.
+	pub fn capabilities(&self) -> CapabilityIter<'a> {
+		match self {
+			Self::H0(h) => h.capabilities(),
+			Self::H1(h) => h.capabilities(),
+			Self::Unknown(_) => CapabilityIter {
+				marker: PhantomData,
+				next: None,
+			},
+		}
 	}
 
 	pub fn base_addresses(&self) -> &[BaseAddress] {
@@ -330,9 +454,18 @@ impl Capability {
 	}
 }
 
+impl fmt::Debug for Capability {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct(stringify!(Capability))
+			.field("id", &format_args!("{:#02x}", self.id()))
+			.field("next", &format_args!("{:#02x}", self.id()))
+			.finish_non_exhaustive()
+	}
+}
+
 pub struct CapabilityIter<'a> {
-	_header: &'a Header0,
 	next: Option<NonNull<Capability>>,
+	marker: PhantomData<&'a Capability>,
 }
 
 impl<'a> Iterator for CapabilityIter<'a> {
