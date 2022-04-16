@@ -110,7 +110,7 @@ pub(super) unsafe fn init() {
 	let com1_irq = 4;
 	let com1_vec = 32 + 4;
 
-	io_apic::set_irq(com1_irq, 0, com1_vec);
+	io_apic::set_irq(com1_irq, 0, com1_vec, io_apic::TriggerMode::Level);
 	amd64::idt_set(com1_vec.into(), crate::wrap_idt!(int irq_handler));
 }
 
