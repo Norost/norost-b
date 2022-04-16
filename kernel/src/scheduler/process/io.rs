@@ -235,7 +235,7 @@ impl super::Process {
 							JobRequest::Write { handle, data } => {
 								job.ty = Job::WRITE;
 								job.handle = handle;
-								let len = data.len().max(job.buffer_size.try_into().unwrap());
+								let len = data.len().min(job.buffer_size.try_into().unwrap());
 								copy_buf(&data[..len]);
 							}
 							JobRequest::Seek { handle, from } => {
