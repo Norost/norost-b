@@ -77,6 +77,36 @@ impl BaseAddress {
 		}
 	}
 
+	/// If set, reads won't have any side effects. This is useful to make better use of caching.
+	pub fn is_prefetchable(value: u32) -> bool {
+		value & 0x8 > 0
+	}
+
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(bars: &[Self], index: usize) -> Option<ParsedBaseAddress> {
+		let low = bars.get(index)?.0.get().into();
+		if BaseAddress::is_io(low) {
+			Some(ParsedBaseAddress::IO32 {
+				address: low & !0x3,
+			})
+		} else if BaseAddress::is_32bit(low) {
+			Some(ParsedBaseAddress::MMIO32 {
+				address: low & !0xf,
+				prefetchable: BaseAddress::is_prefetchable(low),
+			})
+		} else if BaseAddress::is_64bit(low) {
+			Some(ParsedBaseAddress::MMIO64 {
+				address: u64::from(low & !0xf)
+					| u64::from(u32::from(bars.get(index + 1)?.0.get())) << 32,
+				prefetchable: BaseAddress::is_prefetchable(low),
+			})
+		} else {
+			None
+		}
+	}
+
 	/// Return the size of the memory area a BAR points to.
 	///
 	/// This dirties the register, so the original value must be restored afterwards (if any).
@@ -117,6 +147,13 @@ impl fmt::Debug for BaseAddress {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "0x{:08x}", self.get())
 	}
+}
+
+/// A BAR in a more friendly format.
+pub enum ParsedBaseAddress {
+	IO32 { address: u32 },
+	MMIO32 { address: u32, prefetchable: bool },
+	MMIO64 { address: u64, prefetchable: bool },
 }
 
 /// Common header fields.
@@ -258,6 +295,13 @@ impl Header0 {
 		self.common.set_command(value);
 	}
 
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(&self.base_address, index)
+	}
+
 	/// Read the status register
 	pub fn status(&self) -> u16 {
 		self.common.status()
@@ -350,6 +394,13 @@ impl Header1 {
 				NonNull::new_unchecked(next as *mut Capability).cast()
 			}),
 		}
+	}
+
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(&self.base_address, index)
 	}
 }
 
