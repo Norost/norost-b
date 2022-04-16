@@ -168,6 +168,10 @@ impl HeaderCommon {
 	get_volatile!(header_type -> u8);
 	get_volatile!(bist -> u8);
 
+	pub fn has_capabilities(&self) -> bool {
+		self.status() & (1 << 4) > 0
+	}
+
 	/// Set the flags in the command register.
 	pub fn set_command(&self, flags: u16) {
 		self.command.set(flags.into());
@@ -222,13 +226,13 @@ impl Header0 {
 
 	/// Return the capability structures attached to this header.
 	pub fn capabilities<'a>(&'a self) -> CapabilityIter<'a> {
-		unsafe {
-			let next = (self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
-			let next = Some(NonNull::new_unchecked(next as *mut Capability).cast());
-			CapabilityIter {
-				marker: PhantomData,
-				next,
-			}
+		CapabilityIter {
+			marker: PhantomData,
+			next: self.common.has_capabilities().then(|| unsafe {
+				let next =
+					(self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
+				NonNull::new_unchecked(next as *mut Capability).cast()
+			}),
 		}
 	}
 
@@ -338,13 +342,13 @@ pub struct Header1 {
 impl Header1 {
 	/// Return the capability structures attached to this header.
 	pub fn capabilities<'a>(&'a self) -> CapabilityIter<'a> {
-		unsafe {
-			let next = (self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
-			let next = Some(NonNull::new_unchecked(next as *mut Capability).cast());
-			CapabilityIter {
-				marker: PhantomData,
-				next,
-			}
+		CapabilityIter {
+			marker: PhantomData,
+			next: self.common.has_capabilities().then(|| unsafe {
+				let next =
+					(self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
+				NonNull::new_unchecked(next as *mut Capability).cast()
+			}),
 		}
 	}
 }
@@ -452,6 +456,167 @@ impl Capability {
 	pub unsafe fn data<'a, T>(&'a self) -> &'a T {
 		&*(self as *const _ as *const u8).cast()
 	}
+
+	/// Cast this capability to a concrete type if the ID is recognized.
+	pub fn downcast<'a>(&'a self) -> Option<capability::Capability<'a>> {
+		unsafe {
+			use capability::*;
+			match self.id() {
+				0x_5 => Some(Capability::Msi(&*(self as *const _ as *const _))),
+				0x_9 => Some(Capability::Vendor(&*(self as *const _ as *const _))),
+				0x11 => Some(Capability::MsiX(&*(self as *const _ as *const _))),
+				_ => None,
+			}
+		}
+	}
+}
+
+pub mod capability {
+	use super::*;
+
+	pub enum Capability<'a> {
+		Msi(&'a Msi),
+		Vendor(&'a Vendor),
+		MsiX(&'a MsiX),
+	}
+
+	impl fmt::Debug for Capability<'_> {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			match self {
+				Self::Msi(m) => m.fmt(f),
+				Self::Vendor(m) => m.fmt(f),
+				Self::MsiX(m) => m.fmt(f),
+			}
+		}
+	}
+
+	#[repr(C)]
+	pub struct Msi {
+		common: super::Capability,
+		message_control: VolatileCell<MsiMessageControl>,
+		message_address_low: VolatileCell<u32le>,
+		message_address_high: VolatileCell<u32le>,
+		message_data: VolatileCell<u16le>,
+		_reserved: [u8; 2],
+		mask: VolatileCell<u32le>,
+		pending: VolatileCell<u32le>,
+	}
+
+	#[derive(Clone, Copy)]
+	#[repr(transparent)]
+	pub struct MsiMessageControl(u16le);
+
+	impl Msi {
+		get_volatile!(message_control -> MsiMessageControl);
+
+		#[inline]
+		pub fn message_address(&self) -> u64 {
+			let f = |n: &VolatileCell<u32le>| u64::from(u32::from(n.get()));
+			f(&self.message_address_low) | f(&self.message_address_high) << 32
+		}
+
+		get_volatile!(message_data -> u16);
+		get_volatile!(mask -> u32);
+		get_volatile!(pending -> u32);
+	}
+
+	impl MsiMessageControl {
+		#[inline]
+		pub fn enable(&self) -> bool {
+			u16::from(self.0) & (1 << 15) > 0
+		}
+
+		#[inline]
+		pub fn function_mask(&self) -> bool {
+			u16::from(self.0) & (1 << 14) > 0
+		}
+
+		#[inline]
+		pub fn table_size(&self) -> u16 {
+			u16::from(self.0) & 0x3ff
+		}
+	}
+
+	impl fmt::Debug for Msi {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(Msi))
+				.field("common", &self.common)
+				.field("message_control", &self.message_control())
+				.field(
+					"message_address",
+					&format_args!("0x{:016x}", self.message_address()),
+				)
+				.field(
+					"message_data",
+					&format_args!("0x{:04x}", self.message_data()),
+				)
+				.field("mask", &format_args!("0x{:04x}", self.mask()))
+				.field("pending", &format_args!("0x{:04x}", self.pending()))
+				.finish()
+		}
+	}
+
+	impl fmt::Debug for MsiMessageControl {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(MsiMessageControl))
+				.field("enable", &self.enable())
+				.field("function_mask", &self.function_mask())
+				.field("table_size", &self.table_size())
+				.finish()
+		}
+	}
+
+	#[repr(C)]
+	pub struct Vendor {
+		common: super::Capability,
+		length: VolatileCell<u8>,
+	}
+
+	impl Vendor {
+		get_volatile!(length -> u8);
+	}
+
+	impl fmt::Debug for Vendor {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(Vendor))
+				.field("common", &self.common)
+				.field("length", &self.length())
+				.finish_non_exhaustive()
+		}
+	}
+
+	#[repr(C)]
+	pub struct MsiX {
+		common: super::Capability,
+		table_bir_offset: VolatileCell<u32le>,
+		pending_bit_bir_offset: VolatileCell<u32le>,
+	}
+
+	impl MsiX {
+		fn table(&self) -> (u32, u8) {
+			let v = u32::from(self.table_bir_offset.get());
+			(v & !0x7, (v & 0x7) as u8)
+		}
+
+		fn pending(&self) -> (u32, u8) {
+			let v = u32::from(self.pending_bit_bir_offset.get());
+			(v & !0x7, (v & 0x7) as u8)
+		}
+	}
+
+	impl fmt::Debug for MsiX {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			let (table_offset, table_bir) = self.table();
+			let (pending_offset, pending_bir) = self.pending();
+			f.debug_struct(stringify!(MsiX))
+				.field("common", &self.common)
+				.field("table_offset", &format_args!("0x{:04x}", table_offset))
+				.field("table_bir", &table_bir)
+				.field("pending_offset", &format_args!("0x{:04x}", pending_offset))
+				.field("pending_bir", &pending_bir)
+				.finish()
+		}
+	}
 }
 
 impl fmt::Debug for Capability {
@@ -459,7 +624,7 @@ impl fmt::Debug for Capability {
 		f.debug_struct(stringify!(Capability))
 			.field("id", &format_args!("{:#02x}", self.id()))
 			.field("next", &format_args!("{:#02x}", self.id()))
-			.finish_non_exhaustive()
+			.finish()
 	}
 }
 
