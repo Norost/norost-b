@@ -126,21 +126,6 @@ impl Table for StreamingTable {
 }
 
 impl Object for StreamingTable {
-	fn event_listener(&self) -> Result<EventListener, Unpollable> {
-		/*
-		let mut ew = self.jobs.lock();
-		let (l, w) = EventListener::new();
-		if let Some(c) = ew.0.checked_sub(1) {
-			w.complete(Events(42));
-			ew.0 = c;
-		} else {
-			ew.1.push(w);
-		}
-		Ok(l)
-		*/
-		todo!()
-	}
-
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
 		Some(self)
 	}

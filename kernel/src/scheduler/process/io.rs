@@ -321,6 +321,16 @@ impl super::Process {
 							Err(_) => push_resp(-1),
 						}
 					}
+					Request::POLL => {
+						let handle = e.arguments_32[0];
+						let object = self.objects.get(usize::try_from(handle).unwrap()).unwrap();
+						let ticket = object.poll();
+						let result = super::super::block_on(ticket);
+						match result {
+							Ok(b) => push_resp(b as isize),
+							Err(_) => push_resp(-1),
+						}
+					}
 					op => {
 						warn!("Unknown I/O queue operation {}", op);
 						push_resp(-1);

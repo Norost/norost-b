@@ -1,5 +1,8 @@
-use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Table, Ticket};
-use alloc::{boxed::Box, format, string::String, sync::Arc};
+use crate::object_table::{
+	Error, NoneQuery, Object, Query, QueryResult, Table, Ticket, TicketWaker,
+};
+use crate::sync::IsrSpinLock;
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
 use core::str;
 
 /// Table with all PCI devices.
@@ -22,8 +25,7 @@ impl Table for PciTable {
 					Some(())
 				}
 			};
-			let _ = dbg!(core::str::from_utf8(t));
-			let r = match t
+			match t
 				.iter()
 				.position(|c| *c == b':')
 				.map(|i| t.split_at(i.into()))
@@ -43,10 +45,6 @@ impl Table for PciTable {
 				}
 				_ => None,
 			};
-			dbg!(&r, &vendor_id, &device_id);
-			if r.is_none() {
-				return Ticket::new_complete(Ok(Box::new(NoneQuery)));
-			}
 		}
 		Ticket::new_complete(Ok(Box::new(QueryTags {
 			vendor_id,

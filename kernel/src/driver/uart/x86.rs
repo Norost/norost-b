@@ -108,9 +108,9 @@ pub(super) unsafe fn init() {
 	// - Set the IDT entry.
 	// - Set the I/O APIC to route external interrupts to and IDT
 	let com1_irq = 4;
-	let com1_vec = 32 + 4;
+	let com1_vec = amd64::allocate_irq().unwrap();
 
-	io_apic::set_irq(com1_irq, 0, com1_vec);
+	io_apic::set_irq(com1_irq, 0, com1_vec, io_apic::TriggerMode::Level);
 	amd64::idt_set(com1_vec.into(), crate::wrap_idt!(int irq_handler));
 }
 
