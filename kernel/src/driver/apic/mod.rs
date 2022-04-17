@@ -2,7 +2,7 @@ pub mod io_apic;
 pub mod local_apic;
 mod reg;
 
-use crate::arch::amd64::msr;
+use crate::arch::amd64::{self, msr};
 use crate::memory::Page;
 use crate::time::Monotonic;
 use acpi::{AcpiHandler, AcpiTables};
@@ -25,7 +25,9 @@ where
 pub fn post_init() {
 	// Set interrupt vector
 	let t = local_apic::get().lvt_timer.get();
-	local_apic::get().lvt_timer.set(t & !0xff | 61);
+	local_apic::get()
+		.lvt_timer
+		.set(t & !0xff | u32::from(amd64::TIMER_IRQ));
 
 	calibrate_timer(Duration::from_millis(10));
 }

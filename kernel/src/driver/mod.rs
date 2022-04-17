@@ -18,7 +18,8 @@ use crate::boot;
 /// This function may only be called once at boot time
 pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
-	uart::init();
+
+	uart::init(); // Initialize UART first as we need it for logging.
 
 	acpi::init(boot);
 
@@ -28,4 +29,6 @@ pub unsafe fn init(boot: &boot::Info) {
 	rtc::init();
 
 	apic::post_init();
+
+	uart::post_init();
 }

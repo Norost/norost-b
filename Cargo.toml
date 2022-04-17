@@ -5,15 +5,18 @@ cargo-features = ["strip"]
 members = [
 	"kernel",
 	"boot/amd64",
+	"drivers/fs_fat",
 	"drivers/virtio_block",
 	"drivers/virtio_net",
+	"lib/rust/arena",
+	"lib/rust/driver_utils",
 	"lib/rust/endian",
 	"lib/rust/pci",
 	"lib/rust/virtio",
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",
 	"lib/rust/rt",
-	"base/hello_std",
+	"base/minish",
 ]
 
 [profile.dev]
@@ -23,9 +26,15 @@ opt-level = 3
 [profile.release]
 panic = "abort"
 lto = "fat"
+debug = true
 #strip = "symbols"
 
 [profile.release.package.noraboot]
 codegen-units = 1
 opt-level = 'z'
 #strip = "symbols"
+
+[patch.crates-io]
+os_str_bytes = { git = "https://git.sr.ht/~demindiro/os_str_bytes", branch = "norost" }
+atty = { git = "https://git.sr.ht/~demindiro/atty", branch = "norost" }
+dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }

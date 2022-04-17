@@ -149,6 +149,10 @@ pub fn get() -> &'static LocalApic {
 	unsafe { &*(phys_to_virt(super::local_apic_address()).cast()) }
 }
 
+pub fn get_phys() -> u64 {
+	return super::local_apic_address();
+}
+
 pub(super) fn init() {
 	// Ensure the LAPIC registers are mapped.
 	let a = PPN::try_from_usize(super::local_apic_address().try_into().unwrap()).unwrap();

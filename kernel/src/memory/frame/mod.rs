@@ -142,8 +142,8 @@ impl IntoIterator for PageFrame {
 }
 
 pub struct PageFrameIter {
-	base: PPN,
-	count: usize,
+	pub base: PPN,
+	pub count: usize,
 }
 
 impl Iterator for PageFrameIter {

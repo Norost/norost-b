@@ -2,8 +2,10 @@ use super::PCI;
 use crate::memory::frame::PageFrame;
 use crate::memory::frame::PPN;
 use crate::object_table::Object;
+use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
-use alloc::boxed::Box;
+use crate::sync::IsrSpinLock;
+use alloc::{boxed::Box, vec::Vec};
 use pci::BaseAddress;
 
 /// A single PCI device.
@@ -11,6 +13,9 @@ pub struct PciDevice {
 	bus: u8,
 	device: u8,
 }
+
+/// List of tasks waiting for an interrupt.
+static IRQ_LISTENERS: IsrSpinLock<Vec<TicketWaker<usize>>> = IsrSpinLock::new(Vec::new());
 
 impl PciDevice {
 	pub(super) fn new(bus: u8, device: u8) -> Self {
@@ -35,6 +40,12 @@ impl MemoryObject for PciDevice {
 }
 
 impl Object for PciDevice {
+	fn poll(&self) -> Ticket<usize> {
+		let (ticket, waker) = Ticket::new();
+		IRQ_LISTENERS.lock().push(waker);
+		ticket
+	}
+
 	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
 		if offset == 0 {
 			return Some(Box::new(PciDevice {
@@ -72,5 +83,11 @@ pub struct BarRegion {
 impl MemoryObject for BarRegion {
 	fn physical_pages(&self) -> Box<[PageFrame]> {
 		[self.frame].into()
+	}
+}
+
+pub(super) fn irq_handler() {
+	for e in IRQ_LISTENERS.lock().drain(..) {
+		e.complete(Ok(0));
 	}
 }

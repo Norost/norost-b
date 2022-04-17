@@ -1,6 +1,6 @@
 #![no_std]
 
-use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
+use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
 macro_rules! ety {
 	(@INTERNAL impl arithemic $name:ident, $ty:ty, $trait:ident.$fn:ident) => {
@@ -33,6 +33,12 @@ macro_rules! ety {
 		#[repr(transparent)]
 		pub struct $name($ty);
 
+		impl $name {
+			pub const fn new(value: $ty) -> Self {
+				Self(value.$to())
+			}
+		}
+
 		impl From<$ty> for $name {
 			fn from(value: $ty) -> Self {
 				Self(value.$to())
@@ -48,6 +54,14 @@ macro_rules! ety {
 		ety!(@INTERNAL impl bitwise $name, $ty, BitOr.bitor, BitOrAssign.bitor_assign);
 		ety!(@INTERNAL impl bitwise $name, $ty, BitAnd.bitand, BitAndAssign.bitand_assign);
 		ety!(@INTERNAL impl bitwise $name, $ty, BitXor.bitxor, BitXorAssign.bitxor_assign);
+
+		impl Not for $name {
+			type Output = Self;
+
+			fn not(self) -> Self {
+				Self(self.0.not())
+			}
+		}
 	};
 	(be $ty:ty, $name:ident) => {
 		ety!(@INTERNAL $ty, $name, from_be, to_be);

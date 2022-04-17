@@ -21,6 +21,10 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 
+pub use norostb_kernel::{
+	io::{JobId, SeekFrom},
+	syscall::Handle,
+};
 pub use streaming::StreamingTable;
 
 /// The global list of all tables.
@@ -41,25 +45,31 @@ where
 	fn name(&self) -> &str;
 
 	/// Search for objects based on a name and/or tags.
-	fn query(self: Arc<Self>, name: Option<&str>, tags: &[&str]) -> Box<dyn Query>;
+	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>>;
 
-	/// Get a single object based on ID.
-	fn get(self: Arc<Self>, id: Id) -> Ticket;
+	/// Open a single object based on path.
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	/// Create a new object.
-	fn create(self: Arc<Self>, tags: &[u8]) -> Ticket;
+	/// Create a new object with the given path.
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask;
+	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+		unimplemented!()
+	}
 
-	fn finish_job(self: Arc<Self>, job: Job) -> Result<(), ()>;
+	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
+		unimplemented!()
+	}
 
-	fn cancel_job(self: Arc<Self>, job: Job);
+	fn cancel_job(self: Arc<Self>, job_id: JobId) {
+		unimplemented!()
+	}
 }
 
 /// A query into a table.
 pub trait Query
 where
-	Self: Iterator<Item = QueryResult>,
+	Self: Iterator<Item = Ticket<QueryResult>>,
 {
 }
 
@@ -69,7 +79,7 @@ pub struct NoneQuery;
 impl Query for NoneQuery {}
 
 impl Iterator for NoneQuery {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		None
@@ -78,26 +88,24 @@ impl Iterator for NoneQuery {
 
 /// A query that returns a single result.
 pub struct OneQuery {
-	pub id: Id,
-	pub tags: Option<Box<[Box<str>]>>,
+	pub path: Option<Box<[u8]>>,
 }
 
 impl Query for OneQuery {}
 
 impl Iterator for OneQuery {
-	type Item = QueryResult;
+	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.tags
+		self.path
 			.take()
-			.map(|tags| QueryResult { id: self.id, tags })
+			.map(|path| Ticket::new_complete(Ok(QueryResult { path })))
 	}
 }
 
 /// A single query result
 pub struct QueryResult {
-	pub id: Id,
-	pub tags: Box<[Box<str>]>,
+	pub path: Box<[u8]>,
 }
 
 /// A single object.
@@ -108,16 +116,20 @@ pub trait Object {
 		None
 	}
 
-	fn read(&self, _offset: u64, _length: u32) -> Result<Ticket, ()> {
-		Err(())
+	fn read(&self, _offset: u64, _length: usize) -> Ticket<Box<[u8]>> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
-	fn write(&self, _offset: u64, _data: &[u8]) -> Result<Ticket, ()> {
-		Err(())
+	fn write(&self, _offset: u64, _data: &[u8]) -> Ticket<usize> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
-	fn event_listener(&self) -> Result<EventListener, Unpollable> {
-		Err(Unpollable)
+	fn seek(&self, _from: norostb_kernel::io::SeekFrom) -> Ticket<u64> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
+	}
+
+	fn poll(&self) -> Ticket<usize> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
@@ -183,76 +195,27 @@ bi_from!(newtype Events <=> u32);
 pub struct Unpollable;
 
 /// A job submitted by a client to be fulfilled by a server (i.e. table owner).
-#[derive(Default, Debug)]
-pub struct Job {
-	pub ty: JobType,
-	pub flags: [u8; 3],
-	pub job_id: JobId,
-	pub operation_size: u32,
-	pub object_id: Id,
-	pub buffer: Box<[u8]>,
+#[derive(Debug)]
+pub enum JobRequest {
+	Open { path: Box<[u8]> },
+	Create { path: Box<[u8]> },
+	Read { handle: Handle, amount: usize },
+	Write { handle: Handle, data: Box<[u8]> },
+	Seek { handle: Handle, from: SeekFrom },
+	Query { filter: Box<[u8]> },
+	QueryNext { handle: Handle },
 }
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum JobType {
-	#[default]
-	Open = 0,
-	Read = 1,
-	Write = 2,
-	Query = 3,
-	Create = 4,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct JobId(u32);
-
-default!(newtype JobId = u32::MAX);
-bi_from!(newtype JobId <=> u32);
-
-/// Data submitted as part of a job.
-pub enum Data {
-	Usize(usize),
-	#[allow(dead_code)]
-	Bytes(Box<[u8]>),
-	Object(Arc<dyn Object>),
-}
-
-impl Data {
-	pub fn into_usize(self) -> Option<usize> {
-		match self {
-			Self::Usize(n) => Some(n),
-			_ => None,
-		}
-	}
-
-	#[allow(dead_code)]
-	pub fn into_bytes(self) -> Option<Box<[u8]>> {
-		match self {
-			Self::Bytes(n) => Some(n),
-			_ => None,
-		}
-	}
-
-	pub fn into_object(self) -> Option<Arc<dyn Object>> {
-		match self {
-			Self::Object(n) => Some(n),
-			_ => None,
-		}
-	}
-}
-
-impl fmt::Debug for Data {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = f.debug_tuple(stringify!(Data));
-		match self {
-			Self::Usize(n) => f.field(&n),
-			Self::Bytes(d) => f.field(&d),
-			Self::Object(_d) => f.field(&"<object>"),
-		};
-		f.finish()
-	}
+/// A finished job.
+#[derive(Debug)]
+pub enum JobResult {
+	Open { handle: Handle },
+	Create { handle: Handle },
+	Read { data: Box<[u8]> },
+	Write { amount: usize },
+	Seek { position: u64 },
+	Query { handle: Handle },
+	QueryNext { path: Box<[u8]> },
 }
 
 /// An error that occured during a job.
@@ -262,14 +225,20 @@ pub struct Error {
 	pub message: Box<str>,
 }
 
-/// A ticket referring to a job to be completed.
-#[derive(Default)]
-pub struct Ticket {
-	inner: Arc<SpinLock<TicketInner>>,
+impl Error {
+	pub fn new(code: u32, message: Box<str>) -> Self {
+		Self { code, message }
+	}
 }
 
-impl Ticket {
-	pub fn new_complete(status: Result<Data, Error>) -> Self {
+/// A ticket referring to a job to be completed.
+#[derive(Default)]
+pub struct Ticket<T> {
+	inner: Arc<SpinLock<TicketInner<T>>>,
+}
+
+impl<T> Ticket<T> {
+	pub fn new_complete(status: Result<T, Error>) -> Self {
 		let inner = SpinLock::new(TicketInner {
 			waker: None,
 			status: Some(status),
@@ -278,7 +247,7 @@ impl Ticket {
 		Self { inner }
 	}
 
-	pub fn new() -> (Self, TicketWaker) {
+	pub fn new() -> (Self, TicketWaker<T>) {
 		let inner = Arc::new(SpinLock::new(TicketInner {
 			waker: None,
 			status: None,
@@ -292,12 +261,12 @@ impl Ticket {
 	}
 }
 
-pub struct TicketWaker {
-	inner: Arc<SpinLock<TicketInner>>,
+pub struct TicketWaker<T> {
+	inner: Arc<SpinLock<TicketInner<T>>>,
 }
 
-impl TicketWaker {
-	fn complete(self, status: Result<Data, Error>) {
+impl<T> TicketWaker<T> {
+	pub fn complete(self, status: Result<T, Error>) {
 		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
@@ -305,14 +274,14 @@ impl TicketWaker {
 }
 
 #[derive(Default)]
-pub struct TicketInner {
+pub struct TicketInner<T> {
 	waker: Option<Waker>,
 	/// The completion status of this job.
-	status: Option<Result<Data, Error>>,
+	status: Option<Result<T, Error>>,
 }
 
-impl Future for Ticket {
-	type Output = Result<Data, Error>;
+impl<T> Future for Ticket<T> {
+	type Output = Result<T, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		let mut t = self.inner.lock();
@@ -324,14 +293,6 @@ impl Future for Ticket {
 	}
 }
 
-/// The unique identifier of an object.
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct Id(pub u64);
-
-default!(newtype Id = u64::MAX);
-bi_from!(newtype Id <=> u64);
-
 /// The unique identifier of a table.
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -342,7 +303,7 @@ bi_from!(newtype TableId <=> u32);
 enum JobInner {
 	Active {
 		waker: Option<Waker>,
-		result: Option<Job>,
+		job: Option<(JobId, JobRequest)>,
 		table: Weak<dyn Table>,
 	},
 	Cancelled,
@@ -353,10 +314,10 @@ pub struct JobTask {
 }
 
 impl JobTask {
-	pub fn new(table: Weak<dyn Table>, result: Option<Job>) -> (Self, JobWaker) {
+	pub fn new(table: Weak<dyn Table>, job: Option<(JobId, JobRequest)>) -> (Self, JobWaker) {
 		let shared = Arc::new(SpinLock::new(JobInner::Active {
 			waker: None,
-			result,
+			job,
 			table,
 		}));
 		(
@@ -371,8 +332,8 @@ impl JobTask {
 impl Drop for JobTask {
 	fn drop(&mut self) {
 		match mem::replace(&mut *self.shared.lock(), JobInner::Cancelled) {
-			JobInner::Active { result, table, .. } => {
-				result.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job)));
+			JobInner::Active { job, table, .. } => {
+				job.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job.0)));
 			}
 			JobInner::Cancelled => (),
 		}
@@ -380,12 +341,12 @@ impl Drop for JobTask {
 }
 
 impl Future for JobTask {
-	type Output = Result<Job, Cancelled>;
+	type Output = Result<(JobId, JobRequest), Cancelled>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		match &mut *self.shared.lock() {
-			JobInner::Active { waker, result, .. } => {
-				if let Some(s) = result.take() {
+			JobInner::Active { waker, job, .. } => {
+				if let Some(s) = job.take() {
 					Poll::Ready(Ok(s))
 				} else {
 					*waker = Some(cx.waker().clone());
@@ -406,7 +367,7 @@ impl JobWaker {
 		let lock = self.shared.lock();
 		match &*lock {
 			JobInner::Active { .. } => Ok(JobWakerGuard(lock)),
-			JobInner::Cancelled => Err(Cancelled),
+			JobInner::Cancelled { .. } => Err(Cancelled),
 		}
 	}
 }
@@ -414,13 +375,15 @@ impl JobWaker {
 pub struct JobWakerGuard<'a>(crate::sync::spinlock::Guard<'a, JobInner>);
 
 impl JobWakerGuard<'_> {
-	pub fn complete(&mut self, job: Job) {
+	pub fn complete(&mut self, job: (JobId, JobRequest)) {
 		match &mut *self.0 {
-			JobInner::Active { waker, result, .. } => {
-				*result = Some(job);
+			JobInner::Active {
+				waker, job: p_job, ..
+			} => {
+				*p_job = Some(job);
 				waker.take().map(|w| w.wake());
 			}
-			JobInner::Cancelled => unreachable!(),
+			JobInner::Cancelled { .. } => unreachable!(),
 		}
 	}
 }
@@ -447,38 +410,33 @@ pub fn find_table(name: &str) -> Option<TableId> {
 }
 
 /// Perform a query on the given table if it exists.
-pub fn query(
-	table_id: TableId,
-	name: Option<&str>,
-	tags: &[&str],
-) -> Result<Box<dyn Query>, QueryError> {
+pub fn query(table_id: TableId, path: &[u8]) -> Result<Ticket<Box<dyn Query>>, QueryError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.query(name, tags))
+		.map(|tbl| tbl.query(path))
 		.ok_or(QueryError::InvalidTableId)
 }
 
-/// Get an object from a table.
-pub fn get(table_id: TableId, id: Id) -> Result<Ticket, GetError> {
+/// Open an object from a table.
+pub fn open(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, GetError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
-		.map(|tbl| tbl.get(id))
+		.map(|tbl| tbl.open(path))
 		.ok_or(GetError::InvalidTableId)
 }
 
 /// Create a new object in a table.
-#[allow(dead_code)]
-pub fn create(table_id: TableId, tags: &[u8]) -> Result<Ticket, CreateError> {
+pub fn create(table_id: TableId, path: &[u8]) -> Result<Ticket<Arc<dyn Object>>, CreateError> {
 	TABLES
 		.lock()
 		.get(usize::try_from(table_id.0).unwrap())
 		.and_then(Weak::upgrade)
 		.ok_or(CreateError::InvalidTableId)
-		.map(|tbl| tbl.create(tags))
+		.map(|tbl| tbl.create(path))
 }
 
 /// Add a new table.

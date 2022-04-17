@@ -12,6 +12,7 @@ run:
 	./run.sh
 
 disk0:
-	fallocate -l $$((32 * 512)) $@
+	fallocate -l $$((128 * 512)) $@
+	/sbin/mkfs.fat -F 12 $@
 
 .PHONY: kernel boot run
