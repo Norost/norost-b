@@ -63,6 +63,7 @@ impl Request {
 	pub const TAKE_JOB: u8 = 6;
 	pub const FINISH_JOB: u8 = 7;
 	pub const SEEK: u8 = 8;
+	pub const POLL: u8 = 9;
 
 	pub fn read(user_data: usize, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
@@ -170,6 +171,19 @@ impl Request {
 			arguments_32: [handle.try_into().unwrap(), 0],
 			arguments_64: [n],
 			arguments_ptr: [offset as *mut _ as usize, 0],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn poll(user_data: usize, handle: Handle) -> Self {
+		Self {
+			ty: Self::POLL,
+			arguments_8: [0, 0, 0],
+			// FIXME use u32 for handles.
+			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_64: [0],
+			arguments_ptr: [0, 0],
 			user_data,
 			..Default::default()
 		}

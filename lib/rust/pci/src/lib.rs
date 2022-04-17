@@ -12,6 +12,7 @@
 use core::cell::Cell;
 use core::convert::TryInto;
 use core::fmt;
+use core::marker::PhantomData;
 use core::num::NonZeroU32;
 use core::ptr::NonNull;
 use endian::{u16le, u32le};
@@ -76,6 +77,36 @@ impl BaseAddress {
 		}
 	}
 
+	/// If set, reads won't have any side effects. This is useful to make better use of caching.
+	pub fn is_prefetchable(value: u32) -> bool {
+		value & 0x8 > 0
+	}
+
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(bars: &[Self], index: usize) -> Option<ParsedBaseAddress> {
+		let low = bars.get(index)?.0.get().into();
+		if BaseAddress::is_io(low) {
+			Some(ParsedBaseAddress::IO32 {
+				address: low & !0x3,
+			})
+		} else if BaseAddress::is_32bit(low) {
+			Some(ParsedBaseAddress::MMIO32 {
+				address: low & !0xf,
+				prefetchable: BaseAddress::is_prefetchable(low),
+			})
+		} else if BaseAddress::is_64bit(low) {
+			Some(ParsedBaseAddress::MMIO64 {
+				address: u64::from(low & !0xf)
+					| u64::from(u32::from(bars.get(index + 1)?.0.get())) << 32,
+				prefetchable: BaseAddress::is_prefetchable(low),
+			})
+		} else {
+			None
+		}
+	}
+
 	/// Return the size of the memory area a BAR points to.
 	///
 	/// This dirties the register, so the original value must be restored afterwards (if any).
@@ -112,6 +143,30 @@ impl BaseAddress {
 	}
 }
 
+impl fmt::Debug for BaseAddress {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "0x{:08x}", self.get())
+	}
+}
+
+/// A BAR in a more friendly format.
+pub enum ParsedBaseAddress {
+	IO32 { address: u32 },
+	MMIO32 { address: u32, prefetchable: bool },
+	MMIO64 { address: u64, prefetchable: bool },
+}
+
+impl ParsedBaseAddress {
+	#[inline]
+	pub fn try_as_mmio(&self) -> Option<u64> {
+		match self {
+			Self::IO32 { .. } => None,
+			Self::MMIO32 { address, .. } => Some(u64::from(*address)),
+			Self::MMIO64 { address, .. } => Some(*address),
+		}
+	}
+}
+
 /// Common header fields.
 #[repr(C)]
 pub struct HeaderCommon {
@@ -132,6 +187,22 @@ pub struct HeaderCommon {
 	bist: VolatileCell<u8>,
 }
 
+macro_rules! get_volatile {
+	($f:ident -> $t:ty) => {
+		pub fn $f(&self) -> $t {
+			self.$f.get().into()
+		}
+	};
+}
+
+macro_rules! set_volatile {
+	($fn:ident : $f:ident <- $t:ty) => {
+		pub fn $fn(&self, value: $t) {
+			self.$f.set(value.into())
+		}
+	};
+}
+
 impl HeaderCommon {
 	/// Flag used to enable MMIO
 	pub const COMMAND_MMIO_MASK: u16 = 0x2;
@@ -140,14 +211,45 @@ impl HeaderCommon {
 	/// Flag used to disable interrupts.
 	pub const COMMAND_INTERRUPT_DISABLE: u16 = 1 << 10;
 
+	get_volatile!(vendor_id -> u16);
+	get_volatile!(device_id -> u16);
+	get_volatile!(command -> u16);
+	get_volatile!(status -> u16);
+	get_volatile!(revision_id -> u8);
+	get_volatile!(prog_if -> u8);
+	get_volatile!(subclass -> u8);
+	get_volatile!(class_code -> u8);
+	get_volatile!(cache_line_size -> u8);
+	get_volatile!(latency_timer -> u8);
+	get_volatile!(header_type -> u8);
+	get_volatile!(bist -> u8);
+
+	pub fn has_capabilities(&self) -> bool {
+		self.status() & (1 << 4) > 0
+	}
+
 	/// Set the flags in the command register.
 	pub fn set_command(&self, flags: u16) {
 		self.command.set(flags.into());
 	}
+}
 
-	/// Read the status register
-	pub fn status(&self) -> u16 {
-		self.status.get().into()
+impl fmt::Debug for HeaderCommon {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(HeaderCommon))
+			.field("vendor_id", &format_args!("0x{:04x}", self.vendor_id()))
+			.field("device_id", &format_args!("0x{:04x}", self.device_id()))
+			.field("command", &format_args!("0b{:016b}", self.command()))
+			.field("status", &format_args!("0b{:016b}", self.status()))
+			.field("revision_id", &self.revision_id())
+			.field("prog_if", &self.prog_if())
+			.field("subclass", &self.subclass())
+			.field("class_code", &self.class_code())
+			.field("cache_line_size", &self.cache_line_size())
+			.field("latency_timer", &self.latency_timer())
+			.field("header_type", &self.header_type())
+			.field("bist", &self.bist())
+			.finish()
 	}
 }
 
@@ -180,15 +282,25 @@ impl Header0 {
 
 	/// Return the capability structures attached to this header.
 	pub fn capabilities<'a>(&'a self) -> CapabilityIter<'a> {
-		unsafe {
-			let next = (self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
-			let next = Some(NonNull::new_unchecked(next as *mut Capability).cast());
-			CapabilityIter {
-				_header: self,
-				next,
-			}
+		CapabilityIter {
+			marker: PhantomData,
+			next: self.common.has_capabilities().then(|| unsafe {
+				let next =
+					(self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
+				NonNull::new_unchecked(next as *mut Capability).cast()
+			}),
 		}
 	}
+
+	get_volatile!(cardbus_cis_pointer -> u32);
+	get_volatile!(subsystem_vendor_id -> u16);
+	get_volatile!(subsystem_id -> u16);
+	get_volatile!(expansion_rom_base_address -> u32);
+	get_volatile!(capabilities_pointer -> u8);
+	get_volatile!(interrupt_line -> u8);
+	get_volatile!(interrupt_pin -> u8);
+	get_volatile!(min_grant -> u8);
+	get_volatile!(max_latency -> u8);
 
 	pub fn base_address(&self, index: usize) -> u32 {
 		self.base_address[usize::from(index)].get().into()
@@ -202,18 +314,61 @@ impl Header0 {
 		self.common.set_command(value);
 	}
 
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(&self.base_address, index)
+	}
+
 	/// Read the status register
 	pub fn status(&self) -> u16 {
 		self.common.status()
 	}
 }
 
+impl fmt::Debug for Header0 {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(Header0))
+			.field("common", &self.common)
+			.field("base_address", &self.base_address)
+			.field("cardbus_cis_pointer", &self.cardbus_cis_pointer())
+			.field(
+				"subsystem_vendor_id",
+				&format_args!("0x{:04x}", self.subsystem_vendor_id()),
+			)
+			.field(
+				"subsystem_id",
+				&format_args!("0x{:04x}", self.subsystem_id()),
+			)
+			.field(
+				"expansion_rom_base_address",
+				&format_args!("0x{:08x}", self.expansion_rom_base_address()),
+			)
+			.field(
+				"capabilities_pointer",
+				&format_args!("0x{:02x}", self.capabilities_pointer()),
+			)
+			.field(
+				"interrupt_line",
+				&format_args!("0x{:02x}", self.interrupt_line()),
+			)
+			.field(
+				"interrupt_pin",
+				&format_args!("0x{:02x}", self.interrupt_pin()),
+			)
+			.field("min_grant", &format_args!("0x{:02x}", self.min_grant()))
+			.field("max_latency", &format_args!("0x{:02x}", self.max_latency()))
+			.finish()
+	}
+}
+
 /// Header type 0x01 (Pci-to-PCI bridge)
 #[repr(C)]
 pub struct Header1 {
-	common: HeaderCommon,
+	pub common: HeaderCommon,
 
-	base_address: [BaseAddress; 2],
+	pub base_address: [BaseAddress; 2],
 
 	primary_bus_number: VolatileCell<u8>,
 	secondary_bus_number: VolatileCell<u8>,
@@ -247,7 +402,38 @@ pub struct Header1 {
 	bridge_control: VolatileCell<u16le>,
 }
 
+impl Header1 {
+	/// Return the capability structures attached to this header.
+	pub fn capabilities<'a>(&'a self) -> CapabilityIter<'a> {
+		CapabilityIter {
+			marker: PhantomData,
+			next: self.common.has_capabilities().then(|| unsafe {
+				let next =
+					(self as *const _ as *const u8).add(self.capabilities_pointer.get().into());
+				NonNull::new_unchecked(next as *mut Capability).cast()
+			}),
+		}
+	}
+
+	/// Get the full address one or two BARs point to. This may be 64-bit.
+	///
+	/// Returns `None` if the BAR is invalid.
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(&self.base_address, index)
+	}
+}
+
+impl fmt::Debug for Header1 {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(Header1))
+			.field("common", &self.common)
+			.field("base_address", &self.base_address)
+			.finish_non_exhaustive()
+	}
+}
+
 /// Enum of possible headers.
+#[derive(Clone, Copy, Debug)]
 pub enum Header<'a> {
 	H0(&'a Header0),
 	H1(&'a Header1),
@@ -271,12 +457,28 @@ impl<'a> Header<'a> {
 		self.common().device_id.get().into()
 	}
 
+	/// Return the capability structures attached to this header.
+	pub fn capabilities(&self) -> CapabilityIter<'a> {
+		match self {
+			Self::H0(h) => h.capabilities(),
+			Self::H1(h) => h.capabilities(),
+			Self::Unknown(_) => CapabilityIter {
+				marker: PhantomData,
+				next: None,
+			},
+		}
+	}
+
 	pub fn base_addresses(&self) -> &[BaseAddress] {
 		match self {
 			Self::H0(h) => &h.base_address[..],
 			Self::H1(h) => &h.base_address[..],
 			Self::Unknown(_) => &[],
 		}
+	}
+
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(self.base_addresses(), index)
 	}
 
 	pub fn header_type(&self) -> u8 {
@@ -328,11 +530,220 @@ impl Capability {
 	pub unsafe fn data<'a, T>(&'a self) -> &'a T {
 		&*(self as *const _ as *const u8).cast()
 	}
+
+	/// Cast this capability to a concrete type if the ID is recognized.
+	pub fn downcast<'a>(&'a self) -> Option<capability::Capability<'a>> {
+		unsafe {
+			use capability::*;
+			match self.id() {
+				0x_5 => Some(Capability::Msi(&*(self as *const _ as *const _))),
+				0x_9 => Some(Capability::Vendor(&*(self as *const _ as *const _))),
+				0x11 => Some(Capability::MsiX(&*(self as *const _ as *const _))),
+				_ => None,
+			}
+		}
+	}
+}
+
+pub mod capability {
+	use super::*;
+
+	pub enum Capability<'a> {
+		Msi(&'a Msi),
+		Vendor(&'a Vendor),
+		MsiX(&'a MsiX),
+	}
+
+	impl fmt::Debug for Capability<'_> {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			match self {
+				Self::Msi(m) => m.fmt(f),
+				Self::Vendor(m) => m.fmt(f),
+				Self::MsiX(m) => m.fmt(f),
+			}
+		}
+	}
+
+	#[repr(C)]
+	pub struct Msi {
+		common: super::Capability,
+		message_control: VolatileCell<MsiMessageControl>,
+		message_address_low: VolatileCell<u32le>,
+		message_address_high: VolatileCell<u32le>,
+		message_data: VolatileCell<u16le>,
+		_reserved: [u8; 2],
+		mask: VolatileCell<u32le>,
+		pending: VolatileCell<u32le>,
+	}
+
+	#[derive(Clone, Copy)]
+	#[repr(transparent)]
+	pub struct MsiMessageControl(u16le);
+
+	impl Msi {
+		get_volatile!(message_control -> MsiMessageControl);
+
+		#[inline]
+		pub fn message_address(&self) -> u64 {
+			let f = |n: &VolatileCell<u32le>| u64::from(u32::from(n.get()));
+			f(&self.message_address_low) | f(&self.message_address_high) << 32
+		}
+
+		get_volatile!(message_data -> u16);
+		get_volatile!(mask -> u32);
+		get_volatile!(pending -> u32);
+	}
+
+	impl MsiMessageControl {
+		#[inline]
+		pub fn enable(&self) -> bool {
+			u16::from(self.0) & 1 > 0
+		}
+
+		// TODO other stuff
+	}
+
+	impl fmt::Debug for Msi {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(Msi))
+				.field("common", &self.common)
+				.field("message_control", &self.message_control())
+				.field(
+					"message_address",
+					&format_args!("0x{:016x}", self.message_address()),
+				)
+				.field(
+					"message_data",
+					&format_args!("0x{:04x}", self.message_data()),
+				)
+				.field("mask", &format_args!("0x{:04x}", self.mask()))
+				.field("pending", &format_args!("0x{:04x}", self.pending()))
+				.finish()
+		}
+	}
+
+	impl fmt::Debug for MsiMessageControl {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(MsiMessageControl))
+				.field("enable", &self.enable())
+				.finish_non_exhaustive()
+		}
+	}
+
+	#[repr(C)]
+	pub struct Vendor {
+		common: super::Capability,
+		length: VolatileCell<u8>,
+	}
+
+	impl Vendor {
+		get_volatile!(length -> u8);
+	}
+
+	impl fmt::Debug for Vendor {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(Vendor))
+				.field("common", &self.common)
+				.field("length", &self.length())
+				.finish_non_exhaustive()
+		}
+	}
+
+	#[repr(C)]
+	pub struct MsiX {
+		common: super::Capability,
+		message_control: VolatileCell<MsiXMessageControl>,
+		table_bir_offset: VolatileCell<u32le>,
+		pending_bit_bir_offset: VolatileCell<u32le>,
+	}
+
+	#[derive(Clone, Copy)]
+	#[repr(transparent)]
+	pub struct MsiXMessageControl(u16le);
+
+	impl MsiX {
+		get_volatile!(message_control -> MsiXMessageControl);
+		set_volatile!(set_message_control: message_control <- MsiXMessageControl);
+
+		#[inline]
+		pub fn table(&self) -> (u32, u8) {
+			let v = u32::from(self.table_bir_offset.get());
+			(v & !0x7, (v & 0x7) as u8)
+		}
+
+		#[inline]
+		pub fn pending(&self) -> (u32, u8) {
+			let v = u32::from(self.pending_bit_bir_offset.get());
+			(v & !0x7, (v & 0x7) as u8)
+		}
+	}
+
+	impl MsiXMessageControl {
+		const ENABLE: u16le = u16le::new(1 << 15);
+
+		#[inline]
+		pub fn enable(&self) -> bool {
+			u16::from(self.0 & Self::ENABLE) > 0u16
+		}
+
+		#[inline]
+		pub fn set_enable(&mut self, value: bool) {
+			if value {
+				self.0 |= Self::ENABLE;
+			} else {
+				self.0 &= !Self::ENABLE;
+			}
+		}
+
+		#[inline]
+		pub fn function_mask(&self) -> bool {
+			u16::from(self.0) & (1 << 14) > 0
+		}
+
+		#[inline]
+		pub fn table_size(&self) -> u16 {
+			u16::from(self.0) & 0x3ff
+		}
+	}
+
+	impl fmt::Debug for MsiX {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			let (table_offset, table_bir) = self.table();
+			let (pending_offset, pending_bir) = self.pending();
+			f.debug_struct(stringify!(MsiX))
+				.field("common", &self.common)
+				.field("message_control", &self.message_control())
+				.field("table_offset", &format_args!("0x{:04x}", table_offset))
+				.field("table_bir", &table_bir)
+				.field("pending_offset", &format_args!("0x{:04x}", pending_offset))
+				.field("pending_bir", &pending_bir)
+				.finish()
+		}
+	}
+
+	impl fmt::Debug for MsiXMessageControl {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(MsiXMessageControl))
+				.field("enable", &self.enable())
+				.field("function_mask", &self.function_mask())
+				.field("table_size", &self.table_size())
+				.finish()
+		}
+	}
+}
+
+impl fmt::Debug for Capability {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct(stringify!(Capability))
+			.field("id", &format_args!("{:#02x}", self.id()))
+			.field("next", &format_args!("{:#02x}", self.id()))
+			.finish()
+	}
 }
 
 pub struct CapabilityIter<'a> {
-	_header: &'a Header0,
 	next: Option<NonNull<Capability>>,
+	marker: PhantomData<&'a Capability>,
 }
 
 impl<'a> Iterator for CapabilityIter<'a> {
@@ -350,6 +761,58 @@ impl<'a> Iterator for CapabilityIter<'a> {
 			};
 			cap
 		})
+	}
+}
+
+pub mod msix {
+	use super::*;
+
+	#[repr(C)]
+	pub struct TableEntry {
+		message_address_low: VolatileCell<u32le>,
+		message_address_high: VolatileCell<u32le>,
+		message_data: VolatileCell<u32le>,
+		vector_control: VolatileCell<u32le>,
+	}
+
+	impl TableEntry {
+		pub fn message_address(&self) -> u64 {
+			let f = |n| u64::from(u32::from(n));
+			f(self.message_address_low.get()) | f(self.message_address_high.get()) << 32
+		}
+
+		pub fn set_message_address(&self, address: u64) {
+			self.message_address_low.set((address as u32).into());
+			self.message_address_high
+				.set(((address >> 32) as u32).into());
+		}
+
+		get_volatile!(message_data -> u32);
+		set_volatile!(set_message_data: message_data <- u32);
+
+		pub fn is_vector_control_masked(&self) -> bool {
+			u32::from(self.vector_control.get()) & 1 > 0
+		}
+
+		pub fn set_vector_control_mask(&self, mask: bool) {
+			self.vector_control.set(u32::from(mask).into())
+		}
+	}
+
+	impl fmt::Debug for TableEntry {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(TableEntry))
+				.field(
+					"message_address",
+					&format_args!("0x{:016x}", self.message_address()),
+				)
+				.field(
+					"message_data",
+					&format_args!("0x{:08x}", self.message_data()),
+				)
+				.field("is_vector_control_masked", &self.is_vector_control_masked())
+				.finish()
+		}
 	}
 }
 

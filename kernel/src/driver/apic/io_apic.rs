@@ -8,19 +8,31 @@ struct IoApic {
 	data: RegRW,
 }
 
+pub enum TriggerMode {
+	Edge,
+	Level,
+}
+
 #[allow(dead_code)]
-pub fn set_irq(irq: u8, apic_id: u8, vector: u8) {
+pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMode) {
 	let i = 0x10 + u32::from(irq) * 2;
 
 	unsafe {
 		// APIC ID | ...
 		write(i + 1, read(i + 1) & 0x00ffffff | (u32::from(apic_id) << 24));
 
-		// ... | mask | ... | delivery status | destination | delivery | vector
-		write(
-			i + 0,
-			read(i + 0) & 0xfffe_0000 | 0 << 12 | 0 << 11 | 0b000 << 8 | u32::from(vector),
-		)
+		// ... | mask | ... | trigger mode | ... | delivery status | destination | delivery | vector
+		let wr = read(i + 0) & 0xfffe_0000;
+		let wr = wr
+			| match trigger_mode {
+				TriggerMode::Edge => 0,
+				TriggerMode::Level => 1,
+			} << 15;
+		let wr = wr | 0 << 12;
+		let wr = wr | 0 << 11;
+		let wr = wr | 0b000 << 8;
+		let wr = wr | u32::from(vector);
+		write(i + 0, wr);
 	}
 }
 

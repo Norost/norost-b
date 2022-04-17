@@ -99,6 +99,12 @@ struct RequestStatus {
 	status: u8,
 }
 
+/// PCI MSI-X configuration.
+pub struct Msix {
+	/// The MSI-X vector to use for queue interrupts.
+	pub queue: Option<u16>,
+}
+
 impl<'a, F> BlockDevice<'a, F>
 where
 	F: Fn(*const ()) -> usize,
@@ -111,6 +117,7 @@ where
 		get_physical_address: F,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
 		dma_alloc: impl FnOnce(usize) -> Result<(NonNull<()>, usize), ()>,
+		msix: Msix,
 	) -> Result<Self, SetupError> {
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
@@ -132,7 +139,7 @@ where
 		let blk_cfg = unsafe { dev.device.cast::<Config>() };
 
 		// Set up queue.
-		let queue = queue::Queue::<'a>::new(dev.common, 0, 8, None, dma_alloc).expect("OOM");
+		let queue = queue::Queue::<'a>::new(dev.common, 0, 8, msix.queue, dma_alloc).expect("OOM");
 
 		dev.common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE

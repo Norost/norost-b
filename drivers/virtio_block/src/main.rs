@@ -33,12 +33,10 @@ fn main() {
 
 	let (tbl, dev) = dev.unwrap();
 	dbg!(core::str::from_utf8(dev));
-	let handle = std::os::norostb::open(tbl, dev).unwrap();
+	let dev_handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
-	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
-
-	println!("handle: {:?}", handle);
+	let pci_config = syscall::map_object(dev_handle, pci_config, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -60,8 +58,13 @@ fn main() {
 				};
 				let map_bar = |bar: u8| {
 					let addr = map_addr.cast();
-					syscall::map_object(handle, NonNull::new(addr), (bar + 1).into(), usize::MAX)
-						.unwrap();
+					syscall::map_object(
+						dev_handle,
+						NonNull::new(addr),
+						(bar + 1).into(),
+						usize::MAX,
+					)
+					.unwrap();
 					map_addr = map_addr.wrapping_add(16);
 					NonNull::new(addr as *mut _).unwrap()
 				};
@@ -73,8 +76,11 @@ fn main() {
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), a))
 				};
-				let d =
-					virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
+
+				let msix = virtio_block::Msix { queue: Some(0) };
+
+				let d = virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix)
+					.unwrap();
 
 				println!("pci status: {:#x}", h.status());
 
@@ -106,7 +112,6 @@ fn main() {
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
 		if std::os::norostb::take_job(tbl, &mut job).is_err() {
-			std::thread::sleep(std::time::Duration::from_millis(10));
 			continue;
 		}
 
@@ -121,7 +126,7 @@ fn main() {
 				let offset = u16::try_from(offset).unwrap();
 
 				dev.read(&mut sectors, sector, || {
-					std::thread::sleep(std::time::Duration::from_millis(1));
+					std::os::norostb::poll(dev_handle).unwrap();
 				})
 				.unwrap();
 
@@ -145,7 +150,7 @@ fn main() {
 				let offset = u16::try_from(offset).unwrap();
 
 				dev.read(&mut sectors, sector, || {
-					std::thread::sleep(std::time::Duration::from_millis(1));
+					std::os::norostb::poll(dev_handle).unwrap();
 				})
 				.unwrap();
 
@@ -154,7 +159,7 @@ fn main() {
 					.copy_from_slice(data);
 
 				dev.write(&sectors, sector, || {
-					std::thread::sleep(std::time::Duration::from_millis(1));
+					std::os::norostb::poll(dev_handle).unwrap();
 				})
 				.unwrap();
 

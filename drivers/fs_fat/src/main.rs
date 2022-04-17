@@ -35,9 +35,9 @@ fn main() {
 		let mut job = std::os::norostb::Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		if std::os::norostb::take_job(tbl, &mut job).is_err() {
-			std::thread::sleep(std::time::Duration::from_millis(100));
-			continue;
+		match std::os::norostb::take_job(tbl, &mut job) {
+			Ok(()) => {}
+			Err(_) => continue, // Timeout, probably...
 		}
 
 		match job.ty {

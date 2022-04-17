@@ -3,12 +3,12 @@ use core::mem;
 
 #[macro_export]
 macro_rules! __idt_wrap_handler {
-	(trap $fn:ident) => {
+	(trap $fn:path) => {
 		{
-			const _: fn(u32, *const ()) = $fn;
+			const _: extern "C" fn(u32, *const ()) = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
-				asm!("
+				core::arch::asm!("
 					pop		rdi		# Error code
 					pop		rsi		# RIP
 
@@ -21,12 +21,12 @@ macro_rules! __idt_wrap_handler {
 			$crate::arch::amd64::idt::Handler::Trap(f)
 		}
 	};
-	(int $fn:ident) => {
+	(int $fn:path) => {
 		{
-			const _: fn(*const ()) = $fn;
+			const _: extern "C" fn(*const ()) = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
-				asm!("
+				core::arch::asm!("
 					# Save thread state
 					push	rax
 					push	rbx
@@ -77,7 +77,7 @@ macro_rules! __idt_wrap_handler {
 
 					iretq
 				", f = sym $fn,
-				msr = const super::msr::IA32_APIC_BASE_MSR,
+				msr = const $crate::arch::amd64::msr::IA32_APIC_BASE_MSR,
 				eoi = const 0xb0,
 				virt_ident = const 0xffff_c000_0000_0000u64,
 				options(noreturn));
@@ -85,12 +85,12 @@ macro_rules! __idt_wrap_handler {
 			$crate::arch::amd64::idt::Handler::Int(f)
 		}
 	};
-	(int noreturn $fn:ident) => {
+	(int noreturn $fn:path) => {
 		{
-			const _: fn(*const ()) -> ! = $fn;
+			const _: extern "C" fn(*const ()) -> ! = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
-				asm!("
+				core::arch::asm!("
 					# Save thread state
 					push	rax
 					push	rbx
@@ -122,7 +122,7 @@ macro_rules! __idt_wrap_handler {
 					cld
 					jmp		{f}
 				", f = sym $fn,
-				msr = const super::msr::IA32_APIC_BASE_MSR,
+				msr = const $crate::arch::amd64::msr::IA32_APIC_BASE_MSR,
 				eoi = const 0xb0,
 				virt_ident = const 0xffff_c000_0000_0000u64,
 				options(noreturn));
@@ -130,6 +130,20 @@ macro_rules! __idt_wrap_handler {
 			$crate::arch::amd64::idt::Handler::Int(f)
 		}
 	};
+}
+
+#[macro_export]
+macro_rules! wrap_idt {
+	(@INTERNAL $($type:ident)+ $f:path) => {
+		$crate::arch::amd64::idt::IDTEntry::new(
+			1 * 8,
+			$crate::__idt_wrap_handler!($($type)+ $f),
+			0
+		)
+	};
+	(trap $f:path) => { $crate::wrap_idt!(@INTERNAL trap $f) };
+	(int $f:path) => { $crate::wrap_idt!(@INTERNAL int $f) };
+	(int noreturn $f:path) => { $crate::wrap_idt!(@INTERNAL int noreturn $f) };
 }
 
 #[derive(Clone, Copy)]

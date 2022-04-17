@@ -128,8 +128,8 @@ pub trait Object {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
-	fn event_listener(&self) -> Result<EventListener, Unpollable> {
-		Err(Unpollable)
+	fn poll(&self) -> Ticket<usize> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
@@ -266,7 +266,7 @@ pub struct TicketWaker<T> {
 }
 
 impl<T> TicketWaker<T> {
-	fn complete(self, status: Result<T, Error>) {
+	pub fn complete(self, status: Result<T, Error>) {
 		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
