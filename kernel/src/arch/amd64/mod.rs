@@ -85,7 +85,7 @@ extern "C" fn handle_timer(rip: *const ()) -> ! {
 		if let Err(t) = unsafe { scheduler::next_thread() } {
 			if let Some(d) = Monotonic::now().duration_until(t) {
 				apic::set_timer_oneshot(d, Some(16));
-				unsafe { asm!("sti") }
+				enable_interrupts();
 				power::halt();
 			}
 		}
@@ -148,3 +148,17 @@ pub fn allocate_irq() -> Result<u8, IrqsExhausted> {
 
 #[derive(Debug)]
 pub struct IrqsExhausted;
+
+#[inline(always)]
+pub fn enable_interrupts() {
+	unsafe {
+		asm!("sti", options(nostack, nomem, preserves_flags));
+	}
+}
+
+#[inline(always)]
+pub fn disable_interrupts() {
+	unsafe {
+		asm!("cli", options(nostack, nomem, preserves_flags));
+	}
+}
