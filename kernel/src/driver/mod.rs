@@ -19,9 +19,9 @@ use crate::boot;
 pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
 
-	acpi::init(boot);
+	uart::init(); // Initialize UART first as we need it for logging.
 
-	uart::init();
+	acpi::init(boot);
 
 	#[cfg(feature = "driver-pic")]
 	pic::init();
@@ -29,4 +29,6 @@ pub unsafe fn init(boot: &boot::Info) {
 	rtc::init();
 
 	apic::post_init();
+
+	uart::post_init();
 }

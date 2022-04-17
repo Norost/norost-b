@@ -156,6 +156,17 @@ pub enum ParsedBaseAddress {
 	MMIO64 { address: u64, prefetchable: bool },
 }
 
+impl ParsedBaseAddress {
+	#[inline]
+	pub fn try_as_mmio(&self) -> Option<u64> {
+		match self {
+			Self::IO32 { .. } => None,
+			Self::MMIO32 { address, .. } => Some(u64::from(*address)),
+			Self::MMIO64 { address, .. } => Some(*address),
+		}
+	}
+}
+
 /// Common header fields.
 #[repr(C)]
 pub struct HeaderCommon {
@@ -180,6 +191,14 @@ macro_rules! get_volatile {
 	($f:ident -> $t:ty) => {
 		pub fn $f(&self) -> $t {
 			self.$f.get().into()
+		}
+	};
+}
+
+macro_rules! set_volatile {
+	($fn:ident : $f:ident <- $t:ty) => {
+		pub fn $fn(&self, value: $t) {
+			self.$f.set(value.into())
 		}
 	};
 }
@@ -458,6 +477,10 @@ impl<'a> Header<'a> {
 		}
 	}
 
+	pub fn full_base_address(&self, index: usize) -> Option<ParsedBaseAddress> {
+		BaseAddress::full_base_address(self.base_addresses(), index)
+	}
+
 	pub fn header_type(&self) -> u8 {
 		self.common().header_type.get()
 	}
@@ -574,18 +597,10 @@ pub mod capability {
 	impl MsiMessageControl {
 		#[inline]
 		pub fn enable(&self) -> bool {
-			u16::from(self.0) & (1 << 15) > 0
+			u16::from(self.0) & 1 > 0
 		}
 
-		#[inline]
-		pub fn function_mask(&self) -> bool {
-			u16::from(self.0) & (1 << 14) > 0
-		}
-
-		#[inline]
-		pub fn table_size(&self) -> u16 {
-			u16::from(self.0) & 0x3ff
-		}
+		// TODO other stuff
 	}
 
 	impl fmt::Debug for Msi {
@@ -611,9 +626,7 @@ pub mod capability {
 		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 			f.debug_struct(stringify!(MsiMessageControl))
 				.field("enable", &self.enable())
-				.field("function_mask", &self.function_mask())
-				.field("table_size", &self.table_size())
-				.finish()
+				.finish_non_exhaustive()
 		}
 	}
 
@@ -639,19 +652,57 @@ pub mod capability {
 	#[repr(C)]
 	pub struct MsiX {
 		common: super::Capability,
+		message_control: VolatileCell<MsiXMessageControl>,
 		table_bir_offset: VolatileCell<u32le>,
 		pending_bit_bir_offset: VolatileCell<u32le>,
 	}
 
+	#[derive(Clone, Copy)]
+	#[repr(transparent)]
+	pub struct MsiXMessageControl(u16le);
+
 	impl MsiX {
-		fn table(&self) -> (u32, u8) {
+		get_volatile!(message_control -> MsiXMessageControl);
+		set_volatile!(set_message_control: message_control <- MsiXMessageControl);
+
+		#[inline]
+		pub fn table(&self) -> (u32, u8) {
 			let v = u32::from(self.table_bir_offset.get());
 			(v & !0x7, (v & 0x7) as u8)
 		}
 
-		fn pending(&self) -> (u32, u8) {
+		#[inline]
+		pub fn pending(&self) -> (u32, u8) {
 			let v = u32::from(self.pending_bit_bir_offset.get());
 			(v & !0x7, (v & 0x7) as u8)
+		}
+	}
+
+	impl MsiXMessageControl {
+		const ENABLE: u16le = u16le::new(1 << 15);
+
+		#[inline]
+		pub fn enable(&self) -> bool {
+			u16::from(self.0 & Self::ENABLE) > 0u16
+		}
+
+		#[inline]
+		pub fn set_enable(&mut self, value: bool) {
+			if value {
+				self.0 |= Self::ENABLE;
+			} else {
+				self.0 &= !Self::ENABLE;
+			}
+		}
+
+		#[inline]
+		pub fn function_mask(&self) -> bool {
+			u16::from(self.0) & (1 << 14) > 0
+		}
+
+		#[inline]
+		pub fn table_size(&self) -> u16 {
+			u16::from(self.0) & 0x3ff
 		}
 	}
 
@@ -661,10 +712,21 @@ pub mod capability {
 			let (pending_offset, pending_bir) = self.pending();
 			f.debug_struct(stringify!(MsiX))
 				.field("common", &self.common)
+				.field("message_control", &self.message_control())
 				.field("table_offset", &format_args!("0x{:04x}", table_offset))
 				.field("table_bir", &table_bir)
 				.field("pending_offset", &format_args!("0x{:04x}", pending_offset))
 				.field("pending_bir", &pending_bir)
+				.finish()
+		}
+	}
+
+	impl fmt::Debug for MsiXMessageControl {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(MsiXMessageControl))
+				.field("enable", &self.enable())
+				.field("function_mask", &self.function_mask())
+				.field("table_size", &self.table_size())
 				.finish()
 		}
 	}
@@ -699,6 +761,58 @@ impl<'a> Iterator for CapabilityIter<'a> {
 			};
 			cap
 		})
+	}
+}
+
+pub mod msix {
+	use super::*;
+
+	#[repr(C)]
+	pub struct TableEntry {
+		message_address_low: VolatileCell<u32le>,
+		message_address_high: VolatileCell<u32le>,
+		message_data: VolatileCell<u32le>,
+		vector_control: VolatileCell<u32le>,
+	}
+
+	impl TableEntry {
+		pub fn message_address(&self) -> u64 {
+			let f = |n| u64::from(u32::from(n));
+			f(self.message_address_low.get()) | f(self.message_address_high.get()) << 32
+		}
+
+		pub fn set_message_address(&self, address: u64) {
+			self.message_address_low.set((address as u32).into());
+			self.message_address_high
+				.set(((address >> 32) as u32).into());
+		}
+
+		get_volatile!(message_data -> u32);
+		set_volatile!(set_message_data: message_data <- u32);
+
+		pub fn is_vector_control_masked(&self) -> bool {
+			u32::from(self.vector_control.get()) & 1 > 0
+		}
+
+		pub fn set_vector_control_mask(&self, mask: bool) {
+			self.vector_control.set(u32::from(mask).into())
+		}
+	}
+
+	impl fmt::Debug for TableEntry {
+		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+			f.debug_struct(stringify!(TableEntry))
+				.field(
+					"message_address",
+					&format_args!("0x{:016x}", self.message_address()),
+				)
+				.field(
+					"message_data",
+					&format_args!("0x{:08x}", self.message_data()),
+				)
+				.field("is_vector_control_masked", &self.is_vector_control_masked())
+				.finish()
+		}
 	}
 }
 

@@ -21,10 +21,15 @@ pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
 pub unsafe fn init() {
 	// This port is guaranteed to exist.
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-	{
-		DEVICES[0] = Some(SpinLock::new(Uart::new(0x3f8)));
-		x86::init();
-	}
+	DEVICES[0] = Some(SpinLock::new(Uart::new(0x3f8)));
+}
+
+/// # Safety
+///
+/// This function may only be called once after [`init`] and when the APIC is initialized.
+pub unsafe fn post_init() {
+	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+	x86::init();
 
 	let table = Arc::new(table::UartTable) as Arc<dyn object_table::Table>;
 	object_table::add_table(Arc::downgrade(&table));
