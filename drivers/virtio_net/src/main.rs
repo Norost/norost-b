@@ -24,8 +24,7 @@ fn main() {
 		fs::File::open(dev.path()).unwrap().into_handle()
 	};
 
-	let pci_config = NonNull::new(0x1000_0000 as *mut _);
-	let pci_config = syscall::map_object(dev_handle, pci_config, 0, usize::MAX).unwrap();
+	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -33,33 +32,20 @@ fn main() {
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
 	let dev = unsafe { core::mem::transmute::<&_, &_>(&dev) };
 
-	let mut dma_addr = 0x2666_0000;
-
 	let (dev, addr) = {
 		match dev {
 			pci::Header::H0(h) => {
-				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
-
 				let get_phys_addr = |addr| {
 					let addr = NonNull::new(addr as *mut _).unwrap();
 					syscall::physical_address(addr).unwrap()
 				};
 				let map_bar = |bar: u8| {
-					let addr = map_addr.cast();
-					syscall::map_object(
-						dev_handle,
-						NonNull::new(addr),
-						(bar + 1).into(),
-						usize::MAX,
-					)
-					.unwrap();
-					map_addr = map_addr.wrapping_add(16);
-					NonNull::new(addr as *mut _).unwrap()
+					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
+						.unwrap()
+						.cast()
 				};
 				let dma_alloc = |size| {
-					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
-					let res = syscall::alloc_dma(Some(d), size).unwrap();
-					dma_addr += res;
+					let d = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), a))
 				};

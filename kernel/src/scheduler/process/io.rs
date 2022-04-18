@@ -1,9 +1,11 @@
 //! # I/O with user processes
 
-use crate::memory::frame;
-use crate::memory::r#virtual::RWX;
+use super::MemoryObject;
+use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
+use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{JobRequest, JobResult};
+use alloc::boxed::Box;
 use core::ptr::NonNull;
 use core::time::Duration;
 pub use norostb_kernel::io::Queue;
@@ -12,6 +14,7 @@ use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
 pub enum CreateQueueError {
 	TooLarge,
 	OutOfMemory(frame::AllocateContiguousError),
+	MapError(MapError),
 }
 
 pub enum ProcessQueueError {
@@ -23,6 +26,22 @@ pub enum WaitQueueError {
 }
 
 const MAX_SIZE_P2: u8 = 15;
+
+struct IoQueue {
+	base: PPN,
+	count: usize,
+}
+
+impl MemoryObject for IoQueue {
+	fn physical_pages(&self) -> Box<[PageFrame]> {
+		PageFrameIter {
+			base: self.base,
+			count: self.count,
+		}
+		.map(|p| PageFrame { base: p, p2size: 0 })
+		.collect()
+	}
+}
 
 impl super::Process {
 	pub fn create_io_queue(
@@ -41,16 +60,14 @@ impl super::Process {
 		let frame = frame::allocate_contiguous(count.try_into().unwrap())
 			.map_err(CreateQueueError::OutOfMemory)?;
 		let base = base.unwrap(); // TODO
+
+		let queue = IoQueue { base: frame, count };
+
 		unsafe {
 			self.address_space
-				.map(
-					base.as_ptr(),
-					frame::PageFrameIter { base: frame, count },
-					RWX::RW,
-					self.hint_color,
-				)
-				.unwrap();
-		}
+				.map_object(Some(base), Box::new(queue), RWX::RW, self.hint_color)
+				.map_err(CreateQueueError::MapError)?
+		};
 		self.io_queues.push(Queue {
 			base: base.cast(),
 			requests_mask,

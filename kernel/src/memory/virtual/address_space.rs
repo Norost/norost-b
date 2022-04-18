@@ -1,18 +1,31 @@
 use crate::arch::r#virtual;
 use crate::memory::{
-	r#virtual::{MapError, PPN, RWX},
+	r#virtual::{PPN, RWX},
 	Page,
 };
 use crate::scheduler::MemoryObject;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
 use core::ptr::NonNull;
+
+#[derive(Debug)]
+pub enum MapError {
+	Overflow,
+	ZeroSize,
+	NoFreeVirtualAddressSpace,
+	Arch(crate::arch::r#virtual::MapError),
+}
 
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
 	/// All mapped objects
 	objects: Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
+	/// All free virtual addresses. Used to speed up allocation.
+	///
+	/// The value refers to the amount of free *pages*, not bytes!
+	free_virtual_addresses: BTreeMap<NonNull<Page>, NonZeroUsize>,
 }
 
 impl AddressSpace {
@@ -20,6 +33,13 @@ impl AddressSpace {
 		Ok(Self {
 			mmu_address_space: r#virtual::AddressSpace::new()?,
 			objects: Default::default(),
+			// TODO the available range is arch-defined.
+			//free_virtual_addresses: [(NonNull::dangling(), NonZeroUsize::new(4096).unwrap())].into(),
+			free_virtual_addresses: [(
+				NonNull::new(0x1000_0000 as *mut _).unwrap(),
+				NonZeroUsize::new(4096).unwrap(),
+			)]
+			.into(),
 		})
 	}
 
@@ -29,17 +49,21 @@ impl AddressSpace {
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
 		hint_color: u8,
-	) -> Result<MemoryObjectHandle, MapError> {
-		let base = base.unwrap(); // TODO
+	) -> Result<NonNull<Page>, MapError> {
 		let count = object
 			.physical_pages()
 			.into_vec()
 			.into_iter()
 			.flat_map(|f| f)
 			.count();
-		let end = base.as_ptr().wrapping_add(count).wrapping_sub(1);
+		let count = NonZeroUsize::new(count).ok_or(MapError::ZeroSize)?;
+		let base = base
+			.ok_or(())
+			.or_else(|()| self.allocate_virtual_address_range(count))
+			.map_err(|NoFreeVirtualAddressSpace| MapError::NoFreeVirtualAddressSpace)?;
+		let end = base.as_ptr().wrapping_add(count.get()).wrapping_sub(1);
 		if end < base.as_ptr() {
-			Err(MapError::Overflow)?;
+			return Err(MapError::Overflow);
 		}
 		let end = NonNull::new(base.as_ptr()).unwrap();
 
@@ -59,10 +83,10 @@ impl AddressSpace {
 			)
 		};
 		e.map(|()| {
-			let h = MemoryObjectHandle(self.objects.len());
 			self.objects.push((base..=end, object));
-			h
+			base
 		})
+		.map_err(MapError::Arch)
 	}
 
 	/// Get a reference to a memory object.
@@ -73,6 +97,31 @@ impl AddressSpace {
 	/// Map a virtual address to a physical address.
 	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
 		self.mmu_address_space.get_physical_address(address)
+	}
+
+	/// Allocate a range of virtual address space.
+	pub fn allocate_virtual_address_range(
+		&mut self,
+		count: NonZeroUsize,
+	) -> Result<NonNull<Page>, NoFreeVirtualAddressSpace> {
+		for (&addr, &c) in self.free_virtual_addresses.iter() {
+			if c >= count {
+				// Allocate from the bottom half to the top, as lower addresses are usually
+				// more readable (i.e. more ergonomic).
+				self.free_virtual_addresses.remove(&addr);
+				if let Some(new_count) = NonZeroUsize::new(c.get() - count.get()) {
+					let addr = addr.as_ptr().wrapping_add(count.get());
+					self.free_virtual_addresses
+						.insert(NonNull::new(addr).unwrap(), new_count);
+				}
+				return Ok(addr);
+			}
+		}
+		Err(NoFreeVirtualAddressSpace)
+	}
+
+	pub unsafe fn activate(&self) {
+		self.mmu_address_space.activate()
 	}
 
 	/// Identity-map a physical frame.
@@ -90,19 +139,6 @@ impl AddressSpace {
 	}
 }
 
-//TODO temporary because I'm a lazy ass
-impl core::ops::Deref for AddressSpace {
-	type Target = r#virtual::AddressSpace;
-	fn deref(&self) -> &Self::Target {
-		&self.mmu_address_space
-	}
-}
-impl core::ops::DerefMut for AddressSpace {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.mmu_address_space
-	}
-}
-
 #[derive(Clone, Copy)]
 pub struct MemoryObjectHandle(usize);
 
@@ -117,3 +153,5 @@ impl From<usize> for MemoryObjectHandle {
 		Self(n)
 	}
 }
+
+pub struct NoFreeVirtualAddressSpace;

@@ -64,6 +64,7 @@ impl fmt::Debug for MemoryRegion {
 	}
 }
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct Driver {
 	/// Start address of the ELF file.

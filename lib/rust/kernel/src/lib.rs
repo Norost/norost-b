@@ -7,6 +7,7 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 #![feature(allow_internal_unsafe)]
 #![feature(asm_sym)]
+#![feature(core_intrinsics)]
 #![feature(naked_functions)]
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]

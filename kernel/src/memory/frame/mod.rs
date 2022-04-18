@@ -4,8 +4,10 @@
 
 mod dma_frame;
 mod dumb_stack;
+mod owned;
 
 pub use dma_frame::*;
+pub use owned::*;
 
 use super::Page;
 use core::fmt;
@@ -204,6 +206,11 @@ pub enum AllocateContiguousError {
 
 #[derive(Debug)]
 pub enum DeallocateError {}
+
+pub struct AllocateHints {
+	pub address: *const u8,
+	pub color: u8,
+}
 
 /// Allocate a range of pages.
 ///

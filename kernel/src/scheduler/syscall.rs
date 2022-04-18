@@ -63,11 +63,16 @@ extern "C" fn alloc_dma(
 	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
 	Process::current()
 		.map_memory_object(base, Box::new(frame), rwx)
-		.unwrap();
-	Return {
-		status: 0,
-		value: count * Page::SIZE,
-	}
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|base| Return {
+				status: 0,
+				value: base.as_ptr() as usize,
+			},
+		)
 }
 
 extern "C" fn physical_address(
@@ -142,11 +147,16 @@ extern "C" fn map_object(
 	let base = NonNull::new(base as *mut _);
 	Process::current()
 		.map_memory_object_2(handle, base, offset, RWX::RW)
-		.unwrap();
-	Return {
-		status: 0,
-		value: base.unwrap().as_ptr() as usize,
-	}
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|base| Return {
+				status: 0,
+				value: base.as_ptr() as usize,
+			},
+		)
 }
 
 extern "C" fn duplicate_handle(

@@ -53,7 +53,7 @@ impl Process {
 		base: Option<NonNull<Page>>,
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError> {
+	) -> Result<NonNull<Page>, MapError> {
 		self.address_space
 			.map_object(base, object.into(), rwx, self.hint_color)
 	}
@@ -65,7 +65,7 @@ impl Process {
 		base: Option<NonNull<Page>>,
 		offset: u64,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError> {
+	) -> Result<NonNull<Page>, MapError> {
 		let obj = self.objects[handle.0].memory_object(offset).unwrap();
 		self.address_space
 			.map_object(base, obj, rwx, self.hint_color)

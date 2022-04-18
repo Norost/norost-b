@@ -18,6 +18,7 @@ use crate::Page;
 use core::alloc::Layout;
 use core::arch::asm;
 use core::fmt;
+use core::intrinsics;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
@@ -176,7 +177,10 @@ pub fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
 }
 
 #[inline]
-pub fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn alloc_dma(
+	base: Option<NonNull<Page>>,
+	size: usize,
+) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -190,7 +194,7 @@ pub fn alloc_dma(base: Option<NonNull<Page>>, size: usize) -> Result<usize, (Non
 			lateout("r11") _,
 		);
 	}
-	ret(status, value)
+	ret(status, value).map(|p| NonNull::new(p as *mut _).unwrap_or_else(|| intrinsics::abort()))
 }
 
 #[inline]
