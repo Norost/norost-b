@@ -215,7 +215,7 @@ pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 		IDENTITY_MAP_ADDRESS as *const _ <= virt && virt <= u64::MAX as *const _,
 		"virt out of range"
 	);
-	virt.offset_from(IDENTITY_MAP_ADDRESS).try_into().unwrap()
+	unsafe { virt.offset_from(IDENTITY_MAP_ADDRESS).try_into().unwrap() }
 }
 
 /// # Safety
@@ -223,5 +223,5 @@ pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 /// `phys` must be in range, i.e. lower than `1 << 46`.
 pub unsafe fn phys_to_virt(phys: u64) -> *mut u8 {
 	debug_assert!(phys < 1 << 46, "phys out of range");
-	IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap())
+	unsafe { IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap()) }
 }

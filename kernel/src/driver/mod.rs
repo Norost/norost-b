@@ -18,17 +18,18 @@ use crate::boot;
 /// This function may only be called once at boot time
 pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
+	unsafe {
+		uart::init(); // Initialize UART first as we need it for logging.
 
-	uart::init(); // Initialize UART first as we need it for logging.
+		acpi::init(boot);
 
-	acpi::init(boot);
+		#[cfg(feature = "driver-pic")]
+		pic::init();
 
-	#[cfg(feature = "driver-pic")]
-	pic::init();
+		rtc::init();
 
-	rtc::init();
+		apic::post_init();
 
-	apic::post_init();
-
-	uart::post_init();
+		uart::post_init();
+	}
 }

@@ -1,5 +1,4 @@
 use core::arch::asm;
-use core::arch::x86_64::{CpuidResult, __cpuid, __cpuid_count};
 
 mod cr4 {
 	pub const FSGSBASE: u32 = 1 << 16;

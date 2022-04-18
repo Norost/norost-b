@@ -49,13 +49,15 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 		}
 	}
 
-	let virt = phys_to_virt(phys.try_into().unwrap()).cast();
-	let iter = Iter {
-		phys: PPN::from_ptr(virt),
-		size: size / 4096,
-	};
+	unsafe {
+		let virt = phys_to_virt(phys.try_into().unwrap()).cast();
+		let iter = Iter {
+			phys: PPN::from_ptr(virt),
+			size: size / 4096,
+		};
 
-	AddressSpace::kernel_map(virt, iter, RWX::RW).unwrap();
+		AddressSpace::kernel_map(virt, iter, RWX::RW).unwrap();
 
-	Ok(NonNull::new_unchecked(virt))
+		Ok(NonNull::new_unchecked(virt))
+	}
 }

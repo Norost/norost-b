@@ -11,22 +11,16 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 #[derive(Default)]
 pub struct StreamingTable {
 	name: Box<str>,
-	//event_wakers: Mutex<(usize, Vec<EventWaker>)>,
 	job_id_counter: AtomicU32,
 	jobs: Mutex<Vec<(StreamJob, StreamTicketWaker)>>,
 	tickets: Mutex<Vec<(JobId, StreamTicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
-	/// A self reference is necessary for taking/finishing jos, which correspond to read/write
-	/// provided by the Object trait. This trait uses `&self` and not `self: Arc<Self>` since
-	/// the latter would add a non-trivial cost for what is presumably not needed very often.
-	self_ref: Weak<Self>,
 }
 
 impl StreamingTable {
 	pub fn new(name: Box<str>) -> Arc<Self> {
-		Arc::new_cyclic(|self_ref| Self {
+		Arc::new(Self {
 			name,
-			self_ref: self_ref.clone(),
 			..Default::default()
 		})
 	}
@@ -77,7 +71,7 @@ impl Table for StreamingTable {
 		self.submit_job(JobRequest::Create { path: path.into() })
 	}
 
-	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
 		let job = self.jobs.lock().pop().map(|(job, tkt)| {
 			self.tickets.lock().push((job.job_id, tkt));
 			(job.job_id, job.job)

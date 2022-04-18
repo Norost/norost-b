@@ -1,4 +1,3 @@
-use core::arch::asm;
 use core::ops::{Deref, DerefMut};
 
 /// A spinlock intended for use with interrupt service routines.

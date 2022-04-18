@@ -35,50 +35,52 @@ static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
 static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
 
 pub unsafe fn init() {
-	// Setup TSS
-	TSS.set_rsp(0, TSS_STACK.as_ptr());
+	unsafe {
+		// Setup TSS
+		TSS.set_rsp(0, TSS_STACK.as_ptr());
 
-	// Setup GDT
-	GDT.write(gdt::GDT::new(&TSS));
-	GDT_PTR.write(gdt::GDTPointer::new(core::pin::Pin::new(
-		GDT.assume_init_ref(),
-	)));
-	GDT_PTR.assume_init_mut().activate();
+		// Setup GDT
+		GDT.write(gdt::GDT::new(&TSS));
+		GDT_PTR.write(gdt::GDTPointer::new(core::pin::Pin::new(
+			GDT.assume_init_ref(),
+		)));
+		GDT_PTR.assume_init_mut().activate();
 
-	// Setup IDT
-	IDT.set(
-		TIMER_IRQ.into(),
-		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0),
-	);
-	IDT.set(
-		8,
-		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
-	);
-	IDT.set(
-		13,
-		idt::IDTEntry::new(
-			1 * 8,
-			__idt_wrap_handler!(trap handle_general_protection_fault),
-			0,
-		),
-	);
-	IDT.set(
-		14,
-		idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
-	);
-	IDT.set(16, idt::IDTEntry::new(1 * 8, idt::NOOP, 0));
+		// Setup IDT
+		IDT.set(
+			TIMER_IRQ.into(),
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0),
+		);
+		IDT.set(
+			8,
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
+		);
+		IDT.set(
+			13,
+			idt::IDTEntry::new(
+				1 * 8,
+				__idt_wrap_handler!(trap handle_general_protection_fault),
+				0,
+			),
+		);
+		IDT.set(
+			14,
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
+		);
+		IDT.set(16, idt::IDTEntry::new(1 * 8, idt::NOOP, 0));
 
-	IDT_PTR.write(idt::IDTPointer::new(&IDT));
-	IDT_PTR.assume_init_ref().activate();
+		IDT_PTR.write(idt::IDTPointer::new(&IDT));
+		IDT_PTR.assume_init_ref().activate();
 
-	syscall::init();
+		syscall::init();
 
-	cpuid::enable_fsgsbase();
+		cpuid::enable_fsgsbase();
+	}
 }
 
-extern "C" fn handle_timer(rip: *const ()) -> ! {
+extern "C" fn handle_timer(_rip: *const ()) -> ! {
 	debug!("Timer interrupt!");
-	debug!("  RIP:     {:p}", rip);
+	debug!("  RIP:     {:p}", _rip);
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
 	loop {
@@ -128,7 +130,9 @@ pub fn halt() {
 }
 
 pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
-	IDT.set(irq, entry);
+	unsafe {
+		IDT.set(irq, entry);
+	}
 }
 
 pub fn yield_current_thread() {

@@ -9,6 +9,7 @@ struct IoApic {
 }
 
 pub enum TriggerMode {
+	#[allow(dead_code)]
 	Edge,
 	Level,
 }

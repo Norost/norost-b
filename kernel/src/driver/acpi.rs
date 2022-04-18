@@ -10,8 +10,10 @@ impl acpi::AcpiHandler for Handler {
 		phys: usize,
 		size: usize,
 	) -> acpi::PhysicalMapping<Self, T> {
-		let virt = core::ptr::NonNull::new_unchecked(phys_to_virt(phys.try_into().unwrap()));
-		acpi::PhysicalMapping::new(phys, virt.cast(), size, size, Handler)
+		unsafe {
+			let virt = core::ptr::NonNull::new_unchecked(phys_to_virt(phys.try_into().unwrap()));
+			acpi::PhysicalMapping::new(phys, virt.cast(), size, size, Handler)
+		}
 	}
 
 	fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {}
@@ -20,16 +22,18 @@ impl acpi::AcpiHandler for Handler {
 pub unsafe fn init(boot: &boot::Info) {
 	boot.rsdp.validate().unwrap();
 
-	let rsdp = virt_to_phys(&boot.rsdp as *const _ as *const _)
-		.try_into()
-		.unwrap();
-	let acpi = acpi::AcpiTables::from_rsdp(Handler, rsdp).unwrap();
+	unsafe {
+		let rsdp = virt_to_phys(&boot.rsdp as *const _ as *const _)
+			.try_into()
+			.unwrap();
+		let acpi = acpi::AcpiTables::from_rsdp(Handler, rsdp).unwrap();
 
-	super::apic::init_acpi(&acpi);
+		super::apic::init_acpi(&acpi);
 
-	#[cfg(feature = "driver-pci")]
-	super::pci::init_acpi(&acpi);
+		#[cfg(feature = "driver-pci")]
+		super::pci::init_acpi(&acpi);
 
-	#[cfg(feature = "driver-hpet")]
-	super::hpet::init_acpi(&acpi);
+		#[cfg(feature = "driver-hpet")]
+		super::hpet::init_acpi(&acpi);
+	}
 }

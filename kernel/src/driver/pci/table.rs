@@ -1,8 +1,5 @@
-use crate::object_table::{
-	Error, NoneQuery, Object, Query, QueryResult, Table, Ticket, TicketWaker,
-};
-use crate::sync::IsrSpinLock;
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
+use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Table, Ticket};
+use alloc::{boxed::Box, format, string::String, sync::Arc};
 use core::str;
 
 /// Table with all PCI devices.
@@ -90,7 +87,7 @@ impl Iterator for QueryName {
 	fn next(&mut self) -> Option<Self::Item> {
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
-			let h = pci.as_ref().unwrap().get(b, d, f)?;
+			pci.as_ref().unwrap().get(b, d, f)?;
 			Some(Ticket::new_complete(Ok(pci_dev_query_result(b, d, f))))
 		})
 	}

@@ -7,7 +7,7 @@
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
 #![feature(let_else)]
-#![feature(maybe_uninit_extra, maybe_uninit_slice, maybe_uninit_uninit_array)]
+#![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
 #![feature(new_uninit)]
@@ -17,6 +17,7 @@
 #![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
 #![feature(trait_upcasting)]
 #![feature(waker_getters)]
+#![warn(unsafe_op_in_unsafe_fn)]
 
 extern crate alloc;
 
@@ -38,23 +39,12 @@ macro_rules! bi_from {
 	};
 }
 
-macro_rules! default {
-	(newtype $ty:ty = $value:expr) => {
-		impl Default for $ty {
-			fn default() -> Self {
-				Self($value)
-			}
-		}
-	};
-}
-
 #[macro_use]
 mod log;
 
 mod arch;
 mod boot;
 mod driver;
-mod ffi;
 mod memory;
 mod object_table;
 mod power;

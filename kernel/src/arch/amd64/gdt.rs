@@ -142,23 +142,25 @@ impl GDTPointer {
 	}
 
 	pub unsafe fn activate(&self) {
-		asm!("
-			lgdt	[{0}]
+		unsafe {
+			asm!("
+				lgdt	[{0}]
 
-			lea		rax, [rip + 0f]
-			push	0x8					# cs
-			push	rax					# rîp
-			rex64 retf
+				lea		rax, [rip + 0f]
+				push	0x8					# cs
+				push	rax					# rîp
+				rex64 retf
 
-		0:
-			mov		ax, 2 * 8
-			mov		ds, ax
-			mov		es, ax
-			mov		ss, ax
+			0:
+				mov		ax, 2 * 8
+				mov		ds, ax
+				mov		es, ax
+				mov		ss, ax
 
-			# Set TSS
-			mov		ax, 5 * 8
-			ltr		ax
-		", in(reg) &self.limit);
+				# Set TSS
+				mov		ax, 5 * 8
+				ltr		ax
+			", in(reg) &self.limit);
+		}
 	}
 }

@@ -1,4 +1,4 @@
-use crate::arch::amd64::{self, asm::io, IDTEntry};
+use crate::arch::amd64::{self, asm::io};
 use crate::driver::apic::{io_apic, local_apic};
 use core::fmt;
 
@@ -7,12 +7,16 @@ pub struct Uart {
 }
 
 impl Uart {
+	#[allow(dead_code)]
 	const DATA: u16 = 0;
 
 	const INTERRUPT_ENABLE: u16 = 1;
 	pub const INTERRUPT_DATA_AVAILABLE: u8 = 1 << 0;
+	#[allow(dead_code)]
 	pub const INTERRUPT_TRANSMITTER_EMPTY: u8 = 1 << 1;
+	#[allow(dead_code)]
 	pub const INTERRUPT_ERROR: u8 = 1 << 2;
+	#[allow(dead_code)]
 	pub const INTERRUPT_STATUS_CHANGE: u8 = 1 << 3;
 
 	const LINE_CONTROL: u16 = 3;
@@ -33,15 +37,6 @@ impl Uart {
 			true
 		} else {
 			false
-		}
-	}
-
-	#[must_use = "data may be lost if not processed"]
-	pub fn read(&mut self) -> u8 {
-		loop {
-			if let Some(b) = self.try_read() {
-				return b;
-			}
 		}
 	}
 
@@ -110,8 +105,10 @@ pub(super) unsafe fn init() {
 	let com1_irq = 4;
 	let com1_vec = amd64::allocate_irq().unwrap();
 
-	io_apic::set_irq(com1_irq, 0, com1_vec, io_apic::TriggerMode::Level);
-	amd64::idt_set(com1_vec.into(), crate::wrap_idt!(int irq_handler));
+	unsafe {
+		io_apic::set_irq(com1_irq, 0, com1_vec, io_apic::TriggerMode::Level);
+		amd64::idt_set(com1_vec.into(), crate::wrap_idt!(int irq_handler));
+	}
 }
 
 extern "C" fn irq_handler(_rip: *const ()) {

@@ -35,6 +35,4 @@ opt-level = 'z'
 #strip = "symbols"
 
 [patch.crates-io]
-os_str_bytes = { git = "https://git.sr.ht/~demindiro/os_str_bytes", branch = "norost" }
-atty = { git = "https://git.sr.ht/~demindiro/atty", branch = "norost" }
 dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }

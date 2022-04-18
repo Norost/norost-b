@@ -14,7 +14,6 @@ use alloc::{
 	sync::{Arc, Weak},
 	vec::Vec,
 };
-use core::fmt;
 use core::future::Future;
 use core::mem;
 use core::pin::Pin;
@@ -53,15 +52,15 @@ where
 	/// Create a new object with the given path.
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>>;
 
-	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
 		unimplemented!()
 	}
 
-	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
+	fn finish_job(self: Arc<Self>, _job: JobResult, _job_id: JobId) -> Result<(), ()> {
 		unimplemented!()
 	}
 
-	fn cancel_job(self: Arc<Self>, job_id: JobId) {
+	fn cancel_job(self: Arc<Self>, _job_id: JobId) {
 		unimplemented!()
 	}
 }

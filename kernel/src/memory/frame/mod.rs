@@ -49,7 +49,7 @@ impl PPN {
 	///
 	/// The pointer must be aligned and point to somewhere inside the identity map.
 	pub unsafe fn from_ptr(page: *mut Page) -> Self {
-		let virt = super::r#virtual::virt_to_phys(page.cast());
+		let virt = unsafe { super::r#virtual::virt_to_phys(page.cast()) };
 		Self((usize::try_from(virt).unwrap() / Page::SIZE) as PPNBox)
 	}
 

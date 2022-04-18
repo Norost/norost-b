@@ -77,15 +77,14 @@ impl Process {
 		self.address_space.get_object(handle)
 	}
 
-	/// Get a reference to an object.
-	pub fn get_object(&self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
-		self.objects.get(handle.0)
-	}
-
 	/// Duplicate a reference to an object.
 	pub fn duplicate_object_handle(&mut self, handle: ObjectHandle) -> Option<ObjectHandle> {
 		if let Some(obj) = self.objects.get(handle.0) {
-			self.objects.push(obj.clone());
+			// Honestly I don't understand why this isn't fine but the "correct" notation is. Oh
+			// well.
+			//self.objects.push(obj.clone());
+			let obj = obj.clone();
+			self.objects.push(obj);
 			Some((self.objects.len() - 1).into())
 		} else {
 			None
@@ -95,17 +94,6 @@ impl Process {
 	/// Map a virtual address to a physical address.
 	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
 		self.address_space.get_physical_address(address)
-	}
-
-	/// Add an object query.
-	pub fn add_query(&mut self, query: Box<dyn Query>) -> QueryHandle {
-		self.queries.push(query);
-		QueryHandle(self.queries.len() - 1)
-	}
-
-	/// Get a mutable reference to a query.
-	pub fn get_query_mut(&mut self, handle: QueryHandle) -> Option<&mut (dyn Query + 'static)> {
-		self.queries.get_mut(handle.0).map(|q| &mut **q)
 	}
 
 	/// Spawn a new thread.

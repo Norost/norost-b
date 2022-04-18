@@ -41,10 +41,10 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<(), MapError> {
-		let tbl = self.table_mut();
+		let tbl = unsafe { self.table_mut() };
 		for (i, f) in frames.enumerate() {
 			loop {
-				match common::get_entry_mut(tbl, address.add(i) as u64, 0, 3) {
+				match common::get_entry_mut(tbl, address.wrapping_add(i) as u64, 0, 3) {
 					Ok(e) => {
 						e.set_page(f.as_phys() as u64, true, rwx.w()).unwrap();
 						break;
@@ -63,7 +63,7 @@ impl AddressSpace {
 		frames: impl ExactSizeIterator<Item = frame::PageFrame>,
 		rwx: RWX,
 	) -> Result<(), MapError> {
-		let tbl = Self::current();
+		let tbl = unsafe { Self::current() };
 		for f in frames {
 			let level = (f.p2size >= 9).then(|| 1).unwrap_or(0);
 			let offset = (f.p2size >= 9).then(|| 1 << 9).unwrap_or(1);
@@ -74,7 +74,7 @@ impl AddressSpace {
 					match common::get_entry_mut(tbl, address as u64, level, 3 - level) {
 						Ok(e) => {
 							e.set_page(ppn.as_phys() as u64, false, rwx.w()).unwrap();
-							address = address.add(offset);
+							address = address.wrapping_add(offset);
 							break;
 						}
 						Err((e, _)) => {
@@ -104,21 +104,25 @@ impl AddressSpace {
 	}
 
 	pub unsafe fn activate(&self) {
-		asm!("mov cr3, {0}", in(reg) self.cr3);
+		unsafe {
+			asm!("mov cr3, {0}", in(reg) self.cr3);
+		}
 	}
 
 	unsafe fn table(&self) -> &[common::Entry; 512] {
-		&*phys_to_virt((self.cr3 & !Page::MASK) as u64).cast()
+		unsafe { &*phys_to_virt((self.cr3 & !Page::MASK) as u64).cast() }
 	}
 
 	unsafe fn table_mut(&mut self) -> &mut [common::Entry; 512] {
-		&mut *phys_to_virt((self.cr3 & !Page::MASK) as u64).cast()
+		unsafe { &mut *phys_to_virt((self.cr3 & !Page::MASK) as u64).cast() }
 	}
 
 	unsafe fn current<'a>() -> &'a mut [common::Entry; 512] {
 		let cr3: usize;
-		asm!("mov {0}, cr3", out(reg) cr3);
-		&mut *phys_to_virt((cr3 & !Page::MASK) as u64).cast()
+		unsafe {
+			asm!("mov {0}, cr3", out(reg) cr3);
+			&mut *phys_to_virt((cr3 & !Page::MASK) as u64).cast()
+		}
 	}
 }
 

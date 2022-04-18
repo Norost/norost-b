@@ -385,13 +385,3 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[patch.unused]]
-name = "atty"
-version = "0.2.14"
-source = "git+https://git.sr.ht/~demindiro/atty?branch=norost#43eb5300a832e0ffa0e18396de74356acc997db2"
-
-[[patch.unused]]
-name = "os_str_bytes"
-version = "6.0.0"
-source = "git+https://git.sr.ht/~demindiro/os_str_bytes?branch=norost#59ac45c7b1377894a3015079aab2fb008c8925f7"
