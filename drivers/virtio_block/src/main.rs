@@ -5,28 +5,19 @@
 
 use core::ptr::NonNull;
 use norostb_kernel::{self as kernel, io::Job, syscall};
+use std::fs;
+use std::os::norostb::prelude::*;
 use virtio_block::Sector;
 
 fn main() {
-	let mut buf = [0; 256];
-	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
-
-	let mut id = None;
-	let mut dev = None;
-	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		if inf.name() == b"pci" {
-			let tags = b"vendor-id:1af4&device-id:1001";
-			let h = std::os::norostb::query(i, tags).unwrap();
-			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				dev = Some((i, &buf[..obj.path_len]));
-				break 'found_dev;
-			}
-		}
-		id = Some(i);
-	}
-
-	let (tbl, dev) = dev.unwrap();
-	let dev_handle = std::os::norostb::open(tbl, dev).unwrap();
+	let dev_handle = {
+		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1001")
+			.unwrap()
+			.next()
+			.unwrap()
+			.unwrap();
+		fs::File::open(dev.path()).unwrap().into_handle()
+	};
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(dev_handle, pci_config, 0, usize::MAX).unwrap();

@@ -10,34 +10,22 @@ use core::ptr::NonNull;
 use core::time::Duration;
 use norostb_kernel::{self as kernel, io::Job, syscall};
 use smoltcp::socket::TcpState;
+use std::fs;
+use std::os::norostb::prelude::*;
 use std::str::FromStr;
 
 fn main() {
-	let mut buf = [0; 256];
-	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
-
-	// Find virtio-net-pci device
-	let mut id = None;
-	let mut dev = None;
-	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		if inf.name() == b"pci" {
-			let tags = b"vendor-id:1af4&device-id:1000";
-			let h = std::os::norostb::query(i, tags).unwrap();
-			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				dev = Some((i, &buf[..obj.path_len]));
-				break 'found_dev;
-			}
-		}
-		id = Some(i);
-	}
-
-	let (tbl, dev) = dev.unwrap();
-
-	// Reserve & initialize device
-	let handle = std::os::norostb::open(tbl, dev).unwrap();
+	let dev_handle = {
+		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1000")
+			.unwrap()
+			.next()
+			.unwrap()
+			.unwrap();
+		fs::File::open(dev.path()).unwrap().into_handle()
+	};
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
-	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
+	let pci_config = syscall::map_object(dev_handle, pci_config, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -58,8 +46,13 @@ fn main() {
 				};
 				let map_bar = |bar: u8| {
 					let addr = map_addr.cast();
-					syscall::map_object(handle, NonNull::new(addr), (bar + 1).into(), usize::MAX)
-						.unwrap();
+					syscall::map_object(
+						dev_handle,
+						NonNull::new(addr),
+						(bar + 1).into(),
+						usize::MAX,
+					)
+					.unwrap();
 					map_addr = map_addr.wrapping_add(16);
 					NonNull::new(addr as *mut _).unwrap()
 				};

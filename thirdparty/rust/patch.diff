@@ -332,20 +332,66 @@ index 00000000000..17243a4af12
 +
 +#[unstable(feature = "norostb", issue = "none")]
 +pub use self::os_str::{OsStrExt, OsStringExt};
+diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
+new file mode 100644
+index 00000000000..dee3f41c70d
+--- /dev/null
++++ b/library/std/src/os/norostb/io.rs
+@@ -0,0 +1,34 @@
++use crate::sys_common::{AsInner, FromInner, IntoInner};
++use crate::{fs, sys};
++
++pub type Handle = u32;
++
++pub trait AsHandle {
++    fn as_handle(&self) -> Handle;
++}
++
++pub trait IntoHandle {
++    fn into_handle(self) -> Handle;
++}
++
++pub trait FromHandle {
++    unsafe fn from_handle(handle: Handle) -> Self;
++}
++
++impl AsHandle for fs::File {
++    fn as_handle(&self) -> Handle {
++        self.as_inner().handle
++    }
++}
++
++impl IntoHandle for fs::File {
++    fn into_handle(self) -> Handle {
++        self.into_inner().handle
++    }
++}
++
++impl FromHandle for fs::File {
++    unsafe fn from_handle(handle: Handle) -> Self {
++        Self::from_inner(sys::fs::File { handle })
++    }
++}
 diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
 new file mode 100644
-index 00000000000..0ca072765d6
+index 00000000000..0716f1ed226
 --- /dev/null
 +++ b/library/std/src/os/norostb/mod.rs
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,14 @@
 +#![unstable(feature = "norostb", issue = "none")]
 +
 +pub mod ffi;
++pub mod io;
 +
 +pub use crate::sys::io::{
 +    create, finish_job, open, poll, query, query_next, read, seek, take_job, write,
 +};
 +pub use norostb_rt::kernel::io::{Job, ObjectInfo};
++
++pub mod prelude {
++    use super::*;
++    pub use io::{AsHandle, FromHandle, Handle, IntoHandle};
++}
 diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
 index 167c918c94c..dbfba32bd66 100644
 --- a/library/std/src/sys/mod.rs
@@ -563,7 +609,7 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..e4115c1ef4b
+index 00000000000..294e433c547
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
 @@ -0,0 +1,470 @@
@@ -598,7 +644,7 @@ index 00000000000..e4115c1ef4b
 +
 +#[derive(Debug)]
 +pub struct File {
-+    handle: Handle,
++    pub(crate) handle: Handle,
 +}
 +
 +const TABLE_OBJECT_SEPARATOR: u8 = b'/';
