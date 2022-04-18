@@ -96,7 +96,7 @@ fn main() {
 	};
 
 	// Wrap the device for use with smoltcp
-	use smoltcp::{iface, phy, socket, time, wire};
+	use smoltcp::{iface, socket, time, wire};
 	let dev = dev::Dev::new(dev);
 	//let dev = phy::Tracer::new(dev, |t, p| println!("[{}] {}", t, p));
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
@@ -117,30 +117,11 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-net", syscall::TableType::Streaming).unwrap();
 
-	// Create a TCP listener
-	let mut rx @ mut tx = [0; 2048];
-	let rx = socket::TcpSocketBuffer::new(&mut rx[..]);
-	let tx = socket::TcpSocketBuffer::new(&mut tx[..]);
-	let tcp = iface.add_socket(socket::TcpSocket::new(rx, tx));
-
 	#[derive(Clone, Copy)]
 	enum Protocol {
 		Udp,
 		Tcp,
 	}
-
-	/*
-	enum Socket {
-		Udp {
-			socket: socket::UdpSocket,
-			address: IpEndpoint,
-		},
-		Tcp {
-			socket: socket::TcpSocket,
-			state: TcpState
-		},
-	}
-	*/
 
 	let mut t = time::Instant::from_secs(0);
 	let mut buf = [0; 2048];
@@ -253,7 +234,7 @@ fn main() {
 					job.handle = (objects.len() - 1).try_into().unwrap();
 				}
 				Job::READ => {
-					let (sock, addr, prot) = objects[job.handle as usize];
+					let (sock, _addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {
 							todo!("address");
@@ -286,7 +267,7 @@ fn main() {
 						Protocol::Tcp => {
 							let sock = iface.get_socket::<socket::TcpSocket>(sock);
 							let data = &buf[..job.operation_size as usize];
-							let e = sock.send_slice(data);
+							sock.send_slice(data).unwrap();
 						}
 					}
 				}

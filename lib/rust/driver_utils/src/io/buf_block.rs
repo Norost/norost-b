@@ -1,7 +1,6 @@
 use super::CacheSeek;
 use std::io::{self, BufRead, Read, ReadBuf, Seek, SeekFrom, Write};
 use std::mem::MaybeUninit;
-use std::num::NonZeroU64;
 
 /// A buffered I/O wrapper for block devices.
 ///

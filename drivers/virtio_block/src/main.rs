@@ -32,7 +32,6 @@ fn main() {
 	}
 
 	let (tbl, dev) = dev.unwrap();
-	dbg!(core::str::from_utf8(dev));
 	let dev_handle = std::os::norostb::open(tbl, dev).unwrap();
 
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
