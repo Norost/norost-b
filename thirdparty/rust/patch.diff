@@ -609,7 +609,7 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..294e433c547
+index 00000000000..37c1c28c0dc
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
 @@ -0,0 +1,470 @@
@@ -639,7 +639,7 @@ index 00000000000..294e433c547
 +use crate::sys_common::{AsInner, FromInner};
 +use norostb_rt::kernel::{
 +    io::{Handle, ObjectInfo},
-+    syscall::{self, QueryHandle, TableId, TableInfo},
++    syscall::{self, TableId, TableInfo},
 +};
 +
 +#[derive(Debug)]
@@ -659,7 +659,7 @@ index 00000000000..294e433c547
 +pub enum ReadDir {
 +    None,
 +    Tables(Option<TableId>),
-+    Objects { table_id: TableId, table_info: TableInfo, query: QueryHandle },
++    Objects { table_id: TableId, table_info: TableInfo, query: Handle },
 +}
 +
 +#[derive(Clone, Debug)]
@@ -1085,7 +1085,7 @@ index 00000000000..294e433c547
 +}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
-index 00000000000..085f7bf5cda
+index 00000000000..f9a12a66995
 --- /dev/null
 +++ b/library/std/src/sys/norostb/io.rs
 @@ -0,0 +1,263 @@
@@ -1245,7 +1245,7 @@ index 00000000000..085f7bf5cda
 +/// Blocking query
 +#[unstable(feature = "norostb", issue = "none")]
 +#[inline]
-+pub fn query(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::QueryHandle> {
++pub fn query(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::Handle> {
 +    let e = enqueue(Request::query(0, table, path));
 +    if e.value < 0 {
 +        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to query"))
@@ -1264,7 +1264,7 @@ index 00000000000..085f7bf5cda
 +/// Blocking query_next
 +#[unstable(feature = "norostb", issue = "none")]
 +#[inline]
-+pub fn query_next(query: syscall::QueryHandle, info: &mut ObjectInfo) -> io::Result<bool> {
++pub fn query_next(query: syscall::Handle, info: &mut ObjectInfo) -> io::Result<bool> {
 +    let e = enqueue(Request::query_next(0, query, info));
 +    if e.value < 0 {
 +        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))

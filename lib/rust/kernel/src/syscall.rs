@@ -81,8 +81,6 @@ impl fmt::Debug for TableInfo {
 	}
 }
 
-pub type QueryHandle = usize;
-
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Slice<'a, T> {

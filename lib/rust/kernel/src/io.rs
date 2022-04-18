@@ -11,7 +11,7 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::{QueryHandle, TableId};
+use super::syscall::TableId;
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -68,8 +68,7 @@ impl Request {
 	pub fn read(user_data: usize, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
 			ty: Self::READ,
-			// FIXME make handles 32-bit
-			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_32: [handle, 0],
 			arguments_ptr: [buf.as_ptr() as usize, buf.len()],
 			user_data,
 			..Default::default()
@@ -79,8 +78,7 @@ impl Request {
 	pub fn read_uninit(user_data: usize, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
 		Self {
 			ty: Self::READ,
-			// FIXME make handles 32-bit
-			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_32: [handle, 0],
 			arguments_ptr: [buf.as_ptr() as usize, buf.len()],
 			user_data,
 			..Default::default()
@@ -121,19 +119,17 @@ impl Request {
 	pub fn query(user_data: usize, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::QUERY,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
+			arguments_32: [table, 0],
 			arguments_ptr: [path.as_ptr() as usize, path.len()],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query_next(user_data: usize, handle: QueryHandle, info: &mut ObjectInfo) -> Self {
+	pub fn query_next(user_data: usize, handle: Handle, info: &mut ObjectInfo) -> Self {
 		Self {
 			ty: Self::QUERY_NEXT,
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_32: [handle, 0],
 			arguments_ptr: [info as *const _ as usize, 0],
 			user_data,
 			..Default::default()
@@ -143,8 +139,7 @@ impl Request {
 	pub fn take_job(user_data: usize, table: Handle, job: &mut Job) -> Self {
 		Self {
 			ty: Self::TAKE_JOB,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
+			arguments_32: [table, 0],
 			arguments_ptr: [job as *mut _ as usize, 0],
 			user_data,
 			..Default::default()
@@ -154,8 +149,7 @@ impl Request {
 	pub fn finish_job(user_data: usize, table: Handle, job: &Job) -> Self {
 		Self {
 			ty: Self::FINISH_JOB,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
+			arguments_32: [table, 0],
 			arguments_ptr: [job as *const _ as usize, 0],
 			user_data,
 			..Default::default()
@@ -167,8 +161,7 @@ impl Request {
 		Self {
 			ty: Self::SEEK,
 			arguments_8: [t, 0, 0],
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_32: [handle, 0],
 			arguments_64: [n],
 			arguments_ptr: [offset as *mut _ as usize, 0],
 			user_data,
@@ -180,8 +173,7 @@ impl Request {
 		Self {
 			ty: Self::POLL,
 			arguments_8: [0, 0, 0],
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
+			arguments_32: [handle, 0],
 			arguments_64: [0],
 			arguments_ptr: [0, 0],
 			user_data,
