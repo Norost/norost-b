@@ -13,23 +13,17 @@ use smoltcp::socket::TcpState;
 use std::str::FromStr;
 
 fn main() {
-	println!("Hello, internet!");
-
 	let mut buf = [0; 256];
 	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 
 	// Find virtio-net-pci device
 	let mut id = None;
 	let mut dev = None;
-	println!("iter tables");
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
 			let tags = b"vendor-id:1af4&device-id:1000";
 			let h = std::os::norostb::query(i, tags).unwrap();
-			println!("{:?}", h);
 			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				println!("{:#?}", &obj);
 				dev = Some((i, &buf[..obj.path_len]));
 				break 'found_dev;
 			}
@@ -45,8 +39,6 @@ fn main() {
 	let pci_config = NonNull::new(0x1000_0000 as *mut _);
 	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
 
-	println!("handle: {:?}", handle);
-
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
 	let dev = pci.get(0, 0, 0).unwrap();
@@ -58,10 +50,6 @@ fn main() {
 	let (dev, addr) = {
 		match dev {
 			pci::Header::H0(h) => {
-				for (i, b) in h.base_address.iter().enumerate() {
-					println!("{}: {:x}", i, b.get());
-				}
-
 				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
 
 				let get_phys_addr = |addr| {
@@ -76,20 +64,13 @@ fn main() {
 					NonNull::new(addr as *mut _).unwrap()
 				};
 				let dma_alloc = |size| {
-					println!("dma: {:#x}", dma_addr);
 					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
-					println!("  adr: {:p}", d);
 					let res = syscall::alloc_dma(Some(d), size).unwrap();
-					println!("  res: {} (>= {})", res, size);
 					dma_addr += res;
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), a))
 				};
-				let d = virtio_net::Device::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
-
-				println!("pci status: {:#x}", h.status());
-
-				d
+				virtio_net::Device::new(h, get_phys_addr, map_bar, dma_alloc).unwrap()
 			}
 			_ => unreachable!(),
 		}
@@ -98,12 +79,10 @@ fn main() {
 	// Wrap the device for use with smoltcp
 	use smoltcp::{iface, socket, time, wire};
 	let dev = dev::Dev::new(dev);
-	//let dev = phy::Tracer::new(dev, |t, p| println!("[{}] {}", t, p));
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
 	let mut sockets = [iface::SocketStorage::EMPTY; 8];
 	let mut neighbors = [None; 8];
 	let mut routes = [None; 8];
-	println!("{:?}", &addr);
 	let mut iface = iface::InterfaceBuilder::new(dev, &mut sockets[..])
 		.ip_addrs(&mut ip_addrs[..])
 		.hardware_addr(wire::EthernetAddress(*addr.as_ref()).into())

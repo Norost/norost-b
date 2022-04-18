@@ -8,22 +8,16 @@ use norostb_kernel::{self as kernel, io::Job, syscall};
 use virtio_block::Sector;
 
 fn main() {
-	println!("Hello, world! from Rust");
-
 	let mut buf = [0; 256];
 	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
 
 	let mut id = None;
 	let mut dev = None;
-	println!("iter tables");
 	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
 		if inf.name() == b"pci" {
 			let tags = b"vendor-id:1af4&device-id:1001";
 			let h = std::os::norostb::query(i, tags).unwrap();
-			println!("{:?}", h);
 			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				println!("{:#?}", &obj);
 				dev = Some((i, &buf[..obj.path_len]));
 				break 'found_dev;
 			}
@@ -45,10 +39,6 @@ fn main() {
 		let h = pci.get(0, 0, 0).unwrap();
 		match h {
 			pci::Header::H0(h) => {
-				for (i, b) in h.base_address.iter().enumerate() {
-					println!("{}: {:x}", i, b.get());
-				}
-
 				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
 
 				let get_phys_addr = |addr| {
@@ -68,7 +58,6 @@ fn main() {
 					NonNull::new(addr as *mut _).unwrap()
 				};
 				let dma_alloc = |size| {
-					println!("dma: {:#x}", dma_addr);
 					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
 					let res = syscall::alloc_dma(Some(d), size).unwrap();
 					dma_addr += res;
@@ -78,12 +67,7 @@ fn main() {
 
 				let msix = virtio_block::Msix { queue: Some(0) };
 
-				let d = virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix)
-					.unwrap();
-
-				println!("pci status: {:#x}", h.status());
-
-				d
+				virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix).unwrap()
 			}
 			_ => unreachable!(),
 		}

@@ -51,7 +51,6 @@ impl Table for PciTable {
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let _ = dbg!(core::str::from_utf8(path));
 		let r = path_to_bdf(path)
 			.and_then(|(bus, dev, func)| {
 				let pci = super::PCI.lock();
