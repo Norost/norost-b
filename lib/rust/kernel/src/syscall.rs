@@ -1,4 +1,3 @@
-const ID_SYSLOG: usize = 0;
 
 const ID_ALLOC_DMA: usize = 3;
 const ID_PHYSICAL_ADDRESS: usize = 4;
@@ -156,25 +155,6 @@ pub struct TableHandle(usize);
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct Events(u32);
-
-#[optimize(size)]
-#[inline]
-pub fn syslog(s: &[u8]) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_SYSLOG,
-			in("rdi") s.as_ptr(),
-			in("rsi") s.len(),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
-}
 
 #[inline]
 pub fn alloc_dma(
