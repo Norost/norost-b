@@ -22,7 +22,7 @@ use core::intrinsics;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 use core::str;
 use core::time::Duration;
 
@@ -355,7 +355,7 @@ pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize,
 			in("rdi") name.as_ptr(),
 			in("rsi") name.len(),
 			in("rdx") ty,
-			in("rcx") core::ptr::null::<()>(),
+			in("rcx") ptr::null::<()>(),
 			lateout("rax") status,
 			lateout("rdx") value,
 			lateout("rcx") _,
@@ -367,16 +367,16 @@ pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize,
 
 #[inline]
 pub fn create_io_queue(
-	base: *mut Page,
+	base: Option<NonNull<Page>>,
 	request_p2size: u8,
 	response_p2size: u8,
-) -> Result<*mut Page, (NonZeroUsize, usize)> {
+) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_CREATE_IO_QUEUE,
-			in("rdi") base,
+			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
 			in("esi") u32::from(request_p2size),
 			in("edx") u32::from(response_p2size),
 			lateout("rax") status,
@@ -385,17 +385,17 @@ pub fn create_io_queue(
 			lateout("r11") _,
 		)
 	}
-	ret(status, value).map(|v| v as *mut _)
+	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
 }
 
 #[inline]
-pub fn process_io_queue(base: *mut Page) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn process_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_PROCESS_IO_QUEUE,
-			in("rdi") base,
+			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
 			lateout("rax") status,
 			lateout("rdx") value,
 			lateout("rcx") _,
@@ -406,13 +406,13 @@ pub fn process_io_queue(base: *mut Page) -> Result<usize, (NonZeroUsize, usize)>
 }
 
 #[inline]
-pub fn wait_io_queue(base: *mut Page) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn wait_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_WAIT_IO_QUEUE,
-			in("rdi") base,
+			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
 			lateout("rax") status,
 			lateout("rdx") value,
 			lateout("rcx") _,

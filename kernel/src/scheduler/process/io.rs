@@ -59,15 +59,13 @@ impl super::Process {
 		let count = Page::min_pages_for_bytes(size);
 		let frame = frame::allocate_contiguous(count.try_into().unwrap())
 			.map_err(CreateQueueError::OutOfMemory)?;
-		let base = base.unwrap(); // TODO
 
 		let queue = IoQueue { base: frame, count };
 
-		unsafe {
-			self.address_space
-				.map_object(Some(base), Box::new(queue), RWX::RW, self.hint_color)
-				.map_err(CreateQueueError::MapError)?
-		};
+		let base = self
+			.address_space
+			.map_object(base, Box::new(queue), RWX::RW, self.hint_color)
+			.map_err(CreateQueueError::MapError)?;
 		self.io_queues.push(Queue {
 			base: base.cast(),
 			requests_mask,

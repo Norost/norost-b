@@ -92,9 +92,7 @@ fn main() {
 	job.buffer_size = buf.len().try_into().unwrap();
 
 	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
-	let job_queue = 0x9_6666_0000 as *mut _;
-	let job_queue = syscall::create_io_queue(job_queue, 0, 0).unwrap();
-	let job_queue = core::ptr::NonNull::new(job_queue).unwrap();
+	let job_queue = syscall::create_io_queue(None, 0, 0).unwrap();
 	let mut job_queue = Queue {
 		base: job_queue.cast(),
 		requests_mask: 0,
@@ -114,7 +112,7 @@ fn main() {
 	let job_queue_base = job_queue.base.as_ptr() as usize;
 	let thr = std::thread::spawn(move || loop {
 		syscall::sleep(std::time::Duration::from_millis(100));
-		syscall::process_io_queue(job_queue_base as *mut _).unwrap();
+		syscall::process_io_queue(NonNull::new(job_queue_base as *mut _)).unwrap();
 	});
 
 	loop {
