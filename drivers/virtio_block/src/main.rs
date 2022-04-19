@@ -18,7 +18,6 @@ fn main() {
 			.unwrap();
 		fs::File::open(dev.path()).unwrap().into_handle()
 	};
-
 	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
@@ -27,8 +26,8 @@ fn main() {
 		let h = pci.get(0, 0, 0).unwrap();
 		match h {
 			pci::Header::H0(h) => {
-				let get_phys_addr = |addr| {
-					let addr = NonNull::new(addr as *mut _).unwrap();
+				let get_phys_addr = |addr: *mut _| {
+					let addr = NonNull::new(addr).unwrap();
 					syscall::physical_address(addr).unwrap()
 				};
 				let map_bar = |bar: u8| {
@@ -36,15 +35,18 @@ fn main() {
 						.unwrap()
 						.cast()
 				};
-				let dma_alloc = |size| {
+				let dma_alloc = |size, _align| -> Result<_, ()> {
 					let d = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
-					Ok((d.cast(), a))
+					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
 
 				let msix = virtio_block::Msix { queue: Some(0) };
 
-				virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix).unwrap()
+				unsafe {
+					virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix)
+						.unwrap()
+				}
 			}
 			_ => unreachable!(),
 		}
@@ -53,20 +55,19 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
-	#[repr(align(4096))]
-	struct Hack([Sector; 8]);
-	let mut sectors = Hack([Sector::default(); 8]);
-	impl std::ops::Deref for Hack {
-		type Target = [Sector];
-		fn deref(&self) -> &Self::Target {
-			&self.0
-		}
-	}
-	impl std::ops::DerefMut for Hack {
-		fn deref_mut(&mut self) -> &mut Self::Target {
-			&mut self.0
-		}
-	}
+	let sectors = syscall::alloc_dma(None, 4096).unwrap();
+	let sectors_phys = virtio::PhysRegion {
+		base: virtio::PhysAddr::new(
+			syscall::physical_address(sectors)
+				.unwrap()
+				.try_into()
+				.unwrap(),
+		),
+		size: 4096,
+	};
+	let sectors = unsafe {
+		core::slice::from_raw_parts_mut(sectors.cast::<Sector>().as_ptr(), 4096 / Sector::SIZE)
+	};
 
 	let mut queries = driver_utils::Arena::new();
 	let mut data_handles = driver_utils::Arena::new();
@@ -88,6 +89,10 @@ fn main() {
 			continue;
 		}
 
+		let wait = || {
+			std::os::norostb::poll(dev_handle).unwrap();
+		};
+
 		match job.ty {
 			Job::OPEN => {
 				job.handle = data_handles.insert(0);
@@ -98,13 +103,12 @@ fn main() {
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
 
-				dev.read(&mut sectors.0, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.read(sectors_phys, sector, wait).unwrap();
+				}
 
 				let size = job.operation_size.min(
-					(Sector::slice_as_u8(&sectors).len() - usize::from(offset))
+					(Sector::slice_as_u8(sectors).len() - usize::from(offset))
 						.try_into()
 						.unwrap(),
 				);
@@ -122,19 +126,17 @@ fn main() {
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
 
-				dev.read(&mut sectors.0, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.read(sectors_phys, sector, wait).unwrap();
+				}
 
 				let data = &buf[..job.operation_size as usize];
-				Sector::slice_as_u8_mut(&mut sectors)[offset.into()..][..data.len()]
+				Sector::slice_as_u8_mut(sectors)[offset.into()..][..data.len()]
 					.copy_from_slice(data);
 
-				dev.write(&sectors.0, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.write(sectors_phys, sector, wait).unwrap();
+				}
 
 				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
 			}

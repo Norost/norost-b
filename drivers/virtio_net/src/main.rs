@@ -8,7 +8,11 @@ mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{self as kernel, io::Job, syscall};
+use norostb_kernel::{
+	self as kernel,
+	io::{Empty, Job, Queue, Request},
+	syscall,
+};
 use smoltcp::socket::TcpState;
 use std::fs;
 use std::os::norostb::prelude::*;
@@ -35,21 +39,17 @@ fn main() {
 	let (dev, addr) = {
 		match dev {
 			pci::Header::H0(h) => {
-				let get_phys_addr = |addr| {
-					let addr = NonNull::new(addr as *mut _).unwrap();
-					syscall::physical_address(addr).unwrap()
-				};
 				let map_bar = |bar: u8| {
 					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
 						.unwrap()
 						.cast()
 				};
-				let dma_alloc = |size| {
+				let dma_alloc = |size, _align| -> Result<_, ()> {
 					let d = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
-					Ok((d.cast(), a))
+					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
-				virtio_net::Device::new(h, get_phys_addr, map_bar, dma_alloc).unwrap()
+				unsafe { virtio_net::Device::new(h, map_bar, dma_alloc).unwrap() }
 			}
 			_ => unreachable!(),
 		}
@@ -87,7 +87,35 @@ fn main() {
 
 	let mut connecting_tcp_sockets = Vec::new();
 
-	let mut job = std::os::norostb::Job::default();
+	let mut job = Job::default();
+	job.buffer = NonNull::new(buf.as_mut_ptr());
+	job.buffer_size = buf.len().try_into().unwrap();
+
+	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
+	let job_queue = 0x9_6666_0000 as *mut _;
+	let job_queue = syscall::create_io_queue(job_queue, 0, 0).unwrap();
+	let job_queue = core::ptr::NonNull::new(job_queue).unwrap();
+	let mut job_queue = Queue {
+		base: job_queue.cast(),
+		requests_mask: 0,
+		responses_mask: 0,
+	};
+
+	unsafe {
+		job_queue
+			.enqueue_request(Request::take_job(0, tbl, &mut job))
+			.unwrap();
+	}
+
+	// TODO this is stupid but also the easiest fix right now.
+	// The queue isn't truly asynchronous yet and process_io_queue in the
+	// kernel blocks on each request.
+	// Cast to usize because god fucking damn your "lints" Rust.
+	let job_queue_base = job_queue.base.as_ptr() as usize;
+	let thr = std::thread::spawn(move || loop {
+		syscall::sleep(std::time::Duration::from_millis(100));
+		syscall::process_io_queue(job_queue_base as *mut _).unwrap();
+	});
 
 	loop {
 		// Advance TCP connection state.
@@ -103,7 +131,7 @@ fn main() {
 						smoltcp::wire::IpEndpoint::UNSPECIFIED,
 						Protocol::Tcp,
 					));
-					let job = std::os::norostb::Job {
+					let std_job = std::os::norostb::Job {
 						ty: Job::CREATE,
 						job_id,
 						flags: [0; 3],
@@ -114,17 +142,16 @@ fn main() {
 						from_anchor: 0,
 						from_offset: 0,
 					};
-					std::os::norostb::finish_job(tbl, &job).unwrap();
+					std::os::norostb::finish_job(tbl, &std_job).unwrap();
+					unsafe {
+						job_queue.enqueue_request(Request::take_job(0, tbl, &mut job));
+					}
 				}
 				s => todo!("{:?}", s),
 			}
 		}
 
-		while let Ok(()) = {
-			job.buffer = NonNull::new(buf.as_mut_ptr());
-			job.buffer_size = buf.len().try_into().unwrap();
-			std::os::norostb::take_job(tbl, &mut job)
-		} {
+		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
 			match job.ty {
 				Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];
@@ -211,6 +238,7 @@ fn main() {
 							} else {
 								job.buffer_size = 0;
 							}
+							job.operation_size = job.buffer_size;
 						}
 					}
 				}
@@ -232,7 +260,19 @@ fn main() {
 				t => todo!("job type {}", t),
 			}
 
-			std::os::norostb::finish_job(tbl, &job).unwrap();
+			unsafe {
+				job_queue
+					.enqueue_request(Request::finish_job(0, tbl, &job))
+					.unwrap();
+			}
+			while let Err(Empty) = unsafe { job_queue.dequeue_response() } {
+				std::thread::sleep(std::time::Duration::from_millis(1));
+			}
+			unsafe {
+				job_queue
+					.enqueue_request(Request::take_job(0, tbl, &mut job))
+					.unwrap();
+			}
 		}
 
 		iface.poll(t).unwrap();

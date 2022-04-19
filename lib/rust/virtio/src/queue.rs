@@ -1,16 +1,17 @@
 //! Implementation of **split** virtqueues.
 
+use super::{PhysAddr, PhysRegion};
 use core::convert::{TryFrom, TryInto};
 use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
 use core::slice;
 use core::sync::atomic::{self, Ordering};
-use endian::{u16le, u32le, u64le};
+use endian::{u16le, u32le};
 
 #[repr(C)]
 struct Descriptor {
-	address: u64le,
+	address: PhysAddr,
 	length: u32le,
 	flags: u16le,
 	next: u16le,
@@ -121,13 +122,13 @@ impl<'a> Queue<'a> {
 	/// Create a new split virtqueue and attach it to the device.
 	///
 	/// The size must be a power of 2.
-	pub fn new(
+	pub fn new<DmaError>(
 		config: &'a super::pci::CommonConfig,
 		index: u16,
 		max_size: u16,
 		msix: Option<u16>,
-		dma_alloc: impl FnOnce(usize) -> Result<(NonNull<()>, usize), ()>,
-	) -> Result<Self, OutOfMemory> {
+		dma_alloc: impl FnOnce(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
+	) -> Result<Self, NewQueueError<DmaError>> {
 		// TODO ensure max_size is a power of 2
 		let size = u16::from(config.queue_size.get()).min(max_size) as usize;
 		let desc_size = mem::size_of::<Descriptor>() * size;
@@ -140,7 +141,8 @@ impl<'a> Queue<'a> {
 
 		let align = |s| (s + 0xfff) & !0xfff;
 
-		let (mem, phys) = dma_alloc(align(desc_size + avail_size) + align(used_size)).unwrap();
+		let (mem, phys) = dma_alloc(align(desc_size + avail_size) + align(used_size), 4096)
+			.map_err(NewQueueError::DmaError)?;
 		let mem = mem.cast::<u8>();
 
 		let descriptors = mem.cast();
@@ -164,13 +166,13 @@ impl<'a> Queue<'a> {
 		let free_count = 8;
 
 		let d_phys = phys;
-		let a_phys = phys + desc_size;
-		let u_phys = phys + align(desc_size + avail_size);
+		let a_phys = phys + u64::try_from(desc_size).unwrap();
+		let u_phys = phys + u64::try_from(align(desc_size + avail_size)).unwrap();
 
 		config.queue_select.set(index.into());
-		config.queue_descriptors.set((d_phys as u64).into());
-		config.queue_driver.set((a_phys as u64).into());
-		config.queue_device.set((u_phys as u64).into());
+		config.queue_descriptors.set(d_phys);
+		config.queue_driver.set(a_phys);
+		config.queue_device.set(u_phys);
 		config.queue_size.set((size as u16).into());
 		config.queue_enable.set(1.into());
 
@@ -204,10 +206,10 @@ impl<'a> Queue<'a> {
 		&mut self,
 		iterator: I,
 		mut used: Option<&mut dyn FnMut(u16)>,
-		callback: impl FnMut(u16, u64, u32),
+		callback: impl FnMut(u16, PhysRegion),
 	) -> Result<(), NoBuffers>
 	where
-		I: ExactSizeIterator<Item = (u64, u32, bool)>,
+		I: ExactSizeIterator<Item = (PhysAddr, u32, bool)>,
 	{
 		let count = iterator.len().try_into().unwrap();
 		if count == 0 {
@@ -230,7 +232,7 @@ impl<'a> Queue<'a> {
 		while let Some((address, length, write)) = iterator.next() {
 			free_count = free_count.checked_sub(1).ok_or(NoBuffers)?;
 			let i = usize::from(self.free_descriptors[usize::from(free_count)]);
-			desc[i].address = u64le::from(u64::try_from(address).expect("Address out of bounds"));
+			desc[i].address = address;
 			desc[i].length = u32le::from(u32::try_from(length).expect("Length too large"));
 			desc[i].flags = u16le::from(u16::from(write) * Descriptor::WRITE);
 			desc[i].flags |= u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
@@ -255,7 +257,7 @@ impl<'a> Queue<'a> {
 	/// # Returns
 	///
 	/// The amount of buffers collected.
-	pub fn collect_used(&mut self, mut callback: impl FnMut(u16, u64, u32)) -> usize {
+	pub fn collect_used(&mut self, mut callback: impl FnMut(u16, PhysRegion)) -> usize {
 		atomic::fence(Ordering::Acquire);
 		let (head, ring) = used_ring!(self);
 		let table = descriptors_table!(self);
@@ -270,7 +272,11 @@ impl<'a> Queue<'a> {
 			loop {
 				assert_ne!(descr_index, u16::MAX);
 				let descr = &table[usize::from(descr_index)];
-				callback(descr_index, descr.address.into(), descr.length.into());
+				let region = PhysRegion {
+					base: descr.address,
+					size: descr.length.into(),
+				};
+				callback(descr_index, region);
 				self.free_descriptors[usize::from(self.free_count)] = descr_index;
 				self.free_count += 1;
 				if u16::from(descr.flags) & Descriptor::NEXT > 0 {
@@ -292,7 +298,7 @@ impl<'a> Queue<'a> {
 	/// wasting cycles.
 	pub fn wait_for_used(
 		&mut self,
-		mut callback: impl FnMut(u16, u64, u32),
+		mut callback: impl FnMut(u16, PhysRegion),
 		mut wait_fn: impl FnMut(),
 	) {
 		while usize::from(self.free_count) != self.free_descriptors.len()
@@ -309,18 +315,15 @@ impl<'a> Queue<'a> {
 	}
 }
 
-pub struct OutOfMemory;
-
-impl fmt::Debug for OutOfMemory {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "No free DMA memory")
-	}
-}
-
 pub struct NoBuffers;
 
 impl fmt::Debug for NoBuffers {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "No free buffers")
 	}
+}
+
+#[derive(Debug)]
+pub enum NewQueueError<DmaError> {
+	DmaError(DmaError),
 }
