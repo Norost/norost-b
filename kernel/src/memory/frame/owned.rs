@@ -14,7 +14,17 @@ impl OwnedPageFrames {
 		// FIXME if we don't pre allocate we will deadlock.
 		// This is a shitty workaround
 		frames.reserve(size.get());
-		super::allocate(size.get(), |f| frames.push(f), hints.address, hints.color)?;
+		super::allocate(
+			size.get(),
+			|f| {
+				unsafe {
+					f.base.as_ptr().write_bytes(0, 1 << f.p2size);
+				}
+				frames.push(f);
+			},
+			hints.address,
+			hints.color,
+		)?;
 		Ok(Self {
 			frames: frames.into(),
 		})
@@ -24,5 +34,19 @@ impl OwnedPageFrames {
 impl MemoryObject for OwnedPageFrames {
 	fn physical_pages(&self) -> Box<[PageFrame]> {
 		self.frames.clone()
+	}
+}
+
+impl Drop for OwnedPageFrames {
+	fn drop(&mut self) {
+		unsafe {
+			let mut i = 0;
+			super::deallocate(self.frames.len(), || {
+				let f = self.frames[i];
+				i += 1;
+				f
+			})
+			.unwrap();
+		}
 	}
 }

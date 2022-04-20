@@ -57,8 +57,15 @@ impl super::Process {
 		let responses_mask = (1 << response_p2size) - 1;
 		let size = Queue::total_size(requests_mask, responses_mask);
 		let count = Page::min_pages_for_bytes(size);
+
+		assert_eq!(count, 1, "TODO");
+		let mut frame = None;
+		frame::allocate(count, |f| frame = Some(f), 0 as *const _, self.hint_color).unwrap();
+		/*
 		let frame = frame::allocate_contiguous(count.try_into().unwrap())
 			.map_err(CreateQueueError::OutOfMemory)?;
+		*/
+		let frame = frame.unwrap().base;
 
 		let queue = IoQueue { base: frame, count };
 

@@ -27,9 +27,10 @@ impl Thread {
 		process: NonNull<Process>,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
-			let kernel_stack_base = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?
-				.as_ptr()
-				.cast::<[usize; 512]>();
+			let mut kernel_stack_base = None;
+			frame::allocate(1, |f| kernel_stack_base = Some(f), 0 as _, 0).unwrap();
+			let kernel_stack_base = kernel_stack_base.unwrap().base;
+			let kernel_stack_base = kernel_stack_base.as_ptr().cast::<[usize; 512]>();
 			let mut kernel_stack = kernel_stack_base.add(1).cast::<usize>();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);

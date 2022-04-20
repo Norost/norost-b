@@ -52,7 +52,11 @@ impl PPN {
 	/// The pointer must be aligned and point to somewhere inside the identity map.
 	pub unsafe fn from_ptr(page: *mut Page) -> Self {
 		let virt = unsafe { super::r#virtual::virt_to_phys(page.cast()) };
-		Self((usize::try_from(virt).unwrap() / Page::SIZE) as PPNBox)
+		Self(
+			(usize::try_from(virt).unwrap() / Page::SIZE)
+				.try_into()
+				.unwrap(),
+		)
 	}
 
 	pub fn next(&self) -> Self {
@@ -177,7 +181,7 @@ pub enum PageFrameIterError {
 }
 
 /// A region of physical memory
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryRegion {
 	pub base: PPN,
 	pub count: usize,
@@ -232,10 +236,8 @@ where
 	(stack.count() >= count)
 		.then(|| {
 			for _ in 0..count {
-				callback(PageFrame {
-					base: stack.pop().unwrap(),
-					p2size: 0,
-				});
+				let base = stack.pop().unwrap();
+				callback(PageFrame { base, p2size: 0 });
 			}
 		})
 		.ok_or(AllocateError::OutOfFrames)

@@ -12,7 +12,12 @@ pub struct AddressSpace {
 
 impl AddressSpace {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
-		let ppn = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?;
+		let mut ppn = None;
+		frame::allocate(1, |f| ppn = Some(f), 0 as _, 0).unwrap();
+		let ppn = ppn.unwrap().base;
+		unsafe {
+			ppn.as_ptr().cast::<Page>().write_bytes(0, 1);
+		}
 		let mut slf = Self { cr3: ppn.as_phys() };
 
 		// Map the kernel pages

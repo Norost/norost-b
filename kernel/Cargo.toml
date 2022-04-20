@@ -20,4 +20,4 @@ mem-max-256m = []
 driver-pci = []
 driver-hpet = []
 driver-pic = []
-
+debug-sanitize-heap = []

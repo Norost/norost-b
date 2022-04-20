@@ -1,8 +1,5 @@
-use crate::memory::frame;
-use crate::memory::Page;
-use core::arch::asm;
-use core::fmt;
-use core::ptr;
+use crate::memory::{frame, Page};
+use core::{arch::asm, fmt, mem, ptr};
 
 // Don't implement copy to avoid accidentally updating stack values instead of
 // entries in a table.
@@ -73,7 +70,7 @@ impl Entry {
 			// The borrow checked is retarded, so this will have to do.
 			Ok(self.as_table_mut().unwrap())
 		} else if self.is_leaf() {
-			Err(MakeTableError::IsMapped)
+			Err(MakeTableError::IsLeaf)
 		} else {
 			let mut frame = None;
 			frame::allocate(1, |f| frame = Some(f), self as *mut _ as *mut _, hint_color)?;
@@ -150,7 +147,7 @@ impl fmt::Debug for Entry {
 
 #[derive(Debug)]
 pub enum MakeTableError {
-	IsMapped,
+	IsLeaf,
 	OutOfFrames,
 }
 

@@ -12,8 +12,14 @@ pub struct DMAFrame {
 
 impl DMAFrame {
 	pub fn new(count: PPNBox) -> Result<Self, frame::AllocateContiguousError> {
-		frame::allocate_contiguous(NonZeroUsize::new(count.try_into().unwrap()).unwrap())
-			.map(|base| Self { base, count })
+		frame::allocate_contiguous(NonZeroUsize::new(count.try_into().unwrap()).unwrap()).map(
+			|base| {
+				unsafe {
+					base.as_ptr().write_bytes(0, count.try_into().unwrap());
+				}
+				Self { base, count }
+			},
+		)
 	}
 }
 

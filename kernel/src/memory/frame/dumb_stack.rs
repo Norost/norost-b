@@ -28,6 +28,9 @@ impl Stack {
 	}
 
 	pub fn pop(&mut self) -> Option<PPN> {
+		let s = self.get_mut(..).unwrap();
+		s.sort_unstable();
+
 		self.count.checked_sub(1).map(|c| {
 			self.count = c;
 			unsafe { self.stack[c].assume_init_read() }
