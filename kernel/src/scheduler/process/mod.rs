@@ -3,11 +3,12 @@ mod io;
 
 use super::{MemoryObject, Thread};
 use crate::arch;
-use crate::memory::frame;
-use crate::memory::r#virtual::{AddressSpace, MapError, MemoryObjectHandle, RWX};
+use crate::memory::frame::{self, AllocateHints};
+use crate::memory::r#virtual::{AddressSpace, MapError, MemoryObjectHandle, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{Object, Query};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 pub struct Process {
@@ -71,6 +72,15 @@ impl Process {
 			.map_object(base, obj, rwx, self.hint_color)
 	}
 
+	/// Unmap a memory object in a memory range. This unmapping may be partial.
+	pub fn unmap_memory_object(
+		&mut self,
+		base: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		self.address_space.unmap_object(base, count)
+	}
+
 	/// Get a reference to a memory object.
 	#[allow(dead_code)]
 	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
@@ -111,6 +121,14 @@ impl Process {
 		self.threads.push(thr);
 		super::round_robin::insert(thr_weak);
 		Ok(self.threads.len() - 1)
+	}
+
+	/// Create an [`AllocateHints`] structure for the given virtual address.
+	pub fn allocate_hints(&self, address: *const u8) -> AllocateHints {
+		AllocateHints {
+			address,
+			color: self.hint_color,
+		}
 	}
 
 	// FIXME wildly unsafe!

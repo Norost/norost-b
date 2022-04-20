@@ -45,7 +45,7 @@ fn main() {
 						.cast()
 				};
 				let dma_alloc = |size, _align| -> Result<_, ()> {
-					let d = syscall::alloc_dma(None, size).unwrap();
+					let (d, _) = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};

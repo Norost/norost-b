@@ -1,3 +1,5 @@
+const ID_ALLOC: usize = 0;
+const ID_DEALLOC: usize = 1;
 
 const ID_ALLOC_DMA: usize = 3;
 const ID_PHYSICAL_ADDRESS: usize = 4;
@@ -17,7 +19,6 @@ use crate::Page;
 use core::alloc::Layout;
 use core::arch::asm;
 use core::fmt;
-use core::intrinsics;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
@@ -148,6 +149,15 @@ pub enum TableType {
 	Streaming,
 }
 
+pub enum RWX {
+	R = 0b100,
+	W = 0b010,
+	X = 0b001,
+	RW = 0b110,
+	RX = 0b101,
+	RWX = 0b111,
+}
+
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct TableHandle(usize);
@@ -157,10 +167,63 @@ pub struct TableHandle(usize);
 pub struct Events(u32);
 
 #[inline]
+pub fn alloc(
+	base: Option<NonNull<Page>>,
+	size: usize,
+	rwx: RWX,
+) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_ALLOC,
+			in("rdi") base.map_or_else(core::ptr::null_mut, NonNull::as_ptr),
+			in("rsi") size,
+			in("rdx") rwx as usize,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret2(status, value).map(|(status, value)| {
+		(
+			NonNull::new(value as *mut _).unwrap(),
+			NonZeroUsize::new(status).unwrap(),
+		)
+	})
+}
+
+#[inline]
+pub fn dealloc(
+	base: NonNull<Page>,
+	size: usize,
+	dealloc_partial_start: bool,
+	dealloc_partial_end: bool,
+) -> Result<(), (NonZeroUsize, usize)> {
+	let (status, value): (usize, usize);
+	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_DEALLOC,
+			in("rdi") base.as_ptr(),
+			in("rsi") size,
+			in("rdx") flags,
+			lateout("rax") status,
+			lateout("rdx") value,
+			lateout("rcx") _,
+			lateout("r11") _,
+		);
+	}
+	ret(status, value).map(|_| ())
+}
+
+#[inline]
 pub fn alloc_dma(
 	base: Option<NonNull<Page>>,
 	size: usize,
-) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
+) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
 	let (status, value): (usize, usize);
 	unsafe {
 		asm!(
@@ -174,7 +237,12 @@ pub fn alloc_dma(
 			lateout("r11") _,
 		);
 	}
-	ret(status, value).map(|p| NonNull::new(p as *mut _).unwrap_or_else(|| intrinsics::abort()))
+	ret2(status, value).map(|(status, value)| {
+		(
+			NonNull::new(value as *mut _).unwrap(),
+			NonZeroUsize::new(status).unwrap(),
+		)
+	})
 }
 
 #[inline]
@@ -406,5 +474,13 @@ fn ret(status: usize, value: usize) -> Result<usize, (NonZeroUsize, usize)> {
 	match NonZeroUsize::new(status) {
 		None => Ok(value),
 		Some(status) => Err((status, value)),
+	}
+}
+
+fn ret2(status: usize, value: usize) -> Result<(usize, usize), (NonZeroUsize, usize)> {
+	if (status as isize) < 0 {
+		Err((NonZeroUsize::new(status).unwrap(), value))
+	} else {
+		Ok((status, value))
 	}
 }

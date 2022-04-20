@@ -37,7 +37,7 @@ pub struct Dev<'d>(RefCell<DevInner<'d>>);
 impl<'d> Dev<'d> {
 	pub fn new(mut virtio: virtio_net::Device<'d>) -> Self {
 		//let rx_tx_buffer = norostb_kernel::syscall::alloc_dma(None, 1514).unwrap();
-		let rx_tx_buffer = norostb_kernel::syscall::alloc_dma(None, 2048 * 2).unwrap();
+		let (rx_tx_buffer, _) = norostb_kernel::syscall::alloc_dma(None, 2048 * 2).unwrap();
 		let rx_tx_buffer_phys = norostb_kernel::syscall::physical_address(rx_tx_buffer).unwrap();
 		let rx_tx_buffer_phys = PhysAddr::new(rx_tx_buffer_phys.try_into().unwrap());
 

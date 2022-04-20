@@ -52,6 +52,10 @@ pub unsafe fn init() {
 			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0),
 		);
 		IDT.set(
+			6,
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_invalid_opcode), 0),
+		);
+		IDT.set(
 			8,
 			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
 		);
@@ -92,6 +96,18 @@ extern "C" fn handle_timer(_rip: *const ()) -> ! {
 			}
 		}
 	}
+}
+
+extern "C" fn handle_invalid_opcode(error: u32, rip: *const ()) {
+	fatal!("Invalid opcode!");
+	unsafe {
+		let addr: *const ();
+		asm!("mov {}, cr2", out(reg) addr);
+		fatal!("  error:   {:#x}", error);
+		fatal!("  RIP:     {:p}", rip);
+		fatal!("  address: {:p}", addr);
+	}
+	halt();
 }
 
 extern "C" fn handle_double_fault(error: u32, rip: *const ()) {

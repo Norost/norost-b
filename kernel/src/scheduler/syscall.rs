@@ -1,4 +1,4 @@
-use crate::memory::{frame, r#virtual::RWX, Page};
+use crate::memory::{frame, frame::OwnedPageFrames, r#virtual::RWX, Page};
 use crate::object_table;
 use crate::object_table::TableId;
 use crate::scheduler::process::ObjectHandle;
@@ -9,6 +9,7 @@ use alloc::{
 	sync::{Arc, Weak},
 };
 use core::mem;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
 
@@ -24,8 +25,8 @@ type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return
 pub const SYSCALLS_LEN: usize = 23;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
-	undefined,
-	undefined,
+	alloc,
+	dealloc,
 	undefined,
 	alloc_dma,
 	physical_address,
@@ -49,6 +50,104 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	wait_io,
 ];
 
+fn raw_to_rwx(rwx: usize) -> Option<RWX> {
+	Some(match rwx {
+		0b100 => RWX::R,
+		0b010 => RWX::W,
+		0b001 => RWX::X,
+		0b110 => RWX::RW,
+		0b101 => RWX::RX,
+		0b111 => RWX::RWX,
+		_ => return None,
+	})
+}
+
+extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
+	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
+		return Return {
+			status: 1,
+			value: 0,
+		};
+	};
+	let Some(rwx) = raw_to_rwx(rwx) else {
+		return Return {
+			status: 1,
+			value: 0,
+		};
+	};
+	let proc = Process::current();
+	let base = base as *mut _;
+	match OwnedPageFrames::new(count, proc.allocate_hints(base)) {
+		Ok(mem) => proc
+			.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
+			.map_or(
+				Return {
+					status: usize::MAX,
+					value: 0,
+				},
+				|base| Return {
+					status: count.get() * Page::SIZE,
+					value: base.as_ptr() as usize,
+				},
+			),
+		Err(_) => Return {
+			status: usize::MAX - 1,
+			value: 0,
+		},
+	}
+}
+
+extern "C" fn dealloc(
+	base: usize,
+	size: usize,
+	flags: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let dealloc_partial_start = flags & 1 > 0;
+	let dealloc_partial_end = flags & 2 > 0;
+
+	// Round up base & size depending on flags.
+	let (base, size) = if dealloc_partial_start {
+		(base & !Page::MASK, (size + base) & Page::MASK)
+	} else {
+		(
+			(base + Page::MASK) & !Page::MASK,
+			size - (Page::SIZE.wrapping_sub(base) & Page::MASK),
+		)
+	};
+
+	let (base, size) = if dealloc_partial_end {
+		(base, (size + Page::MASK) & !Page::MASK)
+	} else {
+		(base, size & !Page::MASK)
+	};
+
+	let Some(count) = NonZeroUsize::new(size / Page::MASK) else {
+		return Return {
+			status: 0,
+			value: 0,
+		};
+	};
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return {
+			status: usize::MAX,
+			value: 0,
+		}
+	};
+	Process::current().unmap_memory_object(base, count).map_or(
+		Return {
+			status: usize::MAX - 1,
+			value: 0,
+		},
+		|_| Return {
+			status: 0,
+			value: size,
+		},
+	)
+}
+
 extern "C" fn alloc_dma(
 	base: usize,
 	size: usize,
@@ -65,11 +164,11 @@ extern "C" fn alloc_dma(
 		.map_memory_object(base, Box::new(frame), rwx)
 		.map_or(
 			Return {
-				status: 1,
+				status: usize::MAX,
 				value: 0,
 			},
 			|base| Return {
-				status: 0,
+				status: count * Page::SIZE,
 				value: base.as_ptr() as usize,
 			},
 		)

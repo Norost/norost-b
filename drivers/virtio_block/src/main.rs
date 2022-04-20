@@ -36,7 +36,7 @@ fn main() {
 						.cast()
 				};
 				let dma_alloc = |size, _align| -> Result<_, ()> {
-					let d = syscall::alloc_dma(None, size).unwrap();
+					let (d, _) = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
@@ -55,7 +55,7 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
-	let sectors = syscall::alloc_dma(None, 4096).unwrap();
+	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
 	let sectors_phys = virtio::PhysRegion {
 		base: virtio::PhysAddr::new(
 			syscall::physical_address(sectors)

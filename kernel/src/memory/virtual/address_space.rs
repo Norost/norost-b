@@ -17,6 +17,10 @@ pub enum MapError {
 	Arch(crate::arch::r#virtual::MapError),
 }
 
+pub enum UnmapError {
+	InvalidRange,
+}
+
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
@@ -61,11 +65,16 @@ impl AddressSpace {
 			.ok_or(())
 			.or_else(|()| self.allocate_virtual_address_range(count))
 			.map_err(|NoFreeVirtualAddressSpace| MapError::NoFreeVirtualAddressSpace)?;
-		let end = base.as_ptr().wrapping_add(count.get()).wrapping_sub(1);
+		let end = base
+			.as_ptr()
+			.wrapping_add(count.get())
+			.cast::<u8>()
+			.wrapping_sub(1)
+			.cast();
 		if end < base.as_ptr() {
 			return Err(MapError::Overflow);
 		}
-		let end = NonNull::new(base.as_ptr()).unwrap();
+		let end = NonNull::new(end).unwrap();
 
 		let e = unsafe {
 			self.mmu_address_space.map(
@@ -87,6 +96,32 @@ impl AddressSpace {
 			base
 		})
 		.map_err(MapError::Arch)
+	}
+
+	pub fn unmap_object(
+		&mut self,
+		base: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		let i = self
+			.objects
+			.iter()
+			.position(|e| e.0.contains(&base))
+			.unwrap();
+		let (range, obj) = &self.objects[i];
+		let end = base
+			.as_ptr()
+			.wrapping_add(count.get())
+			.cast::<u8>()
+			.wrapping_sub(1)
+			.cast();
+		let unmap_range = base..=NonNull::new(end).unwrap();
+		if &unmap_range == range {
+			self.objects.remove(i);
+			Ok(())
+		} else {
+			todo!("partial unmap");
+		}
 	}
 
 	/// Get a reference to a memory object.
