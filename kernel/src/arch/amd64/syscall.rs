@@ -28,7 +28,12 @@ pub unsafe fn init() {
 		msr::wrmsr(msr::LSTAR, handler as u64);
 
 		// Set GS_BASE to a per-cpu structure
-		let data = Box::leak(Box::<CpuData>::new_uninit());
+		let data = Box::leak(Box::new(CpuData {
+			user_stack_ptr: ptr::null_mut(),
+			kernel_stack_ptr: ptr::null_mut(),
+			process: ptr::null_mut(),
+			thread: ptr::null(),
+		}));
 		msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 	}
 }
