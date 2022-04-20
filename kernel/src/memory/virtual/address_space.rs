@@ -118,10 +118,16 @@ impl AddressSpace {
 		let unmap_range = base..=NonNull::new(end).unwrap();
 		if &unmap_range == range {
 			self.objects.remove(i);
-			Ok(())
 		} else {
 			todo!("partial unmap");
 		}
+
+		// Remove from page tables.
+		unsafe {
+			self.mmu_address_space.unmap(base, count).unwrap();
+		}
+
+		Ok(())
 	}
 
 	/// Get a reference to a memory object.

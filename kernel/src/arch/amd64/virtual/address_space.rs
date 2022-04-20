@@ -58,6 +58,20 @@ impl AddressSpace {
 		Ok(())
 	}
 
+	pub unsafe fn unmap(
+		&mut self,
+		address: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		let tbl = unsafe { self.table_mut() };
+		for i in 0..count.get() {
+			let e = common::get_entry_mut(tbl, address.as_ptr().wrapping_add(i) as u64, 0, 3)
+				.map_err(|_| UnmapError::Unset)?;
+			e.clear().ok_or(UnmapError::Unset)?;
+		}
+		Ok(())
+	}
+
 	pub unsafe fn kernel_map(
 		mut address: *const Page,
 		frames: impl ExactSizeIterator<Item = frame::PageFrame>,
@@ -135,4 +149,9 @@ impl Drop for AddressSpace {
 #[derive(Debug)]
 pub enum MapError {
 	Overflow,
+}
+
+#[derive(Debug)]
+pub enum UnmapError {
+	Unset,
 }
