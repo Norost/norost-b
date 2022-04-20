@@ -59,6 +59,10 @@ mod time;
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	unsafe {
+		driver::early_init(boot_info);
+	}
+
+	unsafe {
 		log::init();
 	}
 
