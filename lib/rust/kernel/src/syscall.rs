@@ -166,27 +166,44 @@ pub struct TableHandle(usize);
 #[repr(transparent)]
 pub struct Events(u32);
 
+macro_rules! syscall {
+	(@INTERNAL $id:ident [$(in($reg:tt) $val:expr),*]) => {
+		unsafe {
+			let status @ value: usize;
+			asm!(
+				"syscall",
+				in("eax") $id,
+				$(in($reg) $val),*,
+				lateout("rax") status,
+				lateout("rdx") value,
+				lateout("rcx") _,
+				lateout("r11") _,
+			);
+			(status, value)
+		}
+	};
+	($id:ident($a1:expr)) => {
+		syscall!(@INTERNAL $id [in("rdi") $a1])
+	};
+	($id:ident($a1:expr, $a2:expr)) => {
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr)) => {
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr)) => {
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("rcx") $a4])
+	};
+}
+
 #[inline]
 pub fn alloc(
 	base: Option<NonNull<Page>>,
 	size: usize,
 	rwx: RWX,
 ) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_ALLOC,
-			in("rdi") base.map_or_else(core::ptr::null_mut, NonNull::as_ptr),
-			in("rsi") size,
-			in("rdx") rwx as usize,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret2(status, value).map(|(status, value)| {
+	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
+	ret2(syscall!(ID_ALLOC(base, size, rwx as usize))).map(|(status, value)| {
 		(
 			NonNull::new(value as *mut _).unwrap(),
 			NonZeroUsize::new(status).unwrap(),
@@ -201,22 +218,8 @@ pub fn dealloc(
 	dealloc_partial_start: bool,
 	dealloc_partial_end: bool,
 ) -> Result<(), (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
 	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_DEALLOC,
-			in("rdi") base.as_ptr(),
-			in("rsi") size,
-			in("rdx") flags,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value).map(|_| ())
+	ret(syscall!(ID_DEALLOC(base.as_ptr(), size, flags))).map(|_| ())
 }
 
 #[inline]
@@ -224,20 +227,11 @@ pub fn alloc_dma(
 	base: Option<NonNull<Page>>,
 	size: usize,
 ) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_ALLOC_DMA,
-			in("rdi") base.map_or_else(core::ptr::null_mut, NonNull::as_ptr),
-			in("rsi") size,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret2(status, value).map(|(status, value)| {
+	ret2(syscall!(ID_ALLOC_DMA(
+		base.map_or_else(ptr::null_mut, NonNull::as_ptr),
+		size
+	)))
+	.map(|(status, value)| {
 		(
 			NonNull::new(value as *mut _).unwrap(),
 			NonZeroUsize::new(status).unwrap(),
@@ -247,38 +241,16 @@ pub fn alloc_dma(
 
 #[inline]
 pub fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_PHYSICAL_ADDRESS,
-			in("rdi") base.as_ptr(),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
+	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr())))
 }
 
 #[inline]
 pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
-	let (status, value): (usize, usize);
+	let id = id.map_or(usize::MAX, |id| id.try_into().unwrap());
 	let mut info = TableInfo::default();
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_NEXT_TABLE,
-			in("rdi") id.map_or(usize::MAX, |id| id.try_into().unwrap()),
-			in("rsi") &mut info,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	(status == 0).then(|| (value as u32, info))
+	ret(syscall!(ID_NEXT_TABLE(id, &mut info)))
+		.ok()
+		.map(|value| (value as u32, info))
 }
 
 #[inline]
@@ -288,39 +260,15 @@ pub fn map_object(
 	offset: u64,
 	length: usize,
 ) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_MAP_OBJECT,
-			in("rdi") handle,
-			in("rsi") base.map_or_else(core::ptr::null_mut, NonNull::as_ptr),
-			in("rdx") offset,
-			in("r10") length,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
+	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
+	ret(syscall!(ID_MAP_OBJECT(handle, base, offset, length)))
+		.map(|v| NonNull::new(v as *mut _).unwrap())
 }
 
 #[inline]
 pub fn sleep(duration: Duration) {
 	let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_SLEEP,
-			in("rdi") micros,
-			// Ignore failures and pretend the sleep terminated early
-			lateout("rax") _,
-			lateout("rdx") _,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
+	syscall!(ID_SLEEP(micros));
 }
 
 #[inline]
@@ -328,20 +276,7 @@ pub unsafe fn spawn_thread(
 	start: unsafe extern "C" fn() -> !,
 	stack: *const (),
 ) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_SPAWN_THREAD,
-			in("rdi") start,
-			in("rsi") stack,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
+	ret(syscall!(ID_SPAWN_THREAD(start, stack)))
 }
 
 #[inline]
@@ -356,38 +291,12 @@ pub fn read_uninit(
 	object: Handle,
 	data: &mut [MaybeUninit<u8>],
 ) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_READ,
-			in("rdi") object,
-			in("rsi") data.as_mut_ptr(),
-			in("rdx") data.len(),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value)
+	ret(syscall!(ID_READ(object, data.as_mut_ptr(), data.len())))
 }
 
 #[inline]
 pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_DUPLICATE_HANDLE,
-			in("rdi") handle,
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		);
-	}
-	ret(status, value).map(|v| v as u32)
+	ret(syscall!(ID_DUPLICATE_HANDLE(handle))).map(|v| v as u32)
 }
 
 #[inline]
@@ -395,22 +304,13 @@ pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize,
 	let ty = match ty {
 		TableType::Streaming => 0,
 	};
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_CREATE_TABLE,
-			in("rdi") name.as_ptr(),
-			in("rsi") name.len(),
-			in("rdx") ty,
-			in("rcx") ptr::null::<()>(),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value).map(|v| v as u32)
+	ret(syscall!(ID_CREATE_TABLE(
+		name.as_ptr(),
+		name.len(),
+		ty,
+		ptr::null::<()>()
+	)))
+	.map(|v| v as u32)
 }
 
 #[inline]
@@ -419,65 +319,39 @@ pub fn create_io_queue(
 	request_p2size: u8,
 	response_p2size: u8,
 ) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_CREATE_IO_QUEUE,
-			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
-			in("esi") u32::from(request_p2size),
-			in("edx") u32::from(response_p2size),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value).map(|v| NonNull::new(v as *mut _).unwrap())
+	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
+	let request_p2size = u32::from(request_p2size);
+	let response_p2size = u32::from(response_p2size);
+	ret(syscall!(ID_CREATE_IO_QUEUE(
+		base,
+		request_p2size,
+		response_p2size
+	)))
+	.map(|v| NonNull::new(v as *mut _).unwrap())
 }
 
 #[inline]
 pub fn process_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_PROCESS_IO_QUEUE,
-			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value)
+	ret(syscall!(ID_PROCESS_IO_QUEUE(
+		base.map_or(ptr::null_mut(), NonNull::as_ptr)
+	)))
 }
 
 #[inline]
 pub fn wait_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
-	let (status, value): (usize, usize);
-	unsafe {
-		asm!(
-			"syscall",
-			in("eax") ID_WAIT_IO_QUEUE,
-			in("rdi") base.map_or(ptr::null_mut(), NonNull::as_ptr),
-			lateout("rax") status,
-			lateout("rdx") value,
-			lateout("rcx") _,
-			lateout("r11") _,
-		)
-	}
-	ret(status, value)
+	ret(syscall!(ID_WAIT_IO_QUEUE(
+		base.map_or(ptr::null_mut(), NonNull::as_ptr)
+	)))
 }
 
-fn ret(status: usize, value: usize) -> Result<usize, (NonZeroUsize, usize)> {
+fn ret((status, value): (usize, usize)) -> Result<usize, (NonZeroUsize, usize)> {
 	match NonZeroUsize::new(status) {
 		None => Ok(value),
 		Some(status) => Err((status, value)),
 	}
 }
 
-fn ret2(status: usize, value: usize) -> Result<(usize, usize), (NonZeroUsize, usize)> {
+fn ret2((status, value): (usize, usize)) -> Result<(usize, usize), (NonZeroUsize, usize)> {
 	if (status as isize) < 0 {
 		Err((NonZeroUsize::new(status).unwrap(), value))
 	} else {
