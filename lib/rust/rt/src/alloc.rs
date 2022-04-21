@@ -25,7 +25,9 @@ fn alloc_pages(layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
 
 /// Give back a range of pages to the kernel.
 fn dealloc_pages(ptr: NonNull<u8>, size: usize) {
-	syscall::dealloc(ptr.cast(), size, false, true).expect("failed to deallocate");
+	unsafe {
+		syscall::dealloc(ptr.cast(), size, false, true).expect("failed to deallocate");
+	}
 }
 
 impl Allocator {

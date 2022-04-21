@@ -139,7 +139,7 @@ pub fn alloc(
 }
 
 #[inline]
-pub fn dealloc(
+pub unsafe fn dealloc(
 	base: NonNull<Page>,
 	size: usize,
 	dealloc_partial_start: bool,
