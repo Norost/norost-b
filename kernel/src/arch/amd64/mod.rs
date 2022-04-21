@@ -15,7 +15,8 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
-	current_process, current_thread, current_thread_weak, set_current_thread, ThreadData,
+	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
+	ThreadData,
 };
 
 /// The IRQ used by the timer.
@@ -79,6 +80,8 @@ pub unsafe fn init() {
 		syscall::init();
 
 		cpuid::enable_fsgsbase();
+
+		r#virtual::init();
 	}
 }
 
@@ -87,15 +90,8 @@ extern "C" fn handle_timer(_rip: *const ()) -> ! {
 	debug!("  RIP:     {:p}", _rip);
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
-	loop {
-		if let Err(t) = unsafe { scheduler::next_thread() } {
-			if let Some(d) = Monotonic::now().duration_until(t) {
-				apic::set_timer_oneshot(d, Some(16));
-				enable_interrupts();
-				power::halt();
-			}
-		}
-	}
+	// SAFETY: we just saved the thread's state.
+	unsafe { scheduler::next_thread() }
 }
 
 extern "C" fn handle_invalid_opcode(error: u32, rip: *const ()) {
@@ -157,30 +153,6 @@ pub fn yield_current_thread() {
 
 /// Switch to this CPU's local stack and call the given function.
 ///
-/// The current thread will be suspended and interrupts will be disabled for the duration of the
-/// call.
-pub macro run_on_local_cpu_stack($f: path, $data: expr) {
-	const _: extern "C" fn(*const ()) = $f;
-	let data: *const () = $data;
-	unsafe {
-		asm!(
-			"cli",
-			"push rbp",
-			"mov  rbp, rsp",
-			"mov  rsp, {stack}",
-			"call {f}",
-			"pop  rbp",
-			"sti",
-			f = sym $f,
-			stack = in(reg) $crate::arch::amd64::_cpu_stack(),
-			in("rsi") data,
-			options(nostack),
-		)
-	}
-}
-
-/// Switch to this CPU's local stack and call the given function.
-///
 /// This macro is intended for cleaning up processes & threads.
 pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
 	const _: extern "C" fn(*const ()) -> ! = $f;
@@ -194,7 +166,7 @@ pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
 			"jmp {f}",
 			f = sym $f,
 			stack = in(reg) $crate::arch::amd64::_cpu_stack(),
-			in("rsi") data,
+			in("rdi") data,
 			options(nostack, noreturn),
 		)
 	}

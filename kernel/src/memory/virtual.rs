@@ -1,7 +1,7 @@
 mod address_space;
 
 use super::frame::PPN;
-pub use crate::arch::amd64::r#virtual::{add_identity_mapping, init, phys_to_virt, virt_to_phys};
+pub use crate::arch::amd64::r#virtual::{add_identity_mapping, phys_to_virt, virt_to_phys};
 pub use address_space::{MapError, *};
 
 pub unsafe trait Mappable<I>

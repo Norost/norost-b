@@ -61,3 +61,10 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 		Ok(NonNull::new_unchecked(virt))
 	}
 }
+
+/// # Safety
+///
+/// This function may only be called once.
+pub(super) unsafe fn init() {
+	unsafe { address_space::init() }
+}

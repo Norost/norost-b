@@ -9,9 +9,6 @@ use std::iter::Filter;
 use std::str;
 
 fn main() -> std::io::Result<()> {
-	println!("Goodbye, cruel world!");
-	//std::process::exit(0x69);
-
 	let mut term = self::term::AnsiTerminal::new(std::io::stdin(), std::io::stderr());
 	term.set_prefix(">> ");
 

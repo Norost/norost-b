@@ -6,8 +6,8 @@ mod thread;
 mod waker;
 
 use crate::time::Monotonic;
+use crate::{arch, power};
 use alloc::sync::{Arc, Weak};
-use arena::Arena;
 use core::future::Future;
 use core::marker::Unpin;
 use core::pin::Pin;
@@ -20,12 +20,13 @@ pub use round_robin::count as thread_count;
 
 /// Switch to the next thread. This does not save the current thread's state!
 ///
-/// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is returned.
+/// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is
+/// returned.
 ///
 /// # Safety
 ///
 /// The current thread's state must be properly saved.
-pub unsafe fn next_thread() -> Result<!, Monotonic> {
+pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let mut thr = round_robin::next().unwrap();
 	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
@@ -42,9 +43,27 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 	}
 }
 
+/// Switch to the next thread. This does not save the current thread's state!
+///
+/// # Safety
+///
+/// The current thread's state must be properly saved.
+pub unsafe fn next_thread() -> ! {
+	use crate::driver::apic;
+	loop {
+		if let Err(t) = unsafe { try_next_thread() } {
+			if let Some(d) = Monotonic::now().duration_until(t) {
+				apic::set_timer_oneshot(d, Some(16));
+				arch::enable_interrupts();
+				power::halt();
+			}
+		}
+	}
+}
+
 /// Wait for an asynchronous task to finish.
 fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
-	let waker = waker::new_waker(Thread::current_weak());
+	let waker = waker::new_waker(Thread::current_weak().unwrap());
 	let mut context = Context::from_waker(&waker);
 	loop {
 		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
@@ -61,7 +80,7 @@ fn block_on_timeout<T>(
 	mut task: impl Future<Output = T> + Unpin,
 	timeout: Duration,
 ) -> Result<T, ()> {
-	let waker = waker::new_waker(Thread::current_weak());
+	let waker = waker::new_waker(Thread::current_weak().unwrap());
 	let mut context = Context::from_waker(&waker);
 	if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
 		return Ok(res);

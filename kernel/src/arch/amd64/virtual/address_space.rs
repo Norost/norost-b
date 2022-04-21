@@ -1,14 +1,18 @@
 use super::common;
-use crate::memory::frame;
+use crate::memory::frame::{self, PageFrame, PPN};
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
 use core::arch::asm;
+use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 pub struct AddressSpace {
 	cr3: usize,
 }
+
+/// The default address space. This should be used when no process is active.
+static mut DEFAULT_ADDRESS_SPACE: MaybeUninit<AddressSpace> = MaybeUninit::uninit();
 
 impl AddressSpace {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
@@ -137,17 +141,40 @@ impl AddressSpace {
 	}
 
 	unsafe fn current<'a>() -> &'a mut [common::Entry; 512] {
-		let cr3: usize;
+		unsafe { &mut *phys_to_virt((current_cr3() & !Page::MASK) as u64).cast() }
+	}
+
+	/// Activate the default address space.
+	///
+	/// # Safety
+	///
+	/// There should be no active pointers to any user-space data
+	// TODO should we even be using any pointers to user-space data directly?
+	pub unsafe fn activate_default() {
 		unsafe {
-			asm!("mov {0}, cr3", out(reg) cr3);
-			&mut *phys_to_virt((cr3 & !Page::MASK) as u64).cast()
+			DEFAULT_ADDRESS_SPACE.assume_init_ref().activate();
 		}
 	}
 }
 
 impl Drop for AddressSpace {
 	fn drop(&mut self) {
-		//todo!()
+		// FIXME this is technically unsafe since cr3 may still be loaded with this
+		// address space.
+		unsafe {
+			// Recursively look for tables & deallocate them
+			dealloc(&self.table()[..256]);
+
+			unsafe fn dealloc(entries: &[common::Entry]) {
+				for e in entries.iter().filter_map(|e| e.as_table()) {
+					unsafe {
+						dealloc(e);
+						let base = PPN::from_ptr(e as *const _ as _);
+						frame::deallocate(1, || PageFrame { base, p2size: 0 }).unwrap()
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -159,4 +186,21 @@ pub enum MapError {
 #[derive(Debug)]
 pub enum UnmapError {
 	Unset,
+}
+
+/// # Safety
+///
+/// This function may only be called once.
+pub(super) unsafe fn init() {
+	unsafe {
+		DEFAULT_ADDRESS_SPACE.write(AddressSpace { cr3: current_cr3() });
+	}
+}
+
+unsafe fn current_cr3() -> usize {
+	unsafe {
+		let cr3: usize;
+		asm!("mov {0}, cr3", out(reg) cr3);
+		cr3
+	}
 }

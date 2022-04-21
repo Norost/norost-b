@@ -1,6 +1,12 @@
-use crate::memory::{frame, frame::OwnedPageFrames, r#virtual::RWX, Page};
+use crate::memory::{
+	frame,
+	frame::OwnedPageFrames,
+	r#virtual::{AddressSpace, RWX},
+	Page,
+};
 use crate::object_table;
 use crate::object_table::TableId;
+use crate::scheduler;
 use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
@@ -75,7 +81,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 			value: 0,
 		};
 	};
-	let proc = Process::current();
+	let proc = Process::current().unwrap();
 	let base = base as *mut _;
 	match OwnedPageFrames::new(count, proc.allocate_hints(base)) {
 		Ok(mem) => proc
@@ -136,16 +142,19 @@ extern "C" fn dealloc(
 			value: 0,
 		}
 	};
-	Process::current().unmap_memory_object(base, count).map_or(
-		Return {
-			status: usize::MAX - 1,
-			value: 0,
-		},
-		|_| Return {
-			status: 0,
-			value: size,
-		},
-	)
+	Process::current()
+		.unwrap()
+		.unmap_memory_object(base, count)
+		.map_or(
+			Return {
+				status: usize::MAX - 1,
+				value: 0,
+			},
+			|_| Return {
+				status: 0,
+				value: size,
+			},
+		)
 }
 
 extern "C" fn alloc_dma(
@@ -161,6 +170,7 @@ extern "C" fn alloc_dma(
 	let count = (size + Page::MASK) / Page::SIZE;
 	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
 	Process::current()
+		.unwrap()
 		.map_memory_object(base, Box::new(frame), rwx)
 		.map_or(
 			Return {
@@ -183,7 +193,11 @@ extern "C" fn physical_address(
 	_: usize,
 ) -> Return {
 	let address = NonNull::new(address as *mut _).unwrap();
-	let value = Process::current().get_physical_address(address).unwrap().0;
+	let value = Process::current()
+		.unwrap()
+		.get_physical_address(address)
+		.unwrap()
+		.0;
 	Return { status: 0, value }
 }
 
@@ -245,6 +259,7 @@ extern "C" fn map_object(
 	let handle = ObjectHandle::from(handle);
 	let base = NonNull::new(base as *mut _);
 	Process::current()
+		.unwrap()
 		.map_memory_object_2(handle, base, offset, RWX::RW)
 		.map_or(
 			Return {
@@ -268,16 +283,19 @@ extern "C" fn duplicate_handle(
 ) -> Return {
 	let handle = ObjectHandle::from(handle);
 
-	Process::current().duplicate_object_handle(handle).map_or(
-		Return {
-			status: 1,
-			value: 0,
-		},
-		|handle| Return {
-			status: 0,
-			value: handle.into(),
-		},
-	)
+	Process::current()
+		.unwrap()
+		.duplicate_object_handle(handle)
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|handle| Return {
+				status: 0,
+				value: handle.into(),
+			},
+		)
 }
 
 extern "C" fn create_table(
@@ -303,7 +321,7 @@ extern "C" fn create_table(
 		_ => todo!(),
 	};
 
-	let handle = Process::current().add_object(tbl).unwrap();
+	let handle = Process::current().unwrap().add_object(tbl).unwrap();
 
 	Return {
 		status: 0,
@@ -322,7 +340,9 @@ extern "C" fn sleep(
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
 
-	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
+	Thread::current()
+		.unwrap()
+		.set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();
 
 	Return {
@@ -339,16 +359,19 @@ extern "C" fn spawn_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	Process::current().spawn_thread(start, stack).map_or(
-		Return {
-			status: 1,
-			value: 0,
-		},
-		|handle| Return {
-			status: 0,
-			value: handle,
-		},
-	)
+	Process::current()
+		.unwrap()
+		.spawn_thread(start, stack)
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|handle| Return {
+				status: 0,
+				value: handle,
+			},
+		)
 }
 
 extern "C" fn create_io_rings(
@@ -360,6 +383,7 @@ extern "C" fn create_io_rings(
 	_: usize,
 ) -> Return {
 	Process::current()
+		.unwrap()
 		.create_io_queue(
 			NonNull::new(base as *mut _),
 			request_p2size as u8,
@@ -379,7 +403,7 @@ extern "C" fn create_io_rings(
 
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
-	Process::current().process_io_queue(base).map_or(
+	Process::current().unwrap().process_io_queue(base).map_or(
 		Return {
 			status: 1,
 			value: 0,
@@ -393,7 +417,7 @@ extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: 
 
 extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
-	Process::current().wait_io_queue(base).map_or(
+	Process::current().unwrap().wait_io_queue(base).map_or(
 		Return {
 			status: 1,
 			value: 0,
@@ -430,16 +454,27 @@ extern "C" fn wait_thread(
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	#[derive(Clone, Copy)]
 	struct D(*const Process, i32);
-	let d = D(Arc::into_raw(Process::current()), code as i32);
+	let d = D(Arc::into_raw(Process::current().unwrap()), code as i32);
 	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
-	extern "C" fn destroy_process(process: *const ()) -> ! {
-		let D(process, code) = unsafe { *(process as *const _) };
+	extern "C" fn destroy_process(data: *const ()) -> ! {
+		let D(process, code) = unsafe { data.cast::<D>().read() };
 		let process = unsafe { Arc::from_raw(process) };
-		dbg!();
-		loop {
-			crate::arch::halt();
+
+		crate::arch::amd64::clear_current_thread();
+
+		unsafe {
+			AddressSpace::activate_default();
 		}
+
+		// SAFETY: we switched to the CPU local stack and won't return to a stack of a thread
+		// owned by this process. We also switched to the default address space.
+		unsafe {
+			process.destroy();
+		}
+
+		// SAFETY: there is no thread state to save.
+		unsafe { scheduler::next_thread() }
 	}
 }
 

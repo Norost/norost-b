@@ -82,7 +82,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 
 	unsafe {
-		memory::r#virtual::init();
 		arch::init();
 	}
 
@@ -126,7 +125,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 
 	// SAFETY: there is no thread state to save.
-	unsafe { scheduler::next_thread().unwrap() }
+	unsafe { scheduler::next_thread() }
 }
 
 #[panic_handler]

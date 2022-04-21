@@ -368,7 +368,9 @@ impl super::Process {
 			.find(|q| q.base == base.cast())
 			.ok_or(WaitQueueError::InvalidAddress)?;
 		while queue.responses_available() == 0 {
-			super::super::Thread::current().sleep(core::time::Duration::MAX);
+			super::super::Thread::current()
+				.unwrap()
+				.sleep(core::time::Duration::MAX);
 		}
 		Ok(())
 	}

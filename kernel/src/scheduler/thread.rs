@@ -1,6 +1,9 @@
 use super::process::Process;
 use crate::arch;
-use crate::memory::frame;
+use crate::memory::{
+	frame::{self, PageFrame, PPN},
+	Page,
+};
 use crate::time::Monotonic;
 use alloc::sync::{Arc, Weak};
 use core::arch::asm;
@@ -10,7 +13,7 @@ use core::time::Duration;
 
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
-	pub kernel_stack: Cell<NonNull<usize>>,
+	pub kernel_stack: Cell<Option<NonNull<usize>>>,
 	// This does create a cyclic reference and risks leaking memory, but should
 	// be faster & more convienent in the long run.
 	//
@@ -52,7 +55,7 @@ impl Thread {
 			kernel_stack = kernel_stack.sub(15);
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
-				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
+				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
@@ -72,6 +75,10 @@ impl Thread {
 	}
 
 	/// Suspend the currently running thread & begin running this thread.
+	///
+	/// # Panics
+	///
+	/// The thread may not have been destroyed already.
 	pub fn resume(self: Arc<Self>) -> ! {
 		unsafe { self.process.as_ref().activate_address_space() };
 
@@ -142,7 +149,8 @@ impl Thread {
 			.async_deadline
 			.replace(None)
 			.unwrap_or_else(|| Monotonic::now().saturating_add(duration));
-		Self::current().set_sleep_until(t);
+		// TODO huh? Why Self::current()?
+		Self::current().unwrap().set_sleep_until(t);
 		Self::yield_current();
 	}
 
@@ -151,8 +159,23 @@ impl Thread {
 	/// # Safety
 	///
 	/// No CPU may be using *any* resource of this thread, especially the stack.
-	pub unsafe fn destroy(self) {
-		todo!()
+	pub unsafe fn destroy(self: Arc<Self>) {
+		// The kernel stack is convienently exactly one page large, so masking the lower bits
+		// will give us the base of the frame.
+
+		// FIXME ensure the thread has been stopped.
+
+		// SAFETY: the kernel pointer should be valid lest we smashed the stack.
+		// The caller also guaranteed it is not using this stack.
+		unsafe {
+			let kernel_stack = self.kernel_stack.take().unwrap().as_ptr() as usize & !Page::MASK;
+			let kernel_stack = PPN::from_ptr(kernel_stack as *mut _);
+			frame::deallocate(1, || PageFrame {
+				base: kernel_stack,
+				p2size: 0,
+			})
+			.unwrap();
+		}
 	}
 
 	pub fn yield_current() {
@@ -164,17 +187,19 @@ impl Thread {
 		self.sleep_until.set(Monotonic::ZERO);
 	}
 
-	pub fn current() -> Arc<Self> {
+	pub fn current() -> Option<Arc<Self>> {
 		arch::amd64::current_thread()
 	}
 
-	pub fn current_weak() -> Weak<Self> {
+	pub fn current_weak() -> Option<Weak<Self>> {
 		arch::amd64::current_thread_weak()
 	}
 }
 
 impl Drop for Thread {
 	fn drop(&mut self) {
-		panic!("threads cannot be dropped implicitly, use Thread::destroy instead");
+		// We currently cannot destroy a thread in a safe way but we also need to ensure
+		// resources are cleaned up properly, so do log it for debugging potential leaks at least.
+		debug!("cleaning up thread");
 	}
 }

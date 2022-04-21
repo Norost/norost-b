@@ -178,6 +178,16 @@ impl AddressSpace {
 		assert_eq!(size % Page::SIZE, 0);
 		unsafe { r#virtual::add_identity_mapping(ppn.as_phys(), size).is_ok() }
 	}
+
+	/// Activate the default address space.
+	///
+	/// # Safety
+	///
+	/// There should be no active pointers to any user-space data
+	// TODO should we even be using any pointers to user-space data directly?
+	pub unsafe fn activate_default() {
+		r#virtual::AddressSpace::activate_default()
+	}
 }
 
 #[derive(Clone, Copy)]

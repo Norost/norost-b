@@ -287,18 +287,19 @@ index 43168e77296..830bfb78c43 100644
          // These platforms don't have any special requirements.
      } else {
 diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
-index 2628afd4237..90d44397047 100644
+index 2628afd4237..fc9391d011b 100644
 --- a/library/std/src/lib.rs
 +++ b/library/std/src/lib.rs
-@@ -231,6 +231,7 @@
+@@ -231,6 +231,8 @@
  #![feature(allow_internal_unstable)]
  #![feature(arbitrary_self_types)]
  #![feature(array_error_internals)]
++#![feature(asm_const)]
 +#![feature(asm_sym)]
  #![feature(assert_matches)]
  #![feature(associated_type_bounds)]
  #![feature(async_iterator)]
-@@ -300,6 +301,7 @@
+@@ -300,6 +302,7 @@
  #![feature(min_specialization)]
  #![feature(mixed_integer_ops)]
  #![feature(must_not_suspend)]
@@ -306,7 +307,7 @@ index 2628afd4237..90d44397047 100644
  #![feature(needs_panic_runtime)]
  #![feature(negative_impls)]
  #![feature(never_type)]
-@@ -316,6 +318,7 @@
+@@ -316,6 +319,7 @@
  #![feature(prelude_import)]
  #![feature(ptr_as_uninit)]
  #![feature(ptr_internals)]
@@ -521,10 +522,10 @@ index 00000000000..a2d75a61976
 +}
 diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
 new file mode 100644
-index 00000000000..1db6a49a522
+index 00000000000..78eaf61d8b4
 --- /dev/null
 +++ b/library/std/src/sys/norostb/common.rs
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,44 @@
 +use crate::io as std_io;
 +
 +pub mod memchr {
@@ -551,9 +552,7 @@ index 00000000000..1db6a49a522
 +}
 +
 +pub fn abort_internal() -> ! {
-+    unsafe {
-+        crate::arch::asm!("hlt; hlt; hlt; ud2", options(noreturn));
-+    }
++    super::os::exit(i32::MAX)
 +}
 +
 +pub fn hashmap_random_keys() -> (u64, u64) {
@@ -1877,10 +1876,10 @@ index 00000000000..dbb6ce22c22
 +}
 diff --git a/library/std/src/sys/norostb/os.rs b/library/std/src/sys/norostb/os.rs
 new file mode 100644
-index 00000000000..e150ae143ad
+index 00000000000..1a7c370b58f
 --- /dev/null
 +++ b/library/std/src/sys/norostb/os.rs
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +use super::unsupported;
 +use crate::error::Error as StdError;
 +use crate::ffi::{OsStr, OsString};
@@ -1888,6 +1887,7 @@ index 00000000000..e150ae143ad
 +use crate::io;
 +use crate::marker::PhantomData;
 +use crate::path::{self, PathBuf};
++use norostb_rt::kernel::syscall;
 +
 +pub fn errno() -> i32 {
 +    0
@@ -1979,8 +1979,8 @@ index 00000000000..e150ae143ad
 +    None
 +}
 +
-+pub fn exit(_code: i32) -> ! {
-+    crate::intrinsics::abort()
++pub fn exit(code: i32) -> ! {
++    syscall::exit(code)
 +}
 +
 +pub fn getpid() -> u32 {
@@ -2031,10 +2031,10 @@ index 00000000000..25514c2322f
 +}
 diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
 new file mode 100644
-index 00000000000..42a1ff730e3
+index 00000000000..f4874b3d196
 --- /dev/null
 +++ b/library/std/src/sys/norostb/process.rs
-@@ -0,0 +1,211 @@
+@@ -0,0 +1,214 @@
 +use crate::ffi::OsStr;
 +use crate::fmt;
 +use crate::io;
@@ -2045,6 +2045,7 @@ index 00000000000..42a1ff730e3
 +use crate::sys::pipe::AnonPipe;
 +use crate::sys::unsupported;
 +use crate::sys_common::process::{CommandEnv, CommandEnvs};
++use norostb_rt::kernel::io::Handle;
 +
 +pub use crate::ffi::OsString as EnvKey;
 +
@@ -2208,23 +2209,25 @@ index 00000000000..42a1ff730e3
 +    }
 +}
 +
-+pub struct Process(!);
++pub struct Process {
++    handle: Handle,
++}
 +
 +impl Process {
 +    pub fn id(&self) -> u32 {
-+        self.0
++        self.handle
 +    }
 +
 +    pub fn kill(&mut self) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn wait(&mut self) -> io::Result<ExitStatus> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-+        self.0
++        unsupported()
 +    }
 +}
 +
@@ -2415,10 +2418,10 @@ index 00000000000..dc00fcdef64
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..50c3963d31d
+index 00000000000..806b093cbd7
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,142 @@
 +use super::unsupported;
 +use crate::ffi::CStr;
 +use crate::io;
@@ -2426,10 +2429,11 @@ index 00000000000..50c3963d31d
 +use crate::num::NonZeroUsize;
 +use crate::ptr;
 +use crate::time::Duration;
++use norostb_rt::kernel::io::Handle;
 +use norostb_rt::kernel::syscall::{self, RWX};
 +
 +pub struct Thread {
-+    handle: usize,
++    handle: Handle,
 +}
 +
 +pub const DEFAULT_MIN_STACK_SIZE: usize = 4096;
@@ -2449,7 +2453,7 @@ index 00000000000..50c3963d31d
 +        let mut stack_ptr = stack_top;
 +        let mut push = |v: usize| {
 +            stack_ptr = stack_ptr.wrapping_sub(1);
-+            // SAFETY: we will only push two usizes, which should fit well within a single
++            // SAFETY: we will only push four usizes, which should fit well within a single
 +            // page.
 +            unsafe {
 +                stack_ptr.write(v);
@@ -2457,8 +2461,16 @@ index 00000000000..50c3963d31d
 +        };
 +        push(ptr as usize);
 +        push(unsafe { mem::transmute(meta) });
++        push(stack.as_ptr() as usize);
++        push(stack_size.get());
 +
-+        unsafe extern "C" fn main(ptr: *mut (), meta: usize) -> ! {
++        unsafe extern "C" fn main(
++            ptr: *mut (),
++            meta: usize,
++            stack_base: *const (),
++            stack_size: usize,
++            handle: Handle,
++        ) -> ! {
 +            let meta = unsafe { mem::transmute(meta) };
 +            let p: Box<dyn FnOnce()> = unsafe { Box::from_raw(ptr::from_raw_parts_mut(ptr, meta)) };
 +
@@ -2468,8 +2480,29 @@ index 00000000000..50c3963d31d
 +
 +            p();
 +
-+            loop {
-+                syscall::sleep(crate::time::Duration::MAX);
++            unsafe {
++                super::thread_local_key::deinit_thread();
++            }
++
++            // We're going to free the stack, so we need to resort to assembly
++            unsafe {
++                core::arch::asm!(
++                    // Deallocate stack
++                    "syscall",
++                    // Kill current thread
++                    "mov eax, {kill_thread}",
++                    "mov rdi, {handle}",
++                    "syscall",
++                    kill_thread = const syscall::ID_KILL_THREAD,
++                    // "formatting may not be suitable for sub-register argument" ???
++                    // Hence cast to usize
++                    handle = in(reg) handle as usize,
++                    in("eax") syscall::ID_DEALLOC,
++                    in("rdi") stack_base,
++                    in("rsi") stack_size,
++                    in("rdx") 0,
++                    options(noreturn, nostack),
++                );
 +            }
 +        }
 +
@@ -2479,6 +2512,9 @@ index 00000000000..50c3963d31d
 +                crate::arch::asm!("
 +					mov rdi, [rsp - 8 * 1]
 +					mov rsi, [rsp - 8 * 2]
++					mov rdx, [rsp - 8 * 3]
++					mov rcx, [rsp - 8 * 4]
++					mov r8d, eax
 +					jmp {main}
 +					",
 +                    main = sym main,
@@ -2490,7 +2526,10 @@ index 00000000000..50c3963d31d
 +        // Spawn thread
 +        unsafe {
 +            syscall::spawn_thread(start, stack_top as *const ())
-+                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "failed to spawn thread"))
++                .map_err(|_| {
++                    syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
++                    io::const_io_error!(io::ErrorKind::Other, "failed to spawn thread")
++                })
 +                .map(|handle| Self { handle })
 +        }
 +    }
@@ -2508,7 +2547,7 @@ index 00000000000..50c3963d31d
 +    }
 +
 +    pub fn join(self) {
-+        todo!("join thread {}", self.handle);
++        let _ = syscall::wait_thread(self.handle);
 +    }
 +}
 +
@@ -2542,10 +2581,10 @@ index 00000000000..85d66098302
 +}
 diff --git a/library/std/src/sys/norostb/thread_local_key.rs b/library/std/src/sys/norostb/thread_local_key.rs
 new file mode 100644
-index 00000000000..0513f6c5bd4
+index 00000000000..55333804ce6
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread_local_key.rs
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,55 @@
 +// TODO move part of this to the runtime crate as other languages will need
 +// to share the same implementation.
 +
@@ -2559,11 +2598,19 @@ index 00000000000..0513f6c5bd4
 +/// This must be called exactly once when a thread is created.
 +pub(super) unsafe fn init_thread() {
 +    unsafe {
-+        tls::init_thread::<_, ()>(|s| {
-+            Ok(NonNull::new(Box::into_raw(Box::<[u8]>::new_uninit_slice(s)) as *mut *mut ())
-+                .unwrap())
++        tls::init_thread(|s| {
++            NonNull::new(Box::into_raw(Box::<[u8]>::new_uninit_slice(s)) as *mut [u8]).unwrap()
 +        })
-+        .unwrap_or_else(|_| crate::intrinsics::abort())
++    }
++}
++/// # Safety
++///
++/// This must be called exactly once when a thread is created.
++pub(super) unsafe fn deinit_thread() {
++    unsafe {
++        tls::deinit_thread(|p| {
++            Box::from_raw(p.as_ptr());
++        })
 +    }
 +}
 +

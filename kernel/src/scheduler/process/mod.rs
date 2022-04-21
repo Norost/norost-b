@@ -4,7 +4,7 @@ mod io;
 use super::{MemoryObject, Thread};
 use crate::arch;
 use crate::memory::frame::{self, AllocateHints};
-use crate::memory::r#virtual::{AddressSpace, MapError, MemoryObjectHandle, UnmapError, RWX};
+use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{Object, Query};
 use crate::sync::Mutex;
@@ -121,6 +121,24 @@ impl Process {
 		}
 	}
 
+	/// Destroy this process.
+	///
+	/// # Safety
+	///
+	/// The caller may *not* be using any resources of this process, especially the address space
+	/// or a thread!
+	pub unsafe fn destroy(self: Arc<Self>) {
+		// Destroy all threads
+		let mut threads = self.threads.lock();
+		for thr in threads.drain(..) {
+			// SAFETY: the caller guarantees we're not using any resources of this thread.
+			unsafe {
+				thr.destroy();
+			}
+		}
+		// Now we just let the destructors do the rest. Sayonara! :)
+	}
+
 	/// Add a thread to this process.
 	///
 	/// The thread must have this process as a parent, i.e. `thread.process == self`.
@@ -128,14 +146,17 @@ impl Process {
 		self.threads.lock().push(thread)
 	}
 
-	pub fn current() -> Arc<Self> {
+	/// Get the current active process.
+	pub fn current() -> Option<Arc<Self>> {
 		arch::current_process()
 	}
 }
 
 impl Drop for Process {
 	fn drop(&mut self) {
-		todo!()
+		// We currently cannot destroy a process in a safe way but we also need to ensure
+		// resources are cleaned up properly, so do log it for debugging potential leaks at least.
+		debug!("cleaning up process");
 	}
 }
 
