@@ -428,17 +428,19 @@ extern "C" fn wait_thread(
 }
 
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	let process_id = Process::current().id();
+	#[derive(Clone, Copy)]
+	struct D(*const Process, i32);
+	let d = D(Arc::into_raw(Process::current()), code as i32);
+	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
-	extern "C" fn destroy_process(process_id: *const ()) -> ! {
-		let process_id = process_id as usize;
+	extern "C" fn destroy_process(process: *const ()) -> ! {
+		let D(process, code) = unsafe { *(process as *const _) };
+		let process = unsafe { Arc::from_raw(process) };
 		dbg!();
 		loop {
 			crate::arch::halt();
 		}
 	}
-
-	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, process_id as _);
 }
 
 #[allow(dead_code)]

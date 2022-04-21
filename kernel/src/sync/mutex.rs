@@ -26,7 +26,7 @@ impl<T> Mutex<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
-				Err(_) => Thread::yield_current(),
+				Err(_) => {} //Thread::yield_current(),
 			}
 		}
 	}

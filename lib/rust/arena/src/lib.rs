@@ -1,11 +1,15 @@
 //! # Typed arena with optional generational identifiers.
 
+#![no_std]
+
+extern crate alloc;
+
 use core::mem;
 use core::ops::{Index, IndexMut};
 
 /// A typed arena. A generation type can be specified which is used to prevent the ABA problem.
 pub struct Arena<V, G: Generation = ()> {
-	storage: Vec<Entry<V, G>>,
+	storage: alloc::vec::Vec<Entry<V, G>>,
 	free: usize,
 	generation: G,
 }

@@ -92,8 +92,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
-	let mut processes = Vec::with_capacity(8);
-
 	// TODO we should try to recuperate this memory when it becomes unused.
 	struct Driver(boot::Driver);
 
@@ -120,14 +118,15 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		.map(Arc::new)
 	{
 		match scheduler::process::Process::from_elf(driver) {
-			Ok(process) => processes.push(process),
+			Ok(_) => {} // We don't need to do anything.
 			Err(e) => {
 				error!("failed to start driver: {:?}", e)
 			}
 		}
 	}
 
-	processes.leak()[0].run()
+	// SAFETY: there is no thread state to save.
+	unsafe { scheduler::next_thread().unwrap() }
 }
 
 #[panic_handler]

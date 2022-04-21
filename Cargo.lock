@@ -182,6 +182,7 @@ name = "nora"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "arena",
  "cfg-if",
  "norostb_kernel",
  "pci",

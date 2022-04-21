@@ -89,7 +89,7 @@ impl MemoryObject for MemorySlice {
 }
 
 impl super::Process {
-	pub fn from_elf(data_object: Arc<dyn MemoryObject>) -> Result<Box<Self>, ElfError> {
+	pub fn from_elf(data_object: Arc<dyn MemoryObject>) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
 		let mut data = data_object.physical_pages();
 		data.sort_by(|a, b| a.base.cmp(&b.base));
@@ -158,6 +158,8 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
+		let mut address_space = slf.address_space.lock();
+
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
 			let header = unsafe {
@@ -201,7 +203,7 @@ impl super::Process {
 				inner: data_object.clone(),
 				range: page_offset..page_offset + count,
 			});
-			slf.address_space
+			address_space
 				.map_object(Some(virt), mem, rwx, slf.hint_color)
 				.map_err(ElfError::MapError)?;
 
@@ -214,18 +216,19 @@ impl super::Process {
 				};
 				let mem =
 					Box::new(OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?);
-				slf.address_space
+				address_space
 					.map_object(Some(virt), mem, rwx, slf.hint_color)
 					.map_err(ElfError::MapError)?;
 			}
 		}
 
-		let mut slf = Box::new(slf);
+		drop(address_space);
+		let slf = Arc::new(slf);
 
-		let thr = Thread::new(header.entry.try_into().unwrap(), 0, NonNull::from(&*slf))?;
+		let thr = Thread::new(header.entry.try_into().unwrap(), 0, slf.clone())?;
 		let thr = Arc::new(thr);
 		super::super::round_robin::insert(Arc::downgrade(&thr));
-		slf.threads.push(thr);
+		slf.add_thread(thr);
 
 		Ok(slf)
 	}

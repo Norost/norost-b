@@ -11,11 +11,17 @@ use std::ptr::NonNull;
 fn main() {
 	// TODO get disk from arguments
 
-	let disk = fs::OpenOptions::new()
-		.read(true)
-		.write(true)
-		.open("virtio-blk/disk/0")
-		.expect("failed to open disk");
+	let disk = loop {
+		if let Ok(disk) = fs::OpenOptions::new()
+			.read(true)
+			.write(true)
+			.open("virtio-blk/disk/0")
+		{
+			break disk;
+		}
+		// TODO we probably should add a syscall to monitor the table list
+		std::thread::yield_now();
+	};
 
 	let disk = driver_utils::io::BufBlock::new(disk);
 	let fs =

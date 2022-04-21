@@ -65,7 +65,7 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
 		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
-		asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());
+		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(&thread.process));
 		asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 	}
 }
@@ -176,22 +176,25 @@ unsafe extern "C" fn handler() {
 	}
 }
 
-pub fn current_process<'a>() -> &'a mut Process {
+pub fn current_process() -> Arc<Process> {
 	unsafe {
 		let process: *mut Process;
-		asm!("mov {0}, gs:[0x10]", out(reg) process);
-		&mut *process
+		asm!("mov {0}, gs:[2 * 8]", out(reg) process);
+		let process = Arc::from_raw(process);
+		// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+		let _ = Arc::into_raw(process.clone());
+		process
 	}
 }
 
 pub fn current_thread() -> Arc<Thread> {
 	unsafe {
 		let thread: *const Thread;
-		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		let r = Arc::from_raw(thread);
-		let s = r.clone();
-		let _ = Arc::into_raw(r);
-		s
+		asm!("mov {0}, gs:[3 * 8]", out(reg) thread);
+		let thread = Arc::from_raw(thread);
+		// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+		let _ = Arc::into_raw(thread.clone());
+		thread
 	}
 }
 

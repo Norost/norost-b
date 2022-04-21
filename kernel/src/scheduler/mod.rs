@@ -7,6 +7,7 @@ mod waker;
 
 use crate::time::Monotonic;
 use alloc::sync::{Arc, Weak};
+use arena::Arena;
 use core::future::Future;
 use core::marker::Unpin;
 use core::pin::Pin;

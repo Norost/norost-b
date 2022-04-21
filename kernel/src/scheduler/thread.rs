@@ -5,14 +5,18 @@ use crate::time::Monotonic;
 use alloc::sync::{Arc, Weak};
 use core::arch::asm;
 use core::cell::Cell;
-use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
 
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
 	pub kernel_stack: Cell<NonNull<usize>>,
-	pub process: NonNull<Process>,
+	// This does create a cyclic reference and risks leaking memory, but should
+	// be faster & more convienent in the long run.
+	//
+	// Especially, we don't need to store the processes anywhere as as long a thread
+	// is alive, the process itself will be alive too.
+	pub process: Arc<Process>,
 	sleep_until: Cell<Monotonic>,
 	/// Async deadline set by [`super::waker::sleep`].
 	async_deadline: Cell<Option<Monotonic>>,
@@ -24,7 +28,7 @@ impl Thread {
 	pub fn new(
 		start: usize,
 		stack: usize,
-		process: NonNull<Process>,
+		process: Arc<Process>,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
 			let mut kernel_stack_base = None;
