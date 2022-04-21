@@ -16,7 +16,7 @@ pub struct Thread {
 	//
 	// Especially, we don't need to store the processes anywhere as as long a thread
 	// is alive, the process itself will be alive too.
-	pub process: Arc<Process>,
+	process: Arc<Process>,
 	sleep_until: Cell<Monotonic>,
 	/// Async deadline set by [`super::waker::sleep`].
 	async_deadline: Cell<Option<Monotonic>>,
@@ -59,6 +59,11 @@ impl Thread {
 				arch_specific: Default::default(),
 			})
 		}
+	}
+
+	/// Get a reference to the owning process.
+	pub fn process(&self) -> &Arc<Process> {
+		&self.process
 	}
 
 	/// Async deadline set by [`super::waker::sleep`].

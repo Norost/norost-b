@@ -65,7 +65,7 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
 		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
-		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(&thread.process));
+		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(thread.process()));
 		asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 	}
 }
