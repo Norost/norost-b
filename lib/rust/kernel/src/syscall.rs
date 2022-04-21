@@ -16,10 +16,8 @@ const ID_PROCESS_IO_QUEUE: usize = 21;
 const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::Page;
-use core::alloc::Layout;
 use core::arch::asm;
 use core::fmt;
-use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
@@ -82,69 +80,6 @@ impl fmt::Debug for TableInfo {
 	}
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct Slice<'a, T> {
-	ptr: NonNull<T>,
-	len: usize,
-	_marker: PhantomData<&'a T>,
-}
-
-impl<'a, T> Slice<'a, T> {
-	/// # Safety
-	///
-	/// `ptr` and `len` must be valid.
-	pub unsafe fn unchecked_as_slice(&self) -> &'a [T] {
-		unsafe { core::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
-	}
-
-	pub fn len(&self) -> usize {
-		self.len
-	}
-}
-
-impl<'a, T> From<&[T]> for Slice<'a, T> {
-	fn from(s: &[T]) -> Self {
-		Self {
-			ptr: NonNull::from(s).as_non_null_ptr(),
-			len: s.len(),
-			_marker: PhantomData,
-		}
-	}
-}
-
-impl<'a, T, const N: usize> From<&'a [T; N]> for Slice<'a, T> {
-	fn from(s: &[T; N]) -> Self {
-		Self {
-			ptr: NonNull::new(s.as_ptr() as *mut _).unwrap(),
-			len: s.len(),
-			_marker: PhantomData,
-		}
-	}
-}
-
-impl<'a, T> Default for Slice<'a, T> {
-	fn default() -> Self {
-		Self {
-			ptr: NonNull::new(Layout::new::<T>().align() as *mut _)
-				.unwrap_or(NonNull::new(1 as *mut _).unwrap()),
-			len: 0,
-			_marker: PhantomData,
-		}
-	}
-}
-
-struct ByteStr<'a>(&'a [u8]);
-
-impl fmt::Debug for ByteStr<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match core::str::from_utf8(self.0) {
-			Ok(s) => s.fmt(f),
-			Err(_) => format_args!("{:?}", self).fmt(f),
-		}
-	}
-}
-
 pub enum TableType {
 	Streaming,
 }
@@ -157,14 +92,6 @@ pub enum RWX {
 	RX = 0b101,
 	RWX = 0b111,
 }
-
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct TableHandle(usize);
-
-#[derive(Clone, Copy, Debug)]
-#[repr(transparent)]
-pub struct Events(u32);
 
 macro_rules! syscall {
 	(@INTERNAL $id:ident [$(in($reg:tt) $val:expr),*]) => {

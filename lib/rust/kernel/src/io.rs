@@ -24,16 +24,6 @@ pub struct Full;
 #[derive(Debug)]
 pub struct Empty;
 
-pub struct Path([u8]);
-
-impl Path {
-	/// This method is not unsafe and an invalid path will not cause UB, though requests made with
-	/// it will result in an error response being returned.
-	pub fn new_unchecked(path: &[u8]) -> &Self {
-		unsafe { &*(path as *const _ as *const _) }
-	}
-}
-
 /// A single request to submit to the kernel.
 #[repr(C)]
 pub struct Request {
