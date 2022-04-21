@@ -2,32 +2,11 @@ use super::common;
 use crate::memory::frame;
 use core::fmt;
 
-pub fn init() {
+/// # Safety
+///
+/// This function may only be called once.
+pub(super) unsafe fn init() {
 	let root = common::get_current();
-
-	// Unmap the one identity mapped page.
-	let mut virt = 0;
-	while virt & (1 << 47) == 0 {
-		match common::get_entry_mut(root, virt, 0, 3) {
-			Ok(e) => match e.clear() {
-				Some(_) => {
-					// Free the pages
-					unsafe {
-						// PT, PD, PDP
-						for l in 1..=3 {
-							let e = common::get_entry_mut(root, virt, l, 3 - l);
-							let ppn = e.unwrap_or_else(|_| unreachable!()).clear().unwrap();
-							// TODO
-							//frame::deallocate(1, || frame::PageFrame::from_raw(ppn, 0)).unwrap();
-						}
-					}
-					break;
-				}
-				None => virt += 0x1000,
-			},
-			Err((_, d)) => virt += 12 << (u64::from(d) * 9),
-		}
-	}
 
 	// Add tables for all of the higher half memory.
 	//

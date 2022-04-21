@@ -51,7 +51,7 @@ _start:
 	ljmp	0x8, realm64
 
 .code64
-	realm64:
+realm64:
 
 	# Fix entry address
 	mov		cl, 32
@@ -67,8 +67,24 @@ _start:
 	mov		ss, ax
 
 	# Fix pointer to boot info structure to point to identity-mapped space
-	movabs	rax, IDENTITY_MAP_ADDRESS
-	or		rdi, rax
+	movabs	rbx, IDENTITY_MAP_ADDRESS
+	or		rdi, rbx
+
+	# Jump to identity-mapped space so we can unmap the last page not in the higher half.
+	lea		rax, [rip + 2f]
+	or		rax, rbx
+	jmp		rax
+
+2:
+	# Unmap the last page. We can do this the lazy way by simply zeroing out the
+	# lower half of the table.
+	mov		rax, cr3
+	or		rax, rbx
+	mov		rbx, rdi
+	mov		rdi, rax
+	mov		rcx, 2048
+	rep stosb
+	mov		rdi, rbx
 
 	# Jump to kernel entry
 	jmp		rsp
