@@ -194,8 +194,10 @@ pub fn map_object(
 
 #[inline]
 pub fn sleep(duration: Duration) {
-	let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
-	syscall!(ID_SLEEP(micros));
+	match duration_to_micros(duration) {
+		(l, None) => syscall!(ID_SLEEP(l)),
+		(l, Some(h)) => syscall!(ID_SLEEP(l, h)),
+	};
 }
 
 #[inline]
@@ -283,5 +285,14 @@ fn ret2((status, value): (usize, usize)) -> Result<(usize, usize), (NonZeroUsize
 		Err((NonZeroUsize::new(status).unwrap(), value))
 	} else {
 		Ok((status, value))
+	}
+}
+
+fn duration_to_micros(t: Duration) -> (usize, Option<usize>) {
+	let micros = u64::try_from(t.as_micros()).unwrap_or(u64::MAX);
+	match mem::size_of::<usize>() {
+		4 => (micros as usize, Some((micros >> 32) as usize)),
+		8 => (micros as usize, None),
+		_ => todo!(),
 	}
 }
