@@ -2,6 +2,8 @@
 
 .globl		_start
 
+.equ		IDENTITY_MAP_ADDRESS, 0xffffc00000000000
+
 # .init is placed at the start of the executable, which is convenient when
 # identity-mapping it.
 .section	.init
@@ -63,6 +65,10 @@ _start:
 	mov		fs, ax
 	mov		gs, ax
 	mov		ss, ax
+
+	# Fix pointer to boot info structure to point to identity-mapped space
+	movabs	rax, IDENTITY_MAP_ADDRESS
+	or		rdi, rax
 
 	# Jump to kernel entry
 	jmp		rsp
