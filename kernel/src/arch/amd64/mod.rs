@@ -155,6 +155,51 @@ pub fn yield_current_thread() {
 	unsafe { asm!("int {}", const TIMER_IRQ) } // Fake timer interrupt
 }
 
+/// Switch to this CPU's local stack and call the given function.
+///
+/// The current thread will be suspended and interrupts will be disabled for the duration of the
+/// call.
+pub macro run_on_local_cpu_stack($f: path, $data: expr) {
+	const _: extern "C" fn(*const ()) = $f;
+	let data: *const () = $data;
+	unsafe {
+		asm!(
+			"cli",
+			"push rbp",
+			"mov  rbp, rsp",
+			"mov  rsp, {stack}",
+			"call {f}",
+			"pop  rbp",
+			"sti",
+			f = sym $f,
+			stack = in(reg) $crate::arch::amd64::_cpu_stack(),
+			in("rsi") data,
+			options(nostack),
+		)
+	}
+}
+
+/// Switch to this CPU's local stack and call the given function.
+///
+/// This macro is intended for cleaning up processes & threads.
+pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
+	const _: extern "C" fn(*const ()) -> ! = $f;
+	let data: *const () = $data;
+	unsafe {
+		asm!(
+			"cli",
+			"push rbp",
+			"mov  rbp, rsp",
+			"mov  rsp, {stack}",
+			"jmp {f}",
+			f = sym $f,
+			stack = in(reg) $crate::arch::amd64::_cpu_stack(),
+			in("rsi") data,
+			options(nostack, noreturn),
+		)
+	}
+}
+
 /// Allocate an IRQ ID.
 ///
 /// This will fail if all IRQs from `0x00` to `0xFE` are allocated.
@@ -181,4 +226,8 @@ pub fn disable_interrupts() {
 	unsafe {
 		asm!("cli", options(nostack, nomem, preserves_flags));
 	}
+}
+
+pub fn _cpu_stack() -> *mut () {
+	syscall::cpu_stack()
 }

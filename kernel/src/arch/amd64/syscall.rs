@@ -1,4 +1,5 @@
 use super::msr;
+use crate::memory::{frame, Page};
 use crate::scheduler::process::Process;
 use crate::scheduler::syscall;
 use crate::scheduler::Thread;
@@ -27,12 +28,18 @@ pub unsafe fn init() {
 		//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 		msr::wrmsr(msr::LSTAR, handler as u64);
 
+		let mut cpu_stack = None;
+		frame::allocate(1, |f| cpu_stack = Some(f), 0 as _, 0).unwrap();
+		let cpu_stack = cpu_stack.unwrap().base.as_ptr();
+		let cpu_stack_ptr = cpu_stack.cast::<Page>().wrapping_add(1).cast();
+
 		// Set GS_BASE to a per-cpu structure
 		let data = Box::leak(Box::new(CpuData {
 			user_stack_ptr: ptr::null_mut(),
 			kernel_stack_ptr: ptr::null_mut(),
 			process: ptr::null_mut(),
 			thread: ptr::null(),
+			cpu_stack_ptr,
 		}));
 		msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 	}
@@ -86,6 +93,7 @@ struct CpuData {
 	kernel_stack_ptr: *mut usize,
 	process: *mut Process,
 	thread: *const Thread,
+	cpu_stack_ptr: *mut (),
 }
 
 #[derive(Default)]
@@ -195,5 +203,13 @@ pub fn current_thread_weak() -> Weak<Thread> {
 		let w = Arc::downgrade(&r);
 		let _ = Arc::into_raw(r);
 		w
+	}
+}
+
+pub(super) fn cpu_stack() -> *mut () {
+	unsafe {
+		let stack: *mut ();
+		asm!("mov {0}, gs:[4 * 8]", out(reg) stack);
+		stack
 	}
 }

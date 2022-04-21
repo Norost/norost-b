@@ -137,6 +137,15 @@ impl Thread {
 		Self::yield_current();
 	}
 
+	/// Destroy this thread.
+	///
+	/// # Safety
+	///
+	/// No CPU may be using *any* resource of this thread, especially the stack.
+	pub unsafe fn destroy(self) {
+		todo!()
+	}
+
 	pub fn yield_current() {
 		crate::arch::yield_current_thread();
 	}
@@ -157,6 +166,6 @@ impl Thread {
 
 impl Drop for Thread {
 	fn drop(&mut self) {
-		todo!()
+		panic!("threads cannot be dropped implicitly, use Thread::destroy instead");
 	}
 }

@@ -1,19 +1,22 @@
-const ID_ALLOC: usize = 0;
-const ID_DEALLOC: usize = 1;
+pub const ID_ALLOC: usize = 0;
+pub const ID_DEALLOC: usize = 1;
 
-const ID_ALLOC_DMA: usize = 3;
-const ID_PHYSICAL_ADDRESS: usize = 4;
-const ID_NEXT_TABLE: usize = 5;
-const ID_MAP_OBJECT: usize = 9;
-const ID_SLEEP: usize = 10;
-const ID_READ: usize = 11;
-const ID_CREATE_TABLE: usize = 13;
+pub const ID_ALLOC_DMA: usize = 3;
+pub const ID_PHYSICAL_ADDRESS: usize = 4;
+pub const ID_NEXT_TABLE: usize = 5;
+pub const ID_MAP_OBJECT: usize = 9;
+pub const ID_SLEEP: usize = 10;
+pub const ID_READ: usize = 11;
+pub const ID_CREATE_TABLE: usize = 13;
+pub const ID_KILL_THREAD: usize = 14;
+pub const ID_WAIT_THREAD: usize = 15;
+pub const ID_EXIT: usize = 16;
 
-const ID_DUPLICATE_HANDLE: usize = 18;
-const ID_SPAWN_THREAD: usize = 19;
-const ID_CREATE_IO_QUEUE: usize = 20;
-const ID_PROCESS_IO_QUEUE: usize = 21;
-const ID_WAIT_IO_QUEUE: usize = 22;
+pub const ID_DUPLICATE_HANDLE: usize = 18;
+pub const ID_SPAWN_THREAD: usize = 19;
+pub const ID_CREATE_IO_QUEUE: usize = 20;
+pub const ID_PROCESS_IO_QUEUE: usize = 21;
+pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::Page;
 use core::arch::asm;
@@ -23,6 +26,8 @@ use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::str;
 use core::time::Duration;
+
+pub struct ExitStatus(pub u32);
 
 struct DebugLossy<'a>(&'a [u8]);
 
@@ -119,7 +124,8 @@ macro_rules! syscall {
 		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3])
 	};
 	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr)) => {
-		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("rcx") $a4])
+		// Use r10 instead of rcx as the latter gets overwritten by the syscall instruction
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4])
 	};
 }
 
@@ -204,8 +210,8 @@ pub fn sleep(duration: Duration) {
 pub unsafe fn spawn_thread(
 	start: unsafe extern "C" fn() -> !,
 	stack: *const (),
-) -> Result<usize, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_SPAWN_THREAD(start, stack)))
+) -> Result<Handle, (NonZeroUsize, usize)> {
+	ret(syscall!(ID_SPAWN_THREAD(start, stack))).map(|h| h as Handle)
 }
 
 #[inline]
@@ -271,6 +277,28 @@ pub fn wait_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize
 	ret(syscall!(ID_WAIT_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
+}
+
+#[inline]
+pub fn kill_thread(handle: Handle) -> Result<(), (NonZeroUsize, usize)> {
+	ret(syscall!(ID_KILL_THREAD(handle))).map(|_| ())
+}
+
+#[inline]
+pub fn wait_thread(handle: Handle) -> Result<(), (NonZeroUsize, usize)> {
+	ret(syscall!(ID_WAIT_THREAD(handle))).map(|_| ())
+}
+
+#[inline]
+pub fn exit(code: i32) -> ! {
+	unsafe {
+		asm!(
+			"syscall",
+			in("eax") ID_EXIT,
+			in("edi") code,
+			options(noreturn, nomem),
+		);
+	}
 }
 
 fn ret((status, value): (usize, usize)) -> Result<usize, (NonZeroUsize, usize)> {

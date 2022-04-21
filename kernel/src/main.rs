@@ -4,6 +4,7 @@
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
 #![feature(const_trait_impl, inline_const)]
+#![feature(decl_macro)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
 #![feature(let_else)]

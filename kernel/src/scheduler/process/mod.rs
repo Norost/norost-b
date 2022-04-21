@@ -33,6 +33,11 @@ impl Process {
 		})
 	}
 
+	pub fn id(&self) -> usize {
+		// TODO
+		0xdeadbeef
+	}
+
 	pub fn activate_address_space(&self) {
 		unsafe { self.address_space.activate() };
 	}

@@ -39,9 +39,9 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	undefined,
 	undefined,
 	create_table,
-	undefined,
-	undefined,
-	undefined,
+	kill_thread,
+	wait_thread,
+	exit,
 	undefined,
 	duplicate_handle,
 	spawn_thread,
@@ -403,6 +403,42 @@ extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: us
 			value: 0,
 		},
 	)
+}
+
+extern "C" fn kill_thread(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	todo!()
+}
+
+extern "C" fn wait_thread(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	todo!()
+}
+
+extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	let process_id = Process::current().id();
+
+	extern "C" fn destroy_process(process_id: *const ()) -> ! {
+		let process_id = process_id as usize;
+		dbg!();
+		loop {
+			crate::arch::halt();
+		}
+	}
+
+	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, process_id as _);
 }
 
 #[allow(dead_code)]
