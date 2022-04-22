@@ -9,13 +9,15 @@ use crate::memory::Page;
 use crate::object_table::{Object, Query};
 use crate::sync::Mutex;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use arena::Arena;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use norostb_kernel::Handle;
 
 pub struct Process {
 	address_space: Mutex<AddressSpace>,
 	hint_color: u8,
-	threads: Mutex<Vec<Arc<Thread>>>,
+	threads: Mutex<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Vec<Arc<dyn Object>>>,
 	queries: Mutex<Vec<Box<dyn Query>>>,
 	io_queues: Mutex<Vec<io::Queue>>,
@@ -100,17 +102,26 @@ impl Process {
 	}
 
 	/// Spawn a new thread.
-	pub fn spawn_thread(
-		self: Arc<Self>,
-		start: usize,
-		stack: usize,
-	) -> Result<usize, crate::memory::frame::AllocateContiguousError> {
-		let thr = Arc::new(Thread::new(start, stack, self.clone())?);
-		let thr_weak = Arc::downgrade(&thr);
+	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
 		let mut threads = self.threads.lock();
-		threads.push(thr);
-		super::round_robin::insert(thr_weak);
-		Ok(threads.len() - 1)
+		let handle = threads.insert_with(|handle| {
+			let (index, generation) = handle.into_raw();
+			assert!(index < 1 << 24, "can't construct unique handle");
+			let handle = (generation as u32) << 24 | index as u32;
+			Arc::new(Thread::new(start, stack, self.clone(), handle).unwrap())
+		});
+		super::round_robin::insert(Arc::downgrade(&threads.get(handle).unwrap()));
+		let (index, generation) = handle.into_raw();
+		Ok((generation as u32) << 24 | index as u32)
+	}
+
+	/// Remove a thread.
+	pub fn remove_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
+		let handle = arena::Handle::from_raw(
+			(handle & 0xff_ffff).try_into().unwrap(),
+			(handle >> 24) as u8,
+		);
+		self.threads.lock().remove(handle)
 	}
 
 	/// Create an [`AllocateHints`] structure for the given virtual address.
@@ -130,20 +141,13 @@ impl Process {
 	pub unsafe fn destroy(self: Arc<Self>) {
 		// Destroy all threads
 		let mut threads = self.threads.lock();
-		for thr in threads.drain(..) {
+		for (_, thr) in threads.drain() {
 			// SAFETY: the caller guarantees we're not using any resources of this thread.
 			unsafe {
 				thr.destroy();
 			}
 		}
 		// Now we just let the destructors do the rest. Sayonara! :)
-	}
-
-	/// Add a thread to this process.
-	///
-	/// The thread must have this process as a parent, i.e. `thread.process == self`.
-	pub fn add_thread(&self, thread: Arc<Thread>) {
-		self.threads.lock().push(thread)
 	}
 
 	/// Get the current active process.

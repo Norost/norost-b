@@ -369,7 +369,7 @@ extern "C" fn spawn_thread(
 			},
 			|handle| Return {
 				status: 0,
-				value: handle,
+				value: handle.try_into().unwrap(),
 			},
 		)
 }
@@ -437,7 +437,36 @@ extern "C" fn kill_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	todo!()
+	// To keep things simple & safe, always switch to the CPU local stack & start running
+	// the next thread, even if it isn't the most efficient way to do things.
+	let Some(thread) = Process::current().unwrap().remove_thread(handle as u32) else {
+		return Return {
+			status: usize::MAX,
+			value: 0,
+		};
+	};
+	let thread = Arc::into_raw(thread);
+	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_thread, thread.cast());
+
+	extern "C" fn destroy_thread(data: *const ()) -> ! {
+		let thread = unsafe { Arc::from_raw(data.cast::<Thread>()) };
+
+		crate::arch::amd64::clear_current_thread();
+
+		unsafe {
+			AddressSpace::activate_default();
+		}
+
+		// SAFETY: we switched to the CPU local stack and won't return to the stack of this thread
+		// We also switched to the default address space in case it's the last thread of the
+		// process.
+		unsafe {
+			thread.destroy();
+		}
+
+		// SAFETY: there is no thread state to save.
+		unsafe { scheduler::next_thread() }
+	}
 }
 
 extern "C" fn wait_thread(
@@ -448,6 +477,7 @@ extern "C" fn wait_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
+	dbg!(handle);
 	todo!()
 }
 

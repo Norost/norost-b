@@ -17,7 +17,6 @@ impl<T> Mutex<T> {
 		}
 	}
 
-	#[track_caller]
 	pub fn lock(&self) -> Guard<T> {
 		// TODO detect double locks by same thread
 		loop {
@@ -26,7 +25,7 @@ impl<T> Mutex<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
-				Err(_) => {} //Thread::yield_current(),
+				Err(_) => Thread::yield_current(),
 			}
 		}
 	}

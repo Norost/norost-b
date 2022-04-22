@@ -2418,7 +2418,7 @@ index 00000000000..dc00fcdef64
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..806b093cbd7
+index 00000000000..637b716dff0
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
 @@ -0,0 +1,142 @@
@@ -2491,16 +2491,16 @@ index 00000000000..806b093cbd7
 +                    "syscall",
 +                    // Kill current thread
 +                    "mov eax, {kill_thread}",
-+                    "mov rdi, {handle}",
++                    "mov rdi, r12",
 +                    "syscall",
 +                    kill_thread = const syscall::ID_KILL_THREAD,
-+                    // "formatting may not be suitable for sub-register argument" ???
-+                    // Hence cast to usize
-+                    handle = in(reg) handle as usize,
 +                    in("eax") syscall::ID_DEALLOC,
 +                    in("rdi") stack_base,
 +                    in("rsi") stack_size,
 +                    in("rdx") 0,
++                    // Rust is retarded and doesn't let us specify clobbers with out
++                    // so we have to avoid rax, rdx, rcx and r11 manually *sigh*
++                    in("r12") handle,
 +                    options(noreturn, nostack),
 +                );
 +            }
@@ -2514,7 +2514,7 @@ index 00000000000..806b093cbd7
 +					mov rsi, [rsp - 8 * 2]
 +					mov rdx, [rsp - 8 * 3]
 +					mov rcx, [rsp - 8 * 4]
-+					mov r8d, eax
++					mov r8, rax
 +					jmp {main}
 +					",
 +                    main = sym main,

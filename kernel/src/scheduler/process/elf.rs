@@ -223,12 +223,11 @@ impl super::Process {
 		}
 
 		drop(address_space);
+
 		let slf = Arc::new(slf);
 
-		let thr = Thread::new(header.entry.try_into().unwrap(), 0, slf.clone())?;
-		let thr = Arc::new(thr);
-		super::super::round_robin::insert(Arc::downgrade(&thr));
-		slf.add_thread(thr);
+		slf.spawn_thread(header.entry.try_into().unwrap(), 0)
+			.unwrap();
 
 		Ok(slf)
 	}

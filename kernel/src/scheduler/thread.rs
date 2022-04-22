@@ -10,6 +10,7 @@ use core::arch::asm;
 use core::cell::Cell;
 use core::ptr::NonNull;
 use core::time::Duration;
+use norostb_kernel::Handle;
 
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
@@ -32,6 +33,7 @@ impl Thread {
 		start: usize,
 		stack: usize,
 		process: Arc<Process>,
+		handle: Handle,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
 			let mut kernel_stack_base = None;
@@ -49,10 +51,15 @@ impl Thread {
 			push(0x2); // rflags: Set reserved bit 1
 			push(3 * 8 | 3); // cs
 			push(start); // rip
-			 // Reserve space for (zeroed) registers
-			 // 15 GP registers without RSP
-			 // FIXME save RFLAGS
-			kernel_stack = kernel_stack.sub(15);
+
+			// Push thread handle (rax)
+			push(handle.try_into().unwrap());
+
+			// Reserve space for (zeroed) registers
+			// 14 GP registers without RSP and RAX
+			// FIXME save RFLAGS
+			kernel_stack = kernel_stack.sub(14);
+
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
 				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
