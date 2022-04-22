@@ -17,9 +17,7 @@ pub enum MapError {
 	Arch(crate::arch::r#virtual::MapError),
 }
 
-pub enum UnmapError {
-	InvalidRange,
-}
+pub enum UnmapError {}
 
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
@@ -108,7 +106,7 @@ impl AddressSpace {
 			.iter()
 			.position(|e| e.0.contains(&base))
 			.unwrap();
-		let (range, obj) = &self.objects[i];
+		let (range, _obj) = &self.objects[i];
 		let end = base
 			.as_ptr()
 			.wrapping_add(count.get())
@@ -128,11 +126,6 @@ impl AddressSpace {
 		}
 
 		Ok(())
-	}
-
-	/// Get a reference to a memory object.
-	pub fn get_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
-		self.objects.get(handle.0).map(|(_, o)| &**o)
 	}
 
 	/// Map a virtual address to a physical address.
@@ -162,7 +155,7 @@ impl AddressSpace {
 	}
 
 	pub unsafe fn activate(&self) {
-		self.mmu_address_space.activate()
+		unsafe { self.mmu_address_space.activate() }
 	}
 
 	/// Identity-map a physical frame.
@@ -186,7 +179,7 @@ impl AddressSpace {
 	/// There should be no active pointers to any user-space data
 	// TODO should we even be using any pointers to user-space data directly?
 	pub unsafe fn activate_default() {
-		r#virtual::AddressSpace::activate_default()
+		unsafe { r#virtual::AddressSpace::activate_default() }
 	}
 }
 

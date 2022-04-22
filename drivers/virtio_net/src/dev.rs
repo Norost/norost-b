@@ -111,7 +111,7 @@ impl<'a, 'd: 'a> Device<'a> for Dev<'d> {
 pub struct DevRxToken<'a, 'd: 'a>(&'a Dev<'d>);
 
 impl<'a, 'd: 'a> RxToken for DevRxToken<'a, 'd> {
-	fn consume<R, F>(mut self, _: Instant, f: F) -> smoltcp::Result<R>
+	fn consume<R, F>(self, _: Instant, f: F) -> smoltcp::Result<R>
 	where
 		F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
 	{

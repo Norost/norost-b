@@ -502,7 +502,7 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
 	extern "C" fn destroy_process(data: *const ()) -> ! {
-		let D(process, code) = unsafe { data.cast::<D>().read() };
+		let D(process, _code) = unsafe { data.cast::<D>().read() };
 		let process = unsafe { Arc::from_raw(process) };
 
 		crate::arch::amd64::clear_current_thread();

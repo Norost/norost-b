@@ -18,14 +18,14 @@
 #![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
 #![feature(trait_upcasting)]
 #![feature(waker_getters)]
-#![warn(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 extern crate alloc;
 
 use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
-use crate::memory::Page;
+use crate::memory::{frame::MemoryRegion, Page};
 use crate::scheduler::MemoryObject;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc};
 use core::panic::PanicInfo;
 
 macro_rules! bi_from {
@@ -68,7 +68,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 
 	for region in boot_info.memory_regions() {
-		use memory::{frame::MemoryRegion, Page};
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
 		let base = base + align;

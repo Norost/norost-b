@@ -9,7 +9,6 @@ mod dev;
 use core::ptr::NonNull;
 use core::time::Duration;
 use norostb_kernel::{
-	self as kernel,
 	io::{Empty, Job, Queue, Request},
 	syscall,
 };
@@ -110,7 +109,7 @@ fn main() {
 	// kernel blocks on each request.
 	// Cast to usize because god fucking damn your "lints" Rust.
 	let job_queue_base = job_queue.base.as_ptr() as usize;
-	let thr = std::thread::spawn(move || loop {
+	std::thread::spawn(move || loop {
 		syscall::sleep(std::time::Duration::from_millis(100));
 		syscall::process_io_queue(NonNull::new(job_queue_base as *mut _)).unwrap();
 	});
@@ -142,7 +141,9 @@ fn main() {
 					};
 					std::os::norostb::finish_job(tbl, &std_job).unwrap();
 					unsafe {
-						job_queue.enqueue_request(Request::take_job(0, tbl, &mut job));
+						job_queue
+							.enqueue_request(Request::take_job(0, tbl, &mut job))
+							.unwrap();
 					}
 				}
 				s => todo!("{:?}", s),

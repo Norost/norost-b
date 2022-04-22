@@ -1,5 +1,5 @@
 use crate::memory::{frame, Page};
-use core::{arch::asm, fmt, mem, ptr};
+use core::{arch::asm, fmt, ptr};
 
 // Don't implement copy to avoid accidentally updating stack values instead of
 // entries in a table.

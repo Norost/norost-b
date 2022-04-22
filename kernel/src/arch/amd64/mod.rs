@@ -9,7 +9,7 @@ mod syscall;
 mod tss;
 pub mod r#virtual;
 
-use crate::{driver::apic, power, scheduler, time::Monotonic};
+use crate::{driver::apic, scheduler};
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};

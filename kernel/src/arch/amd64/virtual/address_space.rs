@@ -179,9 +179,7 @@ impl Drop for AddressSpace {
 }
 
 #[derive(Debug)]
-pub enum MapError {
-	Overflow,
-}
+pub enum MapError {}
 
 #[derive(Debug)]
 pub enum UnmapError {

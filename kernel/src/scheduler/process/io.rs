@@ -13,7 +13,6 @@ use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
 	TooLarge,
-	OutOfMemory(frame::AllocateContiguousError),
 	MapError(MapError),
 }
 

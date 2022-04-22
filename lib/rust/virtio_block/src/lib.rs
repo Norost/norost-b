@@ -1,4 +1,5 @@
 #![no_std]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 mod sector;
 
@@ -111,9 +112,8 @@ impl<'a> BlockDevice<'a> {
 	/// # Safety
 	///
 	/// `dma_alloc` must return valid addresses.
-	pub unsafe fn new<F, DmaError>(
+	pub unsafe fn new<DmaError>(
 		pci: &'a pci::Header0,
-		get_physical_address: F,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
 		mut dma_alloc: impl FnMut(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
 		msix: Msix,

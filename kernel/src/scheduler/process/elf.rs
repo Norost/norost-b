@@ -1,7 +1,7 @@
-use crate::memory::frame::{self, AllocateHints, OwnedPageFrames, PPN};
+use crate::memory::frame::{self, AllocateHints, OwnedPageFrames};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::scheduler::{process::frame::PageFrame, MemoryObject, Thread};
+use crate::scheduler::{process::frame::PageFrame, MemoryObject};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
@@ -100,7 +100,7 @@ impl super::Process {
 			core::slice::from_raw_parts(data[0].base.as_ptr().cast::<u8>(), Page::SIZE * l)
 		};
 
-		let mut slf = Self::new()?;
+		let slf = Self::new()?;
 
 		(data.len() >= 16)
 			.then(|| ())
@@ -182,7 +182,6 @@ impl super::Process {
 			let f = header.flags;
 
 			let page_mask = u64::try_from(Page::MASK).unwrap();
-			let page_size = u64::try_from(Page::SIZE).unwrap();
 
 			(header.offset & page_mask == header.virtual_address & page_mask)
 				.then(|| ())

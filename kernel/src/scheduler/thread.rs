@@ -13,7 +13,7 @@ use alloc::{
 use core::arch::asm;
 use core::cell::Cell;
 use core::ptr::NonNull;
-use core::task::{Context, Waker};
+use core::task::Waker;
 use core::time::Duration;
 use norostb_kernel::Handle;
 

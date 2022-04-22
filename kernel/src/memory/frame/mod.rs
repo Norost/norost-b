@@ -121,13 +121,6 @@ pub struct PageFrame {
 }
 
 impl PageFrame {
-	/// # Safety
-	///
-	/// The base and p2size originates from `PageFrame::into_raw()`.
-	pub unsafe fn from_raw(base: PPN, p2size: u8) -> Self {
-		Self { base, p2size }
-	}
-
 	pub fn iter(&self) -> Result<PageFrameIter, PageFrameIterError> {
 		Ok(PageFrameIter {
 			base: self.base,

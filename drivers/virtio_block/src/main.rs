@@ -26,10 +26,6 @@ fn main() {
 		let h = pci.get(0, 0, 0).unwrap();
 		match h {
 			pci::Header::H0(h) => {
-				let get_phys_addr = |addr: *mut _| {
-					let addr = NonNull::new(addr).unwrap();
-					syscall::physical_address(addr).unwrap()
-				};
 				let map_bar = |bar: u8| {
 					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
 						.unwrap()
@@ -43,10 +39,7 @@ fn main() {
 
 				let msix = virtio_block::Msix { queue: Some(0) };
 
-				unsafe {
-					virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix)
-						.unwrap()
-				}
+				unsafe { virtio_block::BlockDevice::new(h, map_bar, dma_alloc, msix).unwrap() }
 			}
 			_ => unreachable!(),
 		}

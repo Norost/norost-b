@@ -11,7 +11,7 @@
 use core::alloc::Layout;
 use core::convert::TryInto;
 use core::fmt;
-use core::mem::{self, MaybeUninit};
+use core::mem;
 use core::ptr::NonNull;
 use endian::{u16le, u32le};
 use virtio::pci::CommonConfig;
@@ -289,9 +289,9 @@ impl<'a> Device<'a> {
 				| CommonConfig::STATUS_DRIVER_OK,
 		);
 
-		let mac = Mac(unsafe { dev.device.cast::<Config>() }.mac);
+		let mac = Mac(dev.device.cast::<Config>().mac);
 
-		let mut s = Self {
+		let s = Self {
 			rx_queue,
 			tx_queue,
 			notify: dev.notify,

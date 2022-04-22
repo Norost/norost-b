@@ -35,7 +35,7 @@ impl Process {
 		})
 	}
 
-	pub fn activate_address_space(&self) {
+	pub unsafe fn activate_address_space(&self) {
 		unsafe { self.address_space.lock().activate() };
 	}
 
