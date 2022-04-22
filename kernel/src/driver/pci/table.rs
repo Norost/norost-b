@@ -72,8 +72,6 @@ impl Table for PciTable {
 	}
 }
 
-impl Object for PciTable {}
-
 struct QueryName {
 	item: Option<(u8, u8, u8)>,
 }

@@ -38,8 +38,6 @@ impl Table for UartTable {
 	}
 }
 
-impl Object for UartTable {}
-
 #[derive(Clone, Copy)]
 pub struct UartId(u8);
 

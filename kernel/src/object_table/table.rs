@@ -8,7 +8,7 @@ use alloc::{
 use core::time::Duration;
 
 /// A table of objects.
-pub trait Table: Object {
+pub trait Table {
 	/// The name of this table.
 	fn name(&self) -> &str;
 
