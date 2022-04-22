@@ -12,7 +12,7 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 pub struct StreamingTable {
 	name: Box<str>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(StreamJob, StreamTicketWaker)>>,
+	jobs: Mutex<Vec<(StreamJob, Option<StreamTicketWaker>)>>,
 	tickets: Mutex<Vec<(JobId, StreamTicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
 }
@@ -43,12 +43,32 @@ impl StreamingTable {
 				}
 			} else {
 				let mut l = self.jobs.lock();
-				l.push((StreamJob { job_id, job }, ticket_waker.into()));
+				l.push((StreamJob { job_id, job }, Some(ticket_waker.into())));
 				break;
 			}
 		}
 
 		ticket.into()
+	}
+
+	/// Submit a job for which no response is expected, i.e. `finish_job` should *not* be called.
+	fn submit_oneway_job(&self, job: JobRequest) {
+		// Perhaps not strictly necessary, but let's try to prevent potential confusion.
+		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+
+		loop {
+			let j = self.job_handlers.lock().pop();
+			if let Some(w) = j {
+				if let Ok(mut w) = w.lock() {
+					w.complete((job_id, job));
+					break;
+				}
+			} else {
+				let mut l = self.jobs.lock();
+				l.push((StreamJob { job_id, job }, None));
+				break;
+			}
+		}
 	}
 }
 
@@ -73,7 +93,7 @@ impl Table for StreamingTable {
 
 	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
 		let job = self.jobs.lock().pop().map(|(job, tkt)| {
-			self.tickets.lock().push((job.job_id, tkt));
+			tkt.map(|tkt| self.tickets.lock().push((job.job_id, tkt)));
 			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
@@ -171,6 +191,16 @@ impl Object for StreamObject {
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
 			})
+	}
+}
+
+impl Drop for StreamObject {
+	fn drop(&mut self) {
+		Weak::upgrade(&self.table).map(|table| {
+			table.submit_oneway_job(JobRequest::Close {
+				handle: self.handle,
+			});
+		});
 	}
 }
 

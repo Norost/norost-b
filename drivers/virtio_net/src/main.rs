@@ -256,6 +256,9 @@ fn main() {
 						}
 					}
 				}
+				Job::CLOSE => {
+					todo!();
+				}
 				t => todo!("job type {}", t),
 			}
 

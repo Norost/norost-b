@@ -116,6 +116,11 @@ fn main() {
 			Job::SEEK => {
 				todo!()
 			}
+			Job::CLOSE => {
+				open_files.remove(job.handle);
+				// The kernel does not expect a response.
+				continue;
+			}
 			t => todo!("job type {}", t),
 		}
 

@@ -343,12 +343,12 @@ index 00000000000..17243a4af12
 +pub use self::os_str::{OsStrExt, OsStringExt};
 diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
 new file mode 100644
-index 00000000000..dee3f41c70d
+index 00000000000..9f56dbc6f25
 --- /dev/null
 +++ b/library/std/src/os/norostb/io.rs
 @@ -0,0 +1,34 @@
 +use crate::sys_common::{AsInner, FromInner, IntoInner};
-+use crate::{fs, sys};
++use crate::{fs, mem::ManuallyDrop, sys};
 +
 +pub type Handle = u32;
 +
@@ -372,7 +372,7 @@ index 00000000000..dee3f41c70d
 +
 +impl IntoHandle for fs::File {
 +    fn into_handle(self) -> Handle {
-+        self.into_inner().handle
++        ManuallyDrop::new(self.into_inner()).handle
 +    }
 +}
 +
@@ -625,10 +625,10 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..37c1c28c0dc
+index 00000000000..87def158b98
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,476 @@
 +/// ## Path format
 +///
 +/// ```
@@ -949,6 +949,12 @@ index 00000000000..37c1c28c0dc
 +    }
 +}
 +
++impl Drop for File {
++    fn drop(&mut self) {
++        super::io::close(self.handle);
++    }
++}
++
 +impl DirBuilder {
 +    pub fn new() -> DirBuilder {
 +        DirBuilder {}
@@ -1101,10 +1107,10 @@ index 00000000000..37c1c28c0dc
 +}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
-index 00000000000..9f8be8bd45c
+index 00000000000..eabc9ef11ca
 --- /dev/null
 +++ b/library/std/src/sys/norostb/io.rs
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,266 @@
 +use crate::cell::RefCell;
 +use crate::io;
 +use crate::mem::{self, MaybeUninit};
@@ -1337,6 +1343,13 @@ index 00000000000..9f8be8bd45c
 +    } else {
 +        Ok(e.value as usize)
 +    }
++}
++
++/// Blocking close
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn close(handle: syscall::Handle) {
++    enqueue(Request::close(0, handle));
 +}
 +
 +/// Create an iterator over all tables.

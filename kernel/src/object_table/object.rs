@@ -25,8 +25,6 @@ pub trait Object {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
-	//fn close(self: Arc<Self>) -> Ticket<usize>;
-
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
 		None
 	}

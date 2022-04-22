@@ -23,6 +23,7 @@ pub enum JobRequest {
 	Seek { handle: Handle, from: SeekFrom },
 	Query { filter: Box<[u8]> },
 	QueryNext { handle: Handle },
+	Close { handle: Handle },
 }
 
 /// A finished job.

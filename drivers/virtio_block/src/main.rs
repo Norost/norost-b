@@ -163,6 +163,11 @@ fn main() {
 				};
 				data_handles[job.handle] = offset;
 			}
+			Job::CLOSE => {
+				data_handles.remove(job.handle);
+				// The kernel does not expect a response.
+				continue;
+			}
 			t => todo!("job type {}", t),
 		}
 

@@ -268,6 +268,10 @@ impl super::Process {
 							job.ty = Job::QUERY_NEXT;
 							job.handle = handle;
 						}
+						JobRequest::Close { handle } => {
+							job.ty = Job::CLOSE;
+							job.handle = handle;
+						}
 					}
 
 					push_resp(0);
@@ -347,6 +351,10 @@ impl super::Process {
 						Ok(b) => push_resp(b as isize),
 						Err(_) => push_resp(-1),
 					}
+				}
+				Request::CLOSE => {
+					let handle = unerase_handle_type(e.arguments_32[0]);
+					push_resp(objects.remove(handle).map_or(-1, |_| 0));
 				}
 				op => {
 					warn!("Unknown I/O queue operation {}", op);

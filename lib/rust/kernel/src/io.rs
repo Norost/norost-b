@@ -54,6 +54,7 @@ impl Request {
 	pub const FINISH_JOB: u8 = 7;
 	pub const SEEK: u8 = 8;
 	pub const POLL: u8 = 9;
+	pub const CLOSE: u8 = 10;
 
 	pub fn read(user_data: usize, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
@@ -162,10 +163,16 @@ impl Request {
 	pub fn poll(user_data: usize, handle: Handle) -> Self {
 		Self {
 			ty: Self::POLL,
-			arguments_8: [0, 0, 0],
 			arguments_32: [handle, 0],
-			arguments_64: [0],
-			arguments_ptr: [0, 0],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn close(user_data: usize, handle: Handle) -> Self {
+		Self {
+			ty: Self::CLOSE,
+			arguments_32: [handle, 0],
 			user_data,
 			..Default::default()
 		}
@@ -534,6 +541,7 @@ impl Job {
 	pub const CREATE: u8 = 4;
 	pub const QUERY_NEXT: u8 = 5;
 	pub const SEEK: u8 = 6;
+	pub const CLOSE: u8 = 7;
 }
 
 pub type JobId = u32;
