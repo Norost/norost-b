@@ -4,6 +4,7 @@
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
 #![feature(const_trait_impl, inline_const)]
+#![feature(decl_macro)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
 #![feature(let_else)]
@@ -21,6 +22,10 @@
 
 extern crate alloc;
 
+use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
+use crate::memory::Page;
+use crate::scheduler::MemoryObject;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::panic::PanicInfo;
 
 macro_rules! bi_from {
@@ -55,14 +60,15 @@ mod time;
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	unsafe {
+		driver::early_init(boot_info);
+	}
+
+	unsafe {
 		log::init();
 	}
 
 	for region in boot_info.memory_regions() {
-		use memory::{
-			frame::{MemoryRegion, PPN},
-			Page,
-		};
+		use memory::{frame::MemoryRegion, Page};
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
 		let base = base + align;
@@ -76,7 +82,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	}
 
 	unsafe {
-		memory::r#virtual::init();
 		arch::init();
 	}
 
@@ -86,14 +91,41 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	assert!(!boot_info.drivers().is_empty(), "no drivers");
 
-	let mut processes = alloc::vec::Vec::with_capacity(8);
+	// TODO we should try to recuperate this memory when it becomes unused.
+	struct Driver(boot::Driver);
 
-	for driver in boot_info.drivers() {
-		let process = scheduler::process::Process::from_elf(driver.as_slice()).unwrap();
-		processes.push(process);
+	impl MemoryObject for Driver {
+		fn physical_pages(&self) -> Box<[PageFrame]> {
+			assert_eq!(
+				self.0.address & u32::try_from(Page::MASK).unwrap(),
+				0,
+				"ELF file is not aligned"
+			);
+			let base = PPN((self.0.address >> Page::OFFSET_BITS).try_into().unwrap());
+			let count = Page::min_pages_for_bytes(self.0.size.try_into().unwrap());
+			PageFrameIter { base, count }
+				.map(|p| PageFrame { base: p, p2size: 0 })
+				.collect()
+		}
 	}
 
-	processes.leak()[0].run()
+	for driver in boot_info
+		.drivers()
+		.iter()
+		.cloned()
+		.map(Driver)
+		.map(Arc::new)
+	{
+		match scheduler::process::Process::from_elf(driver) {
+			Ok(_) => {} // We don't need to do anything.
+			Err(e) => {
+				error!("failed to start driver: {:?}", e)
+			}
+		}
+	}
+
+	// SAFETY: there is no thread state to save.
+	unsafe { scheduler::next_thread() }
 }
 
 #[panic_handler]

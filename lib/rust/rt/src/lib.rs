@@ -1,6 +1,10 @@
 #![no_std]
+#![feature(allocator_api)]
 #![feature(inline_const)]
+#![feature(nonnull_slice_from_raw_parts)]
+#![feature(slice_ptr_get, slice_ptr_len)]
 
+pub mod alloc;
 pub mod tls;
 
 use core::arch::global_asm;

@@ -1,6 +1,12 @@
-use crate::memory::{frame, r#virtual::RWX, Page};
+use crate::memory::{
+	frame,
+	frame::OwnedPageFrames,
+	r#virtual::{AddressSpace, RWX},
+	Page,
+};
 use crate::object_table;
 use crate::object_table::TableId;
+use crate::scheduler;
 use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
@@ -9,6 +15,7 @@ use alloc::{
 	sync::{Arc, Weak},
 };
 use core::mem;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
 
@@ -24,8 +31,8 @@ type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return
 pub const SYSCALLS_LEN: usize = 23;
 #[export_name = "syscall_table"]
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
-	undefined,
-	undefined,
+	alloc,
+	dealloc,
 	undefined,
 	alloc_dma,
 	physical_address,
@@ -38,9 +45,9 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	undefined,
 	undefined,
 	create_table,
-	undefined,
-	undefined,
-	undefined,
+	kill_thread,
+	wait_thread,
+	exit,
 	undefined,
 	duplicate_handle,
 	spawn_thread,
@@ -48,6 +55,107 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	submit_io,
 	wait_io,
 ];
+
+fn raw_to_rwx(rwx: usize) -> Option<RWX> {
+	Some(match rwx {
+		0b100 => RWX::R,
+		0b010 => RWX::W,
+		0b001 => RWX::X,
+		0b110 => RWX::RW,
+		0b101 => RWX::RX,
+		0b111 => RWX::RWX,
+		_ => return None,
+	})
+}
+
+extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
+	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
+		return Return {
+			status: 1,
+			value: 0,
+		};
+	};
+	let Some(rwx) = raw_to_rwx(rwx) else {
+		return Return {
+			status: 1,
+			value: 0,
+		};
+	};
+	let proc = Process::current().unwrap();
+	let base = base as *mut _;
+	match OwnedPageFrames::new(count, proc.allocate_hints(base)) {
+		Ok(mem) => proc
+			.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
+			.map_or(
+				Return {
+					status: usize::MAX,
+					value: 0,
+				},
+				|base| Return {
+					status: count.get() * Page::SIZE,
+					value: base.as_ptr() as usize,
+				},
+			),
+		Err(_) => Return {
+			status: usize::MAX - 1,
+			value: 0,
+		},
+	}
+}
+
+extern "C" fn dealloc(
+	base: usize,
+	size: usize,
+	flags: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	let dealloc_partial_start = flags & 1 > 0;
+	let dealloc_partial_end = flags & 2 > 0;
+
+	// Round up base & size depending on flags.
+	let (base, size) = if dealloc_partial_start {
+		(base & !Page::MASK, (size + base) & Page::MASK)
+	} else {
+		(
+			(base + Page::MASK) & !Page::MASK,
+			size - (Page::SIZE.wrapping_sub(base) & Page::MASK),
+		)
+	};
+
+	let (base, size) = if dealloc_partial_end {
+		(base, (size + Page::MASK) & !Page::MASK)
+	} else {
+		(base, size & !Page::MASK)
+	};
+
+	let Some(count) = NonZeroUsize::new(size / Page::MASK) else {
+		return Return {
+			status: 0,
+			value: 0,
+		};
+	};
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return {
+			status: usize::MAX,
+			value: 0,
+		}
+	};
+	Process::current()
+		.unwrap()
+		.unmap_memory_object(base, count)
+		.map_or(
+			Return {
+				status: usize::MAX - 1,
+				value: 0,
+			},
+			|_| Return {
+				status: 0,
+				value: size,
+			},
+		)
+}
 
 extern "C" fn alloc_dma(
 	base: usize,
@@ -62,12 +170,18 @@ extern "C" fn alloc_dma(
 	let count = (size + Page::MASK) / Page::SIZE;
 	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
 	Process::current()
+		.unwrap()
 		.map_memory_object(base, Box::new(frame), rwx)
-		.unwrap();
-	Return {
-		status: 0,
-		value: count * Page::SIZE,
-	}
+		.map_or(
+			Return {
+				status: usize::MAX,
+				value: 0,
+			},
+			|base| Return {
+				status: count * Page::SIZE,
+				value: base.as_ptr() as usize,
+			},
+		)
 }
 
 extern "C" fn physical_address(
@@ -79,7 +193,11 @@ extern "C" fn physical_address(
 	_: usize,
 ) -> Return {
 	let address = NonNull::new(address as *mut _).unwrap();
-	let value = Process::current().get_physical_address(address).unwrap().0;
+	let value = Process::current()
+		.unwrap()
+		.get_physical_address(address)
+		.unwrap()
+		.0;
 	Return { status: 0, value }
 }
 
@@ -141,12 +259,18 @@ extern "C" fn map_object(
 	let handle = ObjectHandle::from(handle);
 	let base = NonNull::new(base as *mut _);
 	Process::current()
+		.unwrap()
 		.map_memory_object_2(handle, base, offset, RWX::RW)
-		.unwrap();
-	Return {
-		status: 0,
-		value: base.unwrap().as_ptr() as usize,
-	}
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|base| Return {
+				status: 0,
+				value: base.as_ptr() as usize,
+			},
+		)
 }
 
 extern "C" fn duplicate_handle(
@@ -159,16 +283,19 @@ extern "C" fn duplicate_handle(
 ) -> Return {
 	let handle = ObjectHandle::from(handle);
 
-	Process::current().duplicate_object_handle(handle).map_or(
-		Return {
-			status: 1,
-			value: 0,
-		},
-		|handle| Return {
-			status: 0,
-			value: handle.into(),
-		},
-	)
+	Process::current()
+		.unwrap()
+		.duplicate_object_handle(handle)
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|handle| Return {
+				status: 0,
+				value: handle.into(),
+			},
+		)
 }
 
 extern "C" fn create_table(
@@ -194,7 +321,7 @@ extern "C" fn create_table(
 		_ => todo!(),
 	};
 
-	let handle = Process::current().add_object(tbl).unwrap();
+	let handle = Process::current().unwrap().add_object(tbl).unwrap();
 
 	Return {
 		status: 0,
@@ -213,7 +340,9 @@ extern "C" fn sleep(
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
 
-	Thread::current().set_sleep_until(Monotonic::now().saturating_add(time));
+	Thread::current()
+		.unwrap()
+		.set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();
 
 	Return {
@@ -230,16 +359,19 @@ extern "C" fn spawn_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	Process::current().spawn_thread(start, stack).map_or(
-		Return {
-			status: 1,
-			value: 0,
-		},
-		|handle| Return {
-			status: 0,
-			value: handle,
-		},
-	)
+	Process::current()
+		.unwrap()
+		.spawn_thread(start, stack)
+		.map_or(
+			Return {
+				status: 1,
+				value: 0,
+			},
+			|handle| Return {
+				status: 0,
+				value: handle.try_into().unwrap(),
+			},
+		)
 }
 
 extern "C" fn create_io_rings(
@@ -251,6 +383,7 @@ extern "C" fn create_io_rings(
 	_: usize,
 ) -> Return {
 	Process::current()
+		.unwrap()
 		.create_io_queue(
 			NonNull::new(base as *mut _),
 			request_p2size as u8,
@@ -270,7 +403,7 @@ extern "C" fn create_io_rings(
 
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
-	Process::current().process_io_queue(base).map_or(
+	Process::current().unwrap().process_io_queue(base).map_or(
 		Return {
 			status: 1,
 			value: 0,
@@ -284,7 +417,7 @@ extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: 
 
 extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
-	Process::current().wait_io_queue(base).map_or(
+	Process::current().unwrap().wait_io_queue(base).map_or(
 		Return {
 			status: 1,
 			value: 0,
@@ -294,6 +427,99 @@ extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: us
 			value: 0,
 		},
 	)
+}
+
+extern "C" fn kill_thread(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	// To keep things simple & safe, always switch to the CPU local stack & start running
+	// the next thread, even if it isn't the most efficient way to do things.
+	let Some(thread) = Process::current().unwrap().remove_thread(handle as u32) else {
+		return Return {
+			status: usize::MAX,
+			value: 0,
+		};
+	};
+	let thread = Arc::into_raw(thread);
+	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_thread, thread.cast());
+
+	extern "C" fn destroy_thread(data: *const ()) -> ! {
+		let thread = unsafe { Arc::from_raw(data.cast::<Thread>()) };
+
+		crate::arch::amd64::clear_current_thread();
+
+		unsafe {
+			AddressSpace::activate_default();
+		}
+
+		// SAFETY: we switched to the CPU local stack and won't return to the stack of this thread
+		// We also switched to the default address space in case it's the last thread of the
+		// process.
+		unsafe {
+			thread.destroy();
+		}
+
+		// SAFETY: there is no thread state to save.
+		unsafe { scheduler::next_thread() }
+	}
+}
+
+extern "C" fn wait_thread(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	Process::current()
+		.unwrap()
+		.get_thread(handle as u32)
+		.map_or(
+			Return {
+				status: usize::MAX,
+				value: 0,
+			},
+			|thread| {
+				thread.wait().unwrap();
+				Return {
+					status: 0,
+					value: 0,
+				}
+			},
+		)
+}
+
+extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	#[derive(Clone, Copy)]
+	struct D(*const Process, i32);
+	let d = D(Arc::into_raw(Process::current().unwrap()), code as i32);
+	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
+
+	extern "C" fn destroy_process(data: *const ()) -> ! {
+		let D(process, code) = unsafe { data.cast::<D>().read() };
+		let process = unsafe { Arc::from_raw(process) };
+
+		crate::arch::amd64::clear_current_thread();
+
+		unsafe {
+			AddressSpace::activate_default();
+		}
+
+		// SAFETY: we switched to the CPU local stack and won't return to a stack of a thread
+		// owned by this process. We also switched to the default address space.
+		unsafe {
+			process.destroy();
+		}
+
+		// SAFETY: there is no thread state to save.
+		unsafe { scheduler::next_thread() }
+	}
 }
 
 #[allow(dead_code)]

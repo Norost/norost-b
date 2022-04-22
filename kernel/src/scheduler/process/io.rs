@@ -1,9 +1,11 @@
 //! # I/O with user processes
 
-use crate::memory::frame;
-use crate::memory::r#virtual::RWX;
+use super::MemoryObject;
+use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
+use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{JobRequest, JobResult};
+use alloc::boxed::Box;
 use core::ptr::NonNull;
 use core::time::Duration;
 pub use norostb_kernel::io::Queue;
@@ -12,6 +14,7 @@ use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
 pub enum CreateQueueError {
 	TooLarge,
 	OutOfMemory(frame::AllocateContiguousError),
+	MapError(MapError),
 }
 
 pub enum ProcessQueueError {
@@ -24,9 +27,25 @@ pub enum WaitQueueError {
 
 const MAX_SIZE_P2: u8 = 15;
 
+struct IoQueue {
+	base: PPN,
+	count: usize,
+}
+
+impl MemoryObject for IoQueue {
+	fn physical_pages(&self) -> Box<[PageFrame]> {
+		PageFrameIter {
+			base: self.base,
+			count: self.count,
+		}
+		.map(|p| PageFrame { base: p, p2size: 0 })
+		.collect()
+	}
+}
+
 impl super::Process {
 	pub fn create_io_queue(
-		&mut self,
+		&self,
 		base: Option<NonNull<Page>>,
 		request_p2size: u8,
 		response_p2size: u8,
@@ -38,20 +57,24 @@ impl super::Process {
 		let responses_mask = (1 << response_p2size) - 1;
 		let size = Queue::total_size(requests_mask, responses_mask);
 		let count = Page::min_pages_for_bytes(size);
+
+		assert_eq!(count, 1, "TODO");
+		let mut frame = None;
+		frame::allocate(count, |f| frame = Some(f), 0 as *const _, self.hint_color).unwrap();
+		/*
 		let frame = frame::allocate_contiguous(count.try_into().unwrap())
 			.map_err(CreateQueueError::OutOfMemory)?;
-		let base = base.unwrap(); // TODO
-		unsafe {
-			self.address_space
-				.map(
-					base.as_ptr(),
-					frame::PageFrameIter { base: frame, count },
-					RWX::RW,
-					self.hint_color,
-				)
-				.unwrap();
-		}
-		self.io_queues.push(Queue {
+		*/
+		let frame = frame.unwrap().base;
+
+		let queue = IoQueue { base: frame, count };
+
+		let base = self
+			.address_space
+			.lock()
+			.map_object(base, Box::new(queue), RWX::RW, self.hint_color)
+			.map_err(CreateQueueError::MapError)?;
+		self.io_queues.lock().push(Queue {
 			base: base.cast(),
 			requests_mask,
 			responses_mask,
@@ -59,13 +82,17 @@ impl super::Process {
 		Ok(base)
 	}
 
-	pub fn process_io_queue(&mut self, base: NonNull<Page>) -> Result<(), ProcessQueueError> {
-		let queue = self
-			.io_queues
+	pub fn process_io_queue(&self, base: NonNull<Page>) -> Result<(), ProcessQueueError> {
+		let mut io_queues = self.io_queues.lock();
+		let queue = io_queues
 			.iter_mut()
 			.find(|q| q.base == base.cast())
 			.ok_or(ProcessQueueError::InvalidAddress)?;
 		let (req_mask, resp_mask) = (queue.requests_mask, queue.responses_mask);
+
+		let mut objects = self.objects.lock();
+		let mut queries = self.queries.lock();
+
 		while let Ok(e) = unsafe { queue.request_ring_mut().dequeue(req_mask) } {
 			let mut push_resp = |value| {
 				let resps = unsafe { queue.response_ring_mut() };
@@ -88,7 +115,7 @@ impl super::Process {
 					let data_ptr = e.arguments_ptr[0] as *mut u8;
 					let data_len = e.arguments_ptr[1];
 					let data = unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) };
-					let object = self.objects.get(handle.0).unwrap();
+					let object = objects.get(handle.0).unwrap();
 					let ticket = object.read(0, data_len.try_into().unwrap());
 					let result = super::super::block_on(ticket);
 					match result {
@@ -106,7 +133,7 @@ impl super::Process {
 					let data_ptr = e.arguments_ptr[0] as *const u8;
 					let data_len = e.arguments_ptr[1];
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
-					let object = self.objects.get(handle.0).unwrap();
+					let object = objects.get(handle.0).unwrap();
 					let ticket = object.write(0, data);
 					let result = super::super::block_on(ticket);
 					match result {
@@ -125,8 +152,8 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(o) => {
-							self.objects.push(o);
-							push_resp(self.objects.len() as isize - 1);
+							objects.push(o);
+							push_resp(objects.len() as isize - 1);
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -142,8 +169,8 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(o) => {
-							self.objects.push(o);
-							push_resp(self.objects.len() as isize - 1);
+							objects.push(o);
+							push_resp(objects.len() as isize - 1);
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -159,8 +186,8 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(query) => {
-							self.queries.push(query);
-							push_resp(self.queries.len() as isize - 1);
+							queries.push(query);
+							push_resp(queries.len() as isize - 1);
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -173,7 +200,7 @@ impl super::Process {
 					let path_buffer = unsafe {
 						core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity)
 					};
-					let query = &mut self.queries[handle as usize];
+					let query = &mut queries[handle as usize];
 					match query.next() {
 						None => push_resp(0),
 						Some(ticket) => {
@@ -192,7 +219,7 @@ impl super::Process {
 					let handle = e.arguments_32[0];
 					let job = e.arguments_ptr[0] as *mut Job;
 
-					let tbl = self.objects[handle as usize].clone().as_table().unwrap();
+					let tbl = objects[handle as usize].clone().as_table().unwrap();
 					let job = unsafe { &mut *job };
 
 					let timeout = Duration::MAX;
@@ -253,7 +280,7 @@ impl super::Process {
 					let handle = e.arguments_32[0];
 					let job = e.arguments_ptr[0] as *mut Job;
 
-					let tbl = self.objects[handle as usize].clone().as_table().unwrap();
+					let tbl = objects[handle as usize].clone().as_table().unwrap();
 					let job = unsafe { job.read() };
 
 					let get_buf = || unsafe {
@@ -302,7 +329,7 @@ impl super::Process {
 						push_resp(-1);
 						continue;
 					};
-					let object = self.objects.get(usize::try_from(handle).unwrap()).unwrap();
+					let object = objects.get(usize::try_from(handle).unwrap()).unwrap();
 					let ticket = object.seek(from);
 					let result = super::super::block_on(ticket);
 					match result {
@@ -317,7 +344,7 @@ impl super::Process {
 				}
 				Request::POLL => {
 					let handle = e.arguments_32[0];
-					let object = self.objects.get(usize::try_from(handle).unwrap()).unwrap();
+					let object = objects.get(usize::try_from(handle).unwrap()).unwrap();
 					let ticket = object.poll();
 					let result = super::super::block_on(ticket);
 					match result {
@@ -334,14 +361,16 @@ impl super::Process {
 		Ok(())
 	}
 
-	pub fn wait_io_queue(&mut self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
-		let queue = self
-			.io_queues
+	pub fn wait_io_queue(&self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
+		let io_queues = self.io_queues.lock();
+		let queue = io_queues
 			.iter()
 			.find(|q| q.base == base.cast())
 			.ok_or(WaitQueueError::InvalidAddress)?;
 		while queue.responses_available() == 0 {
-			super::super::Thread::current().sleep(core::time::Duration::MAX);
+			super::super::Thread::current()
+				.unwrap()
+				.sleep(core::time::Duration::MAX);
 		}
 		Ok(())
 	}

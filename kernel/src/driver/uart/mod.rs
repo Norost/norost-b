@@ -18,7 +18,7 @@ pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
 /// # Safety
 ///
 /// This function may only be called once at boot time.
-pub unsafe fn init() {
+pub unsafe fn early_init() {
 	// This port is guaranteed to exist.
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 	unsafe {

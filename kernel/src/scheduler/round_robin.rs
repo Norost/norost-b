@@ -44,8 +44,10 @@ pub fn next() -> Option<Arc<Thread>> {
 			let c = unsafe { curr.as_ref() };
 			let n = unsafe { c.next.as_ref() };
 			if let Some(thr) = Weak::upgrade(&n.thread) {
-				l.1 = Some(c.next);
-				return Some(thr);
+				if !thr.destroyed() {
+					l.1 = Some(c.next);
+					return Some(thr);
+				}
 			}
 			n.next
 		};

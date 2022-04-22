@@ -1,35 +1,52 @@
 use super::process::Process;
 use crate::arch;
-use crate::memory::frame;
+use crate::memory::{
+	frame::{self, PageFrame, PPN},
+	Page,
+};
+use crate::sync::Mutex;
 use crate::time::Monotonic;
-use alloc::sync::{Arc, Weak};
+use alloc::{
+	sync::{Arc, Weak},
+	vec::Vec,
+};
 use core::arch::asm;
 use core::cell::Cell;
-use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use core::task::{Context, Waker};
 use core::time::Duration;
+use norostb_kernel::Handle;
 
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
-	pub kernel_stack: Cell<NonNull<usize>>,
-	pub process: NonNull<Process>,
+	pub kernel_stack: Cell<Option<NonNull<usize>>>,
+	// This does create a cyclic reference and risks leaking memory, but should
+	// be faster & more convienent in the long run.
+	//
+	// Especially, we don't need to store the processes anywhere as as long a thread
+	// is alive, the process itself will be alive too.
+	process: Arc<Process>,
 	sleep_until: Cell<Monotonic>,
 	/// Async deadline set by [`super::waker::sleep`].
 	async_deadline: Cell<Option<Monotonic>>,
 	/// Architecture-specific data.
 	pub arch_specific: arch::ThreadData,
+	/// Tasks to notify when this thread finishes.
+	waiters: Mutex<Vec<Waker>>,
 }
 
 impl Thread {
 	pub fn new(
 		start: usize,
 		stack: usize,
-		process: NonNull<Process>,
+		process: Arc<Process>,
+		handle: Handle,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
-			let kernel_stack_base = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?
-				.as_ptr()
-				.cast::<[usize; 512]>();
+			let mut kernel_stack_base = None;
+			frame::allocate(1, |f| kernel_stack_base = Some(f), 0 as _, 0).unwrap();
+			let kernel_stack_base = kernel_stack_base.unwrap().base;
+			let kernel_stack_base = kernel_stack_base.as_ptr().cast::<[usize; 512]>();
 			let mut kernel_stack = kernel_stack_base.add(1).cast::<usize>();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
@@ -41,19 +58,30 @@ impl Thread {
 			push(0x2); // rflags: Set reserved bit 1
 			push(3 * 8 | 3); // cs
 			push(start); // rip
-			 // Reserve space for (zeroed) registers
-			 // 15 GP registers without RSP
-			 // FIXME save RFLAGS
-			kernel_stack = kernel_stack.sub(15);
+
+			// Push thread handle (rax)
+			push(handle.try_into().unwrap());
+
+			// Reserve space for (zeroed) registers
+			// 14 GP registers without RSP and RAX
+			// FIXME save RFLAGS
+			kernel_stack = kernel_stack.sub(14);
+
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
-				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
+				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
 				arch_specific: Default::default(),
+				waiters: Default::default(),
 			})
 		}
+	}
+
+	/// Get a reference to the owning process.
+	pub fn process(&self) -> &Arc<Process> {
+		&self.process
 	}
 
 	/// Async deadline set by [`super::waker::sleep`].
@@ -62,7 +90,13 @@ impl Thread {
 	}
 
 	/// Suspend the currently running thread & begin running this thread.
-	pub fn resume(self: Arc<Self>) -> ! {
+	///
+	/// The thread may not have been destroyed already.
+	pub fn resume(self: Arc<Self>) -> Result<!, Destroyed> {
+		if self.destroyed() {
+			return Err(Destroyed);
+		}
+
 		unsafe { self.process.as_ref().activate_address_space() };
 
 		unsafe {
@@ -132,8 +166,53 @@ impl Thread {
 			.async_deadline
 			.replace(None)
 			.unwrap_or_else(|| Monotonic::now().saturating_add(duration));
-		Self::current().set_sleep_until(t);
+		// TODO huh? Why Self::current()?
+		Self::current().unwrap().set_sleep_until(t);
 		Self::yield_current();
+	}
+
+	/// Destroy this thread.
+	///
+	/// # Safety
+	///
+	/// No CPU may be using *any* resource of this thread, especially the stack.
+	pub unsafe fn destroy(self: Arc<Self>) {
+		// The kernel stack is convienently exactly one page large, so masking the lower bits
+		// will give us the base of the frame.
+
+		// FIXME ensure the thread has been stopped.
+
+		// SAFETY: the kernel pointer should be valid lest we smashed the stack.
+		// The caller also guaranteed it is not using this stack.
+		unsafe {
+			let kernel_stack = self.kernel_stack.take().unwrap().as_ptr() as usize & !Page::MASK;
+			let kernel_stack = PPN::from_ptr(kernel_stack as *mut _);
+			frame::deallocate(1, || PageFrame {
+				base: kernel_stack,
+				p2size: 0,
+			})
+			.unwrap();
+		}
+
+		for w in self.waiters.lock().drain(..) {
+			w.wake();
+		}
+	}
+
+	/// Wait for this thread to finish. Waiting is only possible if the caller is inside an
+	/// active thread.
+	pub fn wait(&self) -> Result<(), ()> {
+		let mut waiters = self.waiters.lock();
+		if !self.destroyed() {
+			let wake_thr = Thread::current().ok_or(())?;
+			let waker = super::waker::new_waker(Arc::downgrade(&wake_thr));
+			waiters.push(waker);
+			drop(waiters);
+			while !self.destroyed() {
+				wake_thr.sleep(Duration::MAX);
+			}
+		}
+		Ok(())
 	}
 
 	pub fn yield_current() {
@@ -145,17 +224,27 @@ impl Thread {
 		self.sleep_until.set(Monotonic::ZERO);
 	}
 
-	pub fn current() -> Arc<Self> {
+	pub fn current() -> Option<Arc<Self>> {
 		arch::amd64::current_thread()
 	}
 
-	pub fn current_weak() -> Weak<Self> {
+	pub fn current_weak() -> Option<Weak<Self>> {
 		arch::amd64::current_thread_weak()
+	}
+
+	/// Whether this thread has been destroyed.
+	pub fn destroyed(&self) -> bool {
+		self.kernel_stack.get().is_none()
 	}
 }
 
 impl Drop for Thread {
 	fn drop(&mut self) {
-		todo!()
+		// We currently cannot destroy a thread in a safe way but we also need to ensure
+		// resources are cleaned up properly, so do log it for debugging potential leaks at least.
+		debug!("cleaning up thread");
 	}
 }
+
+#[derive(Debug)]
+pub struct Destroyed;

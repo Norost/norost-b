@@ -33,6 +33,15 @@ macro_rules! warn {
 }
 
 #[macro_export]
+macro_rules! error {
+	($($args:tt)*) => {{
+		#[allow(unused_imports)]
+		use core::fmt::Write;
+		writeln!($crate::driver::uart::get(0), $($args)*).unwrap();
+	}}
+}
+
+#[macro_export]
 macro_rules! fatal {
 	($($args:tt)*) => {{
 		#[allow(unused_imports)]

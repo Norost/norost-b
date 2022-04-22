@@ -1,5 +1,6 @@
 #![no_std]
 
+use core::fmt;
 use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
 macro_rules! ety {
@@ -29,7 +30,7 @@ macro_rules! ety {
 	};
 	(@INTERNAL $ty:ty, $name:ident, $from:ident, $to:ident) => {
 		#[allow(non_camel_case_types)]
-		#[derive(Clone, Copy, PartialEq, Eq)]
+		#[derive(Clone, Copy, Default, PartialEq, Eq)]
 		#[repr(transparent)]
 		pub struct $name($ty);
 
@@ -48,6 +49,30 @@ macro_rules! ety {
 		impl From<$name> for $ty {
 			fn from(value: $name) -> Self {
 				Self::$from(value.0)
+			}
+		}
+
+		impl fmt::Debug for $name {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				<$ty>::from(self.0).fmt(f)
+			}
+		}
+
+		impl fmt::Display for $name {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				<$ty>::from(self.0).fmt(f)
+			}
+		}
+
+		impl fmt::LowerHex for $name {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				<$ty>::from(self.0).fmt(f)
+			}
+		}
+
+		impl fmt::UpperHex for $name {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				<$ty>::from(self.0).fmt(f)
 			}
 		}
 

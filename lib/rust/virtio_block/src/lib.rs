@@ -9,8 +9,8 @@ use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
 use endian::{u16le, u32le, u64le};
-use virtio::pci::CommonConfig;
-use virtio::queue;
+use memoffset::offset_of_tuple;
+use virtio::{pci::CommonConfig, queue, PhysAddr, PhysRegion};
 
 const SIZE_MAX: u32 = 1 << 1;
 const SEG_MAX: u32 = 1 << 2;
@@ -36,16 +36,14 @@ const EVENT_IDX: u32 = 1 << 28;
 const INDIRECT_DESC: u32 = 1 << 29;
 
 /// A driver for a virtio block device.
-pub struct BlockDevice<'a, F>
-where
-	F: Fn(*const ()) -> usize,
-{
+pub struct BlockDevice<'a> {
 	queue: queue::Queue<'a>,
 	notify: virtio::pci::Notify<'a>,
 	isr: &'a virtio::pci::ISR,
+	request_header_status: NonNull<(RequestHeader, RequestStatus)>,
+	request_header_status_phys: PhysAddr,
 	/// The amount of sectors available
 	_capacity: u64,
-	get_physical_address: F,
 }
 
 #[repr(C)]
@@ -105,20 +103,27 @@ pub struct Msix {
 	pub queue: Option<u16>,
 }
 
-impl<'a, F> BlockDevice<'a, F>
-where
-	F: Fn(*const ()) -> usize,
-{
+impl<'a> BlockDevice<'a> {
 	/// Setup a block device
 	///
 	/// This is meant to be used as a handler by the `virtio` crate.
-	pub fn new(
+	///
+	/// # Safety
+	///
+	/// `dma_alloc` must return valid addresses.
+	pub unsafe fn new<F, DmaError>(
 		pci: &'a pci::Header0,
 		get_physical_address: F,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
-		dma_alloc: impl FnOnce(usize) -> Result<(NonNull<()>, usize), ()>,
+		mut dma_alloc: impl FnMut(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
 		msix: Msix,
-	) -> Result<Self, SetupError> {
+	) -> Result<Self, SetupError<DmaError>> {
+		let (request_header_status, request_header_status_phys) = dma_alloc(
+			mem::size_of::<(RequestHeader, RequestStatus)>(),
+			mem::align_of::<(RequestHeader, RequestStatus)>(),
+		)
+		.map_err(SetupError::DmaError)?;
+
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
 		dev.common.device_status.set(CommonConfig::STATUS_RESET);
@@ -139,7 +144,11 @@ where
 		let blk_cfg = unsafe { dev.device.cast::<Config>() };
 
 		// Set up queue.
-		let queue = queue::Queue::<'a>::new(dev.common, 0, 8, msix.queue, dma_alloc).expect("OOM");
+		let queue = queue::Queue::<'a>::new(dev.common, 0, 8, msix.queue, dma_alloc).map_err(
+			|e| match e {
+				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
+			},
+		)?;
 
 		dev.common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
@@ -152,115 +161,106 @@ where
 			queue,
 			notify: dev.notify,
 			isr: dev.isr,
+			request_header_status: request_header_status.cast(),
+			request_header_status_phys,
 			_capacity: blk_cfg.capacity.into(),
-			get_physical_address,
 		})
 	}
 
 	/// Write out sectors
-	pub fn write<'s>(
+	///
+	/// # Safety
+	///
+	/// The physical region must be valid.
+	pub unsafe fn write<'s>(
 		&'s mut self,
-		data: impl AsRef<[Sector]> + 's,
+		data: PhysRegion,
 		sector_start: u64,
 		wait: impl FnMut(),
 	) -> Result<(), WriteError> {
-		let header = RequestHeader {
-			typ: RequestHeader::WRITE.into(),
-			reserved: 0.into(),
-			sector: sector_start.into(),
-		};
-		let status = RequestStatus { status: 111 };
-		let h = &header as *const _ as usize;
-		let d = data.as_ref() as *const _ as *const u8 as usize;
-		let s = &status as *const _ as usize;
-		let (hp, ho) = (h & !0xfff, h & 0xfff);
-		let (dp, d_) = (d & !0xfff, d & 0xfff);
-		let (sp, so) = (s & !0xfff, s & 0xfff);
-		let phys_header = (self.get_physical_address)(hp as *const _);
-		let phys_data = (self.get_physical_address)(dp as *const _);
-		let phys_status = (self.get_physical_address)(sp as *const _);
+		unsafe {
+			self.request_header_status.as_ptr().write((
+				RequestHeader {
+					typ: RequestHeader::WRITE.into(),
+					reserved: 0.into(),
+					sector: sector_start.into(),
+				},
+				RequestStatus { status: 111 },
+			));
+		}
 
 		let data = [
 			(
-				(phys_header + ho).try_into().unwrap(),
+				self.request_header_status_phys
+					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 0)).unwrap(),
 				mem::size_of::<RequestHeader>().try_into().unwrap(),
 				false,
 			),
+			(data.base, data.size, false),
 			(
-				(phys_data + d_).try_into().unwrap(),
-				(data.as_ref().len() * mem::size_of::<Sector>())
-					.try_into()
-					.unwrap(),
-				false,
-			),
-			(
-				(phys_status + so).try_into().unwrap(),
+				self.request_header_status_phys
+					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
 				mem::size_of::<RequestStatus>().try_into().unwrap(),
 				true,
 			),
 		];
 
 		self.queue
-			.send(data.iter().copied(), None, |_, _, _| ())
+			.send(data.iter().copied(), None, |_, _| ())
 			.expect("Failed to send data");
 
 		self.flush();
 
-		self.queue.wait_for_used(|_, _, _| (), wait);
+		self.queue.wait_for_used(|_, _| (), wait);
 
 		Ok(())
 	}
 
 	/// Read in sectors
-	pub fn read<'s>(
+	///
+	/// # Safety
+	///
+	/// The physical region must be valid.
+	pub unsafe fn read<'s>(
 		&'s mut self,
-		mut data: impl AsMut<[Sector]> + 's,
+		data: PhysRegion,
 		sector_start: u64,
 		wait: impl FnMut(),
 	) -> Result<(), WriteError> {
-		let header = RequestHeader {
-			typ: RequestHeader::READ.into(),
-			reserved: 0.into(),
-			sector: sector_start.into(),
-		};
-		let status = RequestStatus { status: 111 };
-		let h = &header as *const _ as usize;
-		let d = data.as_mut() as *mut _ as *mut u8 as usize;
-		let s = &status as *const _ as usize;
-		let (hp, ho) = (h & !0xfff, h & 0xfff);
-		let (dp, d_) = (d & !0xfff, d & 0xfff);
-		let (sp, so) = (s & !0xfff, s & 0xfff);
-		let phys_header = (self.get_physical_address)(hp as *const _);
-		let phys_data = (self.get_physical_address)(dp as *const _);
-		let phys_status = (self.get_physical_address)(sp as *const _);
+		unsafe {
+			self.request_header_status.as_ptr().write((
+				RequestHeader {
+					typ: RequestHeader::READ.into(),
+					reserved: 0.into(),
+					sector: sector_start.into(),
+				},
+				RequestStatus { status: 111 },
+			));
+		}
 
 		let data = [
 			(
-				(phys_header + ho).try_into().unwrap(),
+				self.request_header_status_phys
+					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 0)).unwrap(),
 				mem::size_of::<RequestHeader>().try_into().unwrap(),
 				false,
 			),
+			(data.base, data.size, true),
 			(
-				(phys_data + d_).try_into().unwrap(),
-				(data.as_mut().len() * mem::size_of::<Sector>())
-					.try_into()
-					.unwrap(),
-				true,
-			),
-			(
-				(phys_status + so).try_into().unwrap(),
+				self.request_header_status_phys
+					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
 				mem::size_of::<RequestStatus>().try_into().unwrap(),
 				true,
 			),
 		];
 
 		self.queue
-			.send(data.iter().copied(), None, |_, _, _| ())
+			.send(data.iter().copied(), None, |_, _| ())
 			.expect("Failed to send data");
 
 		self.flush();
 
-		self.queue.wait_for_used(|_, _, _| (), wait);
+		self.queue.wait_for_used(|_, _| (), wait);
 
 		Ok(())
 	}
@@ -275,23 +275,15 @@ where
 	}
 }
 
-impl<F> Drop for BlockDevice<'_, F>
-where
-	F: Fn(*const ()) -> usize,
-{
+impl Drop for BlockDevice<'_> {
 	fn drop(&mut self) {
 		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
 
-pub enum SetupError {}
-
-impl fmt::Debug for SetupError {
-	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-		//f.write_str(match self {
-		//})
-		Ok(())
-	}
+#[derive(Debug)]
+pub enum SetupError<DmaError> {
+	DmaError(DmaError),
 }
 
 pub enum WriteError {}

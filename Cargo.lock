@@ -18,6 +18,12 @@ name = "arena"
 version = "0.1.0"
 
 [[package]]
+name = "autocfg"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
+
+[[package]]
 name = "bit_field"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -156,6 +162,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
 
 [[package]]
+name = "memoffset"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "minish"
 version = "0.1.0"
 dependencies = [
@@ -167,6 +182,7 @@ name = "nora"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "arena",
  "cfg-if",
  "norostb_kernel",
  "pci",
@@ -338,6 +354,7 @@ name = "virtio_block"
 version = "0.1.0"
 dependencies = [
  "endian",
+ "memoffset",
  "norostb_kernel",
  "pci",
  "virtio",

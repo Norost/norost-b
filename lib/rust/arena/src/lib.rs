@@ -1,11 +1,17 @@
 //! # Typed arena with optional generational identifiers.
 
+#![no_std]
+
+extern crate alloc;
+
+use alloc::vec;
+use core::iter;
 use core::mem;
 use core::ops::{Index, IndexMut};
 
 /// A typed arena. A generation type can be specified which is used to prevent the ABA problem.
-pub struct Arena<V, G: Generation = ()> {
-	storage: Vec<Entry<V, G>>,
+pub struct Arena<V, G: Generation> {
+	storage: vec::Vec<Entry<V, G>>,
 	free: usize,
 	generation: G,
 }
@@ -68,20 +74,36 @@ impl<V, G: Generation + Default> Arena<V, G> {
 
 impl<V, G: Generation> Arena<V, G> {
 	pub fn insert(&mut self, value: V) -> Handle<G> {
+		self.insert_with(|_| value)
+	}
+
+	pub fn insert_with(&mut self, f: impl FnOnce(Handle<G>) -> V) -> Handle<G> {
 		let generation = self.generation.clone();
 		self.generation.increment();
 		if self.free != usize::MAX {
-			let index = self.free;
-			let entry = Entry::Occupied { value, generation };
+			let handle = Handle {
+				index: self.free,
+				generation,
+			};
+			let entry = Entry::Occupied {
+				value: f(handle),
+				generation,
+			};
 			match mem::replace(&mut self.storage[self.free], entry) {
 				Entry::Free { next } => self.free = next,
 				Entry::Occupied { .. } => unreachable!(),
 			}
-			Handle { index, generation }
+			handle
 		} else {
-			let index = self.storage.len();
-			self.storage.push(Entry::Occupied { value, generation });
-			Handle { index, generation }
+			let handle = Handle {
+				index: self.storage.len(),
+				generation,
+			};
+			self.storage.push(Entry::Occupied {
+				value: f(handle),
+				generation,
+			});
+			handle
 		}
 	}
 
@@ -101,6 +123,13 @@ impl<V, G: Generation> Arena<V, G> {
 					Entry::Free { .. } => unreachable!(),
 				}
 			}
+		}
+	}
+
+	pub fn drain(&mut self) -> Drain<'_, V, G> {
+		self.free = usize::MAX;
+		Drain {
+			inner: self.storage.drain(..).enumerate(),
 		}
 	}
 
@@ -144,5 +173,25 @@ impl<V, G: Generation + Default> Default for Arena<V, G> {
 			free: usize::MAX,
 			generation: Default::default(),
 		}
+	}
+}
+
+pub struct Drain<'a, V, G: Generation> {
+	inner: iter::Enumerate<vec::Drain<'a, Entry<V, G>>>,
+}
+
+impl<'a, V, G: Generation> Iterator for Drain<'a, V, G> {
+	type Item = (Handle<G>, V);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		while let Some((index, value)) = self.inner.next() {
+			match value {
+				Entry::Occupied { value, generation } => {
+					return Some((Handle { index, generation }, value));
+				}
+				Entry::Free { .. } => {}
+			}
+		}
+		None
 	}
 }

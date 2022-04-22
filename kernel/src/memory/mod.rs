@@ -3,6 +3,7 @@ mod heap;
 pub mod r#virtual;
 
 #[cfg(target_arch = "x86_64")]
+#[repr(align(4096))]
 pub struct Page([u8; Self::SIZE]);
 
 impl Page {

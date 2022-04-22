@@ -15,7 +15,8 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
-	current_process, current_thread, current_thread_weak, set_current_thread, ThreadData,
+	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
+	ThreadData,
 };
 
 /// The IRQ used by the timer.
@@ -52,6 +53,10 @@ pub unsafe fn init() {
 			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(int noreturn handle_timer), 0),
 		);
 		IDT.set(
+			6,
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_invalid_opcode), 0),
+		);
+		IDT.set(
 			8,
 			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
 		);
@@ -75,6 +80,8 @@ pub unsafe fn init() {
 		syscall::init();
 
 		cpuid::enable_fsgsbase();
+
+		r#virtual::init();
 	}
 }
 
@@ -83,15 +90,20 @@ extern "C" fn handle_timer(_rip: *const ()) -> ! {
 	debug!("  RIP:     {:p}", _rip);
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
-	loop {
-		if let Err(t) = unsafe { scheduler::next_thread() } {
-			if let Some(d) = Monotonic::now().duration_until(t) {
-				apic::set_timer_oneshot(d, Some(16));
-				enable_interrupts();
-				power::halt();
-			}
-		}
+	// SAFETY: we just saved the thread's state.
+	unsafe { scheduler::next_thread() }
+}
+
+extern "C" fn handle_invalid_opcode(error: u32, rip: *const ()) {
+	fatal!("Invalid opcode!");
+	unsafe {
+		let addr: *const ();
+		asm!("mov {}, cr2", out(reg) addr);
+		fatal!("  error:   {:#x}", error);
+		fatal!("  RIP:     {:p}", rip);
+		fatal!("  address: {:p}", addr);
 	}
+	halt();
 }
 
 extern "C" fn handle_double_fault(error: u32, rip: *const ()) {
@@ -139,6 +151,27 @@ pub fn yield_current_thread() {
 	unsafe { asm!("int {}", const TIMER_IRQ) } // Fake timer interrupt
 }
 
+/// Switch to this CPU's local stack and call the given function.
+///
+/// This macro is intended for cleaning up processes & threads.
+pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
+	const _: extern "C" fn(*const ()) -> ! = $f;
+	let data: *const () = $data;
+	unsafe {
+		asm!(
+			"cli",
+			"push rbp",
+			"mov  rbp, rsp",
+			"mov  rsp, {stack}",
+			"jmp {f}",
+			f = sym $f,
+			stack = in(reg) $crate::arch::amd64::_cpu_stack(),
+			in("rdi") data,
+			options(nostack, noreturn),
+		)
+	}
+}
+
 /// Allocate an IRQ ID.
 ///
 /// This will fail if all IRQs from `0x00` to `0xFE` are allocated.
@@ -165,4 +198,8 @@ pub fn disable_interrupts() {
 	unsafe {
 		asm!("cli", options(nostack, nomem, preserves_flags));
 	}
+}
+
+pub fn _cpu_stack() -> *mut () {
+	syscall::cpu_stack()
 }

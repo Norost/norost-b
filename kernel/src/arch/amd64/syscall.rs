@@ -1,4 +1,5 @@
 use super::msr;
+use crate::memory::{frame, Page};
 use crate::scheduler::process::Process;
 use crate::scheduler::syscall;
 use crate::scheduler::Thread;
@@ -27,20 +28,26 @@ pub unsafe fn init() {
 		//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 		msr::wrmsr(msr::LSTAR, handler as u64);
 
+		let mut cpu_stack = None;
+		frame::allocate(1, |f| cpu_stack = Some(f), 0 as _, 0).unwrap();
+		let cpu_stack = cpu_stack.unwrap().base.as_ptr();
+		let cpu_stack_ptr = cpu_stack.cast::<Page>().wrapping_add(1).cast();
+
 		// Set GS_BASE to a per-cpu structure
-		let data = Box::leak(Box::<CpuData>::new_uninit());
+		let data = Box::leak(Box::new(CpuData {
+			user_stack_ptr: ptr::null_mut(),
+			kernel_stack_ptr: ptr::null_mut(),
+			process: ptr::null_mut(),
+			thread: ptr::null(),
+			cpu_stack_ptr,
+		}));
 		msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 	}
 }
 
 pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 	unsafe {
-		// Remove reference to current thread.
-		let old_thr: *const Thread;
-		asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
-		if !old_thr.is_null() {
-			Arc::from_raw(old_thr);
-		}
+		unref_current_thread();
 
 		// Load fs, gs
 		msr::wrmsr(msr::FS_BASE, thread.arch_specific.fs.get());
@@ -52,8 +59,8 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.get()
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
-		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
-		asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());
+		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().unwrap().as_ptr());
+		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(thread.process()));
 		asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 	}
 }
@@ -67,7 +74,7 @@ pub unsafe fn save_current_thread_state() {
 		asm!("mov {0}, gs:[0 * 8]", lateout(reg) us);
 		tr.user_stack.set(NonNull::new(us));
 		asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
-		tr.kernel_stack.set(NonNull::new(ks).unwrap_unchecked());
+		tr.kernel_stack.set(Some(NonNull::new(ks).unwrap()));
 
 		// Save fs, gs
 		tr.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
@@ -81,6 +88,7 @@ struct CpuData {
 	kernel_stack_ptr: *mut usize,
 	process: *mut Process,
 	thread: *const Thread,
+	cpu_stack_ptr: *mut (),
 }
 
 #[derive(Default)]
@@ -163,32 +171,71 @@ unsafe extern "C" fn handler() {
 	}
 }
 
-pub fn current_process<'a>() -> &'a mut Process {
+pub fn current_process() -> Option<Arc<Process>> {
 	unsafe {
 		let process: *mut Process;
-		asm!("mov {0}, gs:[0x10]", out(reg) process);
-		&mut *process
+		asm!("mov {0}, gs:[2 * 8]", out(reg) process);
+		(!process.is_null()).then(|| {
+			let process = Arc::from_raw(process);
+			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+			let _ = Arc::into_raw(process.clone());
+			process
+		})
 	}
 }
 
-pub fn current_thread() -> Arc<Thread> {
+pub fn current_thread() -> Option<Arc<Thread>> {
 	unsafe {
 		let thread: *const Thread;
-		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		let r = Arc::from_raw(thread);
-		let s = r.clone();
-		let _ = Arc::into_raw(r);
-		s
+		asm!("mov {0}, gs:[3 * 8]", out(reg) thread);
+		(!thread.is_null()).then(|| {
+			let thread = Arc::from_raw(thread);
+			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+			let _ = Arc::into_raw(thread.clone());
+			thread
+		})
 	}
 }
 
-pub fn current_thread_weak() -> Weak<Thread> {
+pub fn current_thread_weak() -> Option<Weak<Thread>> {
 	unsafe {
 		let thread: *const Thread;
 		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		let r = Arc::from_raw(thread);
-		let w = Arc::downgrade(&r);
-		let _ = Arc::into_raw(r);
-		w
+		(!thread.is_null()).then(|| {
+			let thread = Arc::from_raw(thread);
+			let weak = Arc::downgrade(&thread);
+			let _ = Arc::into_raw(thread);
+			weak
+		})
+	}
+}
+
+pub(super) fn cpu_stack() -> *mut () {
+	unsafe {
+		let stack: *mut ();
+		asm!("mov {0}, gs:[4 * 8]", out(reg) stack);
+		stack
+	}
+}
+
+/// Clear the current thread & process from the local CPU data.
+pub fn clear_current_thread() {
+	unsafe {
+		unref_current_thread();
+		asm!("mov gs:[0 * 8], {}", in(reg) ptr::null::<usize>());
+		asm!("mov gs:[1 * 8], {}", in(reg) ptr::null::<usize>());
+		asm!("mov gs:[2 * 8], {}", in(reg) ptr::null::<Process>());
+		asm!("mov gs:[3 * 8], {}", in(reg) ptr::null::<Thread>());
+	}
+}
+
+/// Remove reference to current thread.
+unsafe fn unref_current_thread() {
+	unsafe {
+		let old_thr: *const Thread;
+		asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
+		if !old_thr.is_null() {
+			Arc::from_raw(old_thr);
+		}
 	}
 }

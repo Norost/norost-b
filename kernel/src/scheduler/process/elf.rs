@@ -1,8 +1,7 @@
-use crate::memory::frame;
-use crate::memory::frame::PPN;
-use crate::memory::r#virtual::{virt_to_phys, MapError, RWX};
+use crate::memory::frame::{self, AllocateHints, OwnedPageFrames, PPN};
+use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::scheduler::Thread;
+use crate::scheduler::{process::frame::PageFrame, MemoryObject, Thread};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
@@ -70,8 +69,37 @@ const FLAG_EXEC: u32 = 0x1;
 const FLAG_WRITE: u32 = 0x2;
 const FLAG_READ: u32 = 0x4;
 
+struct MemorySlice {
+	inner: Arc<dyn MemoryObject>,
+	range: Range<usize>,
+}
+
+impl MemoryObject for MemorySlice {
+	fn physical_pages(&self) -> Box<[PageFrame]> {
+		self.inner
+			.physical_pages()
+			.iter()
+			.flat_map(|f| f.iter())
+			.flatten()
+			.skip(self.range.start)
+			.take(self.range.end - self.range.start)
+			.map(|f| PageFrame { base: f, p2size: 0 })
+			.collect()
+	}
+}
+
 impl super::Process {
-	pub fn from_elf(data: &[u8]) -> Result<Box<Self>, ElfError> {
+	pub fn from_elf(data_object: Arc<dyn MemoryObject>) -> Result<Arc<Self>, ElfError> {
+		// FIXME don't require contiguous pages.
+		let mut data = data_object.physical_pages();
+		data.sort_by(|a, b| a.base.cmp(&b.base));
+		let l: usize = data.iter().map(|p| 1 << p.p2size).sum();
+
+		// FIXME definitely don't require unsafe code.
+		let data = unsafe {
+			core::slice::from_raw_parts(data[0].base.as_ptr().cast::<u8>(), Page::SIZE * l)
+		};
+
 		let mut slf = Self::new()?;
 
 		(data.len() >= 16)
@@ -130,6 +158,8 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
+		let mut address_space = slf.address_space.lock();
+
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
 			let header = unsafe {
@@ -158,54 +188,60 @@ impl super::Process {
 				.then(|| ())
 				.ok_or(ElfError::AddressOffsetMismatch)?;
 
+			let page_offset = usize::try_from(header.offset >> Page::OFFSET_BITS).unwrap();
 			let (phys, virt) = (header.physical_address, header.virtual_address);
 			let count = page_count(phys..phys + header.file_size);
 			let alloc = page_count(virt..virt + header.memory_size);
 
 			let virt_address = header.virtual_address & !page_mask;
-			let phys_address =
-				(unsafe { virt_to_phys(data.as_ptr()) } + header.offset) & !page_mask;
+			let virt_address = usize::try_from(virt_address).unwrap();
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
-			for i in 0..count {
-				let virt = (virt_address + i * page_size) as *const _;
-				let phys =
-					PPN::try_from_usize(usize::try_from(phys_address + i * page_size).unwrap())
-						.unwrap();
-				unsafe {
-					slf.address_space
-						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
-				}
-			}
-			for i in count..alloc {
-				let virt = (virt_address + i * page_size) as *const _;
-				let phys = frame::allocate_contiguous(NonZeroUsize::new(1).unwrap())?;
-				unsafe {
-					slf.address_space
-						.map(virt, [phys].iter().copied(), rwx, slf.hint_color)?;
-				}
+
+			// Map part of the ELF file.
+			let virt = NonNull::new(virt_address as *mut _).unwrap();
+			let mem = Box::new(MemorySlice {
+				inner: data_object.clone(),
+				range: page_offset..page_offset + count,
+			});
+			address_space
+				.map_object(Some(virt), mem, rwx, slf.hint_color)
+				.map_err(ElfError::MapError)?;
+
+			// Allocate memory for the region that isn't present in the ELF file.
+			if let Some(size) = NonZeroUsize::new(alloc - count) {
+				let virt = NonNull::new((virt_address + count * Page::SIZE) as *mut _).unwrap();
+				let hint = AllocateHints {
+					address: virt.cast().as_ptr(),
+					color: slf.hint_color,
+				};
+				let mem =
+					Box::new(OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?);
+				address_space
+					.map_object(Some(virt), mem, rwx, slf.hint_color)
+					.map_err(ElfError::MapError)?;
 			}
 		}
 
-		let mut slf = Box::new(slf);
+		drop(address_space);
 
-		let thr = Thread::new(header.entry.try_into().unwrap(), 0, NonNull::from(&*slf))?;
-		let thr = Arc::new(thr);
-		super::super::round_robin::insert(Arc::downgrade(&thr));
-		slf.threads.push(thr);
+		let slf = Arc::new(slf);
+
+		slf.spawn_thread(header.entry.try_into().unwrap(), 0)
+			.unwrap();
 
 		Ok(slf)
 	}
 }
 
 /// Determine the amount of pages needed to cover an address range
-fn page_count(range: Range<u64>) -> u64 {
+fn page_count(range: Range<u64>) -> usize {
 	let (pm, ps) = (
 		u64::try_from(Page::MASK).unwrap(),
 		u64::try_from(Page::SIZE).unwrap(),
 	);
 	let start = range.start & !pm;
 	let end = range.end.wrapping_add(pm) & !pm;
-	end.wrapping_sub(start) / ps
+	(end.wrapping_sub(start) / ps).try_into().unwrap()
 }
 
 #[derive(Debug)]
@@ -223,6 +259,7 @@ pub enum ElfError {
 	ProgramHeaderSizeMismatch,
 	OffsetOutOfBounds,
 	AddressOffsetMismatch,
+	AllocateError(frame::AllocateError),
 	AllocateContiguousError(frame::AllocateContiguousError),
 	MapError(MapError),
 }
@@ -236,11 +273,5 @@ impl From<frame::AllocateContiguousError> for ElfError {
 impl From<crate::memory::r#virtual::IncompatibleRWXFlags> for ElfError {
 	fn from(_: crate::memory::r#virtual::IncompatibleRWXFlags) -> Self {
 		Self::IncompatibleRWXFlags
-	}
-}
-
-impl From<MapError> for ElfError {
-	fn from(err: MapError) -> Self {
-		Self::MapError(err)
 	}
 }
