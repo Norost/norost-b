@@ -1,6 +1,6 @@
 //! # I/O with user processes
 
-use super::MemoryObject;
+use super::{erase_handle_type, unerase_handle_type, MemoryObject};
 use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
@@ -110,11 +110,11 @@ impl super::Process {
 			match e.ty {
 				Request::READ => {
 					// TODO make handles use 32 bit integers
-					let handle = super::ObjectHandle(e.arguments_32[0].try_into().unwrap());
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let data_ptr = e.arguments_ptr[0] as *mut u8;
 					let data_len = e.arguments_ptr[1];
 					let data = unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) };
-					let object = objects.get(handle.0).unwrap();
+					let object = objects.get(handle).unwrap();
 					let ticket = object.read(0, data_len.try_into().unwrap());
 					let result = super::super::block_on(ticket);
 					match result {
@@ -128,11 +128,11 @@ impl super::Process {
 				}
 				Request::WRITE => {
 					// TODO make handles use 32 bit integers
-					let handle = super::ObjectHandle(e.arguments_32[0].try_into().unwrap());
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let data_ptr = e.arguments_ptr[0] as *const u8;
 					let data_len = e.arguments_ptr[1];
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
-					let object = objects.get(handle.0).unwrap();
+					let object = objects.get(handle).unwrap();
 					let ticket = object.write(0, data);
 					let result = super::super::block_on(ticket);
 					match result {
@@ -151,8 +151,7 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(o) => {
-							objects.push(o);
-							push_resp(objects.len() as isize - 1);
+							push_resp(erase_handle_type(objects.insert(o)).try_into().unwrap())
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -168,8 +167,7 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(o) => {
-							objects.push(o);
-							push_resp(objects.len() as isize - 1);
+							push_resp(erase_handle_type(objects.insert(o)).try_into().unwrap())
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -185,8 +183,7 @@ impl super::Process {
 					let result = super::super::block_on(ticket);
 					match result {
 						Ok(query) => {
-							queries.push(query);
-							push_resp(queries.len() as isize - 1);
+							push_resp(erase_handle_type(queries.insert(query)).try_into().unwrap())
 						}
 						Err(_) => push_resp(-1),
 					}
@@ -194,12 +191,12 @@ impl super::Process {
 				Request::QUERY_NEXT => {
 					// SAFETY: FIXME
 					let info = e.arguments_ptr[0];
-					let handle = e.arguments_32[0];
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let info = unsafe { &mut *(info as *mut ObjectInfo) };
 					let path_buffer = unsafe {
 						core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity)
 					};
-					let query = &mut queries[handle as usize];
+					let query = &mut queries[handle];
 					match query.next() {
 						None => push_resp(0),
 						Some(ticket) => {
@@ -215,10 +212,10 @@ impl super::Process {
 					}
 				}
 				Request::TAKE_JOB => {
-					let handle = e.arguments_32[0];
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let job = e.arguments_ptr[0] as *mut Job;
 
-					let tbl = objects[handle as usize].clone().as_table().unwrap();
+					let tbl = objects[handle].clone().as_table().unwrap();
 					let job = unsafe { &mut *job };
 
 					let timeout = Duration::MAX;
@@ -276,10 +273,10 @@ impl super::Process {
 					push_resp(0);
 				}
 				Request::FINISH_JOB => {
-					let handle = e.arguments_32[0];
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let job = e.arguments_ptr[0] as *mut Job;
 
-					let tbl = objects[handle as usize].clone().as_table().unwrap();
+					let tbl = objects[handle].clone().as_table().unwrap();
 					let job = unsafe { job.read() };
 
 					let get_buf = || unsafe {
@@ -318,7 +315,7 @@ impl super::Process {
 					push_resp(0);
 				}
 				Request::SEEK => {
-					let handle = e.arguments_32[0];
+					let handle = unerase_handle_type(e.arguments_32[0]);
 					let direction = e.arguments_8[0];
 					let offset = e.arguments_64[0];
 					let write_offset = e.arguments_ptr[0];
@@ -328,7 +325,7 @@ impl super::Process {
 						push_resp(-1);
 						continue;
 					};
-					let object = objects.get(usize::try_from(handle).unwrap()).unwrap();
+					let object = objects.get(handle).unwrap();
 					let ticket = object.seek(from);
 					let result = super::super::block_on(ticket);
 					match result {
@@ -342,8 +339,8 @@ impl super::Process {
 					}
 				}
 				Request::POLL => {
-					let handle = e.arguments_32[0];
-					let object = objects.get(usize::try_from(handle).unwrap()).unwrap();
+					let handle = unerase_handle_type(e.arguments_32[0]);
+					let object = objects.get(handle).unwrap();
 					let ticket = object.poll();
 					let result = super::super::block_on(ticket);
 					match result {

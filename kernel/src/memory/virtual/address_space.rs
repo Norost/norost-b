@@ -183,19 +183,4 @@ impl AddressSpace {
 	}
 }
 
-#[derive(Clone, Copy)]
-pub struct MemoryObjectHandle(usize);
-
-impl From<MemoryObjectHandle> for usize {
-	fn from(h: MemoryObjectHandle) -> Self {
-		h.0
-	}
-}
-
-impl From<usize> for MemoryObjectHandle {
-	fn from(n: usize) -> Self {
-		Self(n)
-	}
-}
-
 pub struct NoFreeVirtualAddressSpace;

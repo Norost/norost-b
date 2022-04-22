@@ -18,8 +18,8 @@ pub struct Process {
 	address_space: Mutex<AddressSpace>,
 	hint_color: u8,
 	threads: Mutex<Arena<Arc<Thread>, u8>>,
-	objects: Mutex<Vec<Arc<dyn Object>>>,
-	queries: Mutex<Vec<Box<dyn Query>>>,
+	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
+	queries: Mutex<Arena<Box<dyn Query>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
 }
 
@@ -40,10 +40,9 @@ impl Process {
 	}
 
 	/// Add an object to the process' object table.
-	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<ObjectHandle, AddObjectError> {
+	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<Handle, AddObjectError> {
 		let mut objects = self.objects.lock();
-		objects.push(object);
-		Ok(ObjectHandle(objects.len() - 1))
+		Ok(erase_handle_type(objects.insert(object)))
 	}
 
 	/// Map a memory object to a memory range.
@@ -61,12 +60,14 @@ impl Process {
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object_2(
 		&self,
-		handle: ObjectHandle,
+		handle: Handle,
 		base: Option<NonNull<Page>>,
 		offset: u64,
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
-		let obj = self.objects.lock()[handle.0].memory_object(offset).unwrap();
+		let obj = self.objects.lock()[unerase_handle_type(handle)]
+			.memory_object(offset)
+			.unwrap();
 		self.address_space
 			.lock()
 			.map_object(base, obj, rwx, self.hint_color)
@@ -82,15 +83,11 @@ impl Process {
 	}
 
 	/// Duplicate a reference to an object.
-	pub fn duplicate_object_handle(&self, handle: ObjectHandle) -> Option<ObjectHandle> {
+	pub fn duplicate_object_handle(&self, handle: Handle) -> Option<Handle> {
 		let mut objects = self.objects.lock();
-		if let Some(obj) = objects.get(handle.0) {
-			// Honestly I don't understand why this isn't fine but the "correct" notation is. Oh
-			// well.
-			//self.objects.push(obj.clone());
+		if let Some(obj) = objects.get(unerase_handle_type(handle)) {
 			let obj = obj.clone();
-			objects.push(obj);
-			Some((objects.len() - 1).into())
+			Some(erase_handle_type(objects.insert(obj)))
 		} else {
 			None
 		}
@@ -105,23 +102,18 @@ impl Process {
 	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
 		let mut threads = self.threads.lock();
 		let handle = threads.insert_with(|handle| {
-			let (index, generation) = handle.into_raw();
-			assert!(index < 1 << 24, "can't construct unique handle");
-			let handle = (generation as u32) << 24 | index as u32;
-			Arc::new(Thread::new(start, stack, self.clone(), handle).unwrap())
+			Arc::new(Thread::new(start, stack, self.clone(), erase_handle_type(handle)).unwrap())
 		});
 		super::round_robin::insert(Arc::downgrade(&threads.get(handle).unwrap()));
-		let (index, generation) = handle.into_raw();
-		Ok((generation as u32) << 24 | index as u32)
+		Ok(erase_handle_type(handle))
 	}
 
 	/// Get a thread.
 	pub fn get_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
-		let handle = arena::Handle::from_raw(
-			(handle & 0xff_ffff).try_into().unwrap(),
-			(handle >> 24) as u8,
-		);
-		self.threads.lock().get(handle).cloned()
+		self.threads
+			.lock()
+			.get(unerase_handle_type(handle))
+			.cloned()
 	}
 
 	/// Remove a thread.
@@ -173,37 +165,20 @@ impl Drop for Process {
 	}
 }
 
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct ObjectHandle(usize);
-
-impl From<ObjectHandle> for usize {
-	fn from(h: ObjectHandle) -> Self {
-		h.0
-	}
-}
-
-impl From<usize> for ObjectHandle {
-	fn from(n: usize) -> Self {
-		Self(n)
-	}
-}
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct QueryHandle(usize);
-
-impl From<QueryHandle> for usize {
-	fn from(h: QueryHandle) -> Self {
-		h.0
-	}
-}
-
-impl From<usize> for QueryHandle {
-	fn from(n: usize) -> Self {
-		Self(n)
-	}
-}
-
 #[derive(Debug)]
 pub enum AddObjectError {}
+
+#[track_caller]
+fn erase_handle_type(handle: arena::Handle<u8>) -> Handle {
+	let (index, generation) = handle.into_raw();
+	assert!(index < 1 << 24, "can't construct unique handle");
+	(generation as u32) << 24 | index as u32
+}
+
+#[track_caller]
+fn unerase_handle_type(handle: Handle) -> arena::Handle<u8> {
+	arena::Handle::from_raw(
+		(handle & 0xff_ffff).try_into().unwrap(),
+		(handle >> 24) as u8,
+	)
+}

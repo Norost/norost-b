@@ -21,7 +21,7 @@ enum Entry<V, G: Generation> {
 	Occupied { value: V, generation: G },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Handle<G: Generation> {
 	index: usize,
 	generation: G,

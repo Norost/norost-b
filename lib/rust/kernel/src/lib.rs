@@ -23,3 +23,5 @@ pub mod io;
 pub struct Page([u128; 256]);
 
 pub type Handle = u32;
+
+pub type AtomicHandle = core::sync::atomic::AtomicU32;

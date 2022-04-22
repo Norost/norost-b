@@ -7,7 +7,6 @@ use crate::memory::{
 use crate::object_table;
 use crate::object_table::TableId;
 use crate::scheduler;
-use crate::scheduler::process::ObjectHandle;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
 use alloc::{
@@ -256,7 +255,7 @@ extern "C" fn map_object(
 		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
 		s => unreachable!("unsupported usize size of {}", s),
 	};
-	let handle = ObjectHandle::from(handle);
+	let handle = handle as u32;
 	let base = NonNull::new(base as *mut _);
 	Process::current()
 		.unwrap()
@@ -281,7 +280,7 @@ extern "C" fn duplicate_handle(
 	_: usize,
 	_: usize,
 ) -> Return {
-	let handle = ObjectHandle::from(handle);
+	let handle = handle as u32;
 
 	Process::current()
 		.unwrap()
@@ -293,7 +292,7 @@ extern "C" fn duplicate_handle(
 			},
 			|handle| Return {
 				status: 0,
-				value: handle.into(),
+				value: handle.try_into().unwrap(),
 			},
 		)
 }
@@ -325,7 +324,7 @@ extern "C" fn create_table(
 
 	Return {
 		status: 0,
-		value: handle.into(),
+		value: handle.try_into().unwrap(),
 	}
 }
 
