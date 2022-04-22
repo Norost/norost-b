@@ -9,7 +9,7 @@ use std::iter::Filter;
 use std::str;
 
 fn main() -> std::io::Result<()> {
-	std::thread::spawn(|| ());
+	std::thread::spawn(|| ()).join().unwrap();
 	std::thread::yield_now();
 
 	let mut term = self::term::AnsiTerminal::new(std::io::stdin(), std::io::stderr());

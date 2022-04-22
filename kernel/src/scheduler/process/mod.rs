@@ -115,6 +115,15 @@ impl Process {
 		Ok((generation as u32) << 24 | index as u32)
 	}
 
+	/// Get a thread.
+	pub fn get_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
+		let handle = arena::Handle::from_raw(
+			(handle & 0xff_ffff).try_into().unwrap(),
+			(handle >> 24) as u8,
+		);
+		self.threads.lock().get(handle).cloned()
+	}
+
 	/// Remove a thread.
 	pub fn remove_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
 		let handle = arena::Handle::from_raw(

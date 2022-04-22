@@ -4,11 +4,16 @@ use crate::memory::{
 	frame::{self, PageFrame, PPN},
 	Page,
 };
+use crate::sync::Mutex;
 use crate::time::Monotonic;
-use alloc::sync::{Arc, Weak};
+use alloc::{
+	sync::{Arc, Weak},
+	vec::Vec,
+};
 use core::arch::asm;
 use core::cell::Cell;
 use core::ptr::NonNull;
+use core::task::{Context, Waker};
 use core::time::Duration;
 use norostb_kernel::Handle;
 
@@ -26,6 +31,8 @@ pub struct Thread {
 	async_deadline: Cell<Option<Monotonic>>,
 	/// Architecture-specific data.
 	pub arch_specific: arch::ThreadData,
+	/// Tasks to notify when this thread finishes.
+	waiters: Mutex<Vec<Waker>>,
 }
 
 impl Thread {
@@ -67,6 +74,7 @@ impl Thread {
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
 				arch_specific: Default::default(),
+				waiters: Default::default(),
 			})
 		}
 	}
@@ -83,10 +91,12 @@ impl Thread {
 
 	/// Suspend the currently running thread & begin running this thread.
 	///
-	/// # Panics
-	///
 	/// The thread may not have been destroyed already.
-	pub fn resume(self: Arc<Self>) -> ! {
+	pub fn resume(self: Arc<Self>) -> Result<!, Destroyed> {
+		if self.destroyed() {
+			return Err(Destroyed);
+		}
+
 		unsafe { self.process.as_ref().activate_address_space() };
 
 		unsafe {
@@ -183,6 +193,26 @@ impl Thread {
 			})
 			.unwrap();
 		}
+
+		for w in self.waiters.lock().drain(..) {
+			w.wake();
+		}
+	}
+
+	/// Wait for this thread to finish. Waiting is only possible if the caller is inside an
+	/// active thread.
+	pub fn wait(&self) -> Result<(), ()> {
+		let mut waiters = self.waiters.lock();
+		if !self.destroyed() {
+			let wake_thr = Thread::current().ok_or(())?;
+			let waker = super::waker::new_waker(Arc::downgrade(&wake_thr));
+			waiters.push(waker);
+			drop(waiters);
+			while !self.destroyed() {
+				wake_thr.sleep(Duration::MAX);
+			}
+		}
+		Ok(())
 	}
 
 	pub fn yield_current() {
@@ -201,6 +231,11 @@ impl Thread {
 	pub fn current_weak() -> Option<Weak<Self>> {
 		arch::amd64::current_thread_weak()
 	}
+
+	/// Whether this thread has been destroyed.
+	pub fn destroyed(&self) -> bool {
+		self.kernel_stack.get().is_none()
+	}
 }
 
 impl Drop for Thread {
@@ -210,3 +245,6 @@ impl Drop for Thread {
 		debug!("cleaning up thread");
 	}
 }
+
+#[derive(Debug)]
+pub struct Destroyed;

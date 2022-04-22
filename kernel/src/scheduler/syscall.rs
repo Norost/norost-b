@@ -477,8 +477,22 @@ extern "C" fn wait_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	dbg!(handle);
-	todo!()
+	Process::current()
+		.unwrap()
+		.get_thread(handle as u32)
+		.map_or(
+			Return {
+				status: usize::MAX,
+				value: 0,
+			},
+			|thread| {
+				thread.wait().unwrap();
+				Return {
+					status: 0,
+					value: 0,
+				}
+			},
+		)
 }
 
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {

@@ -33,7 +33,7 @@ pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let mut t = Monotonic::MAX;
 	loop {
 		if thr.sleep_until() <= now {
-			thr.resume();
+			let _ = thr.clone().resume();
 		}
 		t = t.min(thr.sleep_until());
 		thr = round_robin::next().unwrap();
