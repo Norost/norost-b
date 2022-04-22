@@ -127,6 +127,7 @@ impl<V, G: Generation> Arena<V, G> {
 	}
 
 	pub fn drain(&mut self) -> Drain<'_, V, G> {
+		self.free = usize::MAX;
 		Drain {
 			inner: self.storage.drain(..).enumerate(),
 		}
