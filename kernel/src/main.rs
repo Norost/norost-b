@@ -15,9 +15,8 @@
 #![feature(optimize_attribute)]
 #![feature(slice_index_methods)]
 #![feature(stmt_expr_attributes)]
-#![allow(incomplete_features)] // It seems like this feature is mostly complete, really.
-#![feature(trait_upcasting)]
 #![feature(waker_getters)]
+#![deny(incomplete_features)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 extern crate alloc;
