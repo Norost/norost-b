@@ -278,11 +278,3 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 		let _ = stack.push(ppn);
 	}
 }
-
-/// The amount of free memory in bytes.
-#[allow(dead_code)]
-pub fn free_memory() -> u128 {
-	(dumb_stack::STACK.lock().count() * Page::SIZE)
-		.try_into()
-		.unwrap()
-}

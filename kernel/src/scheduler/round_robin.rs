@@ -63,8 +63,3 @@ pub fn next() -> Option<Arc<Thread>> {
 		}
 	}
 }
-
-#[allow(dead_code)]
-pub fn count() -> usize {
-	THREAD_LIST.lock().0
-}

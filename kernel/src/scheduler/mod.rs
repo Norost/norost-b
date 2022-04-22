@@ -16,8 +16,6 @@ use core::time::Duration;
 pub use memory_object::*;
 pub use thread::Thread;
 
-pub use round_robin::count as thread_count;
-
 /// Switch to the next thread. This does not save the current thread's state!
 ///
 /// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is

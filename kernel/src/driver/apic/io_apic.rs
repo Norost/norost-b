@@ -14,7 +14,6 @@ pub enum TriggerMode {
 	Level,
 }
 
-#[allow(dead_code)]
 pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMode) {
 	let i = 0x10 + u32::from(irq) * 2;
 

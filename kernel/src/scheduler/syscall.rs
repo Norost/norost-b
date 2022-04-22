@@ -522,7 +522,6 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 	}
 }
 
-#[allow(dead_code)]
 extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	Return {
 		status: usize::MAX,

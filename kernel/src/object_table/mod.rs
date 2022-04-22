@@ -136,50 +136,6 @@ pub trait Object {
 	}
 }
 
-/// A pollable interface to an object.
-pub struct EventListener {
-	shared: Arc<SpinLock<(Option<Waker>, Option<Events>)>>,
-}
-
-pub struct EventWaker {
-	shared: Arc<SpinLock<(Option<Waker>, Option<Events>)>>,
-}
-
-impl EventListener {
-	#[allow(dead_code)]
-	fn new() -> (Self, EventWaker) {
-		let shared = Arc::new(SpinLock::default());
-		(
-			Self {
-				shared: shared.clone(),
-			},
-			EventWaker { shared },
-		)
-	}
-}
-
-impl EventWaker {
-	#[allow(dead_code)]
-	fn complete(self, event: Events) {
-		let mut l = self.shared.lock();
-		l.0.take().map(|w| w.wake());
-		l.1 = Some(event);
-	}
-}
-
-impl Future for EventListener {
-	type Output = Events;
-
-	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		let mut l = self.shared.lock();
-		if let Some(e) = l.1.take() {
-			return Poll::Ready(e);
-		}
-		l.0 = Some(cx.waker().clone());
-		Poll::Pending
-	}
-}
-
 /// A collection of events that occurred in an object
 #[repr(transparent)]
 pub struct Events(u32);
@@ -387,27 +343,6 @@ impl JobWakerGuard<'_> {
 	}
 }
 
-/// Get a list of all tables with their respective name and ID.
-#[allow(dead_code)]
-pub fn tables() -> Vec<(Box<str>, TableId)> {
-	TABLES
-		.lock()
-		.iter()
-		.enumerate()
-		.filter_map(|(i, t)| t.upgrade().map(|t| (t.name().into(), TableId(i as u32))))
-		.collect()
-}
-
-/// Get the ID of the table with the given name.
-#[allow(dead_code)]
-pub fn find_table(name: &str) -> Option<TableId> {
-	TABLES
-		.lock()
-		.iter()
-		.position(|e| e.upgrade().map_or(false, |e| e.name() == name))
-		.map(|i| TableId(i as u32))
-}
-
 /// Perform a query on the given table if it exists.
 pub fn query(table_id: TableId, path: &[u8]) -> Result<Ticket<Box<dyn Query>>, QueryError> {
 	TABLES
@@ -474,7 +409,6 @@ pub enum GetError {
 
 #[derive(Debug)]
 pub enum CreateError {
-	#[allow(dead_code)]
 	InvalidTableId,
 }
 
