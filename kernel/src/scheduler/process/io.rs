@@ -66,6 +66,10 @@ impl super::Process {
 		*/
 		let frame = frame.unwrap().base;
 
+		unsafe {
+			frame.as_ptr().cast::<Page>().write_bytes(0, count);
+		}
+
 		let queue = IoQueue { base: frame, count };
 
 		let base = self
