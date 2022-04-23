@@ -51,7 +51,6 @@ mod boot;
 mod driver;
 mod memory;
 mod object_table;
-mod power;
 mod scheduler;
 mod sync;
 mod time;
@@ -131,6 +130,6 @@ fn panic(info: &PanicInfo) -> ! {
 	fatal!("Panic!");
 	fatal!("{:#?}", info);
 	loop {
-		power::halt();
+		arch::halt();
 	}
 }

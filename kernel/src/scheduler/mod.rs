@@ -5,8 +5,8 @@ pub mod syscall;
 mod thread;
 mod waker;
 
+use crate::arch;
 use crate::time::Monotonic;
-use crate::{arch, power};
 use alloc::sync::Arc;
 use core::future::Future;
 use core::marker::Unpin;
@@ -52,7 +52,7 @@ pub unsafe fn next_thread() -> ! {
 			if let Some(d) = Monotonic::now().duration_until(t) {
 				apic::set_timer_oneshot(d, Some(16));
 				arch::enable_interrupts();
-				power::halt();
+				arch::halt();
 			}
 		}
 	}
