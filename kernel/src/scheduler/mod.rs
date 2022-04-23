@@ -5,33 +5,32 @@ pub mod syscall;
 mod thread;
 mod waker;
 
+use crate::arch;
 use crate::time::Monotonic;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use core::future::Future;
 use core::marker::Unpin;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use core::time::Duration;
 pub use memory_object::*;
 pub use thread::Thread;
 
-pub use round_robin::count as thread_count;
-
 /// Switch to the next thread. This does not save the current thread's state!
 ///
-/// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is returned.
+/// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is
+/// returned.
 ///
 /// # Safety
 ///
 /// The current thread's state must be properly saved.
-pub unsafe fn next_thread() -> Result<!, Monotonic> {
+pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let mut thr = round_robin::next().unwrap();
 	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
 	loop {
 		if thr.sleep_until() <= now {
-			thr.resume();
+			let _ = thr.clone().resume();
 		}
 		t = t.min(thr.sleep_until());
 		thr = round_robin::next().unwrap();
@@ -41,40 +40,26 @@ pub unsafe fn next_thread() -> Result<!, Monotonic> {
 	}
 }
 
-/// Wait for an asynchronous task to finish.
-fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
-	let waker = waker::new_waker(Thread::current_weak());
-	let mut context = Context::from_waker(&waker);
+/// Switch to the next thread. This does not save the current thread's state!
+///
+/// # Safety
+///
+/// The current thread's state must be properly saved.
+pub unsafe fn next_thread() -> ! {
+	use crate::driver::apic;
 	loop {
-		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
-			return res;
+		if let Err(t) = unsafe { try_next_thread() } {
+			if let Some(d) = Monotonic::now().duration_until(t) {
+				apic::set_timer_oneshot(d, Some(16));
+				arch::enable_interrupts();
+				arch::halt();
+			}
 		}
-		Weak::upgrade(&waker::thread(&waker).expect("waker type changed"))
-			.expect("no thread")
-			.sleep(Duration::MAX);
 	}
 }
 
-/// Wait for an asynchronous task to finish or until the timeout expires.
-fn block_on_timeout<T>(
-	mut task: impl Future<Output = T> + Unpin,
-	timeout: Duration,
-) -> Result<T, ()> {
-	let waker = waker::new_waker(Thread::current_weak());
-	let mut context = Context::from_waker(&waker);
-	if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
-		return Ok(res);
-	}
-	let mut sleep = waker::Sleep::new(timeout);
-	loop {
-		if let Poll::Ready(()) = Pin::new(&mut sleep).poll(&mut context) {
-			return Err(());
-		}
-		if let Poll::Ready(res) = Pin::new(&mut task).poll(&mut context) {
-			return Ok(res);
-		}
-		Weak::upgrade(&waker::thread(&waker).expect("waker type changed"))
-			.expect("no thread")
-			.sleep(Duration::MAX);
-	}
+/// Poll a task once.
+fn poll<T>(mut task: impl Future<Output = T> + Unpin) -> Poll<T> {
+	let waker = waker::new_waker(Thread::current_weak().unwrap());
+	Pin::new(&mut task).poll(&mut Context::from_waker(&waker))
 }

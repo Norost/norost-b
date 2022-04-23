@@ -11,11 +11,17 @@ use std::ptr::NonNull;
 fn main() {
 	// TODO get disk from arguments
 
-	let disk = fs::OpenOptions::new()
-		.read(true)
-		.write(true)
-		.open("virtio-blk/disk/0")
-		.expect("failed to open disk");
+	let disk = loop {
+		if let Ok(disk) = fs::OpenOptions::new()
+			.read(true)
+			.write(true)
+			.open("virtio-blk/disk/0")
+		{
+			break disk;
+		}
+		// TODO we probably should add a syscall to monitor the table list
+		std::thread::yield_now();
+	};
 
 	let disk = driver_utils::io::BufBlock::new(disk);
 	let fs =
@@ -109,6 +115,11 @@ fn main() {
 			}
 			Job::SEEK => {
 				todo!()
+			}
+			Job::CLOSE => {
+				open_files.remove(job.handle);
+				// The kernel does not expect a response.
+				continue;
 			}
 			t => todo!("job type {}", t),
 		}

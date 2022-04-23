@@ -4,8 +4,10 @@
 
 mod dma_frame;
 mod dumb_stack;
+mod owned;
 
 pub use dma_frame::*;
+pub use owned::*;
 
 use super::Page;
 use core::fmt;
@@ -49,8 +51,12 @@ impl PPN {
 	///
 	/// The pointer must be aligned and point to somewhere inside the identity map.
 	pub unsafe fn from_ptr(page: *mut Page) -> Self {
-		let virt = super::r#virtual::virt_to_phys(page.cast());
-		Self((usize::try_from(virt).unwrap() / Page::SIZE) as PPNBox)
+		let virt = unsafe { super::r#virtual::virt_to_phys(page.cast()) };
+		Self(
+			(usize::try_from(virt).unwrap() / Page::SIZE)
+				.try_into()
+				.unwrap(),
+		)
 	}
 
 	pub fn next(&self) -> Self {
@@ -115,13 +121,6 @@ pub struct PageFrame {
 }
 
 impl PageFrame {
-	/// # Safety
-	///
-	/// The base and p2size originates from `PageFrame::into_raw()`.
-	pub unsafe fn from_raw(base: PPN, p2size: u8) -> Self {
-		Self { base, p2size }
-	}
-
 	pub fn iter(&self) -> Result<PageFrameIter, PageFrameIterError> {
 		Ok(PageFrameIter {
 			base: self.base,
@@ -175,7 +174,7 @@ pub enum PageFrameIterError {
 }
 
 /// A region of physical memory
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryRegion {
 	pub base: PPN,
 	pub count: usize,
@@ -205,6 +204,11 @@ pub enum AllocateContiguousError {
 #[derive(Debug)]
 pub enum DeallocateError {}
 
+pub struct AllocateHints {
+	pub address: *const u8,
+	pub color: u8,
+}
+
 /// Allocate a range of pages.
 ///
 /// The address hint is used to determine if a hugepage can be allocated and to determine
@@ -225,10 +229,8 @@ where
 	(stack.count() >= count)
 		.then(|| {
 			for _ in 0..count {
-				callback(PageFrame {
-					base: stack.pop().unwrap(),
-					p2size: 0,
-				});
+				let base = stack.pop().unwrap();
+				callback(PageFrame { base, p2size: 0 });
 			}
 		})
 		.ok_or(AllocateError::OutOfFrames)
@@ -275,12 +277,4 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 		// Just discard any leftover pages.
 		let _ = stack.push(ppn);
 	}
-}
-
-/// The amount of free memory in bytes.
-#[allow(dead_code)]
-pub fn free_memory() -> u128 {
-	(dumb_stack::STACK.lock().count() * Page::SIZE)
-		.try_into()
-		.unwrap()
 }

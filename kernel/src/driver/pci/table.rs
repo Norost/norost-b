@@ -1,8 +1,5 @@
-use crate::object_table::{
-	Error, NoneQuery, Object, Query, QueryResult, Table, Ticket, TicketWaker,
-};
-use crate::sync::IsrSpinLock;
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
+use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Table, Ticket};
+use alloc::{boxed::Box, format, string::String, sync::Arc};
 use core::str;
 
 /// Table with all PCI devices.
@@ -54,7 +51,6 @@ impl Table for PciTable {
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let _ = dbg!(core::str::from_utf8(path));
 		let r = path_to_bdf(path)
 			.and_then(|(bus, dev, func)| {
 				let pci = super::PCI.lock();
@@ -76,8 +72,6 @@ impl Table for PciTable {
 	}
 }
 
-impl Object for PciTable {}
-
 struct QueryName {
 	item: Option<(u8, u8, u8)>,
 }
@@ -90,7 +84,7 @@ impl Iterator for QueryName {
 	fn next(&mut self) -> Option<Self::Item> {
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
-			let h = pci.as_ref().unwrap().get(b, d, f)?;
+			pci.as_ref().unwrap().get(b, d, f)?;
 			Some(Ticket::new_complete(Ok(pci_dev_query_result(b, d, f))))
 		})
 	}

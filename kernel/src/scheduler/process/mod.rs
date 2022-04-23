@@ -3,27 +3,54 @@ mod io;
 
 use super::{MemoryObject, Thread};
 use crate::arch;
-use crate::memory::frame;
-use crate::memory::r#virtual::{AddressSpace, MapError, MemoryObjectHandle, RWX};
+use crate::memory::frame::{self, AllocateHints};
+use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{Object, Query};
+use crate::object_table::{AnyTicket, JobTask, Object, Query};
+use crate::sync::Mutex;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use arena::Arena;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+use norostb_kernel::Handle;
 
 pub struct Process {
-	address_space: AddressSpace,
+	address_space: Mutex<AddressSpace>,
 	hint_color: u8,
-	threads: Vec<Arc<Thread>>,
-	objects: Vec<Arc<dyn Object>>,
-	queries: Vec<Box<dyn Query>>,
-	io_queues: Vec<io::Queue>,
+	threads: Mutex<Arena<Arc<Thread>, u8>>,
+	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
+	queries: Mutex<Arena<Box<dyn Query>, u8>>,
+	io_queues: Mutex<Vec<(io::Queue, Vec<PendingTicket>)>>,
+}
+
+struct PendingTicket {
+	user_data: u64,
+	data_ptr: *mut u8,
+	data_len: usize,
+	ticket: TicketOrJob,
+}
+
+enum TicketOrJob {
+	Ticket(AnyTicket),
+	Job(JobTask),
+}
+
+impl<T: Into<AnyTicket>> From<T> for TicketOrJob {
+	fn from(t: T) -> Self {
+		Self::Ticket(t.into())
+	}
+}
+
+impl From<JobTask> for TicketOrJob {
+	fn from(t: JobTask) -> Self {
+		Self::Job(t)
+	}
 }
 
 impl Process {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
-		let address_space = AddressSpace::new()?;
 		Ok(Self {
-			address_space,
+			address_space: Mutex::new(AddressSpace::new()?),
 			hint_color: 0,
 			threads: Default::default(),
 			objects: Default::default(),
@@ -32,61 +59,59 @@ impl Process {
 		})
 	}
 
-	pub fn activate_address_space(&self) {
-		unsafe { self.address_space.activate() };
-	}
-
-	pub fn run(&mut self) -> ! {
-		self.activate_address_space();
-		self.threads[0].clone().resume()
+	pub unsafe fn activate_address_space(&self) {
+		unsafe { self.address_space.lock().activate() };
 	}
 
 	/// Add an object to the process' object table.
-	pub fn add_object(&mut self, object: Arc<dyn Object>) -> Result<ObjectHandle, AddObjectError> {
-		self.objects.push(object);
-		Ok(ObjectHandle(self.objects.len() - 1))
+	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<Handle, AddObjectError> {
+		let mut objects = self.objects.lock();
+		Ok(erase_handle(objects.insert(object)))
 	}
 
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object(
-		&mut self,
+		&self,
 		base: Option<NonNull<Page>>,
 		object: Box<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError> {
+	) -> Result<NonNull<Page>, MapError> {
 		self.address_space
+			.lock()
 			.map_object(base, object.into(), rwx, self.hint_color)
 	}
 
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object_2(
-		&mut self,
-		handle: ObjectHandle,
+		&self,
+		handle: Handle,
 		base: Option<NonNull<Page>>,
 		offset: u64,
 		rwx: RWX,
-	) -> Result<MemoryObjectHandle, MapError> {
-		let obj = self.objects[handle.0].memory_object(offset).unwrap();
+	) -> Result<NonNull<Page>, MapError> {
+		let obj = self.objects.lock()[unerase_handle(handle)]
+			.memory_object(offset)
+			.unwrap();
 		self.address_space
+			.lock()
 			.map_object(base, obj, rwx, self.hint_color)
 	}
 
-	/// Get a reference to a memory object.
-	#[allow(dead_code)]
-	pub fn get_memory_object(&self, handle: MemoryObjectHandle) -> Option<&dyn MemoryObject> {
-		self.address_space.get_object(handle)
-	}
-
-	/// Get a reference to an object.
-	pub fn get_object(&self, handle: ObjectHandle) -> Option<&Arc<dyn Object>> {
-		self.objects.get(handle.0)
+	/// Unmap a memory object in a memory range. This unmapping may be partial.
+	pub fn unmap_memory_object(
+		&self,
+		base: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		self.address_space.lock().unmap_object(base, count)
 	}
 
 	/// Duplicate a reference to an object.
-	pub fn duplicate_object_handle(&mut self, handle: ObjectHandle) -> Option<ObjectHandle> {
-		if let Some(obj) = self.objects.get(handle.0) {
-			self.objects.push(obj.clone());
-			Some((self.objects.len() - 1).into())
+	pub fn duplicate_object_handle(&self, handle: Handle) -> Option<Handle> {
+		let mut objects = self.objects.lock();
+		if let Some(obj) = objects.get(unerase_handle(handle)) {
+			let obj = obj.clone();
+			Some(erase_handle(objects.insert(obj)))
 		} else {
 			None
 		}
@@ -94,80 +119,87 @@ impl Process {
 
 	/// Map a virtual address to a physical address.
 	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
-		self.address_space.get_physical_address(address)
-	}
-
-	/// Add an object query.
-	pub fn add_query(&mut self, query: Box<dyn Query>) -> QueryHandle {
-		self.queries.push(query);
-		QueryHandle(self.queries.len() - 1)
-	}
-
-	/// Get a mutable reference to a query.
-	pub fn get_query_mut(&mut self, handle: QueryHandle) -> Option<&mut (dyn Query + 'static)> {
-		self.queries.get_mut(handle.0).map(|q| &mut **q)
+		self.address_space.lock().get_physical_address(address)
 	}
 
 	/// Spawn a new thread.
-	pub fn spawn_thread(
-		&mut self,
-		start: usize,
-		stack: usize,
-	) -> Result<usize, crate::memory::frame::AllocateContiguousError> {
-		let thr = Arc::new(Thread::new(
-			start,
-			stack,
-			NonNull::new(self as *mut _).unwrap(),
-		)?);
-		let thr_weak = Arc::downgrade(&thr);
-		self.threads.push(thr);
-		super::round_robin::insert(thr_weak);
-		Ok(self.threads.len() - 1)
+	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
+		let mut threads = self.threads.lock();
+		let handle = threads.insert_with(|handle| {
+			Arc::new(Thread::new(start, stack, self.clone(), erase_handle(handle)).unwrap())
+		});
+		super::round_robin::insert(Arc::downgrade(&threads.get(handle).unwrap()));
+		Ok(erase_handle(handle))
 	}
 
-	// FIXME wildly unsafe!
-	pub fn current<'a>() -> &'a mut Self {
+	/// Get a thread.
+	pub fn get_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
+		self.threads.lock().get(unerase_handle(handle)).cloned()
+	}
+
+	/// Remove a thread.
+	pub fn remove_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
+		let handle = arena::Handle::from_raw(
+			(handle & 0xff_ffff).try_into().unwrap(),
+			(handle >> 24) as u8,
+		);
+		self.threads.lock().remove(handle)
+	}
+
+	/// Create an [`AllocateHints`] structure for the given virtual address.
+	pub fn allocate_hints(&self, address: *const u8) -> AllocateHints {
+		AllocateHints {
+			address,
+			color: self.hint_color,
+		}
+	}
+
+	/// Destroy this process.
+	///
+	/// # Safety
+	///
+	/// The caller may *not* be using any resources of this process, especially the address space
+	/// or a thread!
+	pub unsafe fn destroy(self: Arc<Self>) {
+		// Destroy all threads
+		let mut threads = self.threads.lock();
+		for (_, thr) in threads.drain() {
+			// SAFETY: the caller guarantees we're not using any resources of this thread.
+			unsafe {
+				thr.destroy();
+			}
+		}
+		// Now we just let the destructors do the rest. Sayonara! :)
+	}
+
+	/// Get the current active process.
+	pub fn current() -> Option<Arc<Self>> {
 		arch::current_process()
 	}
 }
 
 impl Drop for Process {
 	fn drop(&mut self) {
-		todo!()
-	}
-}
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct ObjectHandle(usize);
-
-impl From<ObjectHandle> for usize {
-	fn from(h: ObjectHandle) -> Self {
-		h.0
-	}
-}
-
-impl From<usize> for ObjectHandle {
-	fn from(n: usize) -> Self {
-		Self(n)
-	}
-}
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct QueryHandle(usize);
-
-impl From<QueryHandle> for usize {
-	fn from(h: QueryHandle) -> Self {
-		h.0
-	}
-}
-
-impl From<usize> for QueryHandle {
-	fn from(n: usize) -> Self {
-		Self(n)
+		// We currently cannot destroy a process in a safe way but we also need to ensure
+		// resources are cleaned up properly, so do log it for debugging potential leaks at least.
+		debug!("cleaning up process");
 	}
 }
 
 #[derive(Debug)]
 pub enum AddObjectError {}
+
+#[track_caller]
+fn erase_handle(handle: arena::Handle<u8>) -> Handle {
+	let (index, generation) = handle.into_raw();
+	assert!(index < 1 << 24, "can't construct unique handle");
+	(generation as u32) << 24 | index as u32
+}
+
+#[track_caller]
+fn unerase_handle(handle: Handle) -> arena::Handle<u8> {
+	arena::Handle::from_raw(
+		(handle & 0xff_ffff).try_into().unwrap(),
+		(handle >> 24) as u8,
+	)
+}

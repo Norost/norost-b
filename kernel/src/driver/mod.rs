@@ -13,22 +13,33 @@ pub mod vga;
 
 use crate::boot;
 
+/// Initialize drivers that are needed very early in the boot process.
+///
+/// # Safety
+///
+/// This function may only be called once at boot time
+pub unsafe fn early_init(_boot: &boot::Info) {
+	unsafe {
+		// Initialize UART first as we need it for logging.
+		uart::early_init();
+	}
+}
+
 /// # Safety
 ///
 /// This function may only be called once at boot time
 pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
+	unsafe {
+		acpi::init(boot);
 
-	uart::init(); // Initialize UART first as we need it for logging.
+		#[cfg(feature = "driver-pic")]
+		pic::init();
 
-	acpi::init(boot);
+		rtc::init();
 
-	#[cfg(feature = "driver-pic")]
-	pic::init();
+		apic::post_init();
 
-	rtc::init();
-
-	apic::post_init();
-
-	uart::post_init();
+		uart::post_init();
+	}
 }

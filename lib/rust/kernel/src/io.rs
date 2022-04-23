@@ -11,10 +11,13 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::{QueryHandle, TableId};
+use super::syscall::TableId;
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
+
+// We cast pointers to u64, so if pointers are 128 bits or larger things may break.
+const _: usize = 8 - mem::size_of::<usize>();
 
 pub type Handle = u32;
 
@@ -24,16 +27,6 @@ pub struct Full;
 #[derive(Debug)]
 pub struct Empty;
 
-pub struct Path([u8]);
-
-impl Path {
-	/// This method is not unsafe and an invalid path will not cause UB, though requests made with
-	/// it will result in an error response being returned.
-	pub fn new_unchecked(path: &[u8]) -> &Self {
-		unsafe { &*(path as *const _ as *const _) }
-	}
-}
-
 /// A single request to submit to the kernel.
 #[repr(C)]
 pub struct Request {
@@ -42,13 +35,11 @@ pub struct Request {
 	/// Storage for 8-bit arguments.
 	pub arguments_8: [u8; 3],
 	/// Storage for 32-bit arguments.
-	pub arguments_32: [u32; 2],
-	/// Storage for 32- or 64-bit arguments, depending on architecture.
-	pub arguments_ptr: [usize; 2],
+	pub arguments_32: [u32; 1],
+	/// Storage for 64-bit arguments. This storage is also used for pointers.
+	pub arguments_64: [u64; 2],
 	/// User data which will be returned with the response.
-	pub user_data: usize,
-	/// Storage for 64-bit arguments.
-	pub arguments_64: [u64; 1],
+	pub user_data: u64,
 }
 
 impl Request {
@@ -64,126 +55,123 @@ impl Request {
 	pub const FINISH_JOB: u8 = 7;
 	pub const SEEK: u8 = 8;
 	pub const POLL: u8 = 9;
+	pub const CLOSE: u8 = 10;
 
-	pub fn read(user_data: usize, handle: Handle, buf: &mut [u8]) -> Self {
+	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
 			ty: Self::READ,
-			// FIXME make handles 32-bit
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_ptr: [buf.as_ptr() as usize, buf.len()],
+			arguments_32: [handle],
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn read_uninit(user_data: usize, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
+	pub fn read_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
 		Self {
 			ty: Self::READ,
-			// FIXME make handles 32-bit
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_ptr: [buf.as_ptr() as usize, buf.len()],
+			arguments_32: [handle],
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn write(user_data: usize, handle: Handle, buf: &[u8]) -> Self {
+	pub fn write(user_data: u64, handle: Handle, buf: &[u8]) -> Self {
 		Self {
 			ty: Self::WRITE,
-			// FIXME make handles 32-bit
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_ptr: [buf.as_ptr() as usize, buf.len()],
+			arguments_32: [handle],
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn open(user_data: usize, table: TableId, path: &[u8]) -> Self {
+	pub fn open(user_data: u64, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
-			arguments_32: [table, 0],
-			arguments_ptr: [path.as_ptr() as usize, path.len()],
+			arguments_32: [table],
+			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn create(user_data: usize, table: TableId, path: &[u8]) -> Self {
+	pub fn create(user_data: u64, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
-			arguments_32: [table, 0],
-			arguments_ptr: [path.as_ptr() as usize, path.len()],
+			arguments_32: [table],
+			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query(user_data: usize, table: TableId, path: &[u8]) -> Self {
+	pub fn query(user_data: u64, table: TableId, path: &[u8]) -> Self {
 		Self {
 			ty: Self::QUERY,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
-			arguments_ptr: [path.as_ptr() as usize, path.len()],
+			arguments_32: [table],
+			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query_next(user_data: usize, handle: QueryHandle, info: &mut ObjectInfo) -> Self {
+	pub fn query_next(user_data: u64, handle: Handle, info: &mut ObjectInfo) -> Self {
 		Self {
 			ty: Self::QUERY_NEXT,
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_ptr: [info as *const _ as usize, 0],
+			arguments_32: [handle],
+			arguments_64: [info as *const _ as u64, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn take_job(user_data: usize, table: Handle, job: &mut Job) -> Self {
+	pub fn take_job(user_data: u64, table: Handle, job: &mut Job) -> Self {
 		Self {
 			ty: Self::TAKE_JOB,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
-			arguments_ptr: [job as *mut _ as usize, 0],
+			arguments_32: [table],
+			arguments_64: [job as *mut _ as u64, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn finish_job(user_data: usize, table: Handle, job: &Job) -> Self {
+	pub fn finish_job(user_data: u64, table: Handle, job: &Job) -> Self {
 		Self {
 			ty: Self::FINISH_JOB,
-			// FIXME use u32 for handles.
-			arguments_32: [table.try_into().unwrap(), 0],
-			arguments_ptr: [job as *const _ as usize, 0],
+			arguments_32: [table],
+			arguments_64: [job as *const _ as u64, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn seek(user_data: usize, handle: Handle, from: SeekFrom, offset: &mut u64) -> Self {
+	pub fn seek(user_data: u64, handle: Handle, from: SeekFrom) -> Self {
 		let (t, n) = from.into_raw();
 		Self {
 			ty: Self::SEEK,
 			arguments_8: [t, 0, 0],
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_64: [n],
-			arguments_ptr: [offset as *mut _ as usize, 0],
+			arguments_32: [handle],
+			arguments_64: [n, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn poll(user_data: usize, handle: Handle) -> Self {
+	pub fn poll(user_data: u64, handle: Handle) -> Self {
 		Self {
 			ty: Self::POLL,
-			arguments_8: [0, 0, 0],
-			// FIXME use u32 for handles.
-			arguments_32: [handle.try_into().unwrap(), 0],
-			arguments_64: [0],
-			arguments_ptr: [0, 0],
+			arguments_32: [handle],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn close(user_data: u64, handle: Handle) -> Self {
+		Self {
+			ty: Self::CLOSE,
+			arguments_32: [handle],
 			user_data,
 			..Default::default()
 		}
@@ -195,9 +183,8 @@ impl Default for Request {
 		Self {
 			ty: u8::MAX,
 			arguments_8: [0; 3],
-			arguments_32: [0; 2],
-			arguments_64: [0; 1],
-			arguments_ptr: [0; 2],
+			arguments_32: [0; 1],
+			arguments_64: [0; 2],
 			user_data: 0,
 		}
 	}
@@ -286,9 +273,9 @@ impl RequestRing {
 /// A single response from the kernel.
 #[repr(C)]
 pub struct Response {
-	pub value: isize,
+	pub value: i64,
 	/// User data that was associated with the request.
-	pub user_data: usize,
+	pub user_data: u64,
 }
 
 /// A ring buffer of responses. The amount of entries is a power of two between 1 and 2^15
@@ -552,6 +539,7 @@ impl Job {
 	pub const CREATE: u8 = 4;
 	pub const QUERY_NEXT: u8 = 5;
 	pub const SEEK: u8 = 6;
+	pub const CLOSE: u8 = 7;
 }
 
 pub type JobId = u32;

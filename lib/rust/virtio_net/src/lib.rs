@@ -1,15 +1,22 @@
 //! Based on https://docs.oasis-open.org/virtio/virtio/v1.1/cs01/virtio-v1.1-cs01.html#x1-2110003
 
 #![no_std]
-#![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
+#![feature(alloc_layout_extra)]
+#![feature(
+	maybe_uninit_slice,
+	maybe_uninit_write_slice,
+	maybe_uninit_array_assume_init
+)]
 
+use core::alloc::Layout;
 use core::convert::TryInto;
 use core::fmt;
-use core::mem::{self, MaybeUninit};
+use core::mem;
 use core::ptr::NonNull;
 use endian::{u16le, u32le};
 use virtio::pci::CommonConfig;
 use virtio::queue;
+use virtio::{PhysAddr, PhysRegion};
 
 /// Device handles packets with partial checksum. This "checksum offload" is a common feature on
 /// modern network cards.
@@ -98,6 +105,7 @@ impl Config {
 	const STATUS_ANNOUNCE: u16 = 1 << 1;
 }
 
+#[derive(Default)]
 #[repr(C)]
 struct PacketHeader {
 	flags: u8,
@@ -144,6 +152,38 @@ impl PacketHeader {
 	const GSO_ECN: u8 = 0x80;
 }
 
+#[repr(align(2048))]
+#[repr(C)]
+pub struct Packet {
+	header: PacketHeader,
+	pub data: [u8; Self::MAX_ETH_SIZE],
+}
+
+impl Packet {
+	const MAX_ETH_SIZE: usize = 1514;
+	/// There is no way to get the real size (_not_ stride), so this'll have to do.
+	const MAX_SIZE: usize = mem::size_of::<PacketHeader>() + Self::MAX_ETH_SIZE;
+
+	/// Calculate the total size of the packet with the given amount of data.
+	///
+	/// # Panics
+	///
+	/// `size` is larger than 1514.
+	pub fn size_with_data(size: usize) -> u32 {
+		assert!(size <= 1514, "size may not be larger than 1514");
+		(mem::size_of::<PacketHeader>() + size).try_into().unwrap()
+	}
+}
+
+impl Default for Packet {
+	fn default() -> Self {
+		Self {
+			header: Default::default(),
+			data: [0; Self::MAX_ETH_SIZE],
+		}
+	}
+}
+
 #[allow(dead_code)]
 #[repr(C)]
 struct NetworkControl {
@@ -151,21 +191,6 @@ struct NetworkControl {
 	command: u8,
 	command_specific_data: [u8; 0],
 	// ack: u8 after command_specific_data
-}
-
-// Align packet to 2048 bytes to ensure it doesn't cross page boundaries.
-// It also allows using just a single buffer/descriptor.
-#[repr(align(2048))]
-#[repr(C)]
-struct Packet {
-	header: PacketHeader,
-	data: [MaybeUninit<u8>; Self::MAX_ETH_SIZE],
-}
-
-impl Packet {
-	const MAX_ETH_SIZE: usize = 1514;
-	/// There is no way to get the real size (_not_ stride), so this'll have to do.
-	const MAX_SIZE: usize = mem::size_of::<PacketHeader>() + Self::MAX_ETH_SIZE;
 }
 
 pub struct Mac([u8; 6]);
@@ -195,29 +220,20 @@ impl fmt::Display for Mac {
 }
 
 /// A driver for a virtio network (Ethernet) device.
-pub struct Device<'a, F>
-where
-	F: Fn(*const ()) -> usize,
-{
-	rx_packet: NonNull<Packet>,
+pub struct Device<'a> {
 	tx_queue: queue::Queue<'a>,
 	rx_queue: queue::Queue<'a>,
 	notify: virtio::pci::Notify<'a>,
 	isr: &'a virtio::pci::ISR,
-	get_physical_address: F,
 }
 
-impl<'a, F> Device<'a, F>
-where
-	F: Fn(*const ()) -> usize,
-{
+impl<'a> Device<'a> {
 	/// Setup a network device
-	pub fn new(
+	pub unsafe fn new<DmaError>(
 		pci: &'a pci::Header0,
-		get_physical_address: F,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
-		mut dma_alloc: impl FnMut(usize) -> Result<(NonNull<()>, usize), ()>,
-	) -> Result<(Self, Mac), SetupError> {
+		mut dma_alloc: impl FnMut(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
+	) -> Result<(Self, Mac), SetupError<DmaError>> {
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
 		dev.common.device_status.set(CommonConfig::STATUS_RESET);
@@ -255,10 +271,16 @@ where
 		// TODO check device status to ensure features were enabled correctly.
 
 		// Set up queues.
-		let rx_queue =
-			queue::Queue::<'a>::new(dev.common, 0, 8, None, &mut dma_alloc).expect("OOM");
-		let tx_queue =
-			queue::Queue::<'a>::new(dev.common, 1, 8, None, &mut dma_alloc).expect("OOM");
+		let rx_queue = queue::Queue::<'a>::new(dev.common, 0, 8, None, &mut dma_alloc).map_err(
+			|e| match e {
+				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
+			},
+		)?;
+		let tx_queue = queue::Queue::<'a>::new(dev.common, 1, 8, None, &mut dma_alloc).map_err(
+			|e| match e {
+				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
+			},
+		)?;
 
 		dev.common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE
@@ -267,91 +289,59 @@ where
 				| CommonConfig::STATUS_DRIVER_OK,
 		);
 
-		let mac = Mac(unsafe { dev.device.cast::<Config>() }.mac);
+		let mac = Mac(dev.device.cast::<Config>().mac);
 
-		let rx_packet = dma_alloc(mem::size_of::<Packet>()).expect("OOM").0.cast();
-
-		let mut s = Self {
-			rx_packet,
+		let s = Self {
 			rx_queue,
 			tx_queue,
 			notify: dev.notify,
 			isr: dev.isr,
-			get_physical_address,
 		};
-		s.insert_buffer(s.rx_packet);
 		Ok((s, mac))
 	}
 
 	/// Send an Ethernet packet
 	///
-	/// # Panics
+	/// # Safety
 	///
-	/// The amount of data is larger than `MAX_ETH_SIZE`, i.e. 1514 bytes.
-	pub fn send<'s>(&'s mut self, data: &'s [u8], wait: impl FnMut()) -> Result<(), SendError> {
-		assert!(
-			data.len() <= Packet::MAX_ETH_SIZE,
-			"data len must be smaller or equal to MAX_ETH_SIZE"
-		);
-		let mut a = Packet {
-			header: PacketHeader {
-				flags: 0,
-				gso_type: PacketHeader::GSO_NONE,
-				csum_start: 0.into(),
-				csum_offset: 0.into(),
-				gso_size: 0.into(),
-				header_length: u16::try_from(mem::size_of::<PacketHeader>())
-					.unwrap()
-					.into(),
-				num_buffers: 0.into(),
-			},
-			data: [MaybeUninit::uninit(); Packet::MAX_ETH_SIZE],
+	/// `data_phys` must point to a valid memory region.
+	pub unsafe fn send<'s>(
+		&'s mut self,
+		data: &mut Packet,
+		data_phys: PhysRegion,
+		wait: impl FnMut(),
+	) -> Result<(), SendError> {
+		data.header = PacketHeader {
+			flags: 0,
+			gso_type: PacketHeader::GSO_NONE,
+			csum_start: 0.into(),
+			csum_offset: 0.into(),
+			gso_size: 0.into(),
+			header_length: u16::try_from(mem::size_of::<PacketHeader>())
+				.unwrap()
+				.into(),
+			num_buffers: 0.into(),
 		};
-		MaybeUninit::write_slice(&mut a.data[..data.len()], &data);
-		let phys = (self.get_physical_address)(&a as *const _ as *const _);
 
-		let data = [(
-			phys.try_into().unwrap(),
-			(mem::size_of::<PacketHeader>() + data.len())
-				.try_into()
-				.unwrap(),
-			false,
-		)];
+		let data = [(data_phys.base, data_phys.size, false)];
 
 		self.tx_queue
-			.send(data.iter().copied(), None, |_, _, _| ())
+			.send(data.iter().copied(), None, |_, _| ())
 			.expect("Failed to send data");
 
 		self.notify.send(self.tx_queue.notify_offset());
 
-		self.tx_queue.wait_for_used(|_, _, _| (), wait);
+		self.tx_queue.wait_for_used(|_, _| (), wait);
 
 		Ok(())
 	}
 
-	/// Receive an Ethernet packet, if any are available
-	pub fn receive<'s>(&'s mut self, data: &'s mut [u8]) -> Result<bool, ReceiveError> {
-		assert!(
-			data.len() >= Packet::MAX_ETH_SIZE,
-			"data len must be greater or equal to MAX_ETH_SIZE"
-		);
-
-		let n = self.rx_queue.collect_used(|_, _, _| ());
-		assert!(n < 2, "received more than 1 packet at once");
-
-		if n == 1 {
-			let pkt = unsafe { self.rx_packet.as_ref() };
-			// FIXME it seems QEMU isn't setting num_buffers properly if MRG_RXBUF is not
-			// negotiated
-			//assert_eq!(u16::from(pkt.header.num_buffers), 1, "expected only one buffer {:#?}", &pkt.header);
-			// SAFETY: FIXME
-			let pd = unsafe { MaybeUninit::slice_assume_init_ref(&pkt.data) };
-			data[..Packet::MAX_ETH_SIZE].copy_from_slice(pd);
-			self.insert_buffer(self.rx_packet);
-			Ok(true)
-		} else {
-			Ok(false)
-		}
+	/// Receive a number of Ethernet packets, if any are available
+	pub unsafe fn receive<'s>(
+		&'s mut self,
+		callback: impl FnMut(u16, PhysRegion),
+	) -> Result<usize, ReceiveError> {
+		Ok(self.rx_queue.collect_used(callback))
 	}
 
 	#[inline]
@@ -359,21 +349,20 @@ where
 		self.isr.read().queue_update()
 	}
 
+	/// Get the layout requirements of a single packet. Useful for allocation.
+	pub fn packet_layout(&self) -> Layout {
+		Layout::new::<Packet>()
+			.extend_packed(Layout::new::<[u8; Packet::MAX_ETH_SIZE]>())
+			.unwrap()
+	}
+
 	/// Insert a buffer for the device to write RX data to
-	fn insert_buffer<'s>(&'s mut self, packet: NonNull<Packet>) {
-		let phys = (self.get_physical_address)(packet.as_ptr() as *const _);
-
-		let data = [(
-			phys.try_into().unwrap(),
-			Packet::MAX_SIZE.try_into().unwrap(),
-			true,
-		)];
-
-		let pkt = unsafe {
-			let mut packet = packet;
-			packet.as_mut()
-		};
-		pkt.header = PacketHeader {
+	pub fn insert_buffer<'s>(
+		&'s mut self,
+		data: &mut Packet,
+		data_phys: PhysAddr,
+	) -> Result<(), Full> {
+		data.header = PacketHeader {
 			flags: 12,
 			gso_type: 34,
 			csum_start: 5678.into(),
@@ -383,31 +372,27 @@ where
 			num_buffers: 1234.into(),
 		};
 
+		let data = [(data_phys, Packet::MAX_SIZE.try_into().unwrap(), true)];
+
 		self.rx_queue
-			.send(data.iter().copied(), None, |_, _, _| ())
+			.send(data.iter().copied(), None, |_, _| ())
 			.expect("Failed to send data");
 
 		self.notify.send(self.rx_queue.notify_offset());
+
+		Ok(())
 	}
 }
 
-impl<F> Drop for Device<'_, F>
-where
-	F: Fn(*const ()) -> usize,
-{
+impl Drop for Device<'_> {
 	fn drop(&mut self) {
 		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
 
-pub enum SetupError {}
-
-impl fmt::Debug for SetupError {
-	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-		//f.write_str(match self {
-		//})
-		Ok(())
-	}
+#[derive(Debug)]
+pub enum SetupError<DmaError> {
+	DmaError(DmaError),
 }
 
 pub enum SendError {}
@@ -433,3 +418,6 @@ impl fmt::Debug for ReceiveError {
 		Ok(())
 	}
 }
+
+#[derive(Debug)]
+pub struct Full;

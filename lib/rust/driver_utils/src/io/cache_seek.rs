@@ -1,5 +1,4 @@
-use std::io::{self, BufRead, Read, ReadBuf, Seek, SeekFrom, Write};
-use std::mem::MaybeUninit;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::num::NonZeroU64;
 
 /// A wrapper that prevents redundant seek calls from being performed. It also defers seeks until

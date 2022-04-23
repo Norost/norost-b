@@ -1,8 +1,9 @@
+use super::phys::PhysAddr;
 use core::convert::TryFrom;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
-use endian::{u16le, u32le, u64le};
+use endian::{u16le, u32le};
 use volatile::VolatileCell;
 
 /// An identifier for a device type
@@ -77,9 +78,9 @@ pub struct CommonConfig {
 	pub queue_msix_vector: VolatileCell<u16le>,
 	pub queue_enable: VolatileCell<u16le>,
 	pub queue_notify_off: VolatileCell<u16le>,
-	pub queue_descriptors: VolatileCell<u64le>,
-	pub queue_driver: VolatileCell<u64le>,
-	pub queue_device: VolatileCell<u64le>,
+	pub queue_descriptors: VolatileCell<PhysAddr>,
+	pub queue_driver: VolatileCell<PhysAddr>,
+	pub queue_device: VolatileCell<PhysAddr>,
 }
 
 impl CommonConfig {

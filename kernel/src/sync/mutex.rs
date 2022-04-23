@@ -17,7 +17,6 @@ impl<T> Mutex<T> {
 		}
 	}
 
-	#[track_caller]
 	pub fn lock(&self) -> Guard<T> {
 		// TODO detect double locks by same thread
 		loop {

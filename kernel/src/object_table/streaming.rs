@@ -11,29 +11,23 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 #[derive(Default)]
 pub struct StreamingTable {
 	name: Box<str>,
-	//event_wakers: Mutex<(usize, Vec<EventWaker>)>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(StreamJob, StreamTicketWaker)>>,
-	tickets: Mutex<Vec<(JobId, StreamTicketWaker)>>,
+	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>)>>,
+	tickets: Mutex<Vec<(JobId, AnyTicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
-	/// A self reference is necessary for taking/finishing jos, which correspond to read/write
-	/// provided by the Object trait. This trait uses `&self` and not `self: Arc<Self>` since
-	/// the latter would add a non-trivial cost for what is presumably not needed very often.
-	self_ref: Weak<Self>,
 }
 
 impl StreamingTable {
 	pub fn new(name: Box<str>) -> Arc<Self> {
-		Arc::new_cyclic(|self_ref| Self {
+		Arc::new(Self {
 			name,
-			self_ref: self_ref.clone(),
 			..Default::default()
 		})
 	}
 
 	fn submit_job<T>(&self, job: JobRequest) -> Ticket<T>
 	where
-		StreamTicketWaker: From<TicketWaker<T>>,
+		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
 
@@ -49,12 +43,32 @@ impl StreamingTable {
 				}
 			} else {
 				let mut l = self.jobs.lock();
-				l.push((StreamJob { job_id, job }, ticket_waker.into()));
+				l.push((StreamJob { job_id, job }, Some(ticket_waker.into())));
 				break;
 			}
 		}
 
 		ticket.into()
+	}
+
+	/// Submit a job for which no response is expected, i.e. `finish_job` should *not* be called.
+	fn submit_oneway_job(&self, job: JobRequest) {
+		// Perhaps not strictly necessary, but let's try to prevent potential confusion.
+		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+
+		loop {
+			let j = self.job_handlers.lock().pop();
+			if let Some(w) = j {
+				if let Ok(mut w) = w.lock() {
+					w.complete((job_id, job));
+					break;
+				}
+			} else {
+				let mut l = self.jobs.lock();
+				l.push((StreamJob { job_id, job }, None));
+				break;
+			}
+		}
 	}
 }
 
@@ -77,9 +91,9 @@ impl Table for StreamingTable {
 		self.submit_job(JobRequest::Create { path: path.into() })
 	}
 
-	fn take_job(self: Arc<Self>, timeout: Duration) -> JobTask {
+	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
 		let job = self.jobs.lock().pop().map(|(job, tkt)| {
-			self.tickets.lock().push((job.job_id, tkt));
+			tkt.map(|tkt| self.tickets.lock().push((job.job_id, tkt)));
 			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
@@ -180,6 +194,16 @@ impl Object for StreamObject {
 	}
 }
 
+impl Drop for StreamObject {
+	fn drop(&mut self) {
+		Weak::upgrade(&self.table).map(|table| {
+			table.submit_oneway_job(JobRequest::Close {
+				handle: self.handle,
+			});
+		});
+	}
+}
+
 struct StreamQuery {
 	table: Arc<StreamingTable>,
 	handle: Handle,
@@ -202,41 +226,6 @@ impl Drop for StreamQuery {
 		todo!()
 	}
 }
-
-enum StreamTicketWaker {
-	Object(TicketWaker<Arc<dyn Object>>),
-	Usize(TicketWaker<usize>),
-	U64(TicketWaker<u64>),
-	Data(TicketWaker<Box<[u8]>>),
-	Query(TicketWaker<Box<dyn Query>>),
-	QueryResult(TicketWaker<QueryResult>),
-}
-
-macro_rules! stream_ticket {
-	($t:ty => $v:ident, $f:ident) => {
-		impl From<TicketWaker<$t>> for StreamTicketWaker {
-			fn from(t: TicketWaker<$t>) -> Self {
-				Self::$v(t)
-			}
-		}
-
-		impl StreamTicketWaker {
-			#[track_caller]
-			fn $f(self) -> TicketWaker<$t> {
-				match self {
-					Self::$v(t) => t,
-					_ => unreachable!(),
-				}
-			}
-		}
-	};
-}
-stream_ticket!(Arc<dyn Object> => Object, into_object);
-stream_ticket!(usize => Usize, into_usize);
-stream_ticket!(u64 => U64, into_u64);
-stream_ticket!(Box<[u8]> => Data, into_data);
-stream_ticket!(Box<dyn Query> => Query, into_query);
-stream_ticket!(QueryResult => QueryResult, into_query_result);
 
 struct StreamJob {
 	job_id: JobId,

@@ -12,6 +12,7 @@ rsdp = "*"
 pci = { path = "../lib/rust/pci" }
 cfg-if = "1.0"
 norostb_kernel = { path = "../lib/rust/kernel" }
+arena = { path = "../lib/rust/arena" }
 
 [features]
 default = ["mem-max-16t", "driver-pci", "driver-hpet"]
@@ -20,4 +21,4 @@ mem-max-256m = []
 driver-pci = []
 driver-hpet = []
 driver-pic = []
-
+debug-sanitize-heap = []

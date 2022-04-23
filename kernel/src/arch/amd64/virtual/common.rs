@@ -1,8 +1,5 @@
-use crate::memory::frame;
-use crate::memory::Page;
-use core::arch::asm;
-use core::fmt;
-use core::ptr;
+use crate::memory::{frame, Page};
+use core::{arch::asm, fmt, ptr};
 
 // Don't implement copy to avoid accidentally updating stack values instead of
 // entries in a table.
@@ -73,7 +70,7 @@ impl Entry {
 			// The borrow checked is retarded, so this will have to do.
 			Ok(self.as_table_mut().unwrap())
 		} else if self.is_leaf() {
-			Err(MakeTableError::IsMapped)
+			Err(MakeTableError::IsLeaf)
 		} else {
 			let mut frame = None;
 			frame::allocate(1, |f| frame = Some(f), self as *mut _ as *mut _, hint_color)?;
@@ -150,7 +147,7 @@ impl fmt::Debug for Entry {
 
 #[derive(Debug)]
 pub enum MakeTableError {
-	IsMapped,
+	IsLeaf,
 	OutOfFrames,
 }
 
@@ -215,7 +212,7 @@ pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 		IDENTITY_MAP_ADDRESS as *const _ <= virt && virt <= u64::MAX as *const _,
 		"virt out of range"
 	);
-	virt.offset_from(IDENTITY_MAP_ADDRESS).try_into().unwrap()
+	unsafe { virt.offset_from(IDENTITY_MAP_ADDRESS).try_into().unwrap() }
 }
 
 /// # Safety
@@ -223,5 +220,5 @@ pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 /// `phys` must be in range, i.e. lower than `1 << 46`.
 pub unsafe fn phys_to_virt(phys: u64) -> *mut u8 {
 	debug_assert!(phys < 1 << 46, "phys out of range");
-	IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap())
+	unsafe { IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap()) }
 }

@@ -19,7 +19,7 @@ impl Monotonic {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[cfg(not(feature = "driver-hpet"))]
 	pub fn from_seconds(s: u128) -> Self {
 		Self {
 			nanoseconds: (s * 1_000_000_000)

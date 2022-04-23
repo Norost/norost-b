@@ -71,13 +71,25 @@ static DESTRUCTORS: [AtomicPtr<()>; ENTRIES] = [const { AtomicPtr::new(ptr::null
 ///
 /// # Safety
 ///
-/// This function may only be called once per thread.
+/// This function may only be called once before `deinit_thread`.
 #[inline]
-pub unsafe fn init_thread<F, R>(alloc: F) -> Result<(), R>
-where
-	F: FnOnce(usize) -> Result<NonNull<*mut ()>, R>,
-{
-	alloc(ENTRIES * mem::size_of::<Entry>()).map(|p| super::set_tls(p.as_ptr().cast()))
+pub unsafe fn init_thread(alloc: impl FnOnce(usize) -> NonNull<[u8]>) {
+	let ptr = alloc(ENTRIES * mem::size_of::<Entry>());
+	super::set_tls(ptr.as_ptr().as_mut_ptr().cast());
+}
+
+/// Initialize TLS storage for a single thread.
+///
+/// # Safety
+///
+/// This function may only be called once after `init_thread`.
+#[inline]
+pub unsafe fn deinit_thread(dealloc: impl FnOnce(NonNull<[u8]>)) {
+	let ptr = NonNull::new(super::get_tls()).unwrap();
+	dealloc(NonNull::slice_from_raw_parts(
+		ptr.cast(),
+		ENTRIES * mem::size_of::<Entry>(),
+	));
 }
 
 /// Allocate a key.

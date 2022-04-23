@@ -38,11 +38,13 @@ where
 
 	let phys = pci.physical_address(0, 0, 0, 0).unwrap();
 	let size = 256 * 32 * 8 * 4096;
-	let virt = add_identity_mapping(phys.try_into().unwrap(), size).unwrap();
+	let virt = unsafe { add_identity_mapping(phys.try_into().unwrap(), size).unwrap() };
 
-	let mut pci = Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]);
+	let mut pci = unsafe { Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]) };
 
-	allocate_irqs(&mut pci);
+	unsafe {
+		allocate_irqs(&mut pci);
+	}
 
 	*PCI.lock() = Some(pci);
 
@@ -77,7 +79,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 
 					let ppn = PPN::try_from_usize((table & !0xfff).try_into().unwrap()).unwrap();
 					AddressSpace::identity_map(ppn, 4096);
-					let table = phys_to_virt(table);
+					let table = unsafe { phys_to_virt(table) };
 					let table = unsafe {
 						core::slice::from_raw_parts_mut(
 							table.cast::<pci::msix::TableEntry>(),
@@ -90,10 +92,6 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 					if pending_ppn != ppn {
 						AddressSpace::identity_map(pending_ppn, 4096);
 					}
-					let pending = phys_to_virt(pending);
-					let pending = unsafe {
-						core::slice::from_raw_parts_mut(pending.cast::<u64>(), table_size)
-					};
 
 					for e in table.iter_mut() {
 						let irq;
@@ -101,7 +99,9 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 						irq = {
 							use crate::arch::amd64;
 							let irq = amd64::allocate_irq().expect("irq");
-							amd64::idt_set(irq.into(), crate::wrap_idt!(int irq_handler));
+							unsafe {
+								amd64::idt_set(irq.into(), crate::wrap_idt!(int irq_handler));
+							}
 							irq
 						};
 

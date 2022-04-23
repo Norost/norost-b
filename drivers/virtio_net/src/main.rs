@@ -8,44 +8,26 @@ mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{self as kernel, io::Job, syscall};
+use norostb_kernel::{
+	io::{Empty, Job, Queue, Request},
+	syscall,
+};
 use smoltcp::socket::TcpState;
+use std::fs;
+use std::os::norostb::prelude::*;
 use std::str::FromStr;
 
 fn main() {
-	println!("Hello, internet!");
+	let dev_handle = {
+		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1000")
+			.unwrap()
+			.next()
+			.unwrap()
+			.unwrap();
+		fs::File::open(dev.path()).unwrap().into_handle()
+	};
 
-	let mut buf = [0; 256];
-	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
-
-	// Find virtio-net-pci device
-	let mut id = None;
-	let mut dev = None;
-	println!("iter tables");
-	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
-		if inf.name() == b"pci" {
-			let tags = b"vendor-id:1af4&device-id:1000";
-			let h = std::os::norostb::query(i, tags).unwrap();
-			println!("{:?}", h);
-			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				println!("{:#?}", &obj);
-				dev = Some((i, &buf[..obj.path_len]));
-				break 'found_dev;
-			}
-		}
-		id = Some(i);
-	}
-
-	let (tbl, dev) = dev.unwrap();
-
-	// Reserve & initialize device
-	let handle = std::os::norostb::open(tbl, dev).unwrap();
-
-	let pci_config = NonNull::new(0x1000_0000 as *mut _);
-	let pci_config = syscall::map_object(handle, pci_config, 0, usize::MAX).unwrap();
-
-	println!("handle: {:?}", handle);
+	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -53,57 +35,32 @@ fn main() {
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
 	let dev = unsafe { core::mem::transmute::<&_, &_>(&dev) };
 
-	let mut dma_addr = 0x2666_0000;
-
 	let (dev, addr) = {
 		match dev {
 			pci::Header::H0(h) => {
-				for (i, b) in h.base_address.iter().enumerate() {
-					println!("{}: {:x}", i, b.get());
-				}
-
-				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
-
-				let get_phys_addr = |addr| {
-					let addr = NonNull::new(addr as *mut _).unwrap();
-					syscall::physical_address(addr).unwrap()
-				};
 				let map_bar = |bar: u8| {
-					let addr = map_addr.cast();
-					syscall::map_object(handle, NonNull::new(addr), (bar + 1).into(), usize::MAX)
-						.unwrap();
-					map_addr = map_addr.wrapping_add(16);
-					NonNull::new(addr as *mut _).unwrap()
+					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
+						.unwrap()
+						.cast()
 				};
-				let dma_alloc = |size| {
-					println!("dma: {:#x}", dma_addr);
-					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
-					println!("  adr: {:p}", d);
-					let res = syscall::alloc_dma(Some(d), size).unwrap();
-					println!("  res: {} (>= {})", res, size);
-					dma_addr += res;
+				let dma_alloc = |size, _align| -> Result<_, ()> {
+					let (d, _) = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
-					Ok((d.cast(), a))
+					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
-				let d = virtio_net::Device::new(h, get_phys_addr, map_bar, dma_alloc).unwrap();
-
-				println!("pci status: {:#x}", h.status());
-
-				d
+				unsafe { virtio_net::Device::new(h, map_bar, dma_alloc).unwrap() }
 			}
 			_ => unreachable!(),
 		}
 	};
 
 	// Wrap the device for use with smoltcp
-	use smoltcp::{iface, phy, socket, time, wire};
+	use smoltcp::{iface, socket, time, wire};
 	let dev = dev::Dev::new(dev);
-	//let dev = phy::Tracer::new(dev, |t, p| println!("[{}] {}", t, p));
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
 	let mut sockets = [iface::SocketStorage::EMPTY; 8];
 	let mut neighbors = [None; 8];
 	let mut routes = [None; 8];
-	println!("{:?}", &addr);
 	let mut iface = iface::InterfaceBuilder::new(dev, &mut sockets[..])
 		.ip_addrs(&mut ip_addrs[..])
 		.hardware_addr(wire::EthernetAddress(*addr.as_ref()).into())
@@ -117,30 +74,11 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-net", syscall::TableType::Streaming).unwrap();
 
-	// Create a TCP listener
-	let mut rx @ mut tx = [0; 2048];
-	let rx = socket::TcpSocketBuffer::new(&mut rx[..]);
-	let tx = socket::TcpSocketBuffer::new(&mut tx[..]);
-	let tcp = iface.add_socket(socket::TcpSocket::new(rx, tx));
-
 	#[derive(Clone, Copy)]
 	enum Protocol {
 		Udp,
 		Tcp,
 	}
-
-	/*
-	enum Socket {
-		Udp {
-			socket: socket::UdpSocket,
-			address: IpEndpoint,
-		},
-		Tcp {
-			socket: socket::TcpSocket,
-			state: TcpState
-		},
-	}
-	*/
 
 	let mut t = time::Instant::from_secs(0);
 	let mut buf = [0; 2048];
@@ -148,7 +86,23 @@ fn main() {
 
 	let mut connecting_tcp_sockets = Vec::new();
 
-	let mut job = std::os::norostb::Job::default();
+	let mut job = Job::default();
+	job.buffer = NonNull::new(buf.as_mut_ptr());
+	job.buffer_size = buf.len().try_into().unwrap();
+
+	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
+	let job_queue = syscall::create_io_queue(None, 0, 0).unwrap();
+	let mut job_queue = Queue {
+		base: job_queue.cast(),
+		requests_mask: 0,
+		responses_mask: 0,
+	};
+
+	unsafe {
+		job_queue
+			.enqueue_request(Request::take_job(0, tbl, &mut job))
+			.unwrap();
+	}
 
 	loop {
 		// Advance TCP connection state.
@@ -164,7 +118,7 @@ fn main() {
 						smoltcp::wire::IpEndpoint::UNSPECIFIED,
 						Protocol::Tcp,
 					));
-					let job = std::os::norostb::Job {
+					let std_job = std::os::norostb::Job {
 						ty: Job::CREATE,
 						job_id,
 						flags: [0; 3],
@@ -175,17 +129,20 @@ fn main() {
 						from_anchor: 0,
 						from_offset: 0,
 					};
-					std::os::norostb::finish_job(tbl, &job).unwrap();
+					std::os::norostb::finish_job(tbl, &std_job).unwrap();
+					unsafe {
+						job_queue
+							.enqueue_request(Request::take_job(0, tbl, &mut job))
+							.unwrap();
+					}
 				}
 				s => todo!("{:?}", s),
 			}
 		}
 
-		while let Ok(()) = {
-			job.buffer = NonNull::new(buf.as_mut_ptr());
-			job.buffer_size = buf.len().try_into().unwrap();
-			std::os::norostb::take_job(tbl, &mut job)
-		} {
+		syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
+
+		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
 			match job.ty {
 				Job::CREATE => {
 					let s = &buf[..job.operation_size as usize];
@@ -253,7 +210,7 @@ fn main() {
 					job.handle = (objects.len() - 1).try_into().unwrap();
 				}
 				Job::READ => {
-					let (sock, addr, prot) = objects[job.handle as usize];
+					let (sock, _addr, prot) = objects[job.handle as usize];
 					match prot {
 						Protocol::Udp => {
 							todo!("address");
@@ -272,6 +229,7 @@ fn main() {
 							} else {
 								job.buffer_size = 0;
 							}
+							job.operation_size = job.buffer_size;
 						}
 					}
 				}
@@ -286,14 +244,30 @@ fn main() {
 						Protocol::Tcp => {
 							let sock = iface.get_socket::<socket::TcpSocket>(sock);
 							let data = &buf[..job.operation_size as usize];
-							let e = sock.send_slice(data);
+							sock.send_slice(data).unwrap();
 						}
 					}
+				}
+				Job::CLOSE => {
+					todo!();
 				}
 				t => todo!("job type {}", t),
 			}
 
-			std::os::norostb::finish_job(tbl, &job).unwrap();
+			unsafe {
+				job_queue
+					.enqueue_request(Request::finish_job(0, tbl, &job))
+					.unwrap();
+			}
+			syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
+			while let Err(Empty) = unsafe { job_queue.dequeue_response() } {
+				syscall::wait_io_queue(Some(job_queue.base.cast())).unwrap();
+			}
+			unsafe {
+				job_queue
+					.enqueue_request(Request::take_job(0, tbl, &mut job))
+					.unwrap();
+			}
 		}
 
 		iface.poll(t).unwrap();

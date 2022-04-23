@@ -1,4 +1,5 @@
 use super::msr;
+use crate::memory::{frame, Page};
 use crate::scheduler::process::Process;
 use crate::scheduler::syscall;
 use crate::scheduler::Thread;
@@ -11,62 +12,74 @@ use core::cell::Cell;
 use core::ptr::{self, NonNull};
 
 pub unsafe fn init() {
-	// Enable syscall/sysenter
-	msr::set_bits(msr::IA32_EFER, msr::IA32_EFER_SCE, true);
+	unsafe {
+		// Enable syscall/sysenter
+		msr::set_bits(msr::IA32_EFER, msr::IA32_EFER_SCE, true);
 
-	// Set STAR kernel CS and user CS
-	// Notes from OSDev wiki:
-	// * SYSCALL loads CS from STAR 47:32
-	// * It then loads SS from STAR 47:32 + 8.
-	// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
-	// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
-	//   userland SS will be loaded from STAR 63:48 + 8
-	msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2) << 48);
-	// Set LSTAR to handler
-	//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
-	msr::wrmsr(msr::LSTAR, handler as u64);
+		// Set STAR kernel CS and user CS
+		// Notes from OSDev wiki:
+		// * SYSCALL loads CS from STAR 47:32
+		// * It then loads SS from STAR 47:32 + 8.
+		// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
+		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
+		//   userland SS will be loaded from STAR 63:48 + 8
+		msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2) << 48);
+		// Set LSTAR to handler
+		//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
+		msr::wrmsr(msr::LSTAR, handler as u64);
 
-	// Set GS_BASE to a per-cpu structure
-	let data = Box::leak(Box::<CpuData>::new_uninit());
-	msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
+		let mut cpu_stack = None;
+		frame::allocate(1, |f| cpu_stack = Some(f), 0 as _, 0).unwrap();
+		let cpu_stack = cpu_stack.unwrap().base.as_ptr();
+		let cpu_stack_ptr = cpu_stack.cast::<Page>().wrapping_add(1).cast();
+
+		// Set GS_BASE to a per-cpu structure
+		let data = Box::leak(Box::new(CpuData {
+			user_stack_ptr: ptr::null_mut(),
+			kernel_stack_ptr: ptr::null_mut(),
+			process: ptr::null_mut(),
+			thread: ptr::null(),
+			cpu_stack_ptr,
+		}));
+		msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
+	}
 }
 
 pub unsafe fn set_current_thread(thread: Arc<Thread>) {
-	// Remove reference to current thread.
-	let old_thr: *const Thread;
-	asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
-	if !old_thr.is_null() {
-		Arc::from_raw(old_thr);
+	unsafe {
+		unref_current_thread();
+
+		// Load fs, gs
+		msr::wrmsr(msr::FS_BASE, thread.arch_specific.fs.get());
+		msr::wrmsr(msr::KERNEL_GS_BASE, thread.arch_specific.gs.get());
+
+		// Set reference to new thread.
+		let user_stack = thread
+			.user_stack
+			.get()
+			.map_or_else(ptr::null_mut, NonNull::as_ptr);
+		asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
+		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().unwrap().as_ptr());
+		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(thread.process()));
+		asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 	}
-
-	// Load fs, gs
-	msr::wrmsr(msr::FS_BASE, thread.arch_specific.fs.get());
-	msr::wrmsr(msr::KERNEL_GS_BASE, thread.arch_specific.gs.get());
-
-	// Set reference to new thread.
-	let user_stack = thread
-		.user_stack
-		.get()
-		.map_or_else(ptr::null_mut, NonNull::as_ptr);
-	asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
-	asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().as_ptr());
-	asm!("mov gs:[2 * 8], {0}", in(reg) thread.process.as_ptr());
-	asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
 }
 
 /// Copy thread state from the CPU data to the thread.
 pub unsafe fn save_current_thread_state() {
-	let (us, ks, tr): (*mut _, *mut _, *const Thread);
-	asm!("mov {0}, gs:[3 * 8]", lateout(reg) tr);
-	let tr = &*tr;
-	asm!("mov {0}, gs:[0 * 8]", lateout(reg) us);
-	tr.user_stack.set(NonNull::new(us));
-	asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
-	tr.kernel_stack.set(NonNull::new(ks).unwrap_unchecked());
+	unsafe {
+		let (us, ks, tr): (*mut _, *mut _, *const Thread);
+		asm!("mov {0}, gs:[3 * 8]", lateout(reg) tr);
+		let tr = &*tr;
+		asm!("mov {0}, gs:[0 * 8]", lateout(reg) us);
+		tr.user_stack.set(NonNull::new(us));
+		asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
+		tr.kernel_stack.set(Some(NonNull::new(ks).unwrap()));
 
-	// Save fs, gs
-	tr.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
-	tr.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
+		// Save fs, gs
+		tr.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
+		tr.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
+	}
 }
 
 #[repr(C)]
@@ -75,6 +88,7 @@ struct CpuData {
 	kernel_stack_ptr: *mut usize,
 	process: *mut Process,
 	thread: *const Thread,
+	cpu_stack_ptr: *mut (),
 }
 
 #[derive(Default)]
@@ -85,102 +99,143 @@ pub struct ThreadData {
 
 #[naked]
 unsafe extern "C" fn handler() {
-	asm!("
-		# Load kernel stack
-		swapgs
-		mov		gs:[0], rsp		# Save user stack ptr
-		mov		rsp, gs:[8]		# Load kernel stack ptr
+	unsafe {
+		asm!("
+			# Load kernel stack
+			swapgs
+			mov		gs:[0], rsp		# Save user stack ptr
+			mov		rsp, gs:[8]		# Load kernel stack ptr
 
-		# Save thread registers (except rax & rdx, we overwrite those anyways)
-		push	r15
-		push	r14
-		push	r13
-		push	r12
-		push	r11
-		push	r10
-		push	r9
-		push	r8
-		push	rbp
-		push	rdi
-		push	rsi
-		push	rdi
-		push	rcx
-		push	rbx
+			# Save thread registers (except rax & rdx, we overwrite those anyways)
+			push	r15
+			push	r14
+			push	r13
+			push	r12
+			push	r11
+			push	r10
+			push	r9
+			push	r8
+			push	rbp
+			push	rdi
+			push	rsi
+			push	rdi
+			push	rcx
+			push	rbx
 
-		# Check if the syscall ID is valid
-		# Jump forward to take advantage of static prediction
-		cmp		rax, {syscall_count}
-		jae		1f
+			# Check if the syscall ID is valid
+			# Jump forward to take advantage of static prediction
+			cmp		rax, {syscall_count}
+			jae		1f
 
-		# Call the appropriate handler
-		# TODO figure out how to do this in one instruction
-		lea		rcx, [rip + syscall_table]
-		lea		rax, [rcx + rax * 8]
-		mov		rcx, r10 # r10 is used as 4th parameter
-		call	[rax]
+			# Call the appropriate handler
+			# TODO figure out how to do this in one instruction
+			lea		rcx, [rip + syscall_table]
+			lea		rax, [rcx + rax * 8]
+			mov		rcx, r10 # r10 is used as 4th parameter
+			call	[rax]
 
-	2:
-		pop		rbx
-		pop		rcx
-		pop		rdi
-		pop		rsi
-		pop		rdi
-		pop		rbp
-		pop		r8
-		pop		r9
-		pop		r10
-		pop		r11
-		pop		r12
-		pop		r13
-		pop		r14
-		pop		r15
+		2:
+			pop		rbx
+			pop		rcx
+			pop		rdi
+			pop		rsi
+			pop		rdi
+			pop		rbp
+			pop		r8
+			pop		r9
+			pop		r10
+			pop		r11
+			pop		r12
+			pop		r13
+			pop		r14
+			pop		r15
 
-		# Save kernel stack in case it got overwritten
-		mov		gs:[8], rsp
+			# Save kernel stack in case it got overwritten
+			mov		gs:[8], rsp
 
-		# Restore user stack pointer
-		mov		rsp, gs:[0]
+			# Restore user stack pointer
+			mov		rsp, gs:[0]
 
-		# Swap to user GS for TLS
-		swapgs
+			# Swap to user GS for TLS
+			swapgs
 
-		# Go back to user mode
-		rex64 sysret
+			# Go back to user mode
+			rex64 sysret
 
-		# Set error code and return
-	1:
-		mov		rax, -1
-		xor		edx, edx
-		jmp		2b
-	", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
+			# Set error code and return
+		1:
+			mov		rax, -1
+			xor		edx, edx
+			jmp		2b
+		", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
+	}
 }
 
-pub fn current_process<'a>() -> &'a mut Process {
+pub fn current_process() -> Option<Arc<Process>> {
 	unsafe {
 		let process: *mut Process;
-		asm!("mov {0}, gs:[0x10]", out(reg) process);
-		&mut *process
+		asm!("mov {0}, gs:[2 * 8]", out(reg) process);
+		(!process.is_null()).then(|| {
+			let process = Arc::from_raw(process);
+			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+			let _ = Arc::into_raw(process.clone());
+			process
+		})
 	}
 }
 
-pub fn current_thread() -> Arc<Thread> {
+pub fn current_thread() -> Option<Arc<Thread>> {
 	unsafe {
 		let thread: *const Thread;
-		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		let r = Arc::from_raw(thread);
-		let s = r.clone();
-		let _ = Arc::into_raw(r);
-		s
+		asm!("mov {0}, gs:[3 * 8]", out(reg) thread);
+		(!thread.is_null()).then(|| {
+			let thread = Arc::from_raw(thread);
+			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
+			let _ = Arc::into_raw(thread.clone());
+			thread
+		})
 	}
 }
 
-pub fn current_thread_weak() -> Weak<Thread> {
+pub fn current_thread_weak() -> Option<Weak<Thread>> {
 	unsafe {
 		let thread: *const Thread;
 		asm!("mov {0}, gs:[0x18]", out(reg) thread);
-		let r = Arc::from_raw(thread);
-		let w = Arc::downgrade(&r);
-		let _ = Arc::into_raw(r);
-		w
+		(!thread.is_null()).then(|| {
+			let thread = Arc::from_raw(thread);
+			let weak = Arc::downgrade(&thread);
+			let _ = Arc::into_raw(thread);
+			weak
+		})
+	}
+}
+
+pub(super) fn cpu_stack() -> *mut () {
+	unsafe {
+		let stack: *mut ();
+		asm!("mov {0}, gs:[4 * 8]", out(reg) stack);
+		stack
+	}
+}
+
+/// Clear the current thread & process from the local CPU data.
+pub fn clear_current_thread() {
+	unsafe {
+		unref_current_thread();
+		asm!("mov gs:[0 * 8], {}", in(reg) ptr::null::<usize>());
+		asm!("mov gs:[1 * 8], {}", in(reg) ptr::null::<usize>());
+		asm!("mov gs:[2 * 8], {}", in(reg) ptr::null::<Process>());
+		asm!("mov gs:[3 * 8], {}", in(reg) ptr::null::<Thread>());
+	}
+}
+
+/// Remove reference to current thread.
+unsafe fn unref_current_thread() {
+	unsafe {
+		let old_thr: *const Thread;
+		asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
+		if !old_thr.is_null() {
+			Arc::from_raw(old_thr);
+		}
 	}
 }

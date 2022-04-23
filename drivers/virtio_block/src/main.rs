@@ -4,87 +4,42 @@
 #![feature(rustc_private)]
 
 use core::ptr::NonNull;
-use norostb_kernel::{self as kernel, io::Job, syscall};
+use norostb_kernel::{io::Job, syscall};
+use std::fs;
+use std::os::norostb::prelude::*;
 use virtio_block::Sector;
 
 fn main() {
-	println!("Hello, world! from Rust");
-
-	let mut buf = [0; 256];
-	let mut obj = std::os::norostb::ObjectInfo::new(&mut buf);
-
-	let mut id = None;
-	let mut dev = None;
-	println!("iter tables");
-	'found_dev: while let Some((i, inf)) = syscall::next_table(id) {
-		println!("table: {:?} -> {:?}", i, core::str::from_utf8(inf.name()));
-		if inf.name() == b"pci" {
-			let tags = b"vendor-id:1af4&device-id:1001";
-			let h = std::os::norostb::query(i, tags).unwrap();
-			println!("{:?}", h);
-			while let Ok(true) = std::os::norostb::query_next(h, &mut obj) {
-				println!("{:#?}", &obj);
-				dev = Some((i, &buf[..obj.path_len]));
-				break 'found_dev;
-			}
-		}
-		id = Some(i);
-	}
-
-	let (tbl, dev) = dev.unwrap();
-	dbg!(core::str::from_utf8(dev));
-	let dev_handle = std::os::norostb::open(tbl, dev).unwrap();
-
-	let pci_config = NonNull::new(0x1000_0000 as *mut _);
-	let pci_config = syscall::map_object(dev_handle, pci_config, 0, usize::MAX).unwrap();
+	let dev_handle = {
+		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1001")
+			.unwrap()
+			.next()
+			.unwrap()
+			.unwrap();
+		fs::File::open(dev.path()).unwrap().into_handle()
+	};
+	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
-
-	let mut dma_addr = 0x2666_0000;
 
 	let mut dev = {
 		let h = pci.get(0, 0, 0).unwrap();
 		match h {
 			pci::Header::H0(h) => {
-				for (i, b) in h.base_address.iter().enumerate() {
-					println!("{}: {:x}", i, b.get());
-				}
-
-				let mut map_addr = 0x2000_0000 as *mut kernel::Page;
-
-				let get_phys_addr = |addr| {
-					let addr = NonNull::new(addr as *mut _).unwrap();
-					syscall::physical_address(addr).unwrap()
-				};
 				let map_bar = |bar: u8| {
-					let addr = map_addr.cast();
-					syscall::map_object(
-						dev_handle,
-						NonNull::new(addr),
-						(bar + 1).into(),
-						usize::MAX,
-					)
-					.unwrap();
-					map_addr = map_addr.wrapping_add(16);
-					NonNull::new(addr as *mut _).unwrap()
+					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
+						.unwrap()
+						.cast()
 				};
-				let dma_alloc = |size| {
-					println!("dma: {:#x}", dma_addr);
-					let d = core::ptr::NonNull::new(dma_addr as *mut _).unwrap();
-					let res = syscall::alloc_dma(Some(d), size).unwrap();
-					dma_addr += res;
+				let dma_alloc = |size, _align| -> Result<_, ()> {
+					let (d, _) = syscall::alloc_dma(None, size).unwrap();
 					let a = syscall::physical_address(d).unwrap();
-					Ok((d.cast(), a))
+					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
 
 				let msix = virtio_block::Msix { queue: Some(0) };
 
-				let d = virtio_block::BlockDevice::new(h, get_phys_addr, map_bar, dma_alloc, msix)
-					.unwrap();
-
-				println!("pci status: {:#x}", h.status());
-
-				d
+				unsafe { virtio_block::BlockDevice::new(h, map_bar, dma_alloc, msix).unwrap() }
 			}
 			_ => unreachable!(),
 		}
@@ -93,7 +48,19 @@ fn main() {
 	// Register new table of Streaming type
 	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
 
-	let mut sectors = [Sector::default(); 8];
+	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
+	let sectors_phys = virtio::PhysRegion {
+		base: virtio::PhysAddr::new(
+			syscall::physical_address(sectors)
+				.unwrap()
+				.try_into()
+				.unwrap(),
+		),
+		size: 4096,
+	};
+	let sectors = unsafe {
+		core::slice::from_raw_parts_mut(sectors.cast::<Sector>().as_ptr(), 4096 / Sector::SIZE)
+	};
 
 	let mut queries = driver_utils::Arena::new();
 	let mut data_handles = driver_utils::Arena::new();
@@ -115,6 +82,10 @@ fn main() {
 			continue;
 		}
 
+		let wait = || {
+			std::os::norostb::poll(dev_handle).unwrap();
+		};
+
 		match job.ty {
 			Job::OPEN => {
 				job.handle = data_handles.insert(0);
@@ -125,13 +96,12 @@ fn main() {
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
 
-				dev.read(&mut sectors, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.read(sectors_phys, sector, wait).unwrap();
+				}
 
 				let size = job.operation_size.min(
-					(Sector::slice_as_u8(&sectors).len() - usize::from(offset))
+					(Sector::slice_as_u8(sectors).len() - usize::from(offset))
 						.try_into()
 						.unwrap(),
 				);
@@ -149,19 +119,17 @@ fn main() {
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
 
-				dev.read(&mut sectors, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.read(sectors_phys, sector, wait).unwrap();
+				}
 
 				let data = &buf[..job.operation_size as usize];
-				Sector::slice_as_u8_mut(&mut sectors)[offset.into()..][..data.len()]
+				Sector::slice_as_u8_mut(sectors)[offset.into()..][..data.len()]
 					.copy_from_slice(data);
 
-				dev.write(&sectors, sector, || {
-					std::os::norostb::poll(dev_handle).unwrap();
-				})
-				.unwrap();
+				unsafe {
+					dev.write(sectors_phys, sector, wait).unwrap();
+				}
 
 				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
 			}
@@ -194,6 +162,11 @@ fn main() {
 					_ => todo!(),
 				};
 				data_handles[job.handle] = offset;
+			}
+			Job::CLOSE => {
+				data_handles.remove(job.handle);
+				// The kernel does not expect a response.
+				continue;
 			}
 			t => todo!("job type {}", t),
 		}

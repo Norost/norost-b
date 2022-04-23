@@ -1,7 +1,13 @@
 use core::arch::asm;
 
-pub unsafe fn set_tls(tls: *const ()) {
+pub unsafe fn set_tls(tls: *mut ()) {
 	asm!("wrfsbase {tls}", tls = in(reg) tls);
+}
+
+pub unsafe fn get_tls() -> *mut () {
+	let tls: *mut ();
+	asm!("rdfsbase {tls}", tls = out(reg) tls);
+	tls
 }
 
 pub unsafe fn read_tls_offset(offset: usize) -> usize {

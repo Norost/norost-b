@@ -63,6 +63,7 @@ fn main() -> std::io::Result<()> {
 				writeln!(term, "  read   <name> [amount]  Read from an object")?;
 				writeln!(term, "  write  <name> <data>    Write to an object")?;
 				writeln!(term, "  vars                    List variables")?;
+				writeln!(term, "  exit   [code]           Exit this shell")?;
 			}
 			b"ls" => {
 				let Some(path) = maybe_next_str(&mut term, &mut args)? else { continue; };
@@ -152,6 +153,18 @@ fn main() -> std::io::Result<()> {
 				for v in vars.keys() {
 					writeln!(term, "{}", v)?;
 				}
+			}
+			b"exit" => {
+				let Some(code) = maybe_next_str(&mut term, &mut args)? else { continue; };
+				let Ok(code) = (if code == "" {
+					Ok(0)
+				} else {
+					code.parse()
+				}) else {
+					writeln!(term, "Code is not a valid number")?;
+					continue;
+				};
+				std::process::exit(code);
 			}
 			c => writeln!(
 				term,
