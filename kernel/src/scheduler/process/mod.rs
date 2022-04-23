@@ -6,7 +6,7 @@ use crate::arch;
 use crate::memory::frame::{self, AllocateHints};
 use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{Object, Query};
+use crate::object_table::{AnyTicket, JobTask, Object, Query};
 use crate::sync::Mutex;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
@@ -20,7 +20,31 @@ pub struct Process {
 	threads: Mutex<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
-	io_queues: Mutex<Vec<io::Queue>>,
+	io_queues: Mutex<Vec<(io::Queue, Vec<PendingTicket>)>>,
+}
+
+struct PendingTicket {
+	user_data: u64,
+	data_ptr: *mut u8,
+	data_len: usize,
+	ticket: TicketOrJob,
+}
+
+enum TicketOrJob {
+	Ticket(AnyTicket),
+	Job(JobTask),
+}
+
+impl<T: Into<AnyTicket>> From<T> for TicketOrJob {
+	fn from(t: T) -> Self {
+		Self::Ticket(t.into())
+	}
+}
+
+impl From<JobTask> for TicketOrJob {
+	fn from(t: JobTask) -> Self {
+		Self::Job(t)
+	}
 }
 
 impl Process {
@@ -42,7 +66,7 @@ impl Process {
 	/// Add an object to the process' object table.
 	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<Handle, AddObjectError> {
 		let mut objects = self.objects.lock();
-		Ok(erase_handle_type(objects.insert(object)))
+		Ok(erase_handle(objects.insert(object)))
 	}
 
 	/// Map a memory object to a memory range.
@@ -65,7 +89,7 @@ impl Process {
 		offset: u64,
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
-		let obj = self.objects.lock()[unerase_handle_type(handle)]
+		let obj = self.objects.lock()[unerase_handle(handle)]
 			.memory_object(offset)
 			.unwrap();
 		self.address_space
@@ -85,9 +109,9 @@ impl Process {
 	/// Duplicate a reference to an object.
 	pub fn duplicate_object_handle(&self, handle: Handle) -> Option<Handle> {
 		let mut objects = self.objects.lock();
-		if let Some(obj) = objects.get(unerase_handle_type(handle)) {
+		if let Some(obj) = objects.get(unerase_handle(handle)) {
 			let obj = obj.clone();
-			Some(erase_handle_type(objects.insert(obj)))
+			Some(erase_handle(objects.insert(obj)))
 		} else {
 			None
 		}
@@ -102,18 +126,15 @@ impl Process {
 	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
 		let mut threads = self.threads.lock();
 		let handle = threads.insert_with(|handle| {
-			Arc::new(Thread::new(start, stack, self.clone(), erase_handle_type(handle)).unwrap())
+			Arc::new(Thread::new(start, stack, self.clone(), erase_handle(handle)).unwrap())
 		});
 		super::round_robin::insert(Arc::downgrade(&threads.get(handle).unwrap()));
-		Ok(erase_handle_type(handle))
+		Ok(erase_handle(handle))
 	}
 
 	/// Get a thread.
 	pub fn get_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
-		self.threads
-			.lock()
-			.get(unerase_handle_type(handle))
-			.cloned()
+		self.threads.lock().get(unerase_handle(handle)).cloned()
 	}
 
 	/// Remove a thread.
@@ -169,14 +190,14 @@ impl Drop for Process {
 pub enum AddObjectError {}
 
 #[track_caller]
-fn erase_handle_type(handle: arena::Handle<u8>) -> Handle {
+fn erase_handle(handle: arena::Handle<u8>) -> Handle {
 	let (index, generation) = handle.into_raw();
 	assert!(index < 1 << 24, "can't construct unique handle");
 	(generation as u32) << 24 | index as u32
 }
 
 #[track_caller]
-fn unerase_handle_type(handle: Handle) -> arena::Handle<u8> {
+fn unerase_handle(handle: Handle) -> arena::Handle<u8> {
 	arena::Handle::from_raw(
 		(handle & 0xff_ffff).try_into().unwrap(),
 		(handle >> 24) as u8,

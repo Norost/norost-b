@@ -1107,10 +1107,10 @@ index 00000000000..87def158b98
 +}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
-index 00000000000..eabc9ef11ca
+index 00000000000..4c9ddf93d7e
 --- /dev/null
 +++ b/library/std/src/sys/norostb/io.rs
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,267 @@
 +use crate::cell::RefCell;
 +use crate::io;
 +use crate::mem::{self, MaybeUninit};
@@ -1285,7 +1285,9 @@ index 00000000000..eabc9ef11ca
 +pub fn query_next(query: syscall::Handle, info: &mut ObjectInfo) -> io::Result<bool> {
 +    let e = enqueue(Request::query_next(0, query, info));
 +    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
++        // FIXME the API for quering is kinda broken right now.
++        //Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
++        Ok(false)
 +    } else {
 +        Ok(e.value > 0)
 +    }
@@ -1319,17 +1321,16 @@ index 00000000000..eabc9ef11ca
 +#[unstable(feature = "norostb", issue = "none")]
 +#[inline]
 +pub fn seek(handle: syscall::Handle, from: io::SeekFrom) -> io::Result<u64> {
-+    let mut offset = 0;
 +    let from = match from {
 +        io::SeekFrom::Start(n) => SeekFrom::Start(n),
 +        io::SeekFrom::End(n) => SeekFrom::End(n),
 +        io::SeekFrom::Current(n) => SeekFrom::Current(n),
 +    };
-+    let e = enqueue(Request::seek(0, handle, from, &mut offset));
++    let e = enqueue(Request::seek(0, handle, from));
 +    if e.value < 0 {
 +        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to seek"))
 +    } else {
-+        Ok(offset)
++        Ok(e.value as u64)
 +    }
 +}
 +
