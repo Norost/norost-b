@@ -104,16 +104,6 @@ fn main() {
 			.unwrap();
 	}
 
-	// TODO this is stupid but also the easiest fix right now.
-	// The queue isn't truly asynchronous yet and process_io_queue in the
-	// kernel blocks on each request.
-	// Cast to usize because god fucking damn your "lints" Rust.
-	let job_queue_base = job_queue.base.as_ptr() as usize;
-	std::thread::spawn(move || loop {
-		syscall::sleep(std::time::Duration::from_millis(100));
-		syscall::process_io_queue(NonNull::new(job_queue_base as *mut _)).unwrap();
-	});
-
 	loop {
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
@@ -149,6 +139,8 @@ fn main() {
 				s => todo!("{:?}", s),
 			}
 		}
+
+		syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
 
 		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
 			match job.ty {
@@ -267,8 +259,9 @@ fn main() {
 					.enqueue_request(Request::finish_job(0, tbl, &job))
 					.unwrap();
 			}
+			syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
 			while let Err(Empty) = unsafe { job_queue.dequeue_response() } {
-				std::thread::sleep(std::time::Duration::from_millis(1));
+				syscall::wait_io_queue(Some(job_queue.base.cast())).unwrap();
 			}
 			unsafe {
 				job_queue

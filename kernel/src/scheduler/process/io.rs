@@ -1,12 +1,15 @@
 //! # I/O with user processes
 
-use super::{erase_handle_type, unerase_handle_type, MemoryObject};
+use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket, TicketOrJob};
 use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{JobRequest, JobResult};
-use alloc::boxed::Box;
-use core::ptr::NonNull;
+use crate::object_table::{
+	self, AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult,
+};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::ptr::{self, NonNull};
+use core::task::Poll;
 use core::time::Duration;
 pub use norostb_kernel::io::Queue;
 use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
@@ -77,24 +80,30 @@ impl super::Process {
 			.lock()
 			.map_object(base, Box::new(queue), RWX::RW, self.hint_color)
 			.map_err(CreateQueueError::MapError)?;
-		self.io_queues.lock().push(Queue {
-			base: base.cast(),
-			requests_mask,
-			responses_mask,
-		});
+		self.io_queues.lock().push((
+			Queue {
+				base: base.cast(),
+				requests_mask,
+				responses_mask,
+			},
+			Default::default(),
+		));
 		Ok(base)
 	}
 
 	pub fn process_io_queue(&self, base: NonNull<Page>) -> Result<(), ProcessQueueError> {
 		let mut io_queues = self.io_queues.lock();
-		let queue = io_queues
+		let (queue, tickets) = io_queues
 			.iter_mut()
-			.find(|q| q.base == base.cast())
+			.find(|(q, _)| q.base == base.cast())
 			.ok_or(ProcessQueueError::InvalidAddress)?;
 		let (req_mask, resp_mask) = (queue.requests_mask, queue.responses_mask);
 
 		let mut objects = self.objects.lock();
 		let mut queries = self.queries.lock();
+
+		// Poll tickets first as it may shrink the ticket Vec.
+		poll_tickets(queue, tickets, &mut objects, &mut queries);
 
 		while let Ok(e) = unsafe { queue.request_ring_mut().dequeue(req_mask) } {
 			let mut push_resp = |value| {
@@ -111,177 +120,118 @@ impl super::Process {
 					)
 				};
 			};
+			let mut push_pending = |data_ptr, data_len, ticket| {
+				tickets.push(PendingTicket {
+					user_data: e.user_data,
+					data_ptr,
+					data_len,
+					ticket,
+				})
+			};
 			match e.ty {
 				Request::READ => {
-					// TODO make handles use 32 bit integers
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let data_ptr = e.arguments_ptr[0] as *mut u8;
 					let data_len = e.arguments_ptr[1];
-					let data = unsafe { core::slice::from_raw_parts_mut(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
-					let ticket = object.read(0, data_len.try_into().unwrap());
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(b) => {
-							let len = b.len().min(data.len());
-							data[..len].copy_from_slice(&b[..len]);
-							push_resp(len.try_into().unwrap())
-						}
-						Err(_) => push_resp(-1),
+					let mut ticket = object.read(0, data_len.try_into().unwrap());
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
+						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::WRITE => {
-					// TODO make handles use 32 bit integers
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let data_ptr = e.arguments_ptr[0] as *const u8;
 					let data_len = e.arguments_ptr[1];
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
-					let ticket = object.write(0, data);
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(n) => push_resp(n.try_into().unwrap()),
-						Err(_) => push_resp(-1),
+					let mut ticket = object.write(0, data);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(b)) => push_resp(b.try_into().unwrap()),
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::OPEN => {
-					let table = e.arguments_32[0];
+					let table = object_table::TableId(e.arguments_32[0]);
 					let path_ptr = e.arguments_ptr[0] as *const u8;
 					let path_len = e.arguments_ptr[1];
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					let ticket =
-						crate::object_table::open(crate::object_table::TableId(table), path)
-							.unwrap();
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(o) => {
-							push_resp(erase_handle_type(objects.insert(o)).try_into().unwrap())
-						}
-						Err(_) => push_resp(-1),
+					match object_table::open(table, path) {
+						Ok(mut ticket) => match poll(&mut ticket) {
+							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+							Poll::Ready(Ok(o)) => {
+								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+							}
+							Poll::Ready(Err(_)) => push_resp(-1),
+						},
+						Err(object_table::GetError::InvalidTableId) => push_resp(-1),
 					}
 				}
 				Request::CREATE => {
-					let table = e.arguments_32[0];
-					let tags_ptr = e.arguments_ptr[0] as *const u8;
-					let tags_len = e.arguments_ptr[1];
-					let tags = unsafe { core::slice::from_raw_parts(tags_ptr, tags_len) };
-					let ticket =
-						crate::object_table::create(crate::object_table::TableId(table), tags)
-							.unwrap();
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(o) => {
-							push_resp(erase_handle_type(objects.insert(o)).try_into().unwrap())
-						}
-						Err(_) => push_resp(-1),
+					let table = object_table::TableId(e.arguments_32[0]);
+					let path_ptr = e.arguments_ptr[0] as *const u8;
+					let path_len = e.arguments_ptr[1];
+					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
+					match object_table::create(table, path) {
+						Ok(mut ticket) => match poll(&mut ticket) {
+							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+							Poll::Ready(Ok(o)) => {
+								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+							}
+							Poll::Ready(Err(_)) => push_resp(-1),
+						},
+						Err(object_table::CreateError::InvalidTableId) => push_resp(-1),
 					}
 				}
 				Request::QUERY => {
-					let id = e.arguments_32[0];
-					let id = crate::object_table::TableId::from(id);
+					let table = object_table::TableId(e.arguments_32[0]);
 					let path_ptr = e.arguments_ptr[0] as *const u8;
 					let path_len = e.arguments_ptr[1];
-					// SAFETY: FIXME
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
-					let ticket = crate::object_table::query(id, path).unwrap();
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(query) => {
-							push_resp(erase_handle_type(queries.insert(query)).try_into().unwrap())
-						}
-						Err(_) => push_resp(-1),
+					match object_table::query(table, path) {
+						Ok(mut ticket) => match poll(&mut ticket) {
+							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+							Poll::Ready(Ok(q)) => {
+								push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
+							}
+							Poll::Ready(Err(_)) => push_resp(-1),
+						},
+						Err(object_table::QueryError::InvalidTableId) => push_resp(-1),
 					}
 				}
 				Request::QUERY_NEXT => {
-					// SAFETY: FIXME
-					let info = e.arguments_ptr[0];
-					let handle = unerase_handle_type(e.arguments_32[0]);
-					let info = unsafe { &mut *(info as *mut ObjectInfo) };
-					let path_buffer = unsafe {
-						core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity)
-					};
+					let info = e.arguments_ptr[0] as *mut ObjectInfo;
+					let handle = unerase_handle(e.arguments_32[0]);
 					let query = &mut queries[handle];
 					match query.next() {
 						None => push_resp(0),
-						Some(ticket) => {
-							if let Ok(obj) = super::super::block_on(ticket) {
-								let len = obj.path.len().min(path_buffer.len());
-								info.path_len = len;
-								path_buffer[..len].copy_from_slice(&obj.path[..len]);
-								push_resp(1)
-							} else {
-								push_resp(0)
-							}
-						}
+						Some(mut ticket) => match poll(&mut ticket) {
+							Poll::Pending => push_pending(info.cast(), 0, ticket.into()),
+							Poll::Ready(Ok(o)) => push_resp(copy_object_info(info, o)),
+							Poll::Ready(Err(_)) => push_resp(0),
+						},
 					}
 				}
 				Request::TAKE_JOB => {
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let job = e.arguments_ptr[0] as *mut Job;
-
-					let tbl = objects[handle].clone().as_table().unwrap();
-					let job = unsafe { &mut *job };
-
-					let timeout = Duration::MAX;
-					let Ok(Ok(info)) = super::super::block_on_timeout(tbl.take_job(timeout), timeout) else {
-						push_resp(-1);
-						continue;
-					};
-					job.job_id = info.0;
-
-					let mut copy_buf = |p: &[u8]| unsafe {
-						let ptr = job.buffer.expect("no buffer ptr");
-						let buf = core::slice::from_raw_parts_mut(
-							ptr.as_ptr(),
-							job.buffer_size.try_into().unwrap(),
-						);
-						buf[..p.len()].copy_from_slice(p);
-						job.operation_size = p.len().try_into().unwrap();
-					};
-
-					match info.1 {
-						JobRequest::Open { path } => {
-							job.ty = Job::OPEN;
-							copy_buf(&path);
+					match objects.get(handle).and_then(|o| o.clone().as_table()) {
+						Some(tbl) => {
+							let mut ticket = tbl.take_job(Duration::MAX);
+							match poll(&mut ticket) {
+								Poll::Pending => push_pending(job.cast(), 0, ticket.into()),
+								Poll::Ready(Ok(info)) => push_resp(take_job(job, info)),
+								Poll::Ready(Err(_)) => push_resp(-1),
+							}
 						}
-						JobRequest::Create { path } => {
-							job.ty = Job::CREATE;
-							copy_buf(&path);
-						}
-						JobRequest::Read { handle, amount } => {
-							job.ty = Job::READ;
-							job.handle = handle;
-							job.operation_size = amount.try_into().unwrap();
-						}
-						JobRequest::Write { handle, data } => {
-							job.ty = Job::WRITE;
-							job.handle = handle;
-							let len = data.len().min(job.buffer_size.try_into().unwrap());
-							copy_buf(&data[..len]);
-						}
-						JobRequest::Seek { handle, from } => {
-							job.ty = Job::SEEK;
-							job.handle = handle;
-							(job.from_anchor, job.from_offset) = from.into_raw();
-						}
-						JobRequest::Query { filter } => {
-							job.ty = Job::QUERY;
-							copy_buf(&filter);
-						}
-						JobRequest::QueryNext { handle } => {
-							job.ty = Job::QUERY_NEXT;
-							job.handle = handle;
-						}
-						JobRequest::Close { handle } => {
-							job.ty = Job::CLOSE;
-							job.handle = handle;
-						}
+						None => push_resp(-1),
 					}
-
-					push_resp(0);
 				}
 				Request::FINISH_JOB => {
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let job = e.arguments_ptr[0] as *mut Job;
 
 					let tbl = objects[handle].clone().as_table().unwrap();
@@ -323,41 +273,51 @@ impl super::Process {
 					push_resp(0);
 				}
 				Request::SEEK => {
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let direction = e.arguments_8[0];
 					let offset = e.arguments_64[0];
-					let write_offset = e.arguments_ptr[0];
+					let write_offset = e.arguments_ptr[0] as *mut u64;
 
 					let Ok(from) = SeekFrom::try_from_raw(direction, offset) else {
 						warn!("Invalid offset ({}, {})", direction, offset);
 						push_resp(-1);
 						continue;
 					};
-					let object = objects.get(handle).unwrap();
-					let ticket = object.seek(from);
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(b) => {
-							unsafe {
-								(write_offset as *mut u64).write(b);
+					match objects.get(handle) {
+						Some(object) => {
+							let mut ticket = object.seek(from);
+							match poll(&mut ticket) {
+								Poll::Pending => {
+									push_pending(write_offset.cast(), 0, ticket.into())
+								}
+								Poll::Ready(Ok(n)) => {
+									unsafe {
+										write_offset.write(n);
+									}
+									push_resp(0);
+								}
+								Poll::Ready(Err(_)) => push_resp(-1),
 							}
-							push_resp(0)
 						}
-						Err(_) => push_resp(-1),
+						None => push_resp(-1),
 					}
 				}
 				Request::POLL => {
-					let handle = unerase_handle_type(e.arguments_32[0]);
-					let object = objects.get(handle).unwrap();
-					let ticket = object.poll();
-					let result = super::super::block_on(ticket);
-					match result {
-						Ok(b) => push_resp(b as isize),
-						Err(_) => push_resp(-1),
+					let handle = unerase_handle(e.arguments_32[0]);
+					match objects.get(handle) {
+						Some(object) => {
+							let mut ticket = object.poll();
+							match poll(&mut ticket) {
+								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+								Poll::Ready(Ok(n)) => push_resp(n as isize),
+								Poll::Ready(Err(_)) => push_resp(-1),
+							}
+						}
+						None => push_resp(-1),
 					}
 				}
 				Request::CLOSE => {
-					let handle = unerase_handle_type(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					push_resp(objects.remove(handle).map_or(-1, |_| 0));
 				}
 				op => {
@@ -370,16 +330,165 @@ impl super::Process {
 	}
 
 	pub fn wait_io_queue(&self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
-		let io_queues = self.io_queues.lock();
-		let queue = io_queues
-			.iter()
-			.find(|q| q.base == base.cast())
+		let mut io_queues = self.io_queues.lock();
+		let (queue, tickets) = io_queues
+			.iter_mut()
+			.find(|(q, _)| q.base == base.cast())
 			.ok_or(WaitQueueError::InvalidAddress)?;
+
 		while queue.responses_available() == 0 {
-			super::super::Thread::current()
-				.unwrap()
-				.sleep(core::time::Duration::MAX);
+			let polls = poll_tickets(
+				queue,
+				tickets,
+				&mut self.objects.lock(),
+				&mut self.queries.lock(),
+			);
+			if polls == 0 {
+				super::super::Thread::current()
+					.unwrap()
+					.sleep(core::time::Duration::MAX);
+			}
 		}
 		Ok(())
 	}
+}
+
+fn poll_tickets(
+	queue: &mut Queue,
+	tickets: &mut Vec<PendingTicket>,
+	objects: &mut arena::Arena<Arc<dyn Object>, u8>,
+	queries: &mut arena::Arena<Box<dyn Query>, u8>,
+) -> usize {
+	let mut polls = 0;
+	for i in (0..tickets.len()).rev() {
+		match &mut tickets[i].ticket {
+			TicketOrJob::Ticket(ticket) => match poll(ticket) {
+				Poll::Pending => {}
+				Poll::Ready(r) => {
+					polls += 1;
+					let tk = tickets.swap_remove(i);
+					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
+					match r {
+						Ok(AnyTicketValue::Object(o)) => {
+							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+						}
+						Ok(AnyTicketValue::Usize(n)) => push_resp(n as isize),
+						Ok(AnyTicketValue::U64(n)) => {
+							unsafe {
+								tk.data_ptr.cast::<u64>().write(n);
+							}
+							push_resp(0);
+						}
+						Ok(AnyTicketValue::Data(b)) => {
+							let data = unsafe {
+								core::slice::from_raw_parts_mut(tk.data_ptr, tk.data_len)
+							};
+							let len = b.len().min(data.len());
+							data[..len].copy_from_slice(&b[..len]);
+							push_resp(len.try_into().unwrap())
+						}
+						Ok(AnyTicketValue::Query(q)) => {
+							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
+						}
+						Ok(AnyTicketValue::QueryResult(o)) => {
+							push_resp(copy_object_info(tk.data_ptr.cast(), o))
+						}
+						Err(_) => push_resp(-1),
+					}
+				}
+			},
+			TicketOrJob::Job(job) => match poll(job) {
+				Poll::Pending => {}
+				Poll::Ready(r) => {
+					polls += 1;
+					let tk = tickets.swap_remove(i);
+					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
+					match r {
+						Ok(info) => push_resp(take_job(tk.data_ptr.cast(), info)),
+						Err(_) => push_resp(-1),
+					}
+				}
+			},
+		}
+	}
+	polls
+}
+
+fn push_resp(queue: &mut Queue, user_data: usize, value: isize) {
+	let resp_mask = queue.responses_mask;
+	let resps = unsafe { queue.response_ring_mut() };
+	// It is the responsibility of the user process to ensure no more requests are in
+	// flight than there is space for responses.
+	let _ = unsafe { resps.enqueue(resp_mask, Response { user_data, value }) };
+}
+
+fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> isize {
+	let data = unsafe { core::slice::from_raw_parts_mut(to_ptr, to_len) };
+	let len = from.len().min(data.len());
+	data[..len].copy_from_slice(&from[..len]);
+	len.try_into().unwrap()
+}
+
+fn copy_object_info(info: *mut ObjectInfo, obj: QueryResult) -> isize {
+	let info = unsafe { &mut *info };
+	let path_buffer = unsafe { core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity) };
+	let len = obj.path.len().min(path_buffer.len());
+	info.path_len = len;
+	path_buffer[..len].copy_from_slice(&obj.path[..len]);
+	1
+}
+
+fn take_job(job: *mut Job, info: (u32, JobRequest)) -> isize {
+	let job = unsafe { &mut *job };
+
+	job.job_id = info.0;
+
+	let mut copy_buf = |p: &[u8]| unsafe {
+		let ptr = job.buffer.expect("no buffer ptr");
+		let buf =
+			core::slice::from_raw_parts_mut(ptr.as_ptr(), job.buffer_size.try_into().unwrap());
+		buf[..p.len()].copy_from_slice(p);
+		job.operation_size = p.len().try_into().unwrap();
+	};
+
+	match info.1 {
+		JobRequest::Open { path } => {
+			job.ty = Job::OPEN;
+			copy_buf(&path);
+		}
+		JobRequest::Create { path } => {
+			job.ty = Job::CREATE;
+			copy_buf(&path);
+		}
+		JobRequest::Read { handle, amount } => {
+			job.ty = Job::READ;
+			job.handle = handle;
+			job.operation_size = amount.try_into().unwrap();
+		}
+		JobRequest::Write { handle, data } => {
+			job.ty = Job::WRITE;
+			job.handle = handle;
+			let len = data.len().min(job.buffer_size.try_into().unwrap());
+			copy_buf(&data[..len]);
+		}
+		JobRequest::Seek { handle, from } => {
+			job.ty = Job::SEEK;
+			job.handle = handle;
+			(job.from_anchor, job.from_offset) = from.into_raw();
+		}
+		JobRequest::Query { filter } => {
+			job.ty = Job::QUERY;
+			copy_buf(&filter);
+		}
+		JobRequest::QueryNext { handle } => {
+			job.ty = Job::QUERY_NEXT;
+			job.handle = handle;
+		}
+		JobRequest::Close { handle } => {
+			job.ty = Job::CLOSE;
+			job.handle = handle;
+		}
+	}
+
+	0
 }

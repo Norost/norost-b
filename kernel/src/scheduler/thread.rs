@@ -84,11 +84,6 @@ impl Thread {
 		&self.process
 	}
 
-	/// Async deadline set by [`super::waker::sleep`].
-	pub(super) fn set_async_deadline(&self, time: Monotonic) {
-		self.async_deadline.set(Some(time));
-	}
-
 	/// Suspend the currently running thread & begin running this thread.
 	///
 	/// The thread may not have been destroyed already.

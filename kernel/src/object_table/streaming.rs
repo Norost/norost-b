@@ -12,8 +12,8 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 pub struct StreamingTable {
 	name: Box<str>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(StreamJob, Option<StreamTicketWaker>)>>,
-	tickets: Mutex<Vec<(JobId, StreamTicketWaker)>>,
+	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>)>>,
+	tickets: Mutex<Vec<(JobId, AnyTicketWaker)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
 }
 
@@ -27,7 +27,7 @@ impl StreamingTable {
 
 	fn submit_job<T>(&self, job: JobRequest) -> Ticket<T>
 	where
-		StreamTicketWaker: From<TicketWaker<T>>,
+		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
 
@@ -226,41 +226,6 @@ impl Drop for StreamQuery {
 		todo!()
 	}
 }
-
-enum StreamTicketWaker {
-	Object(TicketWaker<Arc<dyn Object>>),
-	Usize(TicketWaker<usize>),
-	U64(TicketWaker<u64>),
-	Data(TicketWaker<Box<[u8]>>),
-	Query(TicketWaker<Box<dyn Query>>),
-	QueryResult(TicketWaker<QueryResult>),
-}
-
-macro_rules! stream_ticket {
-	($t:ty => $v:ident, $f:ident) => {
-		impl From<TicketWaker<$t>> for StreamTicketWaker {
-			fn from(t: TicketWaker<$t>) -> Self {
-				Self::$v(t)
-			}
-		}
-
-		impl StreamTicketWaker {
-			#[track_caller]
-			fn $f(self) -> TicketWaker<$t> {
-				match self {
-					Self::$v(t) => t,
-					_ => unreachable!(),
-				}
-			}
-		}
-	};
-}
-stream_ticket!(Arc<dyn Object> => Object, into_object);
-stream_ticket!(usize => Usize, into_usize);
-stream_ticket!(u64 => U64, into_u64);
-stream_ticket!(Box<[u8]> => Data, into_data);
-stream_ticket!(Box<dyn Query> => Query, into_query);
-stream_ticket!(QueryResult => QueryResult, into_query_result);
 
 struct StreamJob {
 	job_id: JobId,
