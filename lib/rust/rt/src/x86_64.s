@@ -4,6 +4,8 @@
 .globl memset
 .globl memcmp
 
+.equ ID_EXIT, 16
+
 # SysV ABI:
 # - Parameter: rdi, rsi, rdx, ...
 # - Return: rax, rdx
@@ -21,13 +23,10 @@ _stack:
 _start:
 	lea rsp, [rip + _stack]
 	call main
-
-	# exit
-	# Not actually supported so we go KABOOM instead
-2:
-	hlt
-	# Just in case...
-	jmp 2b
+	mov edi, eax
+	mov eax, ID_EXIT
+	syscall
+	ud2 # Just in case something went horribly wrong
 
 .section .text.memcpy
 .p2align 4
