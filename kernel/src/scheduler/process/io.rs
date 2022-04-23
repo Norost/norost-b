@@ -131,8 +131,8 @@ impl super::Process {
 			match e.ty {
 				Request::READ => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					let data_ptr = e.arguments_ptr[0] as *mut u8;
-					let data_len = e.arguments_ptr[1];
+					let data_ptr = e.arguments_64[0] as *mut u8;
+					let data_len = e.arguments_64[1] as usize;
 					let object = objects.get(handle).unwrap();
 					let mut ticket = object.read(0, data_len.try_into().unwrap());
 					match poll(&mut ticket) {
@@ -143,8 +143,8 @@ impl super::Process {
 				}
 				Request::WRITE => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					let data_ptr = e.arguments_ptr[0] as *const u8;
-					let data_len = e.arguments_ptr[1];
+					let data_ptr = e.arguments_64[0] as *const u8;
+					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
 					let mut ticket = object.write(0, data);
@@ -156,8 +156,8 @@ impl super::Process {
 				}
 				Request::OPEN => {
 					let table = object_table::TableId(e.arguments_32[0]);
-					let path_ptr = e.arguments_ptr[0] as *const u8;
-					let path_len = e.arguments_ptr[1];
+					let path_ptr = e.arguments_64[0] as *const u8;
+					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
 					match object_table::open(table, path) {
 						Ok(mut ticket) => match poll(&mut ticket) {
@@ -172,8 +172,8 @@ impl super::Process {
 				}
 				Request::CREATE => {
 					let table = object_table::TableId(e.arguments_32[0]);
-					let path_ptr = e.arguments_ptr[0] as *const u8;
-					let path_len = e.arguments_ptr[1];
+					let path_ptr = e.arguments_64[0] as *const u8;
+					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
 					match object_table::create(table, path) {
 						Ok(mut ticket) => match poll(&mut ticket) {
@@ -188,8 +188,8 @@ impl super::Process {
 				}
 				Request::QUERY => {
 					let table = object_table::TableId(e.arguments_32[0]);
-					let path_ptr = e.arguments_ptr[0] as *const u8;
-					let path_len = e.arguments_ptr[1];
+					let path_ptr = e.arguments_64[0] as *const u8;
+					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
 					match object_table::query(table, path) {
 						Ok(mut ticket) => match poll(&mut ticket) {
@@ -203,7 +203,7 @@ impl super::Process {
 					}
 				}
 				Request::QUERY_NEXT => {
-					let info = e.arguments_ptr[0] as *mut ObjectInfo;
+					let info = e.arguments_64[0] as *mut ObjectInfo;
 					let handle = unerase_handle(e.arguments_32[0]);
 					let query = &mut queries[handle];
 					match query.next() {
@@ -217,7 +217,7 @@ impl super::Process {
 				}
 				Request::TAKE_JOB => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					let job = e.arguments_ptr[0] as *mut Job;
+					let job = e.arguments_64[0] as *mut Job;
 					match objects.get(handle).and_then(|o| o.clone().as_table()) {
 						Some(tbl) => {
 							let mut ticket = tbl.take_job(Duration::MAX);
@@ -232,7 +232,7 @@ impl super::Process {
 				}
 				Request::FINISH_JOB => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					let job = e.arguments_ptr[0] as *mut Job;
+					let job = e.arguments_64[0] as *mut Job;
 
 					let tbl = objects[handle].clone().as_table().unwrap();
 					let job = unsafe { job.read() };
@@ -276,7 +276,6 @@ impl super::Process {
 					let handle = unerase_handle(e.arguments_32[0]);
 					let direction = e.arguments_8[0];
 					let offset = e.arguments_64[0];
-					let write_offset = e.arguments_ptr[0] as *mut u64;
 
 					let Ok(from) = SeekFrom::try_from_raw(direction, offset) else {
 						warn!("Invalid offset ({}, {})", direction, offset);
@@ -287,15 +286,8 @@ impl super::Process {
 						Some(object) => {
 							let mut ticket = object.seek(from);
 							match poll(&mut ticket) {
-								Poll::Pending => {
-									push_pending(write_offset.cast(), 0, ticket.into())
-								}
-								Poll::Ready(Ok(n)) => {
-									unsafe {
-										write_offset.write(n);
-									}
-									push_resp(0);
-								}
+								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+								Poll::Ready(Ok(n)) => push_resp(n as i64),
 								Poll::Ready(Err(_)) => push_resp(-1),
 							}
 						}
@@ -309,7 +301,7 @@ impl super::Process {
 							let mut ticket = object.poll();
 							match poll(&mut ticket) {
 								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-								Poll::Ready(Ok(n)) => push_resp(n as isize),
+								Poll::Ready(Ok(n)) => push_resp(n as i64),
 								Poll::Ready(Err(_)) => push_resp(-1),
 							}
 						}
@@ -372,13 +364,8 @@ fn poll_tickets(
 						Ok(AnyTicketValue::Object(o)) => {
 							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
 						}
-						Ok(AnyTicketValue::Usize(n)) => push_resp(n as isize),
-						Ok(AnyTicketValue::U64(n)) => {
-							unsafe {
-								tk.data_ptr.cast::<u64>().write(n);
-							}
-							push_resp(0);
-						}
+						Ok(AnyTicketValue::Usize(n)) => push_resp(n as i64),
+						Ok(AnyTicketValue::U64(n)) => push_resp(n as i64),
 						Ok(AnyTicketValue::Data(b)) => {
 							let data = unsafe {
 								core::slice::from_raw_parts_mut(tk.data_ptr, tk.data_len)
@@ -414,7 +401,7 @@ fn poll_tickets(
 	polls
 }
 
-fn push_resp(queue: &mut Queue, user_data: usize, value: isize) {
+fn push_resp(queue: &mut Queue, user_data: u64, value: i64) {
 	let resp_mask = queue.responses_mask;
 	let resps = unsafe { queue.response_ring_mut() };
 	// It is the responsibility of the user process to ensure no more requests are in
@@ -422,14 +409,14 @@ fn push_resp(queue: &mut Queue, user_data: usize, value: isize) {
 	let _ = unsafe { resps.enqueue(resp_mask, Response { user_data, value }) };
 }
 
-fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> isize {
+fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> i64 {
 	let data = unsafe { core::slice::from_raw_parts_mut(to_ptr, to_len) };
 	let len = from.len().min(data.len());
 	data[..len].copy_from_slice(&from[..len]);
 	len.try_into().unwrap()
 }
 
-fn copy_object_info(info: *mut ObjectInfo, obj: QueryResult) -> isize {
+fn copy_object_info(info: *mut ObjectInfo, obj: QueryResult) -> i64 {
 	let info = unsafe { &mut *info };
 	let path_buffer = unsafe { core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity) };
 	let len = obj.path.len().min(path_buffer.len());
@@ -438,7 +425,7 @@ fn copy_object_info(info: *mut ObjectInfo, obj: QueryResult) -> isize {
 	1
 }
 
-fn take_job(job: *mut Job, info: (u32, JobRequest)) -> isize {
+fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	let job = unsafe { &mut *job };
 
 	job.job_id = info.0;

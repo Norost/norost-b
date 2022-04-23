@@ -24,7 +24,7 @@ pub struct Process {
 }
 
 struct PendingTicket {
-	user_data: usize,
+	user_data: u64,
 	data_ptr: *mut u8,
 	data_len: usize,
 	ticket: TicketOrJob,
