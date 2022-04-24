@@ -89,7 +89,11 @@ impl MemoryObject for MemorySlice {
 }
 
 impl super::Process {
-	pub fn from_elf(data_object: Arc<dyn MemoryObject>) -> Result<Arc<Self>, ElfError> {
+	pub fn from_elf(
+		data_object: Arc<dyn MemoryObject>,
+		stack_frames: OwnedPageFrames,
+		stack_offset: usize,
+	) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
 		let mut data = data_object.physical_pages();
 		data.sort_by(|a, b| a.base.cmp(&b.base));
@@ -221,11 +225,17 @@ impl super::Process {
 			}
 		}
 
+		// Map in stack
+		let stack = address_space
+			.map_object(None, Box::new(stack_frames), RWX::RW, slf.hint_color)
+			.map_err(ElfError::MapError)?;
+		let stack = stack.as_ptr().wrapping_add(stack_offset);
+
 		drop(address_space);
 
 		let slf = Arc::new(slf);
 
-		slf.spawn_thread(header.entry.try_into().unwrap(), 0)
+		slf.spawn_thread(header.entry.try_into().unwrap(), stack as usize)
 			.unwrap();
 
 		Ok(slf)

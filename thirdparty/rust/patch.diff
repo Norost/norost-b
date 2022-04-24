@@ -383,10 +383,10 @@ index 00000000000..9f56dbc6f25
 +}
 diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
 new file mode 100644
-index 00000000000..0716f1ed226
+index 00000000000..4c75f2a691c
 --- /dev/null
 +++ b/library/std/src/os/norostb/mod.rs
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,15 @@
 +#![unstable(feature = "norostb", issue = "none")]
 +
 +pub mod ffi;
@@ -399,6 +399,7 @@ index 00000000000..0716f1ed226
 +
 +pub mod prelude {
 +    use super::*;
++    pub use ffi::OsStrExt;
 +    pub use io::{AsHandle, FromHandle, Handle, IntoHandle};
 +}
 diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
@@ -480,45 +481,160 @@ index 00000000000..80664e9fd25
 +}
 diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
 new file mode 100644
-index 00000000000..a2d75a61976
+index 00000000000..e3d6f92c4b6
 --- /dev/null
 +++ b/library/std/src/sys/norostb/args.rs
-@@ -0,0 +1,36 @@
-+use crate::ffi::OsString;
+@@ -0,0 +1,151 @@
++use crate::ffi::{OsStr, OsString};
 +use crate::fmt;
++use crate::io;
++use crate::os::norostb::prelude::*;
++use crate::ptr::{self, NonNull};
++use crate::slice;
++use crate::sync::atomic::{AtomicPtr, Ordering};
 +
-+pub struct Args {}
++static ARGS_AND_ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
++static ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
++
++pub struct Args {
++    count: usize,
++    ptr: NonNull<u8>,
++}
 +
 +pub fn args() -> Args {
-+    Args {}
++    unsafe {
++        let ptr = NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed))
++            .expect("No arguments were set")
++            .cast::<u16>();
++        Args {
++            count: usize::from(ptr.as_ptr().read_unaligned()),
++            ptr: NonNull::new(ptr.as_ptr().add(1).cast()).unwrap(),
++        }
++    }
 +}
 +
 +impl fmt::Debug for Args {
 +    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        f.debug_list().finish()
++        let args = Args { count: self.count, ptr: self.ptr };
++        let mut f = f.debug_list();
++        for e in args {
++            f.entry(&e);
++        }
++        f.finish()
 +    }
 +}
 +
 +impl Iterator for Args {
 +    type Item = OsString;
++
 +    fn next(&mut self) -> Option<OsString> {
-+        None
++        self.count.checked_sub(1).map(|c| {
++            self.count = c;
++            unsafe {
++                let (val, ptr) = get_str(self.ptr.as_ptr());
++                self.ptr = NonNull::new(ptr).unwrap();
++                val
++            }
++        })
 +    }
++
 +    fn size_hint(&self) -> (usize, Option<usize>) {
-+        (0, Some(0))
++        (self.count, Some(self.count))
 +    }
 +}
 +
 +impl ExactSizeIterator for Args {
 +    fn len(&self) -> usize {
-+        0
++        self.count
 +    }
 +}
 +
 +impl DoubleEndedIterator for Args {
 +    fn next_back(&mut self) -> Option<OsString> {
-+        None
++        self.count.checked_sub(1).map(|c| {
++            // Very inefficient but w/e, it shouldn't matter.
++            let args = Args { count: self.count, ptr: self.ptr };
++            self.count = c;
++            args.last().unwrap()
++        })
 +    }
++}
++
++pub struct Env {
++    count: usize,
++    ptr: NonNull<u8>,
++}
++
++impl fmt::Debug for Env {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        let env = Env { count: self.count, ptr: self.ptr };
++        let mut f = f.debug_map();
++        for (k, v) in env {
++            f.entry(&k, &v);
++        }
++        f.finish()
++    }
++}
++
++impl Iterator for Env {
++    type Item = (OsString, OsString);
++
++    fn next(&mut self) -> Option<(OsString, OsString)> {
++        self.count.checked_sub(1).map(|c| {
++            self.count = c;
++            unsafe {
++                let (key, ptr) = get_str(self.ptr.as_ptr());
++                let (val, ptr) = get_str(ptr);
++                self.ptr = NonNull::new(ptr).unwrap();
++                (key, val)
++            }
++        })
++    }
++}
++
++pub fn env() -> Env {
++    let ptr = NonNull::new(ENV.load(Ordering::Relaxed))
++        .unwrap_or_else(|| {
++            // A finished args iterator will point to the start of the env variables.
++            let mut args = args();
++            (&mut args).last();
++            ENV.store(args.ptr.as_ptr(), Ordering::Relaxed);
++            args.ptr
++        })
++        .cast::<u16>();
++    unsafe {
++        Env {
++            count: usize::from(ptr.as_ptr().read_unaligned()),
++            ptr: NonNull::new(ptr.as_ptr().add(1).cast()).unwrap(),
++        }
++    }
++}
++
++pub fn getenv(key: &OsStr) -> Option<OsString> {
++    env().find_map(|(k, v)| (k == key).then(|| v))
++}
++
++pub fn setenv(_: &OsStr, _: &OsStr) -> io::Result<()> {
++    todo!()
++}
++
++pub fn unsetenv(_: &OsStr) -> io::Result<()> {
++    todo!()
++}
++
++/// # Safety
++///
++/// Must be called only once during runtime initialization.
++pub(super) unsafe fn init(args_and_env: *const u8) {
++    ARGS_AND_ENV.store(args_and_env as _, Ordering::Relaxed)
++}
++
++unsafe fn get_str(ptr: *mut u8) -> (OsString, *mut u8) {
++    let len = usize::from(unsafe { ptr.cast::<u16>().read_unaligned() });
++    let ptr = ptr.wrapping_add(2);
++    let mut s = OsString::new();
++    s.push(OsStr::from_bytes(unsafe { slice::from_raw_parts(ptr, len) }));
++    (s, ptr.wrapping_add(len))
 +}
 diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
 new file mode 100644
@@ -1380,10 +1496,10 @@ index 00000000000..4c9ddf93d7e
 +}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..bc7266f2559
+index 00000000000..a9efd8546af
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,65 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -1430,9 +1546,12 @@ index 00000000000..bc7266f2559
 +/// # Note
 +///
 +/// This is not guaranteed to run, for example when Rust code is called externally.
++// FIXME The current signature is actually wrong, but I'm unsure how to fix it.
++//pub unsafe fn init(_arguments: *const u8) {
 +pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
 +    // FIXME this is not guaranteed to run.
 +    unsafe {
++        args::init(_argc as *const u8);
 +        thread_local_key::init_thread();
 +        stdio::init();
 +    }
@@ -1890,10 +2009,10 @@ index 00000000000..dbb6ce22c22
 +}
 diff --git a/library/std/src/sys/norostb/os.rs b/library/std/src/sys/norostb/os.rs
 new file mode 100644
-index 00000000000..1a7c370b58f
+index 00000000000..94cfcc15453
 --- /dev/null
 +++ b/library/std/src/sys/norostb/os.rs
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,83 @@
 +use super::unsupported;
 +use crate::error::Error as StdError;
 +use crate::ffi::{OsStr, OsString};
@@ -1902,6 +2021,8 @@ index 00000000000..1a7c370b58f
 +use crate::marker::PhantomData;
 +use crate::path::{self, PathBuf};
 +use norostb_rt::kernel::syscall;
++
++pub use super::args::{env, getenv, setenv, unsetenv, Env};
 +
 +pub fn errno() -> i32 {
 +    0
@@ -1958,31 +2079,6 @@ index 00000000000..1a7c370b58f
 +
 +pub fn current_exe() -> io::Result<PathBuf> {
 +    unsupported()
-+}
-+
-+pub struct Env(!);
-+
-+impl Iterator for Env {
-+    type Item = (OsString, OsString);
-+    fn next(&mut self) -> Option<(OsString, OsString)> {
-+        self.0
-+    }
-+}
-+
-+pub fn env() -> Env {
-+    panic!("not supported on this platform")
-+}
-+
-+pub fn getenv(_: &OsStr) -> Option<OsString> {
-+    None
-+}
-+
-+pub fn setenv(_: &OsStr, _: &OsStr) -> io::Result<()> {
-+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot set env vars on this platform"))
-+}
-+
-+pub fn unsetenv(_: &OsStr) -> io::Result<()> {
-+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot unset env vars on this platform"))
 +}
 +
 +pub fn temp_dir() -> PathBuf {

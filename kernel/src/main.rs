@@ -21,10 +21,11 @@
 
 extern crate alloc;
 
-use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
+use crate::memory::frame::{OwnedPageFrames, PageFrame, PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, sync::Arc};
+use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
 
 macro_rules! bi_from {
@@ -113,7 +114,45 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		.map(Driver)
 		.map(Arc::new)
 	{
-		match scheduler::process::Process::from_elf(driver) {
+		let stack = OwnedPageFrames::new(
+			NonZeroUsize::new(1).unwrap(),
+			memory::frame::AllocateHints {
+				address: 0 as _,
+				color: 0,
+			},
+		)
+		.unwrap();
+		unsafe {
+			// args
+			let ptr = stack.physical_pages()[0].base.as_ptr().cast::<u8>();
+			ptr.add(0).cast::<u16>().write(2);
+			let ptr = ptr.add(2);
+
+			let s = b"Hello, world!";
+			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
+			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
+			let ptr = ptr.add(2 + s.len());
+
+			let s = b"Arguments work!";
+			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
+			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
+			let ptr = ptr.add(2 + s.len());
+
+			// env
+			ptr.add(0).cast::<u16>().write(1);
+			let ptr = ptr.add(2);
+
+			let s = b"HELLO_WORLD";
+			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
+			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
+			let ptr = ptr.add(2 + s.len());
+
+			let s = b"Environment variables work!";
+			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
+			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
+			let ptr = ptr.add(2 + s.len());
+		}
+		match scheduler::process::Process::from_elf(driver, stack, 0) {
 			Ok(_) => {} // We don't need to do anything.
 			Err(e) => {
 				error!("failed to start driver: {:?}", e)

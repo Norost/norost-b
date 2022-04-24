@@ -48,7 +48,7 @@ impl From<JobTask> for TicketOrJob {
 }
 
 impl Process {
-	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
+	fn new() -> Result<Self, frame::AllocateContiguousError> {
 		Ok(Self {
 			address_space: Mutex::new(AddressSpace::new()?),
 			hint_color: 0,

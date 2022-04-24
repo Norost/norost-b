@@ -20,7 +20,11 @@ _stack:
 	.zero 8
 
 .section .text._start
+# rax: thread handle
+# rsp: pointer to program arguments & environment variables
+# rsp can also be used as stack but meh
 _start:
+	mov rdi, rsp
 	lea rsp, [rip + _stack]
 	call main
 	mov edi, eax
