@@ -1,4 +1,5 @@
 use crate::paging::{AddError, Page, PML4};
+use core::fmt;
 use core::mem;
 
 #[repr(C)]
@@ -71,9 +72,9 @@ pub enum ParseError {
 	PageAddError(AddError),
 }
 
-impl From<ParseError> for &'static str {
-	fn from(err: ParseError) -> &'static str {
-		match err {
+impl fmt::Debug for ParseError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(match self {
 			ParseError::DataTooShort => "data too short",
 			ParseError::BadMagic => "bad magic",
 			ParseError::BadAlignment => "bad alignment",
@@ -86,14 +87,8 @@ impl From<ParseError> for &'static str {
 			ParseError::ProgramHeaderSizeMismatch => "program header size mismatch",
 			ParseError::OffsetOutOfBounds => "offset out of bounds",
 			ParseError::AddressOffsetMismatch => "address offset mismatch",
-			ParseError::PageAddError(e) => <&'static str as From<_>>::from(e),
-		}
-	}
-}
-
-impl From<AddError> for ParseError {
-	fn from(err: AddError) -> Self {
-		Self::PageAddError(err)
+			ParseError::PageAddError(e) => return e.fmt(f),
+		})
 	}
 }
 
@@ -198,14 +193,18 @@ where
 			let virt = virt_address + i * PAGE_SIZE;
 			let phys = phys_address + i * PAGE_SIZE;
 			let (r, w, x) = (f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0);
-			page_tables.add(virt, phys, r, w, x, &mut page_alloc)?;
+			page_tables
+				.add(virt, phys, r, w, x, &mut page_alloc)
+				.map_err(ParseError::PageAddError)?;
 		}
 		let alloc = (header.memory_size + offset + PAGE_MASK) / PAGE_SIZE;
 		for i in count..alloc {
 			let virt = virt_address + i * PAGE_SIZE;
 			let phys = page_alloc() as u64;
 			let (r, w, x) = (f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0);
-			page_tables.add(virt, phys, r, w, x, &mut page_alloc)?;
+			page_tables
+				.add(virt, phys, r, w, x, &mut page_alloc)
+				.map_err(ParseError::PageAddError)?;
 		}
 	}
 

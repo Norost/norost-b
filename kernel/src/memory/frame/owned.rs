@@ -1,4 +1,4 @@
-use super::{AllocateError, AllocateHints, PageFrame};
+use super::{AllocateError, AllocateHints, Page, PageFrame};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroUsize;
@@ -28,6 +28,14 @@ impl OwnedPageFrames {
 		Ok(Self {
 			frames: frames.into(),
 		})
+	}
+
+	pub unsafe fn clear(&mut self) {
+		for f in self.frames.iter() {
+			unsafe {
+				f.base.as_ptr().cast::<Page>().write_bytes(0, 1 << f.p2size);
+			}
+		}
 	}
 }
 

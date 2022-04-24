@@ -76,6 +76,8 @@ realm64:
 	jmp		rax
 
 2:
+	# FIXME we should load the GDT specified in the kernel.
+
 	# Unmap the last page. We can do this the lazy way by simply zeroing out the
 	# lower half of the table.
 	mov		rax, cr3

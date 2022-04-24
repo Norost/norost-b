@@ -66,6 +66,8 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		log::init();
 	}
 
+	dbg!(boot_info);
+
 	for region in boot_info.memory_regions() {
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
@@ -114,7 +116,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		.map(Driver)
 		.map(Arc::new)
 	{
-		let stack = OwnedPageFrames::new(
+		let mut stack = OwnedPageFrames::new(
 			NonZeroUsize::new(1).unwrap(),
 			memory::frame::AllocateHints {
 				address: 0 as _,
@@ -123,34 +125,30 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		)
 		.unwrap();
 		unsafe {
+			stack.clear();
+		}
+		unsafe {
+			todo!()
+			/*
 			// args
-			let ptr = stack.physical_pages()[0].base.as_ptr().cast::<u8>();
-			ptr.add(0).cast::<u16>().write(2);
-			let ptr = ptr.add(2);
+			let args = || {
+			};
+			let count = args().count().try_into().unwrap();
 
-			let s = b"Hello, world!";
-			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
-			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
-			let ptr = ptr.add(2 + s.len());
+			let mut ptr = stack.physical_pages()[0].base.as_ptr().cast::<u8>();
+			ptr.cast::<u16>().write(count);
+			ptr = ptr.add(2);
 
-			let s = b"Arguments work!";
-			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
-			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
-			let ptr = ptr.add(2 + s.len());
+			for s in args() {
+				ptr.cast::<u16>().write(s.len().try_into().unwrap());
+				ptr = ptr.add(2);
+				ptr.copy_from_nonoverlapping(s.as_ptr(), s.len());
+				ptr = ptr.add(s.len());
+			}
 
 			// env
-			ptr.add(0).cast::<u16>().write(1);
-			let ptr = ptr.add(2);
-
-			let s = b"HELLO_WORLD";
-			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
-			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
-			let ptr = ptr.add(2 + s.len());
-
-			let s = b"Environment variables work!";
-			ptr.add(0).cast::<u16>().write(s.len().try_into().unwrap());
-			ptr.add(2).copy_from_nonoverlapping(s.as_ptr(), s.len());
-			let ptr = ptr.add(2 + s.len());
+			ptr.add(0).cast::<u16>().write(0);
+			*/
 		}
 		match scheduler::process::Process::from_elf(driver, stack, 0) {
 			Ok(_) => {} // We don't need to do anything.

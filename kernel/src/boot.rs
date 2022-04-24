@@ -2,13 +2,15 @@ use core::fmt;
 
 #[repr(C)]
 pub struct Info {
-	memory_regions_len: u16,
-	drivers_len: u8,
-	_padding: [u8; 5],
+	pub memory_regions_offset: u16,
+	pub memory_regions_len: u16,
+	pub drivers_offset: u16,
+	pub drivers_len: u16,
+	pub init_offset: u16,
+	pub init_len: u16,
+	_padding: u32,
 	#[cfg(target_arch = "x86_64")]
 	pub rsdp: rsdp::Rsdp,
-	_padding2: [u8; 4],
-	memory_regions: [MemoryRegion; 0],
 }
 
 impl Info {
@@ -17,18 +19,23 @@ impl Info {
 	/// This *excludes* memory used by the stack and the kernel.
 	pub fn memory_regions(&self) -> &[MemoryRegion] {
 		unsafe {
-			let b = self.memory_regions.as_ptr();
-			core::slice::from_raw_parts(b, usize::from(self.memory_regions_len))
+			let b = (self as *const _ as *const u8).add(self.memory_regions_offset.into());
+			core::slice::from_raw_parts(b.cast(), usize::from(self.memory_regions_len))
 		}
 	}
 
 	/// All drivers to be loaded at boot.
 	pub fn drivers(&self) -> &[Driver] {
 		unsafe {
-			let b = self
-				.memory_regions
-				.as_ptr()
-				.add(usize::from(self.memory_regions_len));
+			let b = (self as *const _ as *const u8).add(self.drivers_offset.into());
+			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
+		}
+	}
+
+	/// All init programs & arguments to run.
+	pub fn init_programs(&self) -> &[InitProgram] {
+		unsafe {
+			let b = (self as *const _ as *const u8).add(self.drivers_offset.into());
 			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
 		}
 	}
@@ -71,6 +78,8 @@ pub struct Driver {
 	pub address: u32,
 	/// Size of the ELF file in bytes.
 	pub size: u32,
+	/// Offset to the name of the driver.
+	pub name_offset: u16,
 }
 
 impl Driver {
@@ -89,7 +98,13 @@ impl fmt::Debug for Driver {
 			"Driver(0x{:x} - 0x{:x} [0x{:x}])",
 			self.address,
 			self.address + self.size,
-			self.size
+			self.size,
 		)
 	}
+}
+
+#[repr(C)]
+pub struct InitProgram {
+	pub name_offset: u16,
+	pub args_offset: u16,
 }
