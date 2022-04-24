@@ -489,10 +489,10 @@ index 00000000000..80664e9fd25
 +}
 diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
 new file mode 100644
-index 00000000000..b7e4c274ff3
+index 00000000000..f14cfc6ae08
 --- /dev/null
 +++ b/library/std/src/sys/norostb/args.rs
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,150 @@
 +use crate::collections::{btree_map, BTreeMap};
 +use crate::ffi::{OsStr, OsString};
 +use crate::fmt;
@@ -624,12 +624,9 @@ index 00000000000..b7e4c274ff3
 +}
 +
 +pub fn unsetenv(key: &OsStr) -> io::Result<()> {
-+    get_env()
-+        .lock()
-+        .expect("failed to lock environment map")
-+        .remove(key)
-+        .map(|_| ())
-+        .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "environment variable not set"))
++    // Removing non-existent env variables is valid apparently...
++    get_env().lock().expect("failed to lock environment map").remove(key);
++    Ok(())
 +}
 +
 +/// # Safety
