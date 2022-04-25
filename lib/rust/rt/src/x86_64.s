@@ -4,6 +4,8 @@
 .globl memset
 .globl memcmp
 
+.equ ID_EXIT, 16
+
 # SysV ABI:
 # - Parameter: rdi, rsi, rdx, ...
 # - Return: rax, rdx
@@ -18,16 +20,17 @@ _stack:
 	.zero 8
 
 .section .text._start
+# rax: thread handle
+# rsp: pointer to program arguments & environment variables
+# rsp can also be used as stack but meh
 _start:
+	mov rdi, rsp
 	lea rsp, [rip + _stack]
 	call main
-
-	# exit
-	# Not actually supported so we go KABOOM instead
-2:
-	hlt
-	# Just in case...
-	jmp 2b
+	mov edi, eax
+	mov eax, ID_EXIT
+	syscall
+	ud2 # Just in case something went horribly wrong
 
 .section .text.memcpy
 .p2align 4

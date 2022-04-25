@@ -17,7 +17,12 @@ use std::fs;
 use std::os::norostb::prelude::*;
 use std::str::FromStr;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	let table_name = std::env::args()
+		.skip(1)
+		.next()
+		.ok_or("expected table name")?;
+
 	let dev_handle = {
 		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1000")
 			.unwrap()
@@ -72,7 +77,7 @@ fn main() {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(b"virtio-net", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
 
 	#[derive(Clone, Copy)]
 	enum Protocol {

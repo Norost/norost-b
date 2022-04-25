@@ -1,0 +1,4 @@
+virtio-net net
+virtio-blk disk
+fs-fat fat disk/data
+minish

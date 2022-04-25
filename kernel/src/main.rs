@@ -21,10 +21,11 @@
 
 extern crate alloc;
 
-use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
+use crate::memory::frame::{OwnedPageFrames, PageFrame, PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, sync::Arc};
+use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
 
 macro_rules! bi_from {
@@ -54,6 +55,7 @@ mod object_table;
 mod scheduler;
 mod sync;
 mod time;
+mod util;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
@@ -86,34 +88,69 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		driver::init(boot_info);
 	}
 
-	assert!(!boot_info.drivers().is_empty(), "no drivers");
-
 	// TODO we should try to recuperate this memory when it becomes unused.
-	struct Driver(boot::Driver);
+	struct Driver(&'static [u8]);
 
 	impl MemoryObject for Driver {
 		fn physical_pages(&self) -> Box<[PageFrame]> {
+			let address = unsafe { memory::r#virtual::virt_to_phys(self.0.as_ptr()) };
 			assert_eq!(
-				self.0.address & u32::try_from(Page::MASK).unwrap(),
+				address & u64::try_from(Page::MASK).unwrap(),
 				0,
 				"ELF file is not aligned"
 			);
-			let base = PPN((self.0.address >> Page::OFFSET_BITS).try_into().unwrap());
-			let count = Page::min_pages_for_bytes(self.0.size.try_into().unwrap());
+			let base = PPN((address >> Page::OFFSET_BITS).try_into().unwrap());
+			let count = Page::min_pages_for_bytes(self.0.len());
 			PageFrameIter { base, count }
 				.map(|p| PageFrame { base: p, p2size: 0 })
 				.collect()
 		}
 	}
 
-	for driver in boot_info
+	let drivers = boot_info
 		.drivers()
-		.iter()
-		.cloned()
-		.map(Driver)
-		.map(Arc::new)
-	{
-		match scheduler::process::Process::from_elf(driver) {
+		.map(|d| Arc::new(Driver(unsafe { d.as_slice() })))
+		.collect::<alloc::vec::Vec<_>>();
+
+	for program in boot_info.init_programs() {
+		let driver = drivers[usize::from(program.driver())].clone();
+		let mut stack = OwnedPageFrames::new(
+			NonZeroUsize::new(1).unwrap(),
+			memory::frame::AllocateHints {
+				address: 0 as _,
+				color: 0,
+			},
+		)
+		.unwrap();
+		unsafe {
+			stack.clear();
+		}
+		unsafe {
+			// args
+			// Include driver name since basically every program ever expects that.
+			let name = boot_info
+				.drivers()
+				.skip(usize::from(program.driver()))
+				.next()
+				.unwrap()
+				.name();
+			let count = (1 + program.args().count()).try_into().unwrap();
+
+			let mut ptr = stack.physical_pages()[0].base.as_ptr().cast::<u8>();
+			ptr.cast::<u16>().write(count);
+			ptr = ptr.add(2);
+
+			for s in [name].into_iter().chain(program.args()) {
+				ptr.cast::<u16>().write(s.len().try_into().unwrap());
+				ptr = ptr.add(2);
+				ptr.copy_from_nonoverlapping(s.as_ptr(), s.len());
+				ptr = ptr.add(s.len());
+			}
+
+			// env (should already be zero but meh, let's be clear)
+			ptr.add(0).cast::<u16>().write(0);
+		}
+		match scheduler::process::Process::from_elf(driver, stack, 0) {
 			Ok(_) => {} // We don't need to do anything.
 			Err(e) => {
 				error!("failed to start driver: {:?}", e)

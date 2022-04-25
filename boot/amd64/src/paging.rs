@@ -1,5 +1,6 @@
 use crate::cpuid;
 use crate::mtrr;
+use core::fmt;
 use core::mem::MaybeUninit;
 
 #[repr(C)]
@@ -10,6 +11,10 @@ impl Page {
 	pub fn zeroed() -> Self {
 		Self(MaybeUninit::zeroed())
 	}
+}
+
+extern "C" {
+	static boot_bottom: usize;
 }
 
 #[repr(C)]
@@ -67,7 +72,7 @@ impl PML4 {
 		// 4KB.
 		// 4KB pages are used to avoid undefined behaviour as 2MB/1GB pages can overlap regions
 		// with different memory types.
-		let init = &crate::boot_bottom as *const _ as usize;
+		let init = &boot_bottom as *const _ as usize;
 		let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
 		let pd = &mut *page_alloc().cast::<Directory>();
 		let pt = &mut *page_alloc().cast::<Table>();
@@ -347,14 +352,14 @@ impl From<SetError> for AddError {
 	}
 }
 
-impl From<AddError> for &'static str {
-	fn from(err: AddError) -> Self {
-		match err {
-			AddError::BadRWXFlags => <&'static str as From<_>>::from(BadRWXFlags),
+impl fmt::Debug for AddError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(match self {
+			AddError::BadRWXFlags => "bad RWX flags",
 			AddError::BadAlignment => "bad alignment",
 			AddError::Occupied => "address occupied",
 			AddError::LowerHalf => "attempt to map lower half",
-		}
+		})
 	}
 }
 
@@ -372,12 +377,6 @@ impl From<BadRWXFlags> for SetError {
 
 #[derive(Clone, Copy)]
 struct BadRWXFlags;
-
-impl From<BadRWXFlags> for &'static str {
-	fn from(_: BadRWXFlags) -> Self {
-		"bad RWX flags"
-	}
-}
 
 fn rwx_flags(r: bool, w: bool, x: bool) -> Result<u64, BadRWXFlags> {
 	match (r, w, x) {

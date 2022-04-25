@@ -8,15 +8,14 @@ use std::fs;
 use std::io::{Read, Seek, Write};
 use std::ptr::NonNull;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO get disk from arguments
+	let mut args = std::env::args().skip(1);
+	let table_name = args.next().ok_or("expected table name")?;
+	let disk = args.next().ok_or("expected disk path")?;
 
 	let disk = loop {
-		if let Ok(disk) = fs::OpenOptions::new()
-			.read(true)
-			.write(true)
-			.open("virtio-blk/disk/0")
-		{
+		if let Ok(disk) = fs::OpenOptions::new().read(true).write(true).open(&disk) {
 			break disk;
 		}
 		// TODO we probably should add a syscall to monitor the table list
@@ -28,7 +27,7 @@ fn main() {
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(b"fat", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
 
 	let mut queries = driver_utils::Arena::new();
 	let mut open_files = driver_utils::Arena::new();

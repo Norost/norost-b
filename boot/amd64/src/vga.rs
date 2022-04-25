@@ -43,37 +43,4 @@ impl Text {
 			self.put_byte(b, fg, bg);
 		}
 	}
-
-	pub fn write_num(&mut self, mut n: i128, base: u8, fg: u8, bg: u8) -> Result<(), InvalidBase> {
-		// Implementation stolen from https://stackoverflow.com/a/23840699/7327379
-		(2 <= base && base < 36).then(|| ()).ok_or(InvalidBase)?;
-
-		let mut t;
-
-		let mut buf = [0; 128];
-		let mut i = 0;
-
-		while {
-			let base = i128::from(base);
-			t = n;
-			n /= base;
-			let d = (35 + (t - n * base)) as usize;
-			buf[i] = b"zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[d];
-			i += 1;
-			n != 0
-		} {}
-
-		if t < 0 {
-			buf[i] = b'-';
-			i += 1;
-		}
-
-		for b in buf[..i].iter().rev().copied() {
-			self.put_byte(b, fg, bg);
-		}
-
-		Ok(())
-	}
 }
-
-pub struct InvalidBase;
