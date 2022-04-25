@@ -137,6 +137,19 @@ any_ticket!(Box<[u8]> => Data, into_data);
 any_ticket!(Box<dyn Query> => Query, into_query);
 any_ticket!(QueryResult => QueryResult, into_query_result);
 
+impl AnyTicketWaker {
+	pub fn complete_err(self, err: Error) {
+		match self {
+			Self::Object(t) => t.complete(Err(err)),
+			Self::Usize(t) => t.complete(Err(err)),
+			Self::U64(t) => t.complete(Err(err)),
+			Self::Data(t) => t.complete(Err(err)),
+			Self::Query(t) => t.complete(Err(err)),
+			Self::QueryResult(t) => t.complete(Err(err)),
+		}
+	}
+}
+
 impl Future for AnyTicket {
 	type Output = Result<AnyTicketValue, Error>;
 

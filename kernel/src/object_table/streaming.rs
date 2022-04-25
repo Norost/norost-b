@@ -8,7 +8,6 @@ use alloc::{
 use core::sync::atomic::{AtomicU32, Ordering};
 use norostb_kernel::{io::SeekFrom, syscall::Handle};
 
-#[derive(Default)]
 pub struct StreamingTable {
 	name: Box<str>,
 	job_id_counter: AtomicU32,
@@ -21,7 +20,10 @@ impl StreamingTable {
 	pub fn new(name: Box<str>) -> Arc<Self> {
 		Arc::new(Self {
 			name,
-			..Default::default()
+			job_id_counter: Default::default(),
+			jobs: Default::default(),
+			tickets: Default::default(),
+			job_handlers: Default::default(),
 		})
 	}
 
@@ -121,7 +123,7 @@ impl Table for StreamingTable {
 			JobResult::Write { amount } => tw.into_usize().complete(Ok(amount)),
 			JobResult::Read { data } => tw.into_data().complete(Ok(data)),
 			JobResult::Query { handle } => tw.into_query().complete(Ok(Box::new(StreamQuery {
-				table: self,
+				table: Arc::downgrade(&self),
 				handle,
 			}))),
 			JobResult::QueryNext { path } => {
@@ -142,6 +144,24 @@ impl Table for StreamingTable {
 impl Object for StreamingTable {
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
 		Some(self)
+	}
+}
+
+impl Drop for StreamingTable {
+	fn drop(&mut self) {
+		// Wake any waiting tasks so they don't get stuck endlessly.
+		for task in self
+			.jobs
+			.lock()
+			.drain(..)
+			.flat_map(|e| e.1)
+			.chain(self.tickets.lock().drain(..).map(|e| e.1))
+		{
+			task.complete_err(Error {
+				code: 127,
+				message: "dropped".into(),
+			});
+		}
 	}
 }
 
@@ -205,7 +225,7 @@ impl Drop for StreamObject {
 }
 
 struct StreamQuery {
-	table: Arc<StreamingTable>,
+	table: Weak<StreamingTable>,
 	handle: Handle,
 }
 
@@ -213,9 +233,11 @@ impl Iterator for StreamQuery {
 	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		Some(self.table.submit_job(JobRequest::QueryNext {
-			handle: self.handle,
-		}))
+		Weak::upgrade(&self.table).map(|table| {
+			table.submit_job(JobRequest::QueryNext {
+				handle: self.handle,
+			})
+		})
 	}
 }
 
