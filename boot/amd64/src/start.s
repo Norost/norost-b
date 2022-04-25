@@ -76,10 +76,12 @@ realm64:
 	jmp		rax
 
 2:
-	# FIXME we should load the GDT specified in the kernel.
+	# Fix the GDT to point to the higher-half identity-mapped space.
+	lgdt	[rip + _gdt_ptr64]
 
 	# Unmap the last page. We can do this the lazy way by simply zeroing out the
 	# lower half of the table.
+	# TODO we leak two pages by doing this.
 	mov		rax, cr3
 	or		rax, rbx
 	mov		rbx, rdi
@@ -90,7 +92,12 @@ realm64:
 
 	# Jump to kernel entry
 	jmp		rsp
+	ud2
 
+_gdt_ptr64:
+	.word	8 * 3 - 1
+	.long	_gdt
+	.long	0xffffc000
 
 .section	.bss.stack
 	.p2align 2

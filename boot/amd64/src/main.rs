@@ -32,7 +32,9 @@ extern "C" {
 }
 
 #[link_section = ".init.gdt"]
+#[export_name = "_gdt"]
 static GDT: gdt::GDT = gdt::GDT::new();
+#[export_name = "_gdt_ptr32"]
 static GDT_PTR: gdt::GDTPointer = gdt::GDTPointer::new(&GDT);
 
 #[repr(C)]
