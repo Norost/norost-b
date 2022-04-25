@@ -26,10 +26,12 @@ impl Info {
 	}
 
 	/// All drivers to be loaded at boot.
-	pub fn drivers(&self) -> &[Driver] {
+	pub fn drivers(&self) -> impl Iterator<Item = Driver<'_>> {
 		unsafe {
 			let b = (self as *const _ as *const u8).add(self.drivers_offset.into());
 			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
+				.iter()
+				.map(|inner: &RawDriver| Driver { info: self, inner })
 		}
 	}
 
@@ -63,7 +65,7 @@ impl fmt::Debug for Info {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
-			.field("drivers", &self.drivers())
+			.field("drivers", &DebugIter::new(self.drivers()))
 			.field("init_programs", &DebugIter::new(self.init_programs()))
 			.field("rsdp", &self.rsdp)
 			.finish()
@@ -90,9 +92,8 @@ impl fmt::Debug for MemoryRegion {
 	}
 }
 
-#[derive(Clone)]
 #[repr(C)]
-pub struct Driver {
+struct RawDriver {
 	/// Start address of the ELF file.
 	pub address: u32,
 	/// Size of the ELF file in bytes.
@@ -101,24 +102,44 @@ pub struct Driver {
 	pub name_offset: u16,
 }
 
-impl Driver {
-	pub fn as_slice(&self) -> &[u8] {
+/// A driver to load at boot.
+pub struct Driver<'a> {
+	info: &'a Info,
+	inner: &'a RawDriver,
+}
+
+impl<'a> Driver<'a> {
+	/// Return the raw binary contents of the driver.
+	///
+	/// # Safety
+	///
+	/// It is up to the caller to ensure the region is still accessible.
+	pub unsafe fn as_slice<'b>(&self) -> &'b [u8] {
 		unsafe {
-			let a = crate::memory::r#virtual::phys_to_virt(self.address.into());
-			core::slice::from_raw_parts(a, self.size.try_into().unwrap())
+			let a = crate::memory::r#virtual::phys_to_virt(self.inner.address.into());
+			core::slice::from_raw_parts(a, self.inner.size.try_into().unwrap())
 		}
+	}
+
+	/// The name of the driver.
+	pub fn name(&self) -> &'a [u8] {
+		self.info.get_str(self.inner.name_offset)
 	}
 }
 
-impl fmt::Debug for Driver {
+impl fmt::Debug for Driver<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"Driver(0x{:x} - 0x{:x} [0x{:x}])",
-			self.address,
-			self.address + self.size,
-			self.size,
-		)
+		f.debug_struct(stringify!(Driver))
+			.field("name", &DebugByteStr::new(self.name()))
+			.field(
+				"range",
+				&format_args!(
+					"{:#x}..{:#x}",
+					self.inner.address,
+					self.inner.address + self.inner.size
+				),
+			)
+			.finish()
 	}
 }
 
