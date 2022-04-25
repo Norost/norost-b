@@ -22,9 +22,14 @@ use alloc::alloc;
 use core::alloc::Layout;
 use core::arch::asm;
 use core::fmt::{self, Write};
-use core::mem::{self, MaybeUninit};
 use core::panic::PanicInfo;
 use core::slice;
+use core::str;
+
+extern "C" {
+	static boot_bottom: usize;
+	static boot_top: usize;
+}
 
 #[link_section = ".init.gdt"]
 static GDT: gdt::GDT = gdt::GDT::new();
@@ -43,7 +48,7 @@ fn alloc_str(arg: &[u8]) -> u16 {
 	let layout = Layout::from_size_align(1 + arg.len(), 1).unwrap();
 	let s = unsafe { slice::from_raw_parts_mut(alloc(layout), layout.size()) };
 	s[1..arg.len() + 1].copy_from_slice(arg);
-	s[0] = s.len().try_into().unwrap();
+	s[0] = arg.len().try_into().unwrap();
 	alloc::offset(s.as_ptr())
 }
 
@@ -51,6 +56,15 @@ fn alloc_slice<T>(count: usize) -> (u16, &'static mut [T]) {
 	let layout = Layout::new::<T>().repeat(count).unwrap();
 	let s = unsafe { slice::from_raw_parts_mut::<T>(alloc(layout.0).cast(), count) };
 	(alloc::offset(s.as_ptr().cast()), s)
+}
+
+fn get_alloc_str(offset: u16) -> &'static [u8] {
+	let ptr = alloc::from_offset(offset);
+	unsafe { slice::from_raw_parts::<u8>(ptr.add(1), (*ptr).into()) }
+}
+
+fn from_utf8(s: &[u8]) -> &str {
+	str::from_utf8(s).unwrap_or("<invalid utf-8>")
 }
 
 #[export_name = "main"]
@@ -67,8 +81,15 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 	let mut kernel = None;
 	let mut init = None;
-
 	let mut rsdp = None;
+
+	let (boot_start, boot_end) = unsafe {
+		(
+			&boot_bottom as *const _ as u64,
+			&boot_top as *const _ as u64,
+		)
+	};
+	let _ = writeln!(Stdout, "Boot: {:#x} - {:#x}", boot_start, boot_end);
 
 	let info = unsafe { &mut *alloc(Layout::new::<info::Info>()).cast::<info::Info>() };
 
@@ -99,6 +120,10 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		}
 	}
 
+	let kernel = kernel.expect("No kernel module");
+	let _ = writeln!(Stdout, "Kernel: {:#x} - {:#x}", kernel.start, kernel.end);
+	info.rsdp.write(*rsdp.unwrap());
+
 	// Only parse drivers so we can exclude them from the final memory regions & we need
 	// them for init.
 	let (offset, drivers) = alloc_slice(info.drivers_len.into());
@@ -115,6 +140,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 					name_offset: alloc_str(name),
 					_padding: 0,
 				};
+				let name = from_utf8(name);
+				let _ = writeln!(Stdout, "Driver {:?}: {:#x} - {:#x}", name, m.start, m.end);
 				i += 1;
 			} else if m.string == b"driver" {
 				panic!("driver must have a name");
@@ -139,7 +166,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let (offset, init) = alloc_slice::<info::InitProgram>(lines_iter().count());
 	info.init_offset = offset;
 	info.init_len = init.len().try_into().unwrap();
-	for (i, (line, init)) in lines_iter().zip(init).enumerate() {
+	for (line, init) in lines_iter().zip(init) {
 		// Split into words
 		let mut words = line
 			.split(|c| b"\t ".contains(c))
@@ -148,7 +175,12 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 		// Get program name & find the corresponding index.
 		let program = words.next().expect("no program name specified");
-		init.driver = u16::MAX;
+		init.driver = drivers
+			.iter()
+			.position(|d| get_alloc_str(d.name_offset) == program)
+			.unwrap_or_else(|| panic!("no matching driver {:?}", from_utf8(program)))
+			.try_into()
+			.unwrap();
 
 		// Parse program arguments
 		// We rely on the fact that alloc() is a bump allocator.
@@ -161,45 +193,72 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	}
 
 	assert_ne!(info.init_len, 0, "no init programs specified");
-	let kernel = kernel.expect("No kernel module");
-	info.rsdp.write(*rsdp.unwrap());
 
 	// Determine free memory regions
 	let iter_regions = |callback: &mut dyn FnMut(info::MemoryRegion)| {
-		let apply = &mut |base: u64, size: u64| {
-			let mut callback = |start, end| {
-				callback(info::MemoryRegion {
-					base: start,
-					size: end - start,
-				})
-			};
-			let kernel_list = [(kernel.start.into(), kernel.end.into())];
+		fn apply(
+			base: u64,
+			size: u64,
+			callback: &mut dyn FnMut(info::MemoryRegion),
+			mut reserved: impl Iterator<Item = (u64, u64)> + Clone,
+		) {
+			if let Some((bottom, top)) = reserved.next() {
+				let mut apply = |start, end| {
+					// Align the addresses to a page boundary.
+					let start = (start + 0xfff) & !0xfff;
+					let end = end & !0xfff;
+					// Discard the region if it's zero-sized.
+					if start != end {
+						apply(start, end - start, callback, reserved.clone())
+					}
+				};
+				let (start, end) = (base, base + size);
+				if bottom <= start && end <= top {
+					// b----s-_-_e----t
+					// Discard the entire region
+				} else if bottom < end && end <= top {
+					// s____b-_-_e----t
+					// Cut off the top half
+					apply(start, bottom);
+				} else if bottom <= start && start < top {
+					// b----s-_-_t____e
+					// Cut off the bottom half
+					apply(top, end);
+				} else if start <= bottom && top <= end {
+					// s____b-_-_t____e
+					// Split the entry in half
+					apply(start, bottom);
+					apply(top, end);
+				} else {
+					// Don't split
+					apply(start, end)
+				}
+			} else {
+				// There is nothing left to split
+				callback(info::MemoryRegion { base, size })
+			}
+		}
+		let apply = &mut |base, size| {
+			let list = [
+				(boot_start, boot_end),
+				(kernel.start.into(), kernel.end.into()),
+			];
 			let driver_list = drivers
 				.iter()
 				.map(|d| (d.address.into(), (d.address + d.size).into()));
-			for (bottom, top) in kernel_list.iter().copied().chain(driver_list) {
-				let (start, end) = (base, base + size);
-				if bottom <= start && end <= top {
-					// Discard the entire entry
-				} else if bottom < end && end <= top {
-					// Cut off the top half
-					callback(start, bottom);
-				} else if bottom <= start && start < top {
-					// Cut off the bottom half
-					callback(top, end);
-				} else if start <= bottom && top <= end {
-					// Split the entry in half
-					callback(start, bottom);
-					callback(top, end);
-				}
-			}
+			apply(
+				base,
+				size,
+				callback,
+				list.iter().copied().chain(driver_list),
+			)
 		};
 
 		for e in boot_info() {
 			if let bi::Info::MemoryMap(m) = e {
 				for e in m.entries.iter().filter(|e| e.is_available()) {
 					assert_eq!(e.base_address & 0xfff, 0, "misaligned base address");
-					/* It *can* happen... I have no idea why though.
+					/* It *can* happen in some cases. No unaligned base addresses so far though.
 					assert_eq!(
 						e.length & 0xfff,
 						0,
@@ -230,11 +289,17 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	});
 
 	// Collect all memory regions excluding area occupied by the kernel & drivers
-	let (offset, mut memory_regions) = alloc_slice::<info::MemoryRegion>(memory_regions_count);
+	let (offset, memory_regions) = alloc_slice::<info::MemoryRegion>(memory_regions_count);
 	info.memory_regions_offset = offset;
 	info.memory_regions_len = memory_regions.len().try_into().unwrap();
 	let mut i = 0;
 	iter_regions(&mut |region| {
+		let _ = writeln!(
+			Stdout,
+			"Memory region: {:#x} - {:#x}",
+			region.base,
+			region.base + region.size
+		);
 		memory_regions[i] = region;
 		i += 1;
 	});
@@ -260,7 +325,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		pml4.write(paging::PML4::new());
 		&mut *pml4
 	};
-	todo!();
 
 	unsafe {
 		pml4.identity_map(&mut page_alloc, memory_top, &cpuid);
@@ -296,11 +360,23 @@ fn panic(info: &PanicInfo) -> ! {
 
 struct Stderr;
 
+struct Stdout;
+
 impl Write for Stderr {
 	fn write_str(&mut self, s: &str) -> fmt::Result {
 		let s = s.as_bytes();
 		debug_assert!(unsafe { VGA.is_some() });
 		unsafe { VGA.as_mut().unwrap_unchecked().write_str(s, 0xc, 0) }
+		s.iter().copied().for_each(uart::Uart::send);
+		Ok(())
+	}
+}
+
+impl Write for Stdout {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		let s = s.as_bytes();
+		debug_assert!(unsafe { VGA.is_some() });
+		unsafe { VGA.as_mut().unwrap_unchecked().write_str(s, 1, 0) }
 		s.iter().copied().for_each(uart::Uart::send);
 		Ok(())
 	}

@@ -37,18 +37,3 @@ pub struct InitProgram {
 	pub driver: u16,
 	pub args_offset: u16,
 }
-
-impl Info {
-	pub const fn empty(buffer: *const u8) -> Self {
-		Self {
-			memory_regions_offset: 0,
-			memory_regions_len: 0,
-			drivers_offset: 0,
-			drivers_len: 0,
-			init_offset: 0,
-			init_len: 0,
-			_padding: 0,
-			rsdp: MaybeUninit::uninit(),
-		}
-	}
-}

@@ -93,6 +93,7 @@ realm64:
 
 
 .section	.bss.stack
+	.p2align 2
 stack_bottom:
-	.zero	0x1000
+	.zero	0x1000 - 8 # Those 8 bytes over the page border keep me up at night
 stack_top:

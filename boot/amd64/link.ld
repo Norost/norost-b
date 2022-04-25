@@ -37,4 +37,6 @@ SECTIONS
 	{
 		*(.note .note.*)
 	}
+
+	boot_top = .;
 }
