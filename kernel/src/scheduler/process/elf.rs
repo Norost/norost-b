@@ -200,15 +200,17 @@ impl super::Process {
 			let virt_address = usize::try_from(virt_address).unwrap();
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
 
-			// Map part of the ELF file.
-			let virt = NonNull::new(virt_address as *mut _).unwrap();
-			let mem = Box::new(MemorySlice {
-				inner: data_object.clone(),
-				range: page_offset..page_offset + count,
-			});
-			address_space
-				.map_object(Some(virt), mem, rwx, slf.hint_color)
-				.map_err(ElfError::MapError)?;
+			if count > 0 {
+				// Map part of the ELF file.
+				let virt = NonNull::new(virt_address as *mut _).unwrap();
+				let mem = Box::new(MemorySlice {
+					inner: data_object.clone(),
+					range: page_offset..page_offset + count,
+				});
+				address_space
+					.map_object(Some(virt), mem, rwx, slf.hint_color)
+					.map_err(ElfError::MapError)?;
+			}
 
 			// Allocate memory for the region that isn't present in the ELF file.
 			if let Some(size) = NonZeroUsize::new(alloc - count) {
