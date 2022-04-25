@@ -67,8 +67,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		log::init();
 	}
 
-	dbg!(boot_info);
-
 	for region in boot_info.memory_regions() {
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;

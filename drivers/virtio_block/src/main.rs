@@ -9,7 +9,12 @@ use std::fs;
 use std::os::norostb::prelude::*;
 use virtio_block::Sector;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	let table_name = std::env::args()
+		.skip(1)
+		.next()
+		.ok_or("expected table name")?;
+
 	let dev_handle = {
 		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1001")
 			.unwrap()
@@ -46,7 +51,7 @@ fn main() {
 	};
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(b"virtio-blk", syscall::TableType::Streaming).unwrap();
+	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
 
 	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
 	let sectors_phys = virtio::PhysRegion {

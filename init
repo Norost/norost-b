@@ -1,4 +1,4 @@
 virtio-net net
 virtio-blk disk
-fs-fat disk/data
-minish example arguments # This is a comment
+fs-fat fat disk/data
+minish

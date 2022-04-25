@@ -9,13 +9,6 @@ use std::iter::Filter;
 use std::str;
 
 fn main() -> std::io::Result<()> {
-	dbg!(dbg!(std::env::args()).next_back());
-	dbg!(std::env::vars().collect::<Vec<_>>());
-	std::env::set_var("foo", "bar");
-	dbg!(std::env::vars().collect::<Vec<_>>());
-	std::env::remove_var("HELLO_WORLD");
-	dbg!(std::env::vars().collect::<Vec<_>>());
-
 	let mut term = self::term::AnsiTerminal::new(std::io::stdin(), std::io::stderr());
 	term.set_prefix(">> ");
 
