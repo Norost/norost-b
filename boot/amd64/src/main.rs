@@ -189,6 +189,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 			if init.args_offset == 0 {
 				init.args_offset = s;
 			}
+			init.args_len += 1;
 		}
 	}
 

@@ -1,3 +1,4 @@
+use crate::util::{DebugByteStr, DebugIter};
 use core::fmt;
 
 #[repr(C)]
@@ -33,11 +34,28 @@ impl Info {
 	}
 
 	/// All init programs & arguments to run.
-	pub fn init_programs(&self) -> &[InitProgram] {
+	pub fn init_programs(&self) -> impl Iterator<Item = InitProgram<'_>> {
 		unsafe {
-			let b = (self as *const _ as *const u8).add(self.drivers_offset.into());
-			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
+			let b = (self as *const _ as *const u8).add(self.init_offset.into());
+			core::slice::from_raw_parts(b.cast(), usize::from(self.init_len))
+				.iter()
+				.map(|inner: &RawInitProgram| InitProgram { info: self, inner })
 		}
+	}
+
+	/// Get a byte string from the buffer.
+	///
+	/// A byte string is prefixed with a single byte that indicates its length.
+	fn get_str(&self, offset: u16) -> &[u8] {
+		let offset = usize::from(offset);
+		let len = self.buffer()[offset];
+		&self.buffer()[1 + offset..1 + offset + usize::from(len)]
+	}
+
+	/// Cast to an array.
+	fn buffer(&self) -> &[u8; 1 << 16] {
+		// SAFETY: The boot loader should have given us a sufficiently large buffer.
+		unsafe { &*(self as *const Self).cast() }
 	}
 }
 
@@ -46,6 +64,7 @@ impl fmt::Debug for Info {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
 			.field("drivers", &self.drivers())
+			.field("init_programs", &DebugIter::new(self.init_programs()))
 			.field("rsdp", &self.rsdp)
 			.finish()
 	}
@@ -104,7 +123,40 @@ impl fmt::Debug for Driver {
 }
 
 #[repr(C)]
-pub struct InitProgram {
-	pub name_offset: u16,
-	pub args_offset: u16,
+struct RawInitProgram {
+	driver: u16,
+	args_offset: u16,
+	args_len: u16,
+}
+
+/// A program to run at boot.
+pub struct InitProgram<'a> {
+	info: &'a Info,
+	inner: &'a RawInitProgram,
+}
+
+impl<'a> InitProgram<'a> {
+	/// The index of the corresponding driver
+	pub fn driver(&self) -> u16 {
+		self.inner.driver
+	}
+
+	/// The arguments that should be passed to this program.
+	pub fn args(&self) -> impl Iterator<Item = &'a [u8]> + '_ {
+		let mut offset = self.inner.args_offset;
+		(0..self.inner.args_len).map(move |_| {
+			let s = self.info.get_str(offset);
+			offset += 1 + u16::try_from(s.len()).unwrap();
+			s
+		})
+	}
+}
+
+impl fmt::Debug for InitProgram<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct(stringify!(InitProgram))
+			.field("driver", &self.driver())
+			.field("args", &DebugIter::new(self.args().map(DebugByteStr::new)))
+			.finish()
+	}
 }

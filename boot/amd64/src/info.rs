@@ -36,4 +36,5 @@ pub struct Driver {
 pub struct InitProgram {
 	pub driver: u16,
 	pub args_offset: u16,
+	pub args_len: u16,
 }

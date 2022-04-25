@@ -55,6 +55,7 @@ mod object_table;
 mod scheduler;
 mod sync;
 mod time;
+mod util;
 
 #[export_name = "main"]
 pub extern "C" fn main(boot_info: &boot::Info) -> ! {
