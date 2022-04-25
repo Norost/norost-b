@@ -29,10 +29,12 @@ pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
 	loop {
-		if thr.sleep_until() <= now {
-			let _ = thr.clone().resume();
+		let sleep_until = thr.sleep_until();
+		if sleep_until <= now {
+			// Be very careful _not_ to clone here, as otherwise we'll start leaking references.
+			let _ = thr.resume();
 		}
-		t = t.min(thr.sleep_until());
+		t = t.min(sleep_until);
 		thr = round_robin::next().unwrap();
 		if Arc::as_ptr(&thr) == first {
 			return Err(t);
