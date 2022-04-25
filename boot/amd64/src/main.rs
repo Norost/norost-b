@@ -377,7 +377,7 @@ impl Write for Stdout {
 	fn write_str(&mut self, s: &str) -> fmt::Result {
 		let s = s.as_bytes();
 		debug_assert!(unsafe { VGA.is_some() });
-		unsafe { VGA.as_mut().unwrap_unchecked().write_str(s, 1, 0) }
+		unsafe { VGA.as_mut().unwrap_unchecked().write_str(s, 7, 0) }
 		s.iter().copied().for_each(uart::Uart::send);
 		Ok(())
 	}
