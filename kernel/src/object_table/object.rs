@@ -13,6 +13,10 @@ pub trait Object {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}
 
+	fn peek(&self, _offset: u64, _length: usize) -> Ticket<Box<[u8]>> {
+		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
+	}
+
 	fn write(&self, _offset: u64, _data: &[u8]) -> Ticket<usize> {
 		Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
 	}

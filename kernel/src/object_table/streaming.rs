@@ -121,7 +121,9 @@ impl Table for StreamingTable {
 				tw.into_object().complete(Ok(obj))
 			}
 			JobResult::Write { amount } => tw.into_usize().complete(Ok(amount)),
-			JobResult::Read { data } => tw.into_data().complete(Ok(data)),
+			JobResult::Read { data } | JobResult::Peek { data } => {
+				tw.into_data().complete(Ok(data))
+			}
 			JobResult::Query { handle } => tw.into_query().complete(Ok(Box::new(StreamQuery {
 				table: Arc::downgrade(&self),
 				handle,
@@ -176,6 +178,20 @@ impl Object for StreamObject {
 			.upgrade()
 			.map(|tbl| {
 				tbl.submit_job(JobRequest::Read {
+					handle: self.handle,
+					amount: length,
+				})
+			})
+			.unwrap_or_else(|| {
+				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
+			})
+	}
+
+	fn peek(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
+		self.table
+			.upgrade()
+			.map(|tbl| {
+				tbl.submit_job(JobRequest::Peek {
 					handle: self.handle,
 					amount: length,
 				})

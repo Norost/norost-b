@@ -24,6 +24,7 @@ pub enum JobRequest {
 	Query { filter: Box<[u8]> },
 	QueryNext { handle: Handle },
 	Close { handle: Handle },
+	Peek { handle: Handle, amount: usize },
 }
 
 /// A finished job.
@@ -36,6 +37,7 @@ pub enum JobResult {
 	Seek { position: u64 },
 	Query { handle: Handle },
 	QueryNext { path: Box<[u8]> },
+	Peek { data: Box<[u8]> },
 }
 
 /// An error that occured during a job.

@@ -141,6 +141,18 @@ impl super::Process {
 						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
+				Request::PEEK => {
+					let handle = unerase_handle(e.arguments_32[0]);
+					let data_ptr = e.arguments_64[0] as *mut u8;
+					let data_len = e.arguments_64[1] as usize;
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.peek(0, data_len.try_into().unwrap());
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
+						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
+						Poll::Ready(Err(_)) => push_resp(-1),
+					}
+				}
 				Request::WRITE => {
 					let handle = unerase_handle(e.arguments_32[0]);
 					let data_ptr = e.arguments_64[0] as *const u8;
@@ -250,6 +262,9 @@ impl super::Process {
 						Job::OPEN => JobResult::Open { handle: job.handle },
 						Job::CREATE => JobResult::Create { handle: job.handle },
 						Job::READ => JobResult::Read {
+							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+						},
+						Job::PEEK => JobResult::Peek {
 							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
 						},
 						Job::WRITE => JobResult::Write {
@@ -447,7 +462,7 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 			job.ty = Job::CREATE;
 			copy_buf(&path);
 		}
-		JobRequest::Read { handle, amount } => {
+		JobRequest::Read { handle, amount } | JobRequest::Peek { handle, amount } => {
 			job.ty = Job::READ;
 			job.handle = handle;
 			job.operation_size = amount.try_into().unwrap();

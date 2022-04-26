@@ -56,6 +56,7 @@ impl Request {
 	pub const SEEK: u8 = 8;
 	pub const POLL: u8 = 9;
 	pub const CLOSE: u8 = 10;
+	pub const PEEK: u8 = 11;
 
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
@@ -172,6 +173,26 @@ impl Request {
 		Self {
 			ty: Self::CLOSE,
 			arguments_32: [handle],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			arguments_32: [handle],
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			arguments_32: [handle],
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
@@ -540,6 +561,7 @@ impl Job {
 	pub const QUERY_NEXT: u8 = 5;
 	pub const SEEK: u8 = 6;
 	pub const CLOSE: u8 = 7;
+	pub const PEEK: u8 = 8;
 }
 
 pub type JobId = u32;
