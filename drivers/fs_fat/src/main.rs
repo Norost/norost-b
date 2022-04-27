@@ -1,9 +1,7 @@
 #![feature(norostb)]
-// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
-// stdlib
-#![feature(rustc_private)]
 
-use norostb_kernel::{io::Job, syscall};
+use norostb_kernel::syscall;
+use norostb_rt as rt;
 use std::fs;
 use std::io::{Read, Seek, Write};
 use std::ptr::NonNull;
@@ -36,11 +34,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let buf = &mut buf;
 
 	loop {
+		use rt::io::Job;
+
 		// Wait for events from the table
-		let mut job = std::os::norostb::Job::default();
+		let mut job = Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		match std::os::norostb::take_job(tbl, &mut job) {
+		match rt::io::take_job(tbl, &mut job) {
 			Ok(()) => {}
 			Err(_) => continue, // Timeout, probably...
 		}
@@ -123,6 +123,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			t => todo!("job type {}", t),
 		}
 
-		std::os::norostb::finish_job(tbl, &job).unwrap();
+		rt::io::finish_job(tbl, &job).unwrap();
 	}
 }

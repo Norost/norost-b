@@ -85,6 +85,7 @@ dependencies = [
  "driver_utils",
  "fatfs",
  "norostb_kernel",
+ "norostb_rt",
 ]
 
 [[package]]
@@ -100,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "norostb_kernel",
+ "norostb_rt",
  "pci",
  "virtio",
  "virtio_block",
@@ -110,6 +112,7 @@ name = "driver_virtio_net"
 version = "0.1.0"
 dependencies = [
  "norostb_kernel",
+ "norostb_rt",
  "pci",
  "smoltcp",
  "virtio",
@@ -211,6 +214,7 @@ dependencies = [
  "cfg-if",
  "compiler_builtins",
  "norostb_kernel",
+ "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
 
@@ -268,6 +272,12 @@ checksum = "66d3add2fc55ef37511bcf81a08ee7a09eff07b23aae38b06a29024a38c604b1"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "rustc-std-workspace-alloc"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff66d57013a5686e1917ed6a025d54dd591fcda71a41fe07edf4d16726aefa86"
 
 [[package]]
 name = "rustc-std-workspace-core"

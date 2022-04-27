@@ -1,10 +1,8 @@
 #![feature(norostb)]
-// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
-// stdlib
-#![feature(rustc_private)]
 
 use core::ptr::NonNull;
 use norostb_kernel::{io::Job, syscall};
+use norostb_rt as rt;
 use std::fs;
 use std::os::norostb::prelude::*;
 use virtio_block::Sector;
@@ -80,15 +78,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	loop {
 		// Wait for events from the table
-		let mut job = std::os::norostb::Job::default();
+		let mut job = rt::io::Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		if std::os::norostb::take_job(tbl, &mut job).is_err() {
+		if rt::io::take_job(tbl, &mut job).is_err() {
 			continue;
 		}
 
 		let wait = || {
-			std::os::norostb::poll(dev_handle).unwrap();
+			rt::io::poll(dev_handle).unwrap();
 		};
 
 		match job.ty {
@@ -176,6 +174,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			t => todo!("job type {}", t),
 		}
 
-		std::os::norostb::finish_job(tbl, &job).unwrap();
+		rt::io::finish_job(tbl, &job).unwrap();
 	}
 }

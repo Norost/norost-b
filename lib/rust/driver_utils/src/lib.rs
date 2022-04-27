@@ -7,7 +7,6 @@
 #![feature(new_uninit)]
 #![feature(norostb)]
 #![feature(read_buf)]
-#![feature(rustc_private)]
 
 mod arena;
 

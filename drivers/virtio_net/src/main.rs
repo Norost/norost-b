@@ -1,16 +1,17 @@
 #![feature(if_let_guard)]
 #![feature(norostb)]
-// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
-// stdlib
-#![feature(rustc_private)]
 
 mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
 use norostb_kernel::{
-	io::{Empty, Job, Queue, Request},
+	io::{Empty, Queue},
 	syscall,
+};
+use norostb_rt::{
+	self as rt,
+	io::{Job, Request},
 };
 use smoltcp::socket::TcpState;
 use std::fs;
@@ -123,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						smoltcp::wire::IpEndpoint::UNSPECIFIED,
 						Protocol::Tcp,
 					));
-					let std_job = std::os::norostb::Job {
+					let std_job = Job {
 						ty: Job::CREATE,
 						job_id,
 						flags: [0; 3],
@@ -134,7 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						from_anchor: 0,
 						from_offset: 0,
 					};
-					std::os::norostb::finish_job(tbl, &std_job).unwrap();
+					rt::io::finish_job(tbl, &std_job).unwrap();
 					unsafe {
 						job_queue
 							.enqueue_request(Request::take_job(0, tbl, &mut job))

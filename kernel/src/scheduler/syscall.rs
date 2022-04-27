@@ -68,6 +68,7 @@ fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 }
 
 extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("alloc");
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
 			status: 1,
@@ -110,6 +111,7 @@ extern "C" fn dealloc(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("dealloc");
 	let dealloc_partial_start = flags & 1 > 0;
 	let dealloc_partial_end = flags & 2 > 0;
 
@@ -164,6 +166,7 @@ extern "C" fn alloc_dma(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("alloc_dma");
 	let rwx = RWX::RW;
 	let base = NonNull::new(base as *mut _);
 	let count = (size + Page::MASK) / Page::SIZE;
@@ -191,6 +194,7 @@ extern "C" fn physical_address(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("physical_address");
 	let address = NonNull::new(address as *mut _).unwrap();
 	let value = Process::current()
 		.unwrap()
@@ -215,6 +219,7 @@ extern "C" fn next_table(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("next_table");
 	let id = (id != usize::MAX).then(|| TableId::from(u32::try_from(id).unwrap()));
 	let (name, id) = match object_table::next_table(id) {
 		Some(p) => p,
@@ -246,6 +251,7 @@ extern "C" fn map_object(
 	length_or_rwx: usize,
 	rwx: usize,
 ) -> Return {
+	debug!("map_object");
 	let (offset, _length, _rwx) = match mem::size_of_val(&offset_l) {
 		4 => (
 			(offset_h_or_length as u64) << 32 | offset_l as u64,
@@ -280,6 +286,7 @@ extern "C" fn duplicate_handle(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("duplicate_handle");
 	let handle = handle as u32;
 
 	Process::current()
@@ -305,6 +312,7 @@ extern "C" fn create_table(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("create_table");
 	let name = NonNull::new(name as *mut u8).unwrap();
 	assert!(name_len <= 255, "name too long");
 	let name = unsafe { core::slice::from_raw_parts(name.as_ptr(), name_len) };
@@ -336,6 +344,7 @@ extern "C" fn sleep(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("sleep");
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
 
@@ -358,6 +367,7 @@ extern "C" fn spawn_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("spawn_thread");
 	Process::current()
 		.unwrap()
 		.spawn_thread(start, stack)
@@ -381,6 +391,7 @@ extern "C" fn create_io_rings(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("create_io_queue");
 	Process::current()
 		.unwrap()
 		.create_io_queue(
@@ -401,6 +412,7 @@ extern "C" fn create_io_rings(
 }
 
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("submit_io");
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
 	Process::current().unwrap().process_io_queue(base).map_or(
 		Return {
@@ -415,6 +427,7 @@ extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: 
 }
 
 extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("wait_io");
 	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
 	Process::current().unwrap().wait_io_queue(base).map_or(
 		Return {
@@ -436,6 +449,7 @@ extern "C" fn kill_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("kill_thread");
 	// To keep things simple & safe, always switch to the CPU local stack & start running
 	// the next thread, even if it isn't the most efficient way to do things.
 	let Some(thread) = Process::current().unwrap().remove_thread(handle as u32) else {
@@ -476,6 +490,7 @@ extern "C" fn wait_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
+	debug!("wait_thread");
 	Process::current()
 		.unwrap()
 		.get_thread(handle as u32)
@@ -495,6 +510,7 @@ extern "C" fn wait_thread(
 }
 
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("exit");
 	#[derive(Clone, Copy)]
 	struct D(*const Process, i32);
 	let d = D(Arc::into_raw(Process::current().unwrap()), code as i32);
@@ -522,6 +538,7 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 }
 
 extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("undefined");
 	Return {
 		status: usize::MAX,
 		value: 0,

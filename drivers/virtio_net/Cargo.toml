@@ -8,6 +8,7 @@ default-target = "x86_64-unknown-norostb"
 
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
+norostb_rt = { path = "../../lib/rust/rt" }
 smoltcp = { version = "*", default-features = false, features = ["alloc", "proto-ipv6", "medium-ethernet", "socket-tcp", "socket-udp", "proto-ipv4", "socket-dhcpv4"] }
 virtio = { path = "../../lib/rust/virtio" }
 virtio_net = { path = "../../lib/rust/virtio_net" }
