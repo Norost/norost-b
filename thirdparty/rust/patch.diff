@@ -392,7 +392,7 @@ index 00000000000..26f5309308e
 +}
 diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
 new file mode 100644
-index 00000000000..2cb85e49d2f
+index 00000000000..a06c561b91c
 --- /dev/null
 +++ b/library/std/src/os/norostb/mod.rs
 @@ -0,0 +1,10 @@
@@ -403,7 +403,7 @@ index 00000000000..2cb85e49d2f
 +
 +pub mod prelude {
 +    use super::*;
-+    pub use ffi::OsStrExt;
++    pub use ffi::{OsStrExt, OsStringExt};
 +    pub use io::{AsHandle, FromHandle, Handle, IntoHandle};
 +}
 diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
@@ -623,10 +623,10 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..463930f15a0
+index 00000000000..e39561c384d
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,473 @@
+@@ -0,0 +1,310 @@
 +use super::cvt_err;
 +/// ## Path format
 +///
@@ -646,41 +646,24 @@ index 00000000000..463930f15a0
 +use crate::ffi::OsString;
 +use crate::hash::Hash;
 +use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
-+use crate::mem;
++use crate::os::norostb::prelude::*;
 +use crate::path::{Path, PathBuf};
-+use crate::sys::os_str::Buf;
 +use crate::sys::time::SystemTime;
 +use crate::sys::unsupported;
-+use crate::sys_common::{AsInner, FromInner};
-+use norostb_rt::{
-+    io as rt_io,
-+    table::{Object, ObjectInfo, TableId, TableInfo, TableIter},
-+    Handle,
-+};
++use crate::sys_common::AsInner;
++use norostb_rt::{io as rt_io, table::Object};
 +
 +#[derive(Debug)]
 +pub struct File(pub(crate) Object);
 +
-+const TABLE_OBJECT_SEPARATOR: u8 = b'/';
-+
 +#[derive(Clone, Debug)]
-+pub enum FileAttr {
-+    Table { entries: u64 },
-+    Object { size: u64 },
-+}
++pub enum FileAttr {}
 +
 +#[derive(Debug)]
-+pub enum ReadDir {
-+    None,
-+    Tables(TableIter),
-+    Objects { table_id: TableId, table_info: TableInfo, query: Handle },
-+}
++pub struct ReadDir(rt_io::Query);
 +
 +#[derive(Clone, Debug)]
-+pub enum DirEntry {
-+    Table { id: TableId, info: TableInfo },
-+    Object { table_id: TableId, table_info: TableInfo, name: OsString },
-+}
++pub struct DirEntry(OsString);
 +
 +#[derive(Clone, Debug)]
 +pub struct OpenOptions {
@@ -692,7 +675,6 @@ index 00000000000..463930f15a0
 +
 +#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 +pub enum FileType {
-+    Table,
 +    Object,
 +}
 +
@@ -702,8 +684,7 @@ index 00000000000..463930f15a0
 +impl FileAttr {
 +    pub fn size(&self) -> u64 {
 +        match self {
-+            Self::Table { entries, .. } => *entries,
-+            Self::Object { size, .. } => *size,
++            _ => unreachable!(),
 +        }
 +    }
 +
@@ -712,10 +693,7 @@ index 00000000000..463930f15a0
 +    }
 +
 +    pub fn file_type(&self) -> FileType {
-+        match self {
-+            Self::Table { .. } => FileType::Table,
-+            Self::Object { .. } => FileType::Object,
-+        }
++        FileType::Object
 +    }
 +
 +    pub fn modified(&self) -> io::Result<SystemTime> {
@@ -742,21 +720,18 @@ index 00000000000..463930f15a0
 +impl FileType {
 +    pub fn is_dir(&self) -> bool {
 +        match self {
-+            Self::Table => true,
 +            Self::Object => false,
 +        }
 +    }
 +
 +    pub fn is_file(&self) -> bool {
 +        match self {
-+            Self::Table => false,
 +            Self::Object => true,
 +        }
 +    }
 +
 +    pub fn is_symlink(&self) -> bool {
 +        match self {
-+            Self::Table => false,
 +            Self::Object => false,
 +        }
 +    }
@@ -766,73 +741,26 @@ index 00000000000..463930f15a0
 +    type Item = io::Result<DirEntry>;
 +
 +    fn next(&mut self) -> Option<io::Result<DirEntry>> {
-+        match mem::replace(self, Self::None) {
-+            Self::None => None,
-+            Self::Tables(mut tbl) => tbl.next().map(|(id, info)| {
-+                *self = Self::Tables(tbl);
-+                Ok(DirEntry::Table { id, info })
-+            }),
-+            Self::Objects { table_id, table_info, query } => {
-+                let mut inner = Vec::with_capacity(4096);
-+                inner.resize(4096, 0);
-+                let mut info = ObjectInfo::new(&mut inner);
-+                match rt_io::query_next(query, &mut info) {
-+                    Ok(true) => {
-+                        inner.resize(info.path_len, 0);
-+                        let name = OsString::from_inner(Buf { inner }).into();
-+                        *self = Self::Objects { table_id, table_info: table_info.clone(), query };
-+                        Some(Ok(DirEntry::Object { table_id, table_info, name }))
-+                    }
-+                    Ok(false) => None,
-+                    Err(_) => unreachable!("kernel returned unknown error code"),
-+                }
-+            }
-+        }
++        self.0.next().map(|path| Ok(DirEntry(OsString::from_vec(path))))
 +    }
 +}
 +
 +impl DirEntry {
 +    pub fn path(&self) -> PathBuf {
-+        match self {
-+            Self::Table { info, .. } => {
-+                let inner = info.name().into();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+            Self::Object { table_info, name, .. } => {
-+                let inner = table_info
-+                    .name()
-+                    .iter()
-+                    .chain(&[TABLE_OBJECT_SEPARATOR])
-+                    .chain(&name.as_inner().inner)
-+                    .copied()
-+                    .collect();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+        }
++        self.0.clone().into()
 +    }
 +
 +    pub fn file_name(&self) -> OsString {
-+        match self {
-+            Self::Table { info, .. } => {
-+                let inner = info.name().iter().copied().collect();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+            Self::Object { name, .. } => name.clone(),
-+        }
++        // TODO this isn't quite accurate.
++        self.0.clone().into()
 +    }
 +
 +    pub fn metadata(&self) -> io::Result<FileAttr> {
-+        match self {
-+            Self::Table { .. } => Ok(FileAttr::Table { entries: 0 }),
-+            Self::Object { .. } => Ok(FileAttr::Object { size: 0 }),
-+        }
++        unsupported()
 +    }
 +
 +    pub fn file_type(&self) -> io::Result<FileType> {
-+        match self {
-+            Self::Table { .. } => Ok(FileType::Table),
-+            Self::Object { .. } => Ok(FileType::Object),
-+        }
++        unsupported()
 +    }
 +}
 +
@@ -856,20 +784,9 @@ index 00000000000..463930f15a0
 +impl File {
 +    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
 +        if opts.create {
-+            // syscall::create takes only a table ID and a string representing path
-+            let mut path = path_inner(path).splitn(2, |c| *c == b'/');
-+            let table = path.next().expect("at least one match");
-+            let path = if let Some(p) = path.next() {
-+                p
-+            } else {
-+                return Err(io::const_io_error!(io::ErrorKind::Other, "expected full path"));
-+            };
-+            let table = find_table(table)?.0;
-+            Object::create(table, path).map(File).map_err(cvt_err)
++            rt_io::base_object().create(path_inner(path)).map(File).map_err(cvt_err)
 +        } else {
-+            // Find a unique ID
-+            let (table_id, path) = split_into_table_and_path(path)?;
-+            Object::open(table_id, path).map(File).map_err(cvt_err)
++            rt_io::base_object().open(path_inner(path)).map(File).map_err(cvt_err)
 +        }
 +    }
 +
@@ -878,13 +795,11 @@ index 00000000000..463930f15a0
 +    }
 +
 +    pub fn fsync(&self) -> io::Result<()> {
-+        // TODO
-+        Ok(())
++        unsupported()
 +    }
 +
 +    pub fn datasync(&self) -> io::Result<()> {
-+        // TODO
-+        Ok(())
++        unsupported()
 +    }
 +
 +    pub fn truncate(&self, _size: u64) -> io::Result<()> {
@@ -961,19 +876,7 @@ index 00000000000..463930f15a0
 +}
 +
 +pub fn readdir(path: &Path) -> io::Result<ReadDir> {
-+    match split_path(path)? {
-+        SplitPath::None => Ok(ReadDir::Tables(TableIter::new().map_err(cvt_err)?)),
-+        SplitPath::Table { table } => {
-+            let (table_id, table_info) = find_table(table)?;
-+            let query = rt_io::query(table_id, &[]).map_err(cvt_err)?;
-+            Ok(ReadDir::Objects { table_id, table_info, query })
-+        }
-+        SplitPath::Path { table, path } => {
-+            let (table_id, table_info) = find_table(table)?;
-+            let query = rt_io::query(table_id, path).map_err(cvt_err)?;
-+            Ok(ReadDir::Objects { table_id, table_info, query })
-+        }
-+    }
++    rt_io::base_object().query(path_inner(path)).map(ReadDir).map_err(cvt_err)
 +}
 +
 +pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -1014,10 +917,8 @@ index 00000000000..463930f15a0
 +    unsupported()
 +}
 +
-+pub fn stat(path: &Path) -> io::Result<FileAttr> {
-+    let _ = split_into_table_and_path(path)?;
-+    // TODO stat doesn't actually exist yet though we do support FileAttr to some limited degree.
-+    Ok(FileAttr::Object { size: 0 })
++pub fn stat(_path: &Path) -> io::Result<FileAttr> {
++    unsupported()
 +}
 +
 +pub fn lstat(path: &Path) -> io::Result<FileAttr> {
@@ -1032,73 +933,9 @@ index 00000000000..463930f15a0
 +    unsupported()
 +}
 +
-+/// Get table ID & info.
-+fn find_table(name: &[u8]) -> io::Result<(TableId, TableInfo)> {
-+    for entry in readdir(Path::new("")).unwrap().filter_map(Result::ok) {
-+        match entry {
-+            DirEntry::Table { id, info } => {
-+                if info.name() == name {
-+                    return Ok((id, info));
-+                }
-+            }
-+            DirEntry::Object { .. } => unreachable!(),
-+        }
-+    }
-+    Err(io::const_io_error!(io::ErrorKind::NotFound, "table not found"))
-+}
-+
-+enum SplitPath<'a> {
-+    None,
-+    Table { table: &'a [u8] },
-+    Path { table: &'a [u8], path: &'a [u8] },
-+}
-+
-+/// Split a path by table, path and ID.
-+fn split_path(path: &Path) -> io::Result<SplitPath<'_>> {
-+    let path = path_inner(path);
-+
-+    if path.is_empty() {
-+        return Ok(SplitPath::None);
-+    }
-+
-+    fn split(s: &[u8], sep: u8) -> Option<(&[u8], &[u8])> {
-+        s.iter().position(|c| *c == sep).map(|i| {
-+            // TODO parse path
-+            let (table, path) = s.split_at(i);
-+            (table, &path[1..])
-+        })
-+    }
-+
-+    if let Some((table, path)) = split(path, TABLE_OBJECT_SEPARATOR) {
-+        if path.is_empty() {
-+            Ok(SplitPath::Table { table })
-+        } else {
-+            Ok(SplitPath::Path { table, path })
-+        }
-+    } else {
-+        Ok(SplitPath::Table { table: path })
-+    }
-+}
-+
 +/// Get a reference to the underlying `[u8]` of a [`Path`].
 +fn path_inner(path: &Path) -> &[u8] {
 +    &path.as_os_str().as_inner().inner
-+}
-+
-+/// Split a path into a table and object component
-+///
-+/// # Errors
-+///
-+/// - There is no separator.
-+/// - The table does not exist.
-+fn split_into_table_and_path(path: &Path) -> io::Result<(TableId, &[u8])> {
-+    // Find a unique ID
-+    match split_path(path)? {
-+        SplitPath::Path { path, table } => Ok((find_table(table)?.0, path)),
-+        SplitPath::Table { .. } | SplitPath::None => {
-+            Err(io::const_io_error!(io::ErrorKind::InvalidInput, "expected path and/or id"))
-+        }
-+    }
 +}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
@@ -2097,10 +1934,10 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..7265037b5a2
+index 00000000000..aff39df5492
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,79 @@
 +use crate::{io, sync::atomic::Ordering};
 +use norostb_rt::{self as rt, AtomicHandle};
 +
@@ -2170,20 +2007,15 @@ index 00000000000..7265037b5a2
 +///
 +/// Must be called only once during runtime initialization.
 +pub(super) unsafe fn init() {
-+    // Find the UART table
-+    let mut tbl = None;
-+    for (id, info) in rt::table::TableIter::new().unwrap() {
-+        if info.name() == b"uart" {
-+            tbl = Some(id);
-+            break;
-+        }
-+    }
-+    // If we couldn't find the table, there is absolutely nothing we can do, so just abort.
-+    let tbl = tbl.unwrap_or_else(|| core::intrinsics::abort());
-+
-+    STDIN.store(rt::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
-+    STDOUT.store(rt::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
-+    STDERR.store(rt::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
++    let f = || {
++        rt::io::base_object()
++            .open(b"uart/0")
++            .unwrap_or_else(|_| core::intrinsics::abort())
++            .into_raw()
++    };
++    STDIN.store(f(), Ordering::Relaxed);
++    STDOUT.store(f(), Ordering::Relaxed);
++    STDERR.store(f(), Ordering::Relaxed);
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644

@@ -4,9 +4,7 @@ use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTick
 use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{
-	self, AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult,
-};
+use crate::object_table::{AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::{self, NonNull};
 use core::task::Poll;
@@ -167,51 +165,48 @@ impl super::Process {
 					}
 				}
 				Request::OPEN => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					match object_table::open(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(o)) => {
-								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::GetError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().open(path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(o)) => {
+							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::CREATE => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					match object_table::create(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(o)) => {
-								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::CreateError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().create(path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(o)) => {
+							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::QUERY => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
-					match object_table::query(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(q)) => {
-								push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::QueryError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().query(Vec::new(), path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(q)) => {
+							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::QUERY_NEXT => {

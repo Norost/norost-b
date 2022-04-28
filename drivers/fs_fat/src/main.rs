@@ -1,6 +1,5 @@
 #![feature(norostb)]
 
-use norostb_kernel::syscall;
 use norostb_rt as rt;
 use std::fs;
 use std::io::{Read, Seek, Write};
@@ -24,8 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let fs =
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
 
-	// Register new table of Streaming type
-	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
+	// Create a new table.
+	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
 
 	let mut queries = driver_utils::Arena::new();
 	let mut open_files = driver_utils::Arena::new();
@@ -40,10 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut job = Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		match rt::io::take_job(tbl, &mut job) {
-			Ok(()) => {}
-			Err(_) => continue, // Timeout, probably...
-		}
+		tbl.take_job(&mut job).unwrap();
 
 		match job.ty {
 			Job::OPEN => {
@@ -123,6 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			t => todo!("job type {}", t),
 		}
 
-		rt::io::finish_job(tbl, &job).unwrap();
+		tbl.finish_job(&job).unwrap();
 	}
 }

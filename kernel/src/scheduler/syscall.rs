@@ -4,15 +4,10 @@ use crate::memory::{
 	r#virtual::{AddressSpace, RWX},
 	Page,
 };
-use crate::object_table;
-use crate::object_table::TableId;
 use crate::scheduler;
 use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
-};
+use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
@@ -35,7 +30,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	undefined,
 	alloc_dma,
 	physical_address,
-	next_table,
+	undefined,
 	undefined,
 	undefined,
 	undefined,
@@ -43,7 +38,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	sleep,
 	undefined,
 	undefined,
-	create_table,
+	undefined,
 	kill_thread,
 	wait_thread,
 	exit,
@@ -204,45 +199,6 @@ extern "C" fn physical_address(
 	Return { status: 0, value }
 }
 
-#[repr(C)]
-struct TableInfo {
-	name_len: u8,
-	name: [u8; 255],
-}
-
-/// Return the name and ID of the table after another table, or the first table if `id == usize::MAX`.
-extern "C" fn next_table(
-	id: usize,
-	info_ptr: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("next_table");
-	let id = (id != usize::MAX).then(|| TableId::from(u32::try_from(id).unwrap()));
-	let (name, id) = match object_table::next_table(id) {
-		Some(p) => p,
-		None => {
-			return Return {
-				status: 1,
-				value: 0,
-			}
-		}
-	};
-	// SAFETY: FIXME
-	unsafe {
-		let info = &mut *(info_ptr as *mut TableInfo);
-		assert!(info.name.len() >= name.len());
-		info.name[..name.len()].copy_from_slice(name.as_bytes());
-		info.name_len = name.len().try_into().unwrap();
-	}
-	Return {
-		status: 0,
-		value: u32::from(id).try_into().unwrap(),
-	}
-}
-
 extern "C" fn map_object(
 	handle: usize,
 	base: usize,
@@ -302,38 +258,6 @@ extern "C" fn duplicate_handle(
 				value: handle.try_into().unwrap(),
 			},
 		)
-}
-
-extern "C" fn create_table(
-	name: usize,
-	name_len: usize,
-	ty: usize,
-	_options: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("create_table");
-	let name = NonNull::new(name as *mut u8).unwrap();
-	assert!(name_len <= 255, "name too long");
-	let name = unsafe { core::slice::from_raw_parts(name.as_ptr(), name_len) };
-	let name = core::str::from_utf8(name).unwrap();
-
-	let name = name.into();
-	let tbl = match ty {
-		0 => {
-			let tbl = object_table::StreamingTable::new(name);
-			object_table::add_table(Arc::downgrade(&tbl) as Weak<dyn object_table::Table>);
-			tbl
-		}
-		_ => todo!(),
-	};
-
-	let handle = Process::current().unwrap().add_object(tbl).unwrap();
-
-	Return {
-		status: 0,
-		value: handle.try_into().unwrap(),
-	}
 }
 
 extern "C" fn sleep(

@@ -5,10 +5,7 @@ mod dev;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{
-	io::{Empty, Queue},
-	syscall,
-};
+use norostb_kernel::{io::Queue, syscall};
 use norostb_rt::{
 	self as rt,
 	io::{Job, Request},
@@ -78,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
+	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
 
 	#[derive(Clone, Copy)]
 	enum Protocol {
@@ -106,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	unsafe {
 		job_queue
-			.enqueue_request(Request::take_job(0, tbl, &mut job))
+			.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
 			.unwrap();
 	}
 
@@ -135,10 +132,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						from_anchor: 0,
 						from_offset: 0,
 					};
-					rt::io::finish_job(tbl, &std_job).unwrap();
+					tbl.finish_job(&std_job).unwrap();
 					unsafe {
 						job_queue
-							.enqueue_request(Request::take_job(0, tbl, &mut job))
+							.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
 							.unwrap();
 					}
 				}
@@ -260,18 +257,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				t => todo!("job type {}", t),
 			}
 
+			tbl.finish_job(&job).unwrap();
 			unsafe {
 				job_queue
-					.enqueue_request(Request::finish_job(0, tbl, &job))
-					.unwrap();
-			}
-			syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
-			while let Err(Empty) = unsafe { job_queue.dequeue_response() } {
-				syscall::wait_io_queue(Some(job_queue.base.cast())).unwrap();
-			}
-			unsafe {
-				job_queue
-					.enqueue_request(Request::take_job(0, tbl, &mut job))
+					.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
 					.unwrap();
 			}
 		}

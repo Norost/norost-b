@@ -8,6 +8,5 @@ default-target = "x86_64-unknown-norostb"
 
 [dependencies]
 fatfs = { git = "https://github.com/rafalh/rust-fatfs", default-features = false, features = ["std", "alloc"] }
-norostb_kernel = { path = "../../lib/rust/kernel" }
 norostb_rt = { path = "../../lib/rust/rt" }
 driver_utils = { path = "../../lib/rust/driver_utils" }

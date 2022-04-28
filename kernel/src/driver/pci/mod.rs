@@ -48,8 +48,8 @@ where
 
 	*PCI.lock() = Some(pci);
 
-	let table = Arc::new(table::PciTable) as Arc<dyn crate::object_table::Table>;
-	object_table::add_table(Arc::downgrade(&table));
+	let table = Arc::new(table::PciTable) as Arc<dyn object_table::Object>;
+	object_table::Root::add(*b"pci", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }
 

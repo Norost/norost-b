@@ -8,6 +8,7 @@
 mod job;
 mod object;
 mod query;
+mod root;
 mod streaming;
 mod table;
 mod ticket;
@@ -23,6 +24,7 @@ pub use norostb_kernel::{
 pub use job::*;
 pub use object::*;
 pub use query::*;
+pub use root::Root;
 pub use streaming::StreamingTable;
 pub use table::*;
 pub use ticket::*;

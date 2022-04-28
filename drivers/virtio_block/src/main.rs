@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
+	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
 
 	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
 	let sectors_phys = virtio::PhysRegion {
@@ -81,9 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut job = rt::io::Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		if rt::io::take_job(tbl, &mut job).is_err() {
-			continue;
-		}
+		tbl.take_job(&mut job).unwrap();
 
 		let wait = || {
 			rt::io::poll(dev_handle).unwrap();
@@ -174,6 +172,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			t => todo!("job type {}", t),
 		}
 
-		rt::io::finish_job(tbl, &job).unwrap();
+		tbl.finish_job(&job).unwrap();
 	}
 }

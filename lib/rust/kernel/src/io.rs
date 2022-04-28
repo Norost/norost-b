@@ -11,7 +11,6 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use super::syscall::TableId;
 use core::mem::{self, MaybeUninit};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -88,30 +87,30 @@ impl Request {
 		}
 	}
 
-	pub fn open(user_data: u64, table: TableId, path: &[u8]) -> Self {
+	pub fn open(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
-			arguments_32: [table],
+			arguments_32: [handle],
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn create(user_data: u64, table: TableId, path: &[u8]) -> Self {
+	pub fn create(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
-			arguments_32: [table],
+			arguments_32: [handle],
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn query(user_data: u64, table: TableId, path: &[u8]) -> Self {
+	pub fn query(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::QUERY,
-			arguments_32: [table],
+			arguments_32: [handle],
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()

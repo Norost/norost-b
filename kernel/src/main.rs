@@ -3,7 +3,7 @@
 #![forbid(unused_must_use)]
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
-#![feature(const_trait_impl, inline_const)]
+#![feature(const_btree_new, const_fn_trait_bound, const_trait_impl, inline_const)]
 #![feature(decl_macro)]
 #![feature(derive_default_enum)]
 #![feature(drain_filter)]
@@ -27,22 +27,6 @@ use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, sync::Arc};
 use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
-
-macro_rules! bi_from {
-	(newtype $a:ident <=> $b:ident) => {
-		impl From<$a> for $b {
-			fn from(a: $a) -> $b {
-				a.0
-			}
-		}
-
-		impl From<$b> for $a {
-			fn from(b: $b) -> $a {
-				$a(b)
-			}
-		}
-	};
-}
 
 #[macro_use]
 mod log;
@@ -112,6 +96,8 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		.map(|d| Arc::new(Driver(unsafe { d.as_slice() })))
 		.collect::<alloc::vec::Vec<_>>();
 
+	let root = Arc::new(object_table::Root);
+
 	for program in boot_info.init_programs() {
 		let driver = drivers[usize::from(program.driver())].clone();
 		let mut stack = OwnedPageFrames::new(
@@ -151,7 +137,9 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 			ptr.add(0).cast::<u16>().write(0);
 		}
 		match scheduler::process::Process::from_elf(driver, stack, 0) {
-			Ok(_) => {} // We don't need to do anything.
+			Ok(process) => {
+				process.add_object(root.clone()).unwrap();
+			}
 			Err(e) => {
 				error!("failed to start driver: {:?}", e)
 			}

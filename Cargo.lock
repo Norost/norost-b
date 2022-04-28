@@ -84,7 +84,6 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "fatfs",
- "norostb_kernel",
  "norostb_rt",
 ]
 

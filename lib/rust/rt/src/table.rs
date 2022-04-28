@@ -1,10 +1,8 @@
 use super::io;
-use core::mem::{ManuallyDrop, MaybeUninit};
-use norostb_kernel::syscall;
+use core::mem::{self, MaybeUninit};
 
 pub use norostb_kernel::{
-	io::ObjectInfo,
-	syscall::{TableId, TableInfo},
+	io::{Job, ObjectInfo},
 	Handle,
 };
 
@@ -13,14 +11,18 @@ pub struct Object(Handle);
 
 impl Object {
 	#[inline]
-	pub fn open(table: TableId, path: &[u8]) -> io::Result<Self> {
-		// Find a unique ID
-		io::open(table, path).map(Self)
+	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
+		io::open(self.0, path).map(Self)
 	}
 
 	#[inline]
-	pub fn create(table: TableId, path: &[u8]) -> io::Result<Self> {
-		io::create(table, path).map(Self)
+	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
+		io::create(self.0, path).map(Self)
+	}
+
+	#[inline]
+	pub fn query(&self, path: &[u8]) -> io::Result<io::Query> {
+		io::query(self.0, path).map(io::Query)
 	}
 
 	#[inline]
@@ -58,15 +60,30 @@ impl Object {
 		io::duplicate(self.0).map(Self)
 	}
 
-	pub fn as_raw(&self) -> Handle {
+	#[inline]
+	pub fn take_job(&self, job: &mut Job) -> io::Result<()> {
+		io::take_job(self.0, job)
+	}
+
+	#[inline]
+	pub fn finish_job(&self, job: &Job) -> io::Result<()> {
+		io::finish_job(self.0, job)
+	}
+
+	#[inline]
+	pub const fn as_raw(&self) -> Handle {
 		self.0
 	}
 
-	pub fn into_raw(self) -> Handle {
-		ManuallyDrop::new(self).0
+	#[inline]
+	pub const fn into_raw(self) -> Handle {
+		let h = self.0;
+		mem::forget(self);
+		h
 	}
 
-	pub fn from_raw(handle: Handle) -> Self {
+	#[inline]
+	pub const fn from_raw(handle: Handle) -> Self {
 		Self(handle)
 	}
 }
@@ -74,34 +91,5 @@ impl Object {
 impl Drop for Object {
 	fn drop(&mut self) {
 		io::close(self.0)
-	}
-}
-
-/// An iterator over all tables.
-#[derive(Debug)]
-pub struct TableIter {
-	state: Option<Option<TableId>>,
-}
-
-impl TableIter {
-	/// Create an iterator over all tables.
-	#[inline(always)]
-	pub fn new() -> super::io::Result<Self> {
-		Ok(Self { state: Some(None) })
-	}
-}
-
-impl Iterator for TableIter {
-	type Item = (TableId, TableInfo);
-
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		self.state
-			.take()
-			.and_then(|id| syscall::next_table(id))
-			.map(|(id, info)| {
-				self.state = Some(Some(id));
-				(id, info)
-			})
 	}
 }

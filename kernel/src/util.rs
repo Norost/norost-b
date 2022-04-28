@@ -5,6 +5,7 @@ use core::{
 	fmt::{self, Write},
 	str,
 };
+use norostb_kernel::Handle;
 
 /// Pretty print an iterator.
 ///
@@ -56,4 +57,21 @@ impl fmt::Debug for DebugByteStr<'_> {
 		}
 		f.write_char('"')
 	}
+}
+
+/// Converts a typed [`arena::Arena`] handle to a generic [`Handle`] suitable for FFI.
+#[track_caller]
+pub fn erase_handle(handle: arena::Handle<u8>) -> Handle {
+	let (index, generation) = handle.into_raw();
+	assert!(index < 1 << 24, "can't construct unique handle");
+	(generation as u32) << 24 | index as u32
+}
+
+/// Converts an untyped [`Handle`] to an [`arena::Arena`] handle.
+#[track_caller]
+pub fn unerase_handle(handle: Handle) -> arena::Handle<u8> {
+	arena::Handle::from_raw(
+		(handle & 0xff_ffff).try_into().unwrap(),
+		(handle >> 24) as u8,
+	)
 }

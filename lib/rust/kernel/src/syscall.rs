@@ -3,11 +3,11 @@ pub const ID_DEALLOC: usize = 1;
 
 pub const ID_ALLOC_DMA: usize = 3;
 pub const ID_PHYSICAL_ADDRESS: usize = 4;
-pub const ID_NEXT_TABLE: usize = 5;
+
 pub const ID_MAP_OBJECT: usize = 9;
 pub const ID_SLEEP: usize = 10;
 pub const ID_READ: usize = 11;
-pub const ID_CREATE_TABLE: usize = 13;
+
 pub const ID_KILL_THREAD: usize = 14;
 pub const ID_WAIT_THREAD: usize = 15;
 pub const ID_EXIT: usize = 16;
@@ -52,42 +52,7 @@ impl fmt::Debug for DebugLossy<'_> {
 	}
 }
 
-pub type TableId = u32;
 pub type Handle = u32;
-
-#[derive(Clone)]
-#[repr(C)]
-pub struct TableInfo {
-	name_len: u8,
-	name: [u8; 255],
-}
-
-impl TableInfo {
-	pub fn name(&self) -> &[u8] {
-		&self.name[..usize::from(self.name_len)]
-	}
-}
-
-impl Default for TableInfo {
-	fn default() -> Self {
-		Self {
-			name_len: 0,
-			name: [0; 255],
-		}
-	}
-}
-
-impl fmt::Debug for TableInfo {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct(stringify!(TableInfo))
-			.field("name", &DebugLossy(self.name()))
-			.finish()
-	}
-}
-
-pub enum TableType {
-	Streaming,
-}
 
 pub enum RWX {
 	R = 0b100,
@@ -178,15 +143,6 @@ pub fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usi
 }
 
 #[inline]
-pub fn next_table(id: Option<TableId>) -> Option<(TableId, TableInfo)> {
-	let id = id.map_or(usize::MAX, |id| id.try_into().unwrap());
-	let mut info = TableInfo::default();
-	ret(syscall!(ID_NEXT_TABLE(id, &mut info)))
-		.ok()
-		.map(|value| (value as u32, info))
-}
-
-#[inline]
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<Page>>,
@@ -232,20 +188,6 @@ pub fn read_uninit(
 #[inline]
 pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)> {
 	ret(syscall!(ID_DUPLICATE_HANDLE(handle))).map(|v| v as u32)
-}
-
-#[inline]
-pub fn create_table(name: &[u8], ty: TableType) -> Result<Handle, (NonZeroUsize, usize)> {
-	let ty = match ty {
-		TableType::Streaming => 0,
-	};
-	ret(syscall!(ID_CREATE_TABLE(
-		name.as_ptr(),
-		name.len(),
-		ty,
-		ptr::null::<()>()
-	)))
-	.map(|v| v as u32)
 }
 
 #[inline]

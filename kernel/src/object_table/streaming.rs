@@ -9,17 +9,15 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use norostb_kernel::{io::SeekFrom, syscall::Handle};
 
 pub struct StreamingTable {
-	name: Box<str>,
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>)>>,
-	tickets: Mutex<Vec<(JobId, AnyTicketWaker)>>,
+	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>, Vec<u8>)>>,
+	tickets: Mutex<Vec<(JobId, AnyTicketWaker, Vec<u8>)>>,
 	job_handlers: Mutex<Vec<JobWaker>>,
 }
 
 impl StreamingTable {
-	pub fn new(name: Box<str>) -> Arc<Self> {
+	pub fn new() -> Arc<Self> {
 		Arc::new(Self {
-			name,
 			job_id_counter: Default::default(),
 			jobs: Default::default(),
 			tickets: Default::default(),
@@ -27,7 +25,7 @@ impl StreamingTable {
 		})
 	}
 
-	fn submit_job<T>(&self, job: JobRequest) -> Ticket<T>
+	fn submit_job<T>(&self, job: JobRequest, prefix: Vec<u8>) -> Ticket<T>
 	where
 		AnyTicketWaker: From<TicketWaker<T>>,
 	{
@@ -39,13 +37,15 @@ impl StreamingTable {
 			let j = self.job_handlers.lock().pop();
 			if let Some(w) = j {
 				if let Ok(mut w) = w.lock() {
-					self.tickets.lock().push((job_id, ticket_waker.into()));
+					self.tickets
+						.lock()
+						.push((job_id, ticket_waker.into(), prefix));
 					w.complete((job_id, job));
 					break;
 				}
 			} else {
 				let mut l = self.jobs.lock();
-				l.push((StreamJob { job_id, job }, Some(ticket_waker.into())));
+				l.push((StreamJob { job_id, job }, Some(ticket_waker.into()), prefix));
 				break;
 			}
 		}
@@ -67,7 +67,7 @@ impl StreamingTable {
 				}
 			} else {
 				let mut l = self.jobs.lock();
-				l.push((StreamJob { job_id, job }, None));
+				l.push((StreamJob { job_id, job }, None, Vec::new()));
 				break;
 			}
 		}
@@ -75,27 +75,9 @@ impl StreamingTable {
 }
 
 impl Table for StreamingTable {
-	fn name(&self) -> &str {
-		&self.name
-	}
-
-	fn query(self: Arc<Self>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(JobRequest::Query {
-			filter: filter.into(),
-		})
-	}
-
-	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(JobRequest::Open { path: path.into() })
-	}
-
-	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(JobRequest::Create { path: path.into() })
-	}
-
 	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
-		let job = self.jobs.lock().pop().map(|(job, tkt)| {
-			tkt.map(|tkt| self.tickets.lock().push((job.job_id, tkt)));
+		let job = self.jobs.lock().pop().map(|(job, tkt, prefix)| {
+			tkt.map(|tkt| self.tickets.lock().push((job.job_id, tkt, prefix)));
 			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
@@ -105,11 +87,11 @@ impl Table for StreamingTable {
 	}
 
 	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
-		let tw;
+		let (tw, mut prefix);
 		{
 			let mut c = self.tickets.lock();
 			let mut c = c.drain_filter(|e| e.0 == job_id);
-			(_, tw) = c.next().ok_or(())?;
+			(_, tw, prefix) = c.next().ok_or(())?;
 			assert!(c.next().is_none());
 		}
 		match job {
@@ -127,10 +109,14 @@ impl Table for StreamingTable {
 			JobResult::Query { handle } => tw.into_query().complete(Ok(Box::new(StreamQuery {
 				table: Arc::downgrade(&self),
 				handle,
+				prefix,
 			}))),
 			JobResult::QueryNext { path } => {
 				tw.into_query_result().complete(if path.len() > 0 {
-					Ok(QueryResult { path })
+					prefix.extend(path.into_vec());
+					Ok(QueryResult {
+						path: prefix.into(),
+					})
 				} else {
 					Err(Error::new(0, "".into()))
 				});
@@ -144,6 +130,23 @@ impl Table for StreamingTable {
 }
 
 impl Object for StreamingTable {
+	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
+		self.submit_job(
+			JobRequest::Query {
+				filter: filter.into(),
+			},
+			prefix.into(),
+		)
+	}
+
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		self.submit_job(JobRequest::Open { path: path.into() }, Default::default())
+	}
+
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		self.submit_job(JobRequest::Create { path: path.into() }, Default::default())
+	}
+
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
 		Some(self)
 	}
@@ -177,10 +180,13 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				tbl.submit_job(JobRequest::Read {
-					handle: self.handle,
-					amount: length,
-				})
+				tbl.submit_job(
+					JobRequest::Read {
+						handle: self.handle,
+						amount: length,
+					},
+					Default::default(),
+				)
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -191,10 +197,13 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				tbl.submit_job(JobRequest::Peek {
-					handle: self.handle,
-					amount: length,
-				})
+				tbl.submit_job(
+					JobRequest::Peek {
+						handle: self.handle,
+						amount: length,
+					},
+					Default::default(),
+				)
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -205,10 +214,13 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				tbl.submit_job(JobRequest::Write {
-					handle: self.handle,
-					data: data.into(),
-				})
+				tbl.submit_job(
+					JobRequest::Write {
+						handle: self.handle,
+						data: data.into(),
+					},
+					Default::default(),
+				)
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -219,10 +231,13 @@ impl Object for StreamObject {
 		self.table
 			.upgrade()
 			.map(|tbl| {
-				tbl.submit_job(JobRequest::Seek {
-					handle: self.handle,
-					from,
-				})
+				tbl.submit_job(
+					JobRequest::Seek {
+						handle: self.handle,
+						from,
+					},
+					Default::default(),
+				)
 			})
 			.unwrap_or_else(|| {
 				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
@@ -243,6 +258,7 @@ impl Drop for StreamObject {
 struct StreamQuery {
 	table: Weak<StreamingTable>,
 	handle: Handle,
+	prefix: Vec<u8>,
 }
 
 impl Iterator for StreamQuery {
@@ -250,9 +266,12 @@ impl Iterator for StreamQuery {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		Weak::upgrade(&self.table).map(|table| {
-			table.submit_job(JobRequest::QueryNext {
-				handle: self.handle,
-			})
+			table.submit_job(
+				JobRequest::QueryNext {
+					handle: self.handle,
+				},
+				self.prefix.clone(),
+			)
 		})
 	}
 }

@@ -1,8 +1,8 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-use crate::tls;
-use alloc::boxed::Box;
+use crate::{table::Object, tls};
+use alloc::{boxed::Box, vec::Vec};
 use core::mem::{self, MaybeUninit};
 use norostb_kernel::{error::result, io::Queue, syscall};
 use norostb_kernel::{error::Error, Handle};
@@ -11,6 +11,17 @@ pub use norostb_kernel::{
 	error::Result,
 	io::{Job, ObjectInfo, Request, Response, SeekFrom},
 };
+
+#[linkage = "weak"]
+#[export_name = "__rt_io_base_object"]
+static BASE_HANDLE: Handle = 0; // FIXME don't hardcode this.
+
+static BASE_OBJECT: Object = Object::from_raw(BASE_HANDLE);
+
+#[inline]
+pub fn base_object() -> &'static Object {
+	&BASE_OBJECT
+}
 
 #[derive(Copy, Clone)]
 pub struct IoSlice<'a>(&'a [u8]);
@@ -150,20 +161,20 @@ pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
 
 /// Blocking open
 #[inline]
-pub fn open(table: syscall::TableId, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::open(0, table, path)).value).map(|v| v as Handle)
+pub fn open(handle: Handle, path: &[u8]) -> Result<Handle> {
+	result(enqueue(Request::open(0, handle, path)).value).map(|v| v as Handle)
 }
 
 /// Blocking create
 #[inline]
-pub fn create(table: syscall::TableId, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::create(0, table, path)).value).map(|v| v as Handle)
+pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
+	result(enqueue(Request::create(0, handle, path)).value).map(|v| v as Handle)
 }
 
 /// Blocking query
 #[inline]
-pub fn query(table: syscall::TableId, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::query(0, table, path)).value).map(|v| v as Handle)
+pub fn query(handle: Handle, path: &[u8]) -> Result<Handle> {
+	result(enqueue(Request::query(0, handle, path)).value).map(|v| v as Handle)
 }
 
 /// Blocking query_next
@@ -213,4 +224,22 @@ pub fn close(handle: Handle) {
 #[inline]
 pub fn duplicate(handle: Handle) -> Result<Handle> {
 	syscall::duplicate_handle(handle).map_err(|_| todo!())
+}
+
+#[derive(Debug)]
+pub struct Query(pub(crate) Handle);
+
+impl Iterator for Query {
+	type Item = Vec<u8>;
+
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item> {
+		let mut buf = Vec::with_capacity(4096);
+		buf.resize(4096, 0);
+		let mut info = ObjectInfo::new(&mut buf[..]);
+		query_next(self.0, &mut info).unwrap().then(|| {
+			buf.resize(info.path_len, 0);
+			buf
+		})
+	}
 }
