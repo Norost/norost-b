@@ -130,6 +130,18 @@ pub fn read_uninit(handle: Handle, data: &mut [MaybeUninit<u8>]) -> Result<usize
 	result(enqueue(Request::read_uninit(0, handle, data)).value).map(|v| v as usize)
 }
 
+/// Blocking peek
+#[inline]
+pub fn peek(handle: Handle, data: &mut [u8]) -> Result<usize> {
+	result(enqueue(Request::peek(0, handle, data)).value).map(|v| v as usize)
+}
+
+/// Blocking peek
+#[inline]
+pub fn peek_uninit(handle: Handle, data: &mut [MaybeUninit<u8>]) -> Result<usize> {
+	result(enqueue(Request::peek_uninit(0, handle, data)).value).map(|v| v as usize)
+}
+
 /// Blocking write
 #[inline]
 pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {

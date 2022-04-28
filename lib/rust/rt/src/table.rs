@@ -34,14 +34,26 @@ impl Object {
 	}
 
 	#[inline]
+	pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
+		io::peek(self.0, buf)
+	}
+
+	#[inline]
+	pub fn peek_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
+		io::peek_uninit(self.0, buf)
+	}
+
+	#[inline]
 	pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
 		io::write(self.0, buf)
 	}
 
+	#[inline]
 	pub fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
 		io::seek(self.0, pos)
 	}
 
+	#[inline]
 	pub fn duplicate(&self) -> io::Result<Self> {
 		io::duplicate(self.0).map(Self)
 	}
