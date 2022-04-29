@@ -135,7 +135,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		if let bi::Info::Module(m) = e {
 			if m.string.starts_with(b"driver ") || m.string.starts_with(b"driver\t") {
 				let name = m.string[b"driver ".len()..].trim_ascii();
-				assert!(name.len() < 16, "name may not be longer than 15 characters");
 				drivers[i] = info::Driver {
 					address: m.start as u32,
 					size: (m.end - m.start).try_into().unwrap(),
