@@ -60,14 +60,6 @@ impl Object for PciTable {
 			.ok_or_else(|| todo!());
 		Ticket::new_complete(r)
 	}
-
-	fn create(self: Arc<Self>, _: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let e = Error {
-			code: 1,
-			message: "can't create pci devices".into(),
-		};
-		Ticket::new_complete(Err(e))
-	}
 }
 
 struct QueryName {

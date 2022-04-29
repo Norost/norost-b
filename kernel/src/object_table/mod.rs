@@ -17,6 +17,7 @@ use crate::scheduler::MemoryObject;
 use core::time::Duration;
 
 pub use norostb_kernel::{
+	error::Error,
 	io::{JobId, SeekFrom},
 	syscall::Handle,
 };

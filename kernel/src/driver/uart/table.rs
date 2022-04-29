@@ -24,14 +24,6 @@ impl Object for UartTable {
 			todo!()
 		}
 	}
-
-	fn create(self: Arc<Self>, _: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let e = Error {
-			code: 1,
-			message: "can't create uart devices".into(),
-		};
-		Ticket::new_complete(Err(e))
-	}
 }
 
 #[derive(Clone, Copy)]

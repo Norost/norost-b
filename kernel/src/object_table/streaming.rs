@@ -118,7 +118,8 @@ impl Table for StreamingTable {
 						path: prefix.into(),
 					})
 				} else {
-					Err(Error::new(0, "".into()))
+					// FIXME query API sucks
+					Err(Error::InvalidOperation)
 				});
 			}
 			JobResult::Seek { position } => {
@@ -162,10 +163,7 @@ impl Drop for StreamingTable {
 			.flat_map(|e| e.1)
 			.chain(self.tickets.lock().drain(..).map(|e| e.1))
 		{
-			task.complete_err(Error {
-				code: 127,
-				message: "dropped".into(),
-			});
+			task.complete_err(Error::Cancelled)
 		}
 	}
 }
@@ -188,9 +186,7 @@ impl Object for StreamObject {
 					Default::default(),
 				)
 			})
-			.unwrap_or_else(|| {
-				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
-			})
+			.unwrap_or_else(|| todo!())
 	}
 
 	fn peek(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
@@ -205,9 +201,7 @@ impl Object for StreamObject {
 					Default::default(),
 				)
 			})
-			.unwrap_or_else(|| {
-				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
-			})
+			.unwrap_or_else(|| todo!())
 	}
 
 	fn write(&self, _: u64, data: &[u8]) -> Ticket<usize> {
@@ -222,9 +216,7 @@ impl Object for StreamObject {
 					Default::default(),
 				)
 			})
-			.unwrap_or_else(|| {
-				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
-			})
+			.unwrap_or_else(|| todo!())
 	}
 
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
@@ -239,9 +231,7 @@ impl Object for StreamObject {
 					Default::default(),
 				)
 			})
-			.unwrap_or_else(|| {
-				Ticket::new_complete(Err(Error::new(1, "TODO error message".into())))
-			})
+			.unwrap_or_else(|| todo!())
 	}
 }
 

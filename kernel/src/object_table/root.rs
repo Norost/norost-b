@@ -64,7 +64,7 @@ impl Object for Root {
 		find(path).map_or_else(
 			|| {
 				Ticket::new_complete(if path.contains(&b'/') {
-					Err(Error::new(1, "object doesn't exist".into()))
+					Err(Error::DoesNotExist)
 				} else {
 					let mut objects = OBJECTS.lock();
 					let tbl = StreamingTable::new() as Arc<dyn Object>;
@@ -75,7 +75,7 @@ impl Object for Root {
 			},
 			|(obj, _, path)| {
 				if path == b"" {
-					Ticket::new_complete(Err(Error::new(1, "object already exists".into())))
+					Ticket::new_complete(Err(Error::AlreadyExists))
 				} else {
 					obj.create(path)
 				}
@@ -103,5 +103,5 @@ fn find(path: &[u8]) -> Option<(Arc<dyn Object>, &[u8], &[u8])> {
 }
 
 fn not_found<T>() -> Ticket<T> {
-	Ticket::new_complete(Err(Error::new(1, "object not found".into())))
+	Ticket::new_complete(Err(Error::DoesNotExist))
 }

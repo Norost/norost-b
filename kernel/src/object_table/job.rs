@@ -41,19 +41,6 @@ pub enum JobResult {
 	Peek { data: Box<[u8]> },
 }
 
-/// An error that occured during a job.
-#[derive(Debug)]
-pub struct Error {
-	pub code: u32,
-	pub message: Box<str>,
-}
-
-impl Error {
-	pub fn new(code: u32, message: Box<str>) -> Self {
-		Self { code, message }
-	}
-}
-
 enum JobInner {
 	Active {
 		waker: Option<Waker>,

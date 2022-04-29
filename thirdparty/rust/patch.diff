@@ -992,10 +992,10 @@ index 00000000000..d5f475b4310
 +}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..098eab958e7
+index 00000000000..5f58cbcdb05
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,73 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -1063,6 +1063,10 @@ index 00000000000..098eab958e7
 +    use norostb_rt::Error;
 +    match err {
 +        Error::Unknown => const_io_error!(ErrorKind::Uncategorized, "uncategorized error"),
++        Error::InvalidOperation => const_io_error!(ErrorKind::Unsupported, "invalid operation"),
++        Error::DoesNotExist => const_io_error!(ErrorKind::NotFound, "does not exist"),
++        Error::AlreadyExists => const_io_error!(ErrorKind::AlreadyExists, "already exists"),
++        Error::Cancelled => const_io_error!(ErrorKind::Uncategorized, "cancelled"),
 +    }
 +}
 diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs

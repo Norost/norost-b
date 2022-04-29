@@ -50,5 +50,5 @@ pub trait Object {
 }
 
 fn not_implemented<T>() -> Ticket<T> {
-	Ticket::new_complete(Err(Error::new(0, "not implemented".into())))
+	Ticket::new_complete(Err(Error::InvalidOperation))
 }
