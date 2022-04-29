@@ -31,8 +31,11 @@ impl Object for Root {
 				}
 			}
 			impl<I: Iterator<Item = Ticket<QueryResult>>> Query for Q<I> {}
-			Ticket::new_complete(Ok(Box::new(Q(OBJECTS
-				.lock()
+
+			// Filter any dead objects before querying.
+			let mut objects = OBJECTS.lock();
+			objects.retain(|k, v| v.strong_count() > 0);
+			Ticket::new_complete(Ok(Box::new(Q(objects
 				.keys()
 				.cloned()
 				.collect::<Vec<_>>()
