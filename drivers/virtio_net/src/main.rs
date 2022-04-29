@@ -10,7 +10,7 @@ use norostb_rt::{
 	self as rt,
 	io::{Job, Request},
 };
-use smoltcp::socket::TcpState;
+use smoltcp::{socket::TcpState, wire};
 use std::fs;
 use std::os::norostb::prelude::*;
 use std::str::FromStr;
@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Wrap the device for use with smoltcp
-	use smoltcp::{iface, socket, time, wire};
+	use smoltcp::{iface, socket, time};
 	let dev = dev::Dev::new(dev);
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
 	let mut sockets = [iface::SocketStorage::EMPTY; 8];
@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	enum Query {
 		Root(QueryRoot),
-		SourceAddr(wire::IpAddress, Protocol),
+		SourceAddr(wire::Ipv6Address, Protocol),
 		DestAddr {
 			source: wire::IpAddress,
 			protocol: Protocol,
@@ -284,7 +284,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					let query = match (path.next().unwrap(), path.next(), path.next()) {
 						("", None, _) => Query::Root(QueryRoot::Default),
 						("default", None, _) | ("default", Some(""), None) => {
-							Query::SourceAddr(iface.ip_addrs()[0].address(), Protocol::Tcp)
+							let addr = into_ip6(iface.ip_addrs()[0].address());
+							Query::SourceAddr(addr, Protocol::Tcp)
 						},
 						(addr, None, _) | (addr, Some(""), None) if let Ok(addr) = wire::IpAddress::from_str(addr) => todo!(),
 						path => todo!("{:?}", path),
@@ -302,7 +303,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						}
 						Some(Query::Root(QueryRoot::IpAddr(i))) => {
 							let mut b = &mut buf[..];
-							write!(b, "{}", iface.ip_addrs()[*i].address()).unwrap();
+							write!(b, "{}", into_ip6(iface.ip_addrs()[*i].address())).unwrap();
 							let l = b.len();
 							job.operation_size = (buf.len() - l).try_into().unwrap();
 							*i += 1;
@@ -354,5 +355,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		syscall::sleep(Duration::from_secs(1) / 10);
 		t += time::Duration::from_secs(1) / 10;
+	}
+}
+
+fn into_ip6(addr: wire::IpAddress) -> wire::Ipv6Address {
+	match addr {
+		wire::IpAddress::Ipv4(wire::Ipv4Address([a, b, c, d])) => wire::Ipv6Address::new(
+			0,
+			0,
+			0,
+			0,
+			0,
+			0xffff,
+			u16::from(a) << 8 | u16::from(b),
+			u16::from(c) << 8 | u16::from(d),
+		),
+		wire::IpAddress::Ipv6(a) => a,
+		// Non-exhaustive cause *shrug*
+		_ => todo!("unsupported address type"),
 	}
 }
