@@ -63,11 +63,15 @@ impl Object for Root {
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		find(path).map_or_else(
 			|| {
-				let mut objects = OBJECTS.lock();
-				let tbl = StreamingTable::new() as Arc<dyn Object>;
-				let r = objects.insert(path.into(), Arc::downgrade(&tbl));
-				assert!(r.is_none());
-				Ticket::new_complete(Ok(tbl))
+				Ticket::new_complete(if path.contains(&b'/') {
+					Err(Error::new(1, "object doesn't exist".into()))
+				} else {
+					let mut objects = OBJECTS.lock();
+					let tbl = StreamingTable::new() as Arc<dyn Object>;
+					let r = objects.insert(path.into(), Arc::downgrade(&tbl));
+					assert!(r.is_none());
+					Ok(tbl)
+				})
 			},
 			|(obj, _, path)| {
 				if path == b"" {
