@@ -107,6 +107,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			.unwrap();
 	}
 
+	enum Query {
+		Root(QueryRoot),
+		SourceAddr(wire::IpAddress, Protocol),
+		DestAddr {
+			source: wire::IpAddress,
+			protocol: Protocol,
+			dest: wire::IpAddress,
+		},
+		DestPort {
+			source: wire::IpAddress,
+			protocol: Protocol,
+			dest: wire::IpAddress,
+			port: u16,
+		},
+	}
+
+	enum QueryRoot {
+		Default,
+		IpAddr(usize),
+	}
+
+	let mut queries = driver_utils::Arena::new();
+
 	loop {
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
@@ -253,6 +276,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				}
 				Job::CLOSE => {
 					todo!();
+				}
+				Job::QUERY => {
+					let mut path = core::str::from_utf8(&buf[..job.operation_size as usize])
+						.unwrap()
+						.split('/');
+					let query = match (path.next().unwrap(), path.next(), path.next()) {
+						("", None, _) => Query::Root(QueryRoot::Default),
+						("default", None, _) | ("default", Some(""), None) => {
+							Query::SourceAddr(iface.ip_addrs()[0].address(), Protocol::Tcp)
+						},
+						(addr, None, _) | (addr, Some(""), None) if let Ok(addr) = wire::IpAddress::from_str(addr) => todo!(),
+						path => todo!("{:?}", path),
+					};
+					job.handle = queries.insert(query);
+				}
+				Job::QUERY_NEXT => {
+					use std::io::Write;
+					match queries.get_mut(job.handle) {
+						Some(Query::Root(q @ QueryRoot::Default)) => {
+							let s = b"default";
+							buf[..s.len()].copy_from_slice(s);
+							job.operation_size = s.len().try_into().unwrap();
+							*q = QueryRoot::IpAddr(0);
+						}
+						Some(Query::Root(QueryRoot::IpAddr(i))) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}", iface.ip_addrs()[*i].address()).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							*i += 1;
+							if *i >= iface.ip_addrs().len() {
+								queries.remove(job.handle);
+							}
+						}
+						Some(Query::SourceAddr(addr, p @ Protocol::Tcp)) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}/tcp", addr).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							*p = Protocol::Udp;
+						}
+						Some(Query::SourceAddr(addr, Protocol::Udp)) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}/udp", addr).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							queries.remove(job.handle);
+						}
+						Some(_) => todo!(),
+						None => job.operation_size = 0,
+					}
 				}
 				t => todo!("job type {}", t),
 			}

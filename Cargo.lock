@@ -110,6 +110,7 @@ dependencies = [
 name = "driver_virtio_net"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "norostb_kernel",
  "norostb_rt",
  "pci",
