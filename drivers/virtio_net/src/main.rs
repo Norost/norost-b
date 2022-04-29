@@ -125,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	enum QueryRoot {
 		Default,
+		Global,
 		IpAddr(usize),
 	}
 
@@ -297,6 +298,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					match queries.get_mut(job.handle) {
 						Some(Query::Root(q @ QueryRoot::Default)) => {
 							let s = b"default";
+							buf[..s.len()].copy_from_slice(s);
+							job.operation_size = s.len().try_into().unwrap();
+							*q = QueryRoot::Global;
+						}
+						Some(Query::Root(q @ QueryRoot::Global)) => {
+							let s = b"::";
 							buf[..s.len()].copy_from_slice(s);
 							job.operation_size = s.len().try_into().unwrap();
 							*q = QueryRoot::IpAddr(0);
