@@ -22,10 +22,11 @@ install () {
 	cp target/$TARGET_USER/release/$3 isodir/drivers/$2
 }
 
-install drivers fs_fat       driver_fs_fat
-install drivers virtio_block driver_virtio_block
-install drivers virtio_net   driver_virtio_net
-install base    minish       minish
+install drivers fs_fat             driver_fs_fat
+install drivers virtio_block       driver_virtio_block
+install drivers virtio_net         driver_virtio_net
+install base    minish             minish
+install base    static_http_server static_http_server
 
 # Note: make sure grub-pc-bin is installed! Otherwise QEMU may hang on
 # "Booting from disk" or return error code 0009

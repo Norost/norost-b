@@ -174,6 +174,18 @@ struct StreamObject {
 }
 
 impl Object for StreamObject {
+	fn query(self: Arc<Self>, _prefix: Vec<u8>, _filter: &[u8]) -> Ticket<Box<dyn Query>> {
+		todo!()
+	}
+
+	fn open(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		todo!()
+	}
+
+	fn create(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		todo!()
+	}
+
 	fn read(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
 		self.table
 			.upgrade()

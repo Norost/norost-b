@@ -1,4 +1,5 @@
 virtio-net net
-virtio-blk disk
-fs-fat fat disk/data
-minish
+#virtio-blk disk
+#fs-fat fat disk/data
+#minish
+static_http_server

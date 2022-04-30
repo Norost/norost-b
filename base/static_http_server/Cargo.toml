@@ -1,0 +1,10 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "static_http_server"
+description = "Minimal static file server over HTTP"
+version = "0.1.0"
+edition = "2021"
+default-target = "x86_64-unknown-norostb"
+
+[dependencies]

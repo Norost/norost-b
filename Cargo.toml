@@ -17,6 +17,7 @@ members = [
 	"lib/rust/volatile",
 	"lib/rust/rt",
 	"base/minish",
+	"base/static_http_server",
 ]
 
 [profile.dev]

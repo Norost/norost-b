@@ -303,6 +303,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "static_http_server"
+version = "0.1.0"
+
+[[package]]
 name = "syn"
 version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
