@@ -12,10 +12,10 @@
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]
 
+pub mod error;
 #[cfg(feature = "userspace")]
 #[macro_use]
 pub mod syscall;
-
 pub mod io;
 
 #[repr(align(4096))]

@@ -1,9 +1,6 @@
 #![feature(norostb)]
-// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
-// stdlib
-#![feature(rustc_private)]
 
-use norostb_kernel::{io::Job, syscall};
+use norostb_rt as rt;
 use std::fs;
 use std::io::{Read, Seek, Write};
 use std::ptr::NonNull;
@@ -26,8 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let fs =
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
 
-	// Register new table of Streaming type
-	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
+	// Create a new table.
+	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
 
 	let mut queries = driver_utils::Arena::new();
 	let mut open_files = driver_utils::Arena::new();
@@ -36,14 +33,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let buf = &mut buf;
 
 	loop {
+		use rt::io::Job;
+
 		// Wait for events from the table
-		let mut job = std::os::norostb::Job::default();
+		let mut job = Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
-		match std::os::norostb::take_job(tbl, &mut job) {
-			Ok(()) => {}
-			Err(_) => continue, // Timeout, probably...
-		}
+		tbl.take_job(&mut job).unwrap();
 
 		match job.ty {
 			Job::OPEN => {
@@ -123,6 +119,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			t => todo!("job type {}", t),
 		}
 
-		std::os::norostb::finish_job(tbl, &job).unwrap();
+		tbl.finish_job(&job).unwrap();
 	}
 }

@@ -8,6 +8,7 @@ default-target = "x86_64-unknown-norostb"
 
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
+norostb_rt = { path = "../../lib/rust/rt" }
 virtio = { path = "../../lib/rust/virtio" }
 virtio_block = { path = "../../lib/rust/virtio_block" }
 pci = { path = "../../lib/rust/pci" }

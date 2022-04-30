@@ -1,16 +1,12 @@
-use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Table, Ticket};
-use alloc::{boxed::Box, format, string::String, sync::Arc};
-use core::str;
+use crate::object_table::{Error, NoneQuery, Object, Query, QueryResult, Ticket};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
+use core::{mem, str};
 
 /// Table with all PCI devices.
 pub struct PciTable;
 
-impl Table for PciTable {
-	fn name(&self) -> &str {
-		"pci"
-	}
-
-	fn query(self: Arc<Self>, path: &[u8]) -> Ticket<Box<dyn Query>> {
+impl Object for PciTable {
+	fn query(self: Arc<Self>, prefix: Vec<u8>, path: &[u8]) -> Ticket<Box<dyn Query>> {
 		let (mut vendor_id, mut device_id) = (None, None);
 		for t in path.split(|c| *c == b'&') {
 			let f = |a: &mut Option<u16>, h: &[u8]| {
@@ -35,6 +31,7 @@ impl Table for PciTable {
 						Box::new(NoneQuery),
 						|h| {
 							Box::new(QueryName {
+								prefix,
 								item: bdf_from_string(h),
 							})
 						},
@@ -44,6 +41,7 @@ impl Table for PciTable {
 			};
 		}
 		Ticket::new_complete(Ok(Box::new(QueryTags {
+			prefix,
 			vendor_id,
 			device_id,
 			index: 0,
@@ -62,17 +60,10 @@ impl Table for PciTable {
 			.ok_or_else(|| todo!());
 		Ticket::new_complete(r)
 	}
-
-	fn create(self: Arc<Self>, _: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let e = Error {
-			code: 1,
-			message: "can't create pci devices".into(),
-		};
-		Ticket::new_complete(Err(e))
-	}
 }
 
 struct QueryName {
+	prefix: Vec<u8>,
 	item: Option<(u8, u8, u8)>,
 }
 
@@ -85,12 +76,16 @@ impl Iterator for QueryName {
 		self.item.take().and_then(|(b, d, f)| {
 			let pci = super::PCI.lock();
 			pci.as_ref().unwrap().get(b, d, f)?;
-			Some(Ticket::new_complete(Ok(pci_dev_query_result(b, d, f))))
+			let path = mem::take(&mut self.prefix);
+			Some(Ticket::new_complete(Ok(pci_dev_query_result(
+				path, b, d, f,
+			))))
 		})
 	}
 }
 
 struct QueryTags {
+	prefix: Vec<u8>,
 	vendor_id: Option<u16>,
 	device_id: Option<u16>,
 	index: u32,
@@ -115,7 +110,10 @@ impl Iterator for QueryTags {
 					continue;
 				}
 				return Some(Ticket::new_complete(Ok(pci_dev_query_result(
-					bus, dev, func,
+					self.prefix.clone(),
+					bus,
+					dev,
+					func,
 				))));
 			}
 		}
@@ -137,10 +135,9 @@ fn pci_dev_object(_h: pci::Header, bus: u8, dev: u8, _func: u8) -> Arc<dyn Objec
 	Arc::new(super::PciDevice::new(bus, dev))
 }
 
-fn pci_dev_query_result(bus: u8, dev: u8, func: u8) -> QueryResult {
-	QueryResult {
-		path: bdf_to_string(bus, dev, func).into_boxed_str().into(),
-	}
+fn pci_dev_query_result(mut path: Vec<u8>, bus: u8, dev: u8, func: u8) -> QueryResult {
+	path.extend(bdf_to_string(bus, dev, func).into_bytes());
+	QueryResult { path: path.into() }
 }
 
 fn n_to_bdf(n: u64) -> Option<(u8, u8, u8)> {

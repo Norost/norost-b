@@ -1,5 +1,5 @@
 use super::Uart;
-use crate::object_table::{Error, NoneQuery, Object, Query, Table, Ticket, TicketWaker};
+use crate::object_table::{Error, NoneQuery, Object, Query, Ticket, TicketWaker};
 use crate::sync::IsrSpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
@@ -9,12 +9,8 @@ pub struct UartTable;
 static PENDING_READS: [IsrSpinLock<Vec<TicketWaker<Box<[u8]>>>>; 1] =
 	[IsrSpinLock::new(Vec::new())];
 
-impl Table for UartTable {
-	fn name(&self) -> &str {
-		"uart"
-	}
-
-	fn query(self: Arc<Self>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
+impl Object for UartTable {
+	fn query(self: Arc<Self>, prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
 		match tags {
 			&[] => todo!(),
 			_ => Ticket::new_complete(Ok(Box::new(NoneQuery))),
@@ -27,14 +23,6 @@ impl Table for UartTable {
 		} else {
 			todo!()
 		}
-	}
-
-	fn create(self: Arc<Self>, _: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let e = Error {
-			code: 1,
-			message: "can't create uart devices".into(),
-		};
-		Ticket::new_complete(Err(e))
 	}
 }
 

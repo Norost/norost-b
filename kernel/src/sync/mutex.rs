@@ -39,10 +39,7 @@ impl<T> From<T> for Mutex<T> {
 	}
 }
 
-impl<T> Default for Mutex<T>
-where
-	T: Default,
-{
+impl<T: ~const Default> const Default for Mutex<T> {
 	fn default() -> Self {
 		Self::new(Default::default())
 	}

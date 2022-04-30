@@ -1,21 +1,31 @@
 #![feature(if_let_guard)]
+#![feature(never_type)]
 #![feature(norostb)]
-// FIXME figure out why rustc doesn't let us use data structures from an re-exported crate in
-// stdlib
-#![feature(rustc_private)]
+#![feature(type_alias_impl_trait)]
 
 mod dev;
+mod tcp;
+mod udp;
 
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{
-	io::{Empty, Job, Queue, Request},
-	syscall,
+use norostb_kernel::{io::Queue, syscall};
+use norostb_rt::{
+	self as rt,
+	io::{Job, Request},
 };
-use smoltcp::socket::TcpState;
+use smoltcp::{iface::SocketHandle, socket::TcpState, wire};
 use std::fs;
 use std::os::norostb::prelude::*;
 use std::str::FromStr;
+use tcp::{TcpConnection, TcpListener};
+use udp::UdpSocket;
+
+enum Socket {
+	TcpListener(TcpListener<5>),
+	TcpConnection(TcpConnection),
+	Udp(UdpSocket),
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let table_name = std::env::args()
@@ -60,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Wrap the device for use with smoltcp
-	use smoltcp::{iface, socket, time, wire};
+	use smoltcp::{iface, socket, time};
 	let dev = dev::Dev::new(dev);
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
 	let mut sockets = [iface::SocketStorage::EMPTY; 8];
@@ -77,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = syscall::create_table(table_name.as_bytes(), syscall::TableType::Streaming).unwrap();
+	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
 
 	#[derive(Clone, Copy)]
 	enum Protocol {
@@ -87,9 +97,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let mut t = time::Instant::from_secs(0);
 	let mut buf = [0; 2048];
-	let mut objects = Vec::new();
-
-	let mut connecting_tcp_sockets = Vec::new();
 
 	let mut job = Job::default();
 	job.buffer = NonNull::new(buf.as_mut_ptr());
@@ -105,43 +112,89 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	unsafe {
 		job_queue
-			.enqueue_request(Request::take_job(0, tbl, &mut job))
+			.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
 			.unwrap();
 	}
+
+	let mut alloc_port = 50_000u16;
+	let mut alloc_port = || {
+		alloc_port = alloc_port.wrapping_add(1).max(50_000);
+		alloc_port
+	};
+
+	enum Query {
+		Root(QueryRoot),
+		SourceAddr(wire::Ipv6Address, Protocol),
+		DestAddr {
+			source: wire::IpAddress,
+			protocol: Protocol,
+			dest: wire::IpAddress,
+		},
+		DestPort {
+			source: wire::IpAddress,
+			protocol: Protocol,
+			dest: wire::IpAddress,
+			port: u16,
+		},
+	}
+
+	enum QueryRoot {
+		Default,
+		Global,
+		IpAddr(usize),
+	}
+
+	let mut queries = driver_utils::Arena::new();
+	let mut sockets = driver_utils::Arena::new();
+	let mut connecting_tcp_sockets = Vec::<(TcpConnection, _)>::new();
+	let mut accepting_tcp_sockets = Vec::new();
+	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
 	loop {
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
-			let (sock_h, job_id) = connecting_tcp_sockets[i];
-			let sock = iface.get_socket::<socket::TcpSocket>(sock_h);
-			match sock.state() {
-				TcpState::SynSent | TcpState::SynReceived => {}
-				TcpState::Established => {
-					connecting_tcp_sockets.remove(i);
-					objects.push((
-						sock_h,
-						smoltcp::wire::IpEndpoint::UNSPECIFIED,
-						Protocol::Tcp,
-					));
-					let std_job = std::os::norostb::Job {
-						ty: Job::CREATE,
-						job_id,
-						flags: [0; 3],
-						handle: (objects.len() - 1).try_into().unwrap(),
-						buffer: None,
-						buffer_size: 0,
-						operation_size: 0,
-						from_anchor: 0,
-						from_offset: 0,
-					};
-					std::os::norostb::finish_job(tbl, &std_job).unwrap();
-					unsafe {
-						job_queue
-							.enqueue_request(Request::take_job(0, tbl, &mut job))
-							.unwrap();
-					}
+			let (sock, _) = &connecting_tcp_sockets[i];
+			if sock.ready(&mut iface) {
+				let (sock, job_id) = connecting_tcp_sockets.swap_remove(i);
+				let handle = sockets.insert(Socket::TcpConnection(sock));
+				let std_job = Job {
+					ty: Job::CREATE,
+					job_id,
+					flags: [0; 3],
+					handle,
+					buffer: None,
+					buffer_size: 0,
+					operation_size: 0,
+					from_anchor: 0,
+					from_offset: 0,
+				};
+				tbl.finish_job(&std_job).unwrap();
+				unsafe {
+					job_queue
+						.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+						.unwrap();
 				}
-				s => todo!("{:?}", s),
+			}
+		}
+
+		// Remove closed TCP connections.
+		for i in (0..closing_tcp_sockets.len()).rev() {
+			let sock = &mut closing_tcp_sockets[i];
+			if sock.remove(&mut iface) {
+				closing_tcp_sockets.swap_remove(i);
+			}
+		}
+
+		// Accept incoming TCP connections.
+		for i in (0..accepting_tcp_sockets.len()).rev() {
+			let (handle, _) = accepting_tcp_sockets[i];
+			let c = match &mut sockets[handle] {
+				Socket::TcpListener(l) => l.accept(&mut iface),
+				_ => unreachable!(),
+			};
+			if let Some(sock) = c {
+				let (_, job_id) = accepting_tcp_sockets.swap_remove(i);
+				connecting_tcp_sockets.push((sock, job_id));
 			}
 		}
 
@@ -149,128 +202,191 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
 			match job.ty {
-				Job::CREATE => {
-					let s = &buf[..job.operation_size as usize];
-
-					let mut protocol = None;
-					let mut port = None;
-					let mut address = None;
-
-					for tag in s.split(|c| *c == b'&') {
-						let tag = std::str::from_utf8(tag).unwrap();
-						match tag {
-							"udp" => protocol = Some(Protocol::Udp),
-							"tcp" => protocol = Some(Protocol::Tcp),
-							s if let Ok(n) = u16::from_str_radix(s, 10) => port = Some(n),
-							s if let Ok(a) = std::net::Ipv6Addr::from_str(s) => address = Some(a),
+				Job::OPEN => {
+					assert_ne!(job.handle, driver_utils::Handle::MAX, "TODO");
+					let path = &buf[..job.operation_size as usize];
+					let path = core::str::from_utf8(path).unwrap();
+					match &mut sockets[job.handle] {
+						Socket::TcpListener(_) => match path {
+							"accept" => {
+								accepting_tcp_sockets.push((job.handle, job.job_id));
+								continue;
+							}
 							_ => todo!(),
-						}
+						},
+						Socket::TcpConnection(_) => todo!(),
+						Socket::Udp(_) => todo!(),
 					}
-
-					use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address, Ipv6Address};
-					let addr = match address.unwrap() {
-						a if let Some(a) = a.to_ipv4() => IpAddress::Ipv4(Ipv4Address(a.octets())),
-						a => IpAddress::Ipv6(Ipv6Address(a.octets())),
-					};
-					let addr = IpEndpoint {
-						addr,
-						port: port.unwrap(),
-					};
-
-					match protocol.unwrap() {
-						Protocol::Udp => {
-							use smoltcp::storage::{PacketBuffer, PacketMetadata};
-							let f = |n| (0..n).map(|_| PacketMetadata::EMPTY).collect::<Vec<_>>();
-							let g = |n| (0..n).map(|_| 0u8).collect::<Vec<_>>();
-							let rx = PacketBuffer::new(f(5), g(1024));
-							let tx = PacketBuffer::new(f(5), g(1024));
-							let mut sock = socket::UdpSocket::new(rx, tx);
-							let local_addr = IpEndpoint {
-								addr: IpAddress::Ipv4(Ipv4Address([10, 0, 2, 15])),
-								port: 6666,
-							};
-							sock.bind(local_addr).unwrap();
-							let sock = iface.add_socket(sock);
-							objects.push((sock, addr, Protocol::Udp));
+				}
+				Job::CREATE => {
+					assert_eq!(job.handle, driver_utils::Handle::MAX, "TODO");
+					let s = &buf[..job.operation_size as usize];
+					let s = core::str::from_utf8(s).unwrap();
+					let mut parts = s.split('/');
+					let source = match parts.next().unwrap() {
+						"default" => iface.ip_addrs()[0].address(),
+						source => {
+							let source = std::net::Ipv6Addr::from_str(source).unwrap();
+							if let Some(source) = source.to_ipv4() {
+								wire::IpAddress::Ipv4(wire::Ipv4Address(source.octets()))
+							} else {
+								wire::IpAddress::Ipv6(wire::Ipv6Address(source.octets()))
+							}
 						}
-						Protocol::Tcp => {
-							use smoltcp::storage::RingBuffer;
-							let g = |n| (0..n).map(|_| 0u8).collect::<Vec<_>>();
-							let rx = RingBuffer::new(g(1024));
-							let tx = RingBuffer::new(g(1024));
-							let local_addr = IpEndpoint {
-								addr: IpAddress::Ipv4(Ipv4Address([10, 0, 2, 15])),
-								port: 6666,
-							};
-							let sock = socket::TcpSocket::new(rx, tx);
-							let sock = iface.add_socket(sock);
-							connecting_tcp_sockets.push((sock, job.job_id));
-							let (sock, cx) =
-								iface.get_socket_and_context::<socket::TcpSocket>(sock);
-							sock.connect(cx, addr, local_addr).unwrap();
-							continue;
-						}
-					}
+					};
+					job.handle = sockets.insert(match parts.next().unwrap() {
+						// protocol
+						"tcp" => {
+							match parts.next().unwrap() {
+								// type
+								"listen" => {
+									let port = parts.next().unwrap().parse().unwrap();
+									let source = wire::IpEndpoint { addr: source, port };
+									Socket::TcpListener(TcpListener::new(&mut iface, source))
+								}
+								"connect" => {
+									let dest = parts.next().unwrap();
+									let dest = std::net::Ipv6Addr::from_str(dest).unwrap();
+									let dest = dest.to_ipv4().map_or(
+										wire::IpAddress::Ipv6(wire::Ipv6Address(dest.octets())),
+										|dest| {
+											wire::IpAddress::Ipv4(wire::Ipv4Address(dest.octets()))
+										},
+									);
+									let port = parts.next().unwrap().parse().unwrap();
+									let source = wire::IpEndpoint {
+										addr: source,
+										port: alloc_port(),
+									};
+									let dest = wire::IpEndpoint { addr: dest, port };
 
-					job.handle = (objects.len() - 1).try_into().unwrap();
+									connecting_tcp_sockets.push((
+										TcpConnection::new(&mut iface, source, dest),
+										job.job_id,
+									));
+									continue;
+								}
+								"active" => todo!(),
+								_ => todo!(),
+							}
+						}
+						"udp" => Socket::Udp(UdpSocket::new(&mut iface)),
+						_ => todo!(),
+					});
+
+					assert!(parts.next().is_none());
 				}
 				Job::READ => {
-					let (sock, _addr, prot) = objects[job.handle as usize];
-					match prot {
-						Protocol::Udp => {
-							todo!("address");
-							/*
-							let sock = iface.get_socket::<socket::UdpSocket>(sock);
-							let data = unsafe { job.data() };
-							sock.recv_slice(data, addr).unwrap();
-							*/
+					let len = usize::try_from(job.operation_size).unwrap().min(buf.len());
+					let data = &mut buf[..len];
+					match &mut sockets[job.handle] {
+						Socket::TcpListener(_) => todo!(),
+						Socket::TcpConnection(sock) => {
+							job.operation_size =
+								sock.read(data, &mut iface).unwrap().try_into().unwrap();
+							job.buffer = NonNull::new(data.as_mut_ptr());
 						}
-						Protocol::Tcp => {
-							let sock = iface.get_socket::<socket::TcpSocket>(sock);
-							let len = (job.operation_size as usize).min(buf.len());
-							if let Ok(len) = sock.recv_slice(&mut buf[..len]) {
-								job.buffer = NonNull::new(buf.as_mut_ptr());
-								job.buffer_size = len.try_into().unwrap();
-							} else {
-								job.buffer_size = 0;
-							}
-							job.operation_size = job.buffer_size;
+						Socket::Udp(sock) => {
+							todo!("address")
 						}
 					}
 				}
 				Job::WRITE => {
-					let (sock, addr, prot) = objects[job.handle as usize];
-					match prot {
-						Protocol::Udp => {
-							let sock = iface.get_socket::<socket::UdpSocket>(sock);
-							let data = &buf[..job.operation_size as usize];
-							sock.send_slice(data, addr).unwrap();
+					let data = &buf[..job.operation_size as usize];
+					match &mut sockets[job.handle] {
+						Socket::TcpListener(_) => todo!(),
+						Socket::TcpConnection(sock) => {
+							sock.write(data, &mut iface).unwrap();
 						}
-						Protocol::Tcp => {
-							let sock = iface.get_socket::<socket::TcpSocket>(sock);
-							let data = &buf[..job.operation_size as usize];
-							sock.send_slice(data).unwrap();
+						Socket::Udp(sock) => {
+							todo!("address")
 						}
 					}
 				}
 				Job::CLOSE => {
-					todo!();
+					match sockets.remove(job.handle).unwrap() {
+						Socket::TcpListener(_) => todo!(),
+						Socket::TcpConnection(mut sock) => {
+							sock.close(&mut iface);
+							closing_tcp_sockets.push(sock);
+						}
+						Socket::Udp(sock) => {
+							todo!("address")
+						}
+					}
+					unsafe {
+						job_queue
+							.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+							.unwrap();
+					}
+					continue;
+				}
+				Job::QUERY => {
+					assert_eq!(job.handle, driver_utils::Handle::MAX, "TODO");
+					let mut path = core::str::from_utf8(&buf[..job.operation_size as usize])
+						.unwrap()
+						.split('/');
+					let query = match (path.next().unwrap(), path.next(), path.next()) {
+						("", None, _) => Query::Root(QueryRoot::Default),
+						("default", None, _) | ("default", Some(""), None) => {
+							let addr = into_ip6(iface.ip_addrs()[0].address());
+							Query::SourceAddr(addr, Protocol::Tcp)
+						},
+						(addr, None, _) | (addr, Some(""), None) if let Ok(addr) = wire::IpAddress::from_str(addr) => todo!(),
+						path => todo!("{:?}", path),
+					};
+					job.handle = queries.insert(query);
+				}
+				Job::QUERY_NEXT => {
+					use std::io::Write;
+					match queries.get_mut(job.handle) {
+						Some(Query::Root(q @ QueryRoot::Default)) => {
+							let s = b"default";
+							buf[..s.len()].copy_from_slice(s);
+							job.operation_size = s.len().try_into().unwrap();
+							*q = QueryRoot::Global;
+						}
+						Some(Query::Root(q @ QueryRoot::Global)) => {
+							let s = b"::";
+							buf[..s.len()].copy_from_slice(s);
+							job.operation_size = s.len().try_into().unwrap();
+							*q = QueryRoot::IpAddr(0);
+						}
+						Some(Query::Root(QueryRoot::IpAddr(i))) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}", into_ip6(iface.ip_addrs()[*i].address())).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							*i += 1;
+							if *i >= iface.ip_addrs().len() {
+								queries.remove(job.handle);
+							}
+						}
+						Some(Query::SourceAddr(addr, p @ Protocol::Tcp)) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}/tcp", addr).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							*p = Protocol::Udp;
+						}
+						Some(Query::SourceAddr(addr, Protocol::Udp)) => {
+							let mut b = &mut buf[..];
+							write!(b, "{}/udp", addr).unwrap();
+							let l = b.len();
+							job.operation_size = (buf.len() - l).try_into().unwrap();
+							queries.remove(job.handle);
+						}
+						Some(_) => todo!(),
+						None => job.operation_size = 0,
+					}
 				}
 				t => todo!("job type {}", t),
 			}
 
+			tbl.finish_job(&job).unwrap();
 			unsafe {
 				job_queue
-					.enqueue_request(Request::finish_job(0, tbl, &job))
-					.unwrap();
-			}
-			syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
-			while let Err(Empty) = unsafe { job_queue.dequeue_response() } {
-				syscall::wait_io_queue(Some(job_queue.base.cast())).unwrap();
-			}
-			unsafe {
-				job_queue
-					.enqueue_request(Request::take_job(0, tbl, &mut job))
+					.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
 					.unwrap();
 			}
 		}
@@ -290,5 +406,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		syscall::sleep(Duration::from_secs(1) / 10);
 		t += time::Duration::from_secs(1) / 10;
+	}
+}
+
+fn into_ip6(addr: wire::IpAddress) -> wire::Ipv6Address {
+	match addr {
+		wire::IpAddress::Ipv4(wire::Ipv4Address([a, b, c, d])) => wire::Ipv6Address::new(
+			0,
+			0,
+			0,
+			0,
+			0,
+			0xffff,
+			u16::from(a) << 8 | u16::from(b),
+			u16::from(c) << 8 | u16::from(d),
+		),
+		wire::IpAddress::Ipv6(a) => a,
+		// Non-exhaustive cause *shrug*
+		_ => todo!("unsupported address type"),
 	}
 }

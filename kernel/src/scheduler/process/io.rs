@@ -4,9 +4,7 @@ use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTick
 use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{
-	self, AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult,
-};
+use crate::object_table::{AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::{self, NonNull};
 use core::task::Poll;
@@ -141,6 +139,18 @@ impl super::Process {
 						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
+				Request::PEEK => {
+					let handle = unerase_handle(e.arguments_32[0]);
+					let data_ptr = e.arguments_64[0] as *mut u8;
+					let data_len = e.arguments_64[1] as usize;
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.peek(0, data_len.try_into().unwrap());
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
+						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
+						Poll::Ready(Err(_)) => push_resp(-1),
+					}
+				}
 				Request::WRITE => {
 					let handle = unerase_handle(e.arguments_32[0]);
 					let data_ptr = e.arguments_64[0] as *const u8;
@@ -155,51 +165,48 @@ impl super::Process {
 					}
 				}
 				Request::OPEN => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					match object_table::open(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(o)) => {
-								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::GetError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().open(path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(o)) => {
+							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::CREATE => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					match object_table::create(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(o)) => {
-								push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::CreateError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().create(path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(o)) => {
+							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::QUERY => {
-					let table = object_table::TableId(e.arguments_32[0]);
+					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
-					match object_table::query(table, path) {
-						Ok(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-							Poll::Ready(Ok(q)) => {
-								push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
-							}
-							Poll::Ready(Err(_)) => push_resp(-1),
-						},
-						Err(object_table::QueryError::InvalidTableId) => push_resp(-1),
+					let object = objects.get(handle).unwrap();
+					let mut ticket = object.clone().query(Vec::new(), path);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(q)) => {
+							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
+						}
+						Poll::Ready(Err(_)) => push_resp(-1),
 					}
 				}
 				Request::QUERY_NEXT => {
@@ -250,6 +257,9 @@ impl super::Process {
 						Job::OPEN => JobResult::Open { handle: job.handle },
 						Job::CREATE => JobResult::Create { handle: job.handle },
 						Job::READ => JobResult::Read {
+							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+						},
+						Job::PEEK => JobResult::Peek {
 							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
 						},
 						Job::WRITE => JobResult::Write {
@@ -439,15 +449,17 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	};
 
 	match info.1 {
-		JobRequest::Open { path } => {
+		JobRequest::Open { handle, path } => {
 			job.ty = Job::OPEN;
+			job.handle = handle;
 			copy_buf(&path);
 		}
-		JobRequest::Create { path } => {
+		JobRequest::Create { handle, path } => {
 			job.ty = Job::CREATE;
+			job.handle = handle;
 			copy_buf(&path);
 		}
-		JobRequest::Read { handle, amount } => {
+		JobRequest::Read { handle, amount } | JobRequest::Peek { handle, amount } => {
 			job.ty = Job::READ;
 			job.handle = handle;
 			job.operation_size = amount.try_into().unwrap();
@@ -463,8 +475,9 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 			job.handle = handle;
 			(job.from_anchor, job.from_offset) = from.into_raw();
 		}
-		JobRequest::Query { filter } => {
+		JobRequest::Query { handle, filter } => {
 			job.ty = Job::QUERY;
+			job.handle = handle;
 			copy_buf(&filter);
 		}
 		JobRequest::QueryNext { handle } => {

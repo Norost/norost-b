@@ -1,8 +1,13 @@
 use core::mem;
-use core::ptr::{self, NonNull};
+use core::ptr;
 use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 const ENTRIES: usize = 128;
+
+#[cfg(not(feature = "rustc-dep-of-std"))]
+extern crate alloc;
+
+use alloc::boxed::Box;
 
 #[derive(Debug)]
 pub struct Full;
@@ -18,9 +23,13 @@ impl Bitset {
 	const BITS_PER_ENTRY: usize = mem::size_of::<AtomicUsize>() * 8;
 
 	const fn new() -> Self {
-		Self {
+		let mut slf = Self {
 			bits: [const { AtomicUsize::new(0) }; ENTRIES / Self::BITS_PER_ENTRY],
-		}
+		};
+		// Reservations:
+		// 0) QUEUE_KEY in io.rs
+		slf.bits[0] = AtomicUsize::new(1);
+		slf
 	}
 
 	/// Clear a bit
@@ -57,25 +66,64 @@ impl Bitset {
 	}
 }
 
+#[derive(Clone, Copy)]
 pub struct Key(pub usize);
 
 #[repr(C)]
 struct Entry {
-	data: *mut u8,
+	data: *mut (),
 }
 
-static ALLOCATED: Bitset = Bitset::new();
-static DESTRUCTORS: [AtomicPtr<()>; ENTRIES] = [const { AtomicPtr::new(ptr::null_mut()) }; ENTRIES];
+// See lib.rs
+//
+// We use a function because "must have type `*const T` or `*mut T` due to `#[linkage]` attribute"
+//
+// TODO this doesn't get inlined :(
+#[linkage = "weak"]
+#[export_name = "__rt_tls_allocated"]
+fn allocated() -> &'static Bitset {
+	static ALLOCATED: Bitset = Bitset::new();
+	&ALLOCATED
+}
 
-/// Initialize TLS storage for a single thread.
+// See lib.rs
+#[linkage = "weak"]
+#[export_name = "__rt_tls_destructors"]
+fn destructors() -> &'static [AtomicPtr<()>; ENTRIES] {
+	static DESTRUCTORS: [AtomicPtr<()>; ENTRIES] = {
+		let mut d = [const { AtomicPtr::new(ptr::null_mut()) }; ENTRIES];
+		d[0] = AtomicPtr::new(crate::io::queue_dtor as _);
+		d
+	};
+	&DESTRUCTORS
+}
+
+/// Create & initialize TLS storage for a new thread.
+#[must_use = "this must be passed to the new thread"]
+pub(crate) fn create_for_thread(
+	init: impl Iterator<Item = (Key, *mut ())>,
+) -> crate::io::Result<*mut ()> {
+	// TODO allocation may fail.
+	let mut entries = Box::<[Entry]>::new_zeroed_slice(ENTRIES);
+	for (k, data) in init {
+		entries[k.0].write(Entry { data });
+	}
+	Ok(Box::into_raw(entries).cast())
+}
+
+/// Initialize TLS storage for the current thread.
 ///
 /// # Safety
 ///
 /// This function may only be called once before `deinit_thread`.
-#[inline]
-pub unsafe fn init_thread(alloc: impl FnOnce(usize) -> NonNull<[u8]>) {
-	let ptr = alloc(ENTRIES * mem::size_of::<Entry>());
-	super::set_tls(ptr.as_ptr().as_mut_ptr().cast());
+///
+/// # Note
+///
+/// [`crate::thread::init`] should be preferred.
+pub(crate) unsafe fn init_thread(ptr: *mut ()) {
+	unsafe {
+		super::set_tls(ptr);
+	}
 }
 
 /// Initialize TLS storage for a single thread.
@@ -83,20 +131,39 @@ pub unsafe fn init_thread(alloc: impl FnOnce(usize) -> NonNull<[u8]>) {
 /// # Safety
 ///
 /// This function may only be called once after `init_thread`.
-#[inline]
-pub unsafe fn deinit_thread(dealloc: impl FnOnce(NonNull<[u8]>)) {
-	let ptr = NonNull::new(super::get_tls()).unwrap();
-	dealloc(NonNull::slice_from_raw_parts(
-		ptr.cast(),
-		ENTRIES * mem::size_of::<Entry>(),
-	));
+///
+/// The given pointer must come from [`create_for_thread`].
+///
+/// # Note
+///
+/// [`crate::thread::deinit`] should be preferred.
+pub(crate) unsafe fn deinit_thread() {
+	unsafe {
+		let storage = super::get_tls().cast::<Entry>();
+		Box::from_raw(ptr::slice_from_raw_parts_mut(storage, ENTRIES));
+	}
+}
+
+/// Initialize the runtime.
+///
+/// # Safety
+///
+/// This function may only be called once.
+pub(crate) unsafe fn init() {
+	let entries = create_for_thread([].into_iter()).unwrap_or_else(|_| {
+		// We can't do anything
+		core::intrinsics::abort()
+	});
+	unsafe {
+		init_thread(entries);
+	}
 }
 
 /// Allocate a key.
 #[inline]
-pub fn allocate(destructor: Option<unsafe extern "C" fn(*mut u8)>) -> Result<Key, Full> {
-	let key = ALLOCATED.allocate()?;
-	DESTRUCTORS[key].store(
+pub fn allocate(destructor: Option<unsafe extern "C" fn(*mut ())>) -> Result<Key, Full> {
+	let key = allocated().allocate()?;
+	destructors()[key].store(
 		destructor.map_or(ptr::null_mut(), |f| f as *mut ()),
 		Ordering::Relaxed,
 	);
@@ -110,7 +177,7 @@ pub fn allocate(destructor: Option<unsafe extern "C" fn(*mut u8)>) -> Result<Key
 /// The key may not be reused after this call.
 #[inline]
 pub unsafe fn free(key: Key) {
-	ALLOCATED.clear(key.0);
+	allocated().clear(key.0);
 }
 
 /// Set data associated with a key.
@@ -121,8 +188,10 @@ pub unsafe fn free(key: Key) {
 ///
 /// Only keys returned from [`allocate`] may be used.
 #[inline]
-pub unsafe fn set(key: Key, data: *mut u8) {
-	super::write_tls_offset(key.0, data as usize);
+pub unsafe fn set(key: Key, data: *mut ()) {
+	unsafe {
+		super::write_tls_offset(key.0, data as usize);
+	}
 }
 
 /// Get data associated with a key.
@@ -135,6 +204,6 @@ pub unsafe fn set(key: Key, data: *mut u8) {
 ///
 /// The data must be initialized with [`set_data`].
 #[inline]
-pub unsafe fn get(key: Key) -> *mut u8 {
-	super::read_tls_offset(key.0) as *mut _
+pub unsafe fn get(key: Key) -> *mut () {
+	unsafe { super::read_tls_offset(key.0) as *mut _ }
 }

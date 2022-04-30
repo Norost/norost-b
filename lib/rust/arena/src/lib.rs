@@ -1,6 +1,7 @@
 //! # Typed arena with optional generational identifiers.
 
 #![no_std]
+#![feature(const_default_impls, const_fn_trait_bound, const_trait_impl)]
 
 extern crate alloc;
 
@@ -67,7 +68,7 @@ impl_int!(i64);
 impl_int!(i128);
 
 impl<V, G: Generation + Default> Arena<V, G> {
-	pub fn new() -> Self {
+	pub const fn new() -> Self {
 		Default::default()
 	}
 }
@@ -166,7 +167,7 @@ impl<V, G: Generation> IndexMut<Handle<G>> for Arena<V, G> {
 	}
 }
 
-impl<V, G: Generation + Default> Default for Arena<V, G> {
+impl<V, G: Generation + ~const Default> const Default for Arena<V, G> {
 	fn default() -> Self {
 		Self {
 			storage: Default::default(),

@@ -8,6 +8,7 @@ use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{AnyTicket, JobTask, Object, Query};
 use crate::sync::Mutex;
+use crate::util::{erase_handle, unerase_handle};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
 use core::num::NonZeroUsize;
@@ -188,18 +189,3 @@ impl Drop for Process {
 
 #[derive(Debug)]
 pub enum AddObjectError {}
-
-#[track_caller]
-fn erase_handle(handle: arena::Handle<u8>) -> Handle {
-	let (index, generation) = handle.into_raw();
-	assert!(index < 1 << 24, "can't construct unique handle");
-	(generation as u32) << 24 | index as u32
-}
-
-#[track_caller]
-fn unerase_handle(handle: Handle) -> arena::Handle<u8> {
-	arena::Handle::from_raw(
-		(handle & 0xff_ffff).try_into().unwrap(),
-		(handle >> 24) as u8,
-	)
-}

@@ -84,7 +84,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "fatfs",
- "norostb_kernel",
+ "norostb_rt",
 ]
 
 [[package]]
@@ -100,6 +100,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "norostb_kernel",
+ "norostb_rt",
  "pci",
  "virtio",
  "virtio_block",
@@ -109,7 +110,9 @@ dependencies = [
 name = "driver_virtio_net"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "norostb_kernel",
+ "norostb_rt",
  "pci",
  "smoltcp",
  "virtio",
@@ -171,6 +174,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mhttp"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34334252b387adb910abcc2afcf6a27eb04c6615a5838598e9b2c918f5005290"
+
+[[package]]
 name = "minish"
 version = "0.1.0"
 dependencies = [
@@ -211,6 +220,7 @@ dependencies = [
  "cfg-if",
  "compiler_builtins",
  "norostb_kernel",
+ "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
 
@@ -270,6 +280,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-std-workspace-alloc"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff66d57013a5686e1917ed6a025d54dd591fcda71a41fe07edf4d16726aefa86"
+
+[[package]]
 name = "rustc-std-workspace-core"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,6 +306,13 @@ dependencies = [
  "bitflags",
  "byteorder",
  "managed",
+]
+
+[[package]]
+name = "static_http_server"
+version = "0.1.0"
+dependencies = [
+ "mhttp",
 ]
 
 [[package]]

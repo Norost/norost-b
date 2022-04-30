@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 152689953b8..1d02b40453f 100644
+index 152689953b8..20779a31c39 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -520,6 +520,10 @@ name = "cfg-if"
@@ -13,7 +13,7 @@ index 152689953b8..1d02b40453f 100644
  
  [[package]]
  name = "chalk-derive"
-@@ -2371,6 +2375,24 @@ dependencies = [
+@@ -2371,6 +2375,25 @@ dependencies = [
   "version_check",
  ]
  
@@ -32,13 +32,14 @@ index 152689953b8..1d02b40453f 100644
 + "cfg-if 1.0.0",
 + "compiler_builtins",
 + "norostb_kernel",
++ "rustc-std-workspace-alloc",
 + "rustc-std-workspace-core",
 +]
 +
  [[package]]
  name = "ntapi"
  version = "0.3.6"
-@@ -4794,6 +4816,7 @@ dependencies = [
+@@ -4794,6 +4817,7 @@ dependencies = [
   "hermit-abi 0.2.0",
   "libc",
   "miniz_oxide",
@@ -351,12 +352,12 @@ index 00000000000..17243a4af12
 +pub use self::os_str::{OsStrExt, OsStringExt};
 diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
 new file mode 100644
-index 00000000000..9f56dbc6f25
+index 00000000000..26f5309308e
 --- /dev/null
 +++ b/library/std/src/os/norostb/io.rs
 @@ -0,0 +1,34 @@
 +use crate::sys_common::{AsInner, FromInner, IntoInner};
-+use crate::{fs, mem::ManuallyDrop, sys};
++use crate::{fs, sys};
 +
 +pub type Handle = u32;
 +
@@ -374,40 +375,35 @@ index 00000000000..9f56dbc6f25
 +
 +impl AsHandle for fs::File {
 +    fn as_handle(&self) -> Handle {
-+        self.as_inner().handle
++        self.as_inner().0.as_raw()
 +    }
 +}
 +
 +impl IntoHandle for fs::File {
 +    fn into_handle(self) -> Handle {
-+        ManuallyDrop::new(self.into_inner()).handle
++        self.into_inner().0.into_raw()
 +    }
 +}
 +
 +impl FromHandle for fs::File {
 +    unsafe fn from_handle(handle: Handle) -> Self {
-+        Self::from_inner(sys::fs::File { handle })
++        Self::from_inner(sys::fs::File(norostb_rt::table::Object::from_raw(handle)))
 +    }
 +}
 diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
 new file mode 100644
-index 00000000000..4c75f2a691c
+index 00000000000..a06c561b91c
 --- /dev/null
 +++ b/library/std/src/os/norostb/mod.rs
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,10 @@
 +#![unstable(feature = "norostb", issue = "none")]
 +
 +pub mod ffi;
 +pub mod io;
 +
-+pub use crate::sys::io::{
-+    create, finish_job, open, poll, query, query_next, read, seek, take_job, write,
-+};
-+pub use norostb_rt::kernel::io::{Job, ObjectInfo};
-+
 +pub mod prelude {
 +    use super::*;
-+    pub use ffi::OsStrExt;
++    pub use ffi::{OsStrExt, OsStringExt};
 +    pub use io::{AsHandle, FromHandle, Handle, IntoHandle};
 +}
 diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
@@ -426,222 +422,101 @@ index 167c918c94c..dbfba32bd66 100644
          pub use self::unsupported::*;
 diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
 new file mode 100644
-index 00000000000..80664e9fd25
+index 00000000000..da879fb0b9d
 --- /dev/null
 +++ b/library/std/src/sys/norostb/alloc.rs
-@@ -0,0 +1,57 @@
-+use crate::alloc::{Allocator as Alloc, GlobalAlloc, Layout, System};
-+use crate::ptr::{self, NonNull};
-+use crate::sys_common::mutex::StaticMutex;
-+use norostb_rt::alloc::Allocator;
+@@ -0,0 +1,20 @@
++use crate::alloc::{GlobalAlloc, Layout, System};
 +
-+static ALLOCATOR_LOCK: StaticMutex = StaticMutex::new();
-+static mut ALLOCATOR: Allocator = Allocator::new();
++macro_rules! imp {
++    ($fn:ident($($args:ident : $ty:ty),*) -> $ret:ty) => {
++        #[inline]
++        unsafe fn $fn(&self, $($args:$ty),*) -> $ret {
++            unsafe {
++                norostb_rt::alloc::ALLOCATOR.$fn($($args),*)
++            }
++        }
++    };
++}
 +
 +#[stable(feature = "alloc_system_type", since = "1.28.0")]
 +unsafe impl GlobalAlloc for System {
-+    #[inline]
-+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-+        unsafe {
-+            let _guard = ALLOCATOR_LOCK.lock();
-+            ALLOCATOR.allocate(layout).map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
-+        }
-+    }
-+
-+    #[inline]
-+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-+        unsafe {
-+            let _guard = ALLOCATOR_LOCK.lock();
-+            ALLOCATOR.allocate_zeroed(layout).map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
-+        }
-+    }
-+
-+    #[inline]
-+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-+        debug_assert!(!ptr.is_null());
-+        unsafe {
-+            let _guard = ALLOCATOR_LOCK.lock();
-+            ALLOCATOR.deallocate(NonNull::new_unchecked(ptr), layout)
-+        }
-+    }
-+
-+    #[inline]
-+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-+        debug_assert!(!ptr.is_null());
-+        let old_layout = layout;
-+        if let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) {
-+            unsafe {
-+                let _guard = ALLOCATOR_LOCK.lock();
-+                if new_layout.size() > old_layout.size() {
-+                    ALLOCATOR
-+                        .grow(NonNull::new_unchecked(ptr), old_layout, new_layout)
-+                        .map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
-+                } else {
-+                    ALLOCATOR
-+                        .shrink(NonNull::new_unchecked(ptr), old_layout, new_layout)
-+                        .map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
-+                }
-+            }
-+        } else {
-+            ptr::null_mut()
-+        }
-+    }
++    imp!(alloc(layout: Layout) -> *mut u8);
++    imp!(alloc_zeroed(layout: Layout) -> *mut u8);
++    imp!(dealloc(ptr: *mut u8, layout: Layout) -> ());
++    imp!(realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8);
 +}
 diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
 new file mode 100644
-index 00000000000..f14cfc6ae08
+index 00000000000..dc96c9d5fdd
 --- /dev/null
 +++ b/library/std/src/sys/norostb/args.rs
-@@ -0,0 +1,150 @@
-+use crate::collections::{btree_map, BTreeMap};
+@@ -0,0 +1,66 @@
 +use crate::ffi::{OsStr, OsString};
-+use crate::fmt;
 +use crate::io;
-+use crate::lazy::SyncOnceCell;
-+use crate::os::norostb::prelude::*;
-+use crate::ptr::{self, NonNull};
-+use crate::slice;
-+use crate::sync::{
-+    atomic::{AtomicPtr, Ordering},
-+    Mutex,
-+};
++use crate::os::norostb::ffi::{OsStrExt, OsStringExt};
 +
-+static ARGS_AND_ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
-+static ENV: SyncOnceCell<Mutex<BTreeMap<OsString, OsString>>> = SyncOnceCell::new();
++use norostb_rt::args;
 +
-+pub struct Args {
-+    count: usize,
-+    ptr: NonNull<u8>,
-+}
-+
-+pub fn args() -> Args {
-+    unsafe {
-+        let ptr = NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed))
-+            .expect("No arguments were set")
-+            .cast::<u16>();
-+        Args {
-+            count: usize::from(ptr.as_ptr().read_unaligned()),
-+            ptr: NonNull::new(ptr.as_ptr().add(1).cast()).unwrap(),
-+        }
-+    }
-+}
-+
-+impl fmt::Debug for Args {
-+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        let args = Args { count: self.count, ptr: self.ptr };
-+        let mut f = f.debug_list();
-+        for e in args {
-+            f.entry(&e);
-+        }
-+        f.finish()
-+    }
-+}
++#[derive(Debug)]
++pub struct Args(args::Args);
 +
 +impl Iterator for Args {
 +    type Item = OsString;
 +
-+    fn next(&mut self) -> Option<OsString> {
-+        self.count.checked_sub(1).map(|c| {
-+            self.count = c;
-+            unsafe {
-+                let (val, ptr) = get_str(self.ptr.as_ptr());
-+                self.ptr = NonNull::new(ptr).unwrap();
-+                val
-+            }
-+        })
-+    }
-+
-+    fn size_hint(&self) -> (usize, Option<usize>) {
-+        (self.count, Some(self.count))
++    fn next(&mut self) -> Option<Self::Item> {
++        self.0.next().map(OsStr::from_bytes).map(Into::into)
 +    }
 +}
 +
 +impl ExactSizeIterator for Args {
 +    fn len(&self) -> usize {
-+        self.count
++        self.0.len()
 +    }
 +}
 +
 +impl DoubleEndedIterator for Args {
-+    fn next_back(&mut self) -> Option<OsString> {
-+        self.count.checked_sub(1).map(|c| {
-+            // Very inefficient but w/e, it shouldn't matter.
-+            let args = Args { count: self.count, ptr: self.ptr };
-+            self.count = c;
-+            args.last().unwrap()
-+        })
++    fn next_back(&mut self) -> Option<Self::Item> {
++        self.0.next_back().map(OsStr::from_bytes).map(Into::into)
 +    }
 +}
 +
-+pub struct Env {
-+    inner: btree_map::IntoIter<OsString, OsString>,
-+}
++#[derive(Debug)]
++pub struct Env(args::Env);
 +
 +impl Iterator for Env {
 +    type Item = (OsString, OsString);
 +
-+    fn next(&mut self) -> Option<(OsString, OsString)> {
-+        self.inner.next()
++    fn next(&mut self) -> Option<Self::Item> {
++        self.0.next().map(|(key, val)| {
++            (OsString::from_vec(key.into_owned()), OsString::from_vec(val.into_owned()))
++        })
 +    }
 +}
 +
-+fn get_env() -> &'static Mutex<BTreeMap<OsString, OsString>> {
-+    ENV.get_or_init(|| {
-+        // A finished args iterator will point to the start of the env variables.
-+        let mut args = args();
-+        (&mut args).last();
-+        // Load all env variables in a map so we can easily modify & remove variables.
-+        let mut map = BTreeMap::new();
-+        unsafe {
-+            let ptr = args.ptr.as_ptr().cast::<u16>();
-+            let count = usize::from(ptr.read_unaligned());
-+            let mut ptr = ptr.add(1).cast::<u8>();
-+            for _ in 0..count {
-+                let (key, p) = get_str(ptr);
-+                let (val, p) = get_str(p);
-+                map.insert(key, val);
-+                ptr = p;
-+            }
-+        }
-+        Mutex::new(map)
-+    })
++pub fn args() -> Args {
++    Args(args::Args::new())
 +}
 +
 +pub fn env() -> Env {
-+    // "The returned iterator contains a snapshot of the process’s environment variables ..." &
-+    // "Modifications to environment variables afterwards will not be reflected ..."
-+    // means we need to clone it, or at least use some kind of CoW.
-+    Env { inner: get_env().lock().expect("failed to lock environment map").clone().into_iter() }
++    Env(args::Env::new())
 +}
 +
 +pub fn getenv(key: &OsStr) -> Option<OsString> {
-+    get_env().lock().expect("failed to lock environment map").get(key).cloned()
++    args::Env::get(OsStr::as_bytes(key)).map(|val| OsString::from_vec(val.into_owned()))
 +}
 +
 +pub fn setenv(key: &OsStr, value: &OsStr) -> io::Result<()> {
-+    get_env().lock().expect("failed to lock environment map").insert(key.into(), value.into());
-+    Ok(())
++    let f = |v| Vec::from(OsStr::as_bytes(v)).into();
++    args::Env::try_insert(f(key), f(value))
++        .map(|_| ())
++        .map_err(|_| io::const_io_error!(io::ErrorKind::OutOfMemory, "out of memory"))
 +}
 +
 +pub fn unsetenv(key: &OsStr) -> io::Result<()> {
-+    // Removing non-existent env variables is valid apparently...
-+    get_env().lock().expect("failed to lock environment map").remove(key);
++    // Removing non-existent env variables is valid in stdlib.
++    let _ = args::Env::remove(OsStr::as_bytes(key));
 +    Ok(())
-+}
-+
-+/// # Safety
-+///
-+/// Must be called only once during runtime initialization.
-+pub(super) unsafe fn init(args_and_env: *const u8) {
-+    ARGS_AND_ENV.store(args_and_env as _, Ordering::Relaxed)
-+}
-+
-+unsafe fn get_str(ptr: *mut u8) -> (OsString, *mut u8) {
-+    let len = usize::from(unsafe { ptr.cast::<u16>().read_unaligned() });
-+    let ptr = ptr.wrapping_add(2);
-+    let mut s = OsString::new();
-+    s.push(OsStr::from_bytes(unsafe { slice::from_raw_parts(ptr, len) }));
-+    (s, ptr.wrapping_add(len))
 +}
 diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
 new file mode 100644
@@ -748,10 +623,11 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..87def158b98
+index 00000000000..e39561c384d
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,476 @@
+@@ -0,0 +1,310 @@
++use super::cvt_err;
 +/// ## Path format
 +///
 +/// ```
@@ -770,42 +646,24 @@ index 00000000000..87def158b98
 +use crate::ffi::OsString;
 +use crate::hash::Hash;
 +use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
-+use crate::mem;
++use crate::os::norostb::prelude::*;
 +use crate::path::{Path, PathBuf};
-+use crate::sys::os_str::Buf;
 +use crate::sys::time::SystemTime;
 +use crate::sys::unsupported;
-+use crate::sys_common::{AsInner, FromInner};
-+use norostb_rt::kernel::{
-+    io::{Handle, ObjectInfo},
-+    syscall::{self, TableId, TableInfo},
-+};
++use crate::sys_common::AsInner;
++use norostb_rt::{io as rt_io, table::Object};
 +
 +#[derive(Debug)]
-+pub struct File {
-+    pub(crate) handle: Handle,
-+}
-+
-+const TABLE_OBJECT_SEPARATOR: u8 = b'/';
++pub struct File(pub(crate) Object);
 +
 +#[derive(Clone, Debug)]
-+pub enum FileAttr {
-+    Table { entries: u64 },
-+    Object { size: u64 },
-+}
++pub enum FileAttr {}
++
++#[derive(Debug)]
++pub struct ReadDir(rt_io::Query);
 +
 +#[derive(Clone, Debug)]
-+pub enum ReadDir {
-+    None,
-+    Tables(Option<TableId>),
-+    Objects { table_id: TableId, table_info: TableInfo, query: Handle },
-+}
-+
-+#[derive(Clone, Debug)]
-+pub enum DirEntry {
-+    Table { id: TableId, info: TableInfo },
-+    Object { table_id: TableId, table_info: TableInfo, name: OsString },
-+}
++pub struct DirEntry(OsString);
 +
 +#[derive(Clone, Debug)]
 +pub struct OpenOptions {
@@ -817,7 +675,6 @@ index 00000000000..87def158b98
 +
 +#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 +pub enum FileType {
-+    Table,
 +    Object,
 +}
 +
@@ -827,8 +684,7 @@ index 00000000000..87def158b98
 +impl FileAttr {
 +    pub fn size(&self) -> u64 {
 +        match self {
-+            Self::Table { entries, .. } => *entries,
-+            Self::Object { size, .. } => *size,
++            _ => unreachable!(),
 +        }
 +    }
 +
@@ -837,10 +693,7 @@ index 00000000000..87def158b98
 +    }
 +
 +    pub fn file_type(&self) -> FileType {
-+        match self {
-+            Self::Table { .. } => FileType::Table,
-+            Self::Object { .. } => FileType::Object,
-+        }
++        FileType::Object
 +    }
 +
 +    pub fn modified(&self) -> io::Result<SystemTime> {
@@ -867,21 +720,18 @@ index 00000000000..87def158b98
 +impl FileType {
 +    pub fn is_dir(&self) -> bool {
 +        match self {
-+            Self::Table => true,
 +            Self::Object => false,
 +        }
 +    }
 +
 +    pub fn is_file(&self) -> bool {
 +        match self {
-+            Self::Table => false,
 +            Self::Object => true,
 +        }
 +    }
 +
 +    pub fn is_symlink(&self) -> bool {
 +        match self {
-+            Self::Table => false,
 +            Self::Object => false,
 +        }
 +    }
@@ -891,73 +741,26 @@ index 00000000000..87def158b98
 +    type Item = io::Result<DirEntry>;
 +
 +    fn next(&mut self) -> Option<io::Result<DirEntry>> {
-+        match mem::replace(self, Self::None) {
-+            Self::None => None,
-+            Self::Tables(tbl) => syscall::next_table(tbl).map(|(id, info)| {
-+                *self = Self::Tables(Some(id));
-+                Ok(DirEntry::Table { id, info })
-+            }),
-+            Self::Objects { table_id, table_info, query } => {
-+                let mut inner = Vec::with_capacity(4096);
-+                inner.resize(4096, 0);
-+                let mut info = ObjectInfo::new(&mut inner);
-+                match super::io::query_next(query, &mut info) {
-+                    Ok(true) => {
-+                        inner.resize(info.path_len, 0);
-+                        let name = OsString::from_inner(Buf { inner }).into();
-+                        *self = Self::Objects { table_id, table_info: table_info.clone(), query };
-+                        Some(Ok(DirEntry::Object { table_id, table_info, name }))
-+                    }
-+                    Ok(false) => None,
-+                    Err(_) => unreachable!("kernel returned unknown error code"),
-+                }
-+            }
-+        }
++        self.0.next().map(|path| Ok(DirEntry(OsString::from_vec(path))))
 +    }
 +}
 +
 +impl DirEntry {
 +    pub fn path(&self) -> PathBuf {
-+        match self {
-+            Self::Table { info, .. } => {
-+                let inner = info.name().into();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+            Self::Object { table_info, name, .. } => {
-+                let inner = table_info
-+                    .name()
-+                    .iter()
-+                    .chain(&[TABLE_OBJECT_SEPARATOR])
-+                    .chain(&name.as_inner().inner)
-+                    .copied()
-+                    .collect();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+        }
++        self.0.clone().into()
 +    }
 +
 +    pub fn file_name(&self) -> OsString {
-+        match self {
-+            Self::Table { info, .. } => {
-+                let inner = info.name().iter().copied().collect();
-+                OsString::from_inner(Buf { inner }).into()
-+            }
-+            Self::Object { name, .. } => name.clone(),
-+        }
++        // TODO this isn't quite accurate.
++        self.0.clone().into()
 +    }
 +
 +    pub fn metadata(&self) -> io::Result<FileAttr> {
-+        match self {
-+            Self::Table { .. } => Ok(FileAttr::Table { entries: 0 }),
-+            Self::Object { .. } => Ok(FileAttr::Object { size: 0 }),
-+        }
++        unsupported()
 +    }
 +
 +    pub fn file_type(&self) -> io::Result<FileType> {
-+        match self {
-+            Self::Table { .. } => Ok(FileType::Table),
-+            Self::Object { .. } => Ok(FileType::Object),
-+        }
++        unsupported()
 +    }
 +}
 +
@@ -981,20 +784,9 @@ index 00000000000..87def158b98
 +impl File {
 +    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
 +        if opts.create {
-+            // syscall::create takes only a table ID and a string representing path
-+            let mut path = path_inner(path).splitn(2, |c| *c == b'/');
-+            let table = path.next().expect("at least one match");
-+            let path = if let Some(p) = path.next() {
-+                p
-+            } else {
-+                return Err(io::const_io_error!(io::ErrorKind::Other, "expected full path"));
-+            };
-+            let table = find_table(table)?.0;
-+            super::io::create(table, path).map(|handle| File { handle })
++            rt_io::base_object().create(path_inner(path)).map(File).map_err(cvt_err)
 +        } else {
-+            // Find a unique ID
-+            let (table_id, path) = split_into_table_and_path(path)?;
-+            super::io::open(table_id, path).map(|handle| File { handle })
++            rt_io::base_object().open(path_inner(path)).map(File).map_err(cvt_err)
 +        }
 +    }
 +
@@ -1003,13 +795,11 @@ index 00000000000..87def158b98
 +    }
 +
 +    pub fn fsync(&self) -> io::Result<()> {
-+        // TODO
-+        Ok(())
++        unsupported()
 +    }
 +
 +    pub fn datasync(&self) -> io::Result<()> {
-+        // TODO
-+        Ok(())
++        unsupported()
 +    }
 +
 +    pub fn truncate(&self, _size: u64) -> io::Result<()> {
@@ -1017,7 +807,7 @@ index 00000000000..87def158b98
 +    }
 +
 +    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-+        super::io::read(self.handle, buf)
++        self.0.read(buf).map_err(cvt_err)
 +    }
 +
 +    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
@@ -1031,7 +821,7 @@ index 00000000000..87def158b98
 +    pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
 +        // SAFETY: we don't deinitialize any part of the buffer
 +        let s = unsafe { buf.unfilled_mut() };
-+        let len = super::io::read_uninit(self.handle, s)?;
++        let len = self.0.read_uninit(s).map_err(cvt_err)?;
 +        // SAFETY: the kernel has initialized `len` bytes.
 +        unsafe {
 +            buf.assume_init(buf.filled().len() + len);
@@ -1041,7 +831,7 @@ index 00000000000..87def158b98
 +    }
 +
 +    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-+        super::io::write(self.handle, buf)
++        self.0.write(buf).map_err(cvt_err)
 +    }
 +
 +    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
@@ -1058,23 +848,20 @@ index 00000000000..87def158b98
 +    }
 +
 +    pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
-+        super::io::seek(self.handle, pos)
++        let pos = match pos {
++            SeekFrom::Start(n) => rt_io::SeekFrom::Start(n),
++            SeekFrom::Current(n) => rt_io::SeekFrom::Current(n),
++            SeekFrom::End(n) => rt_io::SeekFrom::End(n),
++        };
++        self.0.seek(pos).map_err(cvt_err)
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<File> {
-+        syscall::duplicate_handle(self.handle)
-+            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "TODO failed duplicate"))
-+            .map(|handle| Self { handle })
++        self.0.duplicate().map_err(cvt_err).map(Self)
 +    }
 +
 +    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
 +        unsupported()
-+    }
-+}
-+
-+impl Drop for File {
-+    fn drop(&mut self) {
-+        super::io::close(self.handle);
 +    }
 +}
 +
@@ -1089,19 +876,7 @@ index 00000000000..87def158b98
 +}
 +
 +pub fn readdir(path: &Path) -> io::Result<ReadDir> {
-+    match split_path(path)? {
-+        SplitPath::None => Ok(ReadDir::Tables(None)),
-+        SplitPath::Table { table } => {
-+            let (table_id, table_info) = find_table(table)?;
-+            let query = super::io::query(table_id, &[])?;
-+            Ok(ReadDir::Objects { table_id, table_info, query })
-+        }
-+        SplitPath::Path { table, path } => {
-+            let (table_id, table_info) = find_table(table)?;
-+            let query = super::io::query(table_id, path)?;
-+            Ok(ReadDir::Objects { table_id, table_info, query })
-+        }
-+    }
++    rt_io::base_object().query(path_inner(path)).map(ReadDir).map_err(cvt_err)
 +}
 +
 +pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -1142,10 +917,8 @@ index 00000000000..87def158b98
 +    unsupported()
 +}
 +
-+pub fn stat(path: &Path) -> io::Result<FileAttr> {
-+    let _ = split_into_table_and_path(path)?;
-+    // TODO stat doesn't actually exist yet though we do support FileAttr to some limited degree.
-+    Ok(FileAttr::Object { size: 0 })
++pub fn stat(_path: &Path) -> io::Result<FileAttr> {
++    unsupported()
 +}
 +
 +pub fn lstat(path: &Path) -> io::Result<FileAttr> {
@@ -1160,87 +933,17 @@ index 00000000000..87def158b98
 +    unsupported()
 +}
 +
-+/// Get table ID & info.
-+fn find_table(name: &[u8]) -> io::Result<(TableId, TableInfo)> {
-+    for entry in readdir(Path::new("")).unwrap().filter_map(Result::ok) {
-+        match entry {
-+            DirEntry::Table { id, info } => {
-+                if info.name() == name {
-+                    return Ok((id, info));
-+                }
-+            }
-+            DirEntry::Object { .. } => unreachable!(),
-+        }
-+    }
-+    Err(io::const_io_error!(io::ErrorKind::NotFound, "table not found"))
-+}
-+
-+enum SplitPath<'a> {
-+    None,
-+    Table { table: &'a [u8] },
-+    Path { table: &'a [u8], path: &'a [u8] },
-+}
-+
-+/// Split a path by table, path and ID.
-+fn split_path(path: &Path) -> io::Result<SplitPath<'_>> {
-+    let path = path_inner(path);
-+
-+    if path.is_empty() {
-+        return Ok(SplitPath::None);
-+    }
-+
-+    fn split(s: &[u8], sep: u8) -> Option<(&[u8], &[u8])> {
-+        s.iter().position(|c| *c == sep).map(|i| {
-+            // TODO parse path
-+            let (table, path) = s.split_at(i);
-+            (table, &path[1..])
-+        })
-+    }
-+
-+    if let Some((table, path)) = split(path, TABLE_OBJECT_SEPARATOR) {
-+        if path.is_empty() {
-+            Ok(SplitPath::Table { table })
-+        } else {
-+            Ok(SplitPath::Path { table, path })
-+        }
-+    } else {
-+        Ok(SplitPath::Table { table: path })
-+    }
-+}
-+
 +/// Get a reference to the underlying `[u8]` of a [`Path`].
 +fn path_inner(path: &Path) -> &[u8] {
 +    &path.as_os_str().as_inner().inner
 +}
-+
-+/// Split a path into a table and object component
-+///
-+/// # Errors
-+///
-+/// - There is no separator.
-+/// - The table does not exist.
-+fn split_into_table_and_path(path: &Path) -> io::Result<(TableId, &[u8])> {
-+    // Find a unique ID
-+    match split_path(path)? {
-+        SplitPath::Path { path, table } => Ok((find_table(table)?.0, path)),
-+        SplitPath::Table { .. } | SplitPath::None => {
-+            Err(io::const_io_error!(io::ErrorKind::InvalidInput, "expected path and/or id"))
-+        }
-+    }
-+}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
-index 00000000000..4c9ddf93d7e
+index 00000000000..d5f475b4310
 --- /dev/null
 +++ b/library/std/src/sys/norostb/io.rs
-@@ -0,0 +1,267 @@
-+use crate::cell::RefCell;
-+use crate::io;
-+use crate::mem::{self, MaybeUninit};
-+use norostb_rt::kernel::{
-+    io::{Job, ObjectInfo, Queue, Request, Response, SeekFrom},
-+    syscall::{self, TableId, TableInfo},
-+};
+@@ -0,0 +1,47 @@
++use crate::mem;
 +
 +#[derive(Copy, Clone)]
 +pub struct IoSlice<'a>(&'a [u8]);
@@ -1287,226 +990,12 @@ index 00000000000..4c9ddf93d7e
 +        self.0
 +    }
 +}
-+
-+thread_local! {
-+    static QUEUE: RefCell<Queue> = RefCell::new({
-+        Queue {
-+            base: syscall::create_io_queue(None, 0, 0)
-+                .unwrap_or_else(|e| rtabort!("failed to create io queue: {:?}", e))
-+                .cast(),
-+            requests_mask: 0,
-+            responses_mask: 0,
-+        }
-+    });
-+}
-+
-+fn enqueue(request: Request) -> Response {
-+    QUEUE.with(|queue| unsafe {
-+        let mut queue = queue.borrow_mut();
-+        queue.enqueue_request(request).unwrap();
-+        syscall::process_io_queue(Some(queue.base.cast())).unwrap();
-+        loop {
-+            if let Ok(e) = queue.dequeue_response() {
-+                break e;
-+            }
-+            syscall::wait_io_queue(Some(queue.base.cast())).unwrap();
-+        }
-+    })
-+}
-+
-+/// Blocking read
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn read(handle: syscall::Handle, data: &mut [u8]) -> io::Result<usize> {
-+    unsafe { read_uninit(handle, mem::transmute(data)) }
-+}
-+
-+/// Blocking read
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn read_uninit(handle: syscall::Handle, data: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
-+    let e = enqueue(Request::read_uninit(0, handle, data));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to read"))
-+    } else {
-+        Ok(e.value as usize)
-+    }
-+}
-+
-+/// Blocking write
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn write(handle: syscall::Handle, data: &[u8]) -> io::Result<usize> {
-+    let e = enqueue(Request::write(0, handle, data));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
-+    } else {
-+        Ok(e.value as usize)
-+    }
-+}
-+
-+/// Blocking open
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn open(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::Handle> {
-+    let e = enqueue(Request::open(0, table, path));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to open"))
-+    } else {
-+        // This error pops up despite stdlib already using 2021 edition?!?
-+        /*
-+            = help: items from traits can only be used if the trait is in scope
-+            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
-+        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
-+                */
-+        use crate::convert::TryInto;
-+        Ok(e.value.try_into().unwrap())
-+    }
-+}
-+
-+/// Blocking create
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn create(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::Handle> {
-+    let e = enqueue(Request::create(0, table, path));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to create"))
-+    } else {
-+        // This error pops up despite stdlib already using 2021 edition?!?
-+        /*
-+            = help: items from traits can only be used if the trait is in scope
-+            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
-+        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
-+                */
-+        use crate::convert::TryInto;
-+        Ok(e.value.try_into().unwrap())
-+    }
-+}
-+
-+/// Blocking query
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn query(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::Handle> {
-+    let e = enqueue(Request::query(0, table, path));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to query"))
-+    } else {
-+        // This error pops up despite stdlib already using 2021 edition?!?
-+        /*
-+            = help: items from traits can only be used if the trait is in scope
-+            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
-+        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
-+                */
-+        use crate::convert::TryInto;
-+        Ok(e.value.try_into().unwrap())
-+    }
-+}
-+
-+/// Blocking query_next
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn query_next(query: syscall::Handle, info: &mut ObjectInfo) -> io::Result<bool> {
-+    let e = enqueue(Request::query_next(0, query, info));
-+    if e.value < 0 {
-+        // FIXME the API for quering is kinda broken right now.
-+        //Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
-+        Ok(false)
-+    } else {
-+        Ok(e.value > 0)
-+    }
-+}
-+
-+/// Blocking take_job
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn take_job(table: syscall::Handle, job: &mut Job) -> io::Result<()> {
-+    let e = enqueue(Request::take_job(0, table, job));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to take job"))
-+    } else {
-+        Ok(())
-+    }
-+}
-+
-+/// Blocking finish_job
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn finish_job(table: syscall::Handle, job: &Job) -> io::Result<()> {
-+    let e = enqueue(Request::finish_job(0, table, &job));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to finish job"))
-+    } else {
-+        Ok(())
-+    }
-+}
-+
-+/// Blocking seek
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn seek(handle: syscall::Handle, from: io::SeekFrom) -> io::Result<u64> {
-+    let from = match from {
-+        io::SeekFrom::Start(n) => SeekFrom::Start(n),
-+        io::SeekFrom::End(n) => SeekFrom::End(n),
-+        io::SeekFrom::Current(n) => SeekFrom::Current(n),
-+    };
-+    let e = enqueue(Request::seek(0, handle, from));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to seek"))
-+    } else {
-+        Ok(e.value as u64)
-+    }
-+}
-+
-+/// Blocking poll
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn poll(handle: syscall::Handle) -> io::Result<usize> {
-+    let e = enqueue(Request::poll(0, handle));
-+    if e.value < 0 {
-+        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to poll"))
-+    } else {
-+        Ok(e.value as usize)
-+    }
-+}
-+
-+/// Blocking close
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn close(handle: syscall::Handle) {
-+    enqueue(Request::close(0, handle));
-+}
-+
-+/// Create an iterator over all tables.
-+#[unstable(feature = "norostb", issue = "none")]
-+#[inline]
-+pub fn tables() -> TableIter {
-+    TableIter { state: Some(None) }
-+}
-+
-+/// An iterator over all tables.
-+#[derive(Clone, Debug)]
-+#[unstable(feature = "norostb", issue = "none")]
-+pub struct TableIter {
-+    state: Option<Option<TableId>>,
-+}
-+
-+impl Iterator for TableIter {
-+    type Item = (TableId, TableInfo);
-+
-+    #[inline]
-+    fn next(&mut self) -> Option<Self::Item> {
-+        self.state.take().and_then(|id| syscall::next_table(id)).map(|(id, info)| {
-+            self.state = Some(Some(id));
-+            (id, info)
-+        })
-+    }
-+}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..a9efd8546af
+index 00000000000..5f58cbcdb05
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,73 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -1553,13 +1042,9 @@ index 00000000000..a9efd8546af
 +/// # Note
 +///
 +/// This is not guaranteed to run, for example when Rust code is called externally.
-+// FIXME The current signature is actually wrong, but I'm unsure how to fix it.
-+//pub unsafe fn init(_arguments: *const u8) {
-+pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
++pub unsafe fn init(_: isize, _: *const *const u8) {
 +    // FIXME this is not guaranteed to run.
 +    unsafe {
-+        args::init(_argc as *const u8);
-+        thread_local_key::init_thread();
 +        stdio::init();
 +    }
 +}
@@ -1572,6 +1057,18 @@ index 00000000000..a9efd8546af
 +///
 +/// This is not guaranteed to run, for example when Rust code is called externally.
 +pub unsafe fn cleanup() {}
++
++fn cvt_err(err: norostb_rt::Error) -> crate::io::Error {
++    use crate::io::{const_io_error, ErrorKind};
++    use norostb_rt::Error;
++    match err {
++        Error::Unknown => const_io_error!(ErrorKind::Uncategorized, "uncategorized error"),
++        Error::InvalidOperation => const_io_error!(ErrorKind::Unsupported, "invalid operation"),
++        Error::DoesNotExist => const_io_error!(ErrorKind::NotFound, "does not exist"),
++        Error::AlreadyExists => const_io_error!(ErrorKind::AlreadyExists, "already exists"),
++        Error::Cancelled => const_io_error!(ErrorKind::Uncategorized, "cancelled"),
++    }
++}
 diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
 new file mode 100644
 index 00000000000..b3203c16c50
@@ -1641,178 +1138,219 @@ index 00000000000..b3203c16c50
 +}
 diff --git a/library/std/src/sys/norostb/net.rs b/library/std/src/sys/norostb/net.rs
 new file mode 100644
-index 00000000000..dbb6ce22c22
+index 00000000000..74e738357c6
 --- /dev/null
 +++ b/library/std/src/sys/norostb/net.rs
-@@ -0,0 +1,369 @@
+@@ -0,0 +1,411 @@
++use super::cvt_err;
++use crate::cell::Cell;
 +use crate::convert::TryFrom;
-+use crate::fmt;
-+use crate::io::{self, IoSlice, IoSliceMut};
++use crate::io::{self, IoSlice, IoSliceMut, Write};
 +use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 +use crate::sys::unsupported;
 +use crate::time::Duration;
++use norostb_rt as rt;
 +
-+pub struct TcpStream(!);
++#[derive(Debug)]
++pub struct TcpStream {
++    inner: rt::Object,
++    read_timeout: Cell<Option<Duration>>,
++    write_timeout: Cell<Option<Duration>>,
++}
++
++macro netpath($fmt:literal, $addr:ident) {{
++    let addr = $addr?;
++    let ip = match addr {
++        SocketAddr::V4(a) => a.ip().to_ipv6_mapped(),
++        SocketAddr::V6(a) => *a.ip(),
++    };
++    // 128 bytes ought to be plenty.
++    let mut path = [0; 128];
++    let mut p = &mut path[..];
++    write!(p, $fmt, ip, addr.port()).unwrap();
++    let l = p.len();
++    (path.len() - l, path)
++}}
 +
 +impl TcpStream {
-+    pub fn connect(_: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
++    pub fn connect(address: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
++        let (l, p) = netpath!("net/default/tcp/connect/{}/{}", address);
++        Ok(Self {
++            inner: rt::io::base_object().create(&p[..l]).map_err(cvt_err)?,
++            read_timeout: Cell::new(None),
++            write_timeout: Cell::new(None),
++        })
++    }
++
++    pub fn connect_timeout(_address: &SocketAddr, _timeout: Duration) -> io::Result<TcpStream> {
 +        unsupported()
 +    }
 +
-+    pub fn connect_timeout(_: &SocketAddr, _: Duration) -> io::Result<TcpStream> {
-+        unsupported()
++    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
++        self.read_timeout.set(timeout);
++        Ok(())
 +    }
 +
-+    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-+        self.0
++    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
++        self.write_timeout.set(timeout);
++        Ok(())
 +    }
 +
 +    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-+        self.0
++        Ok(self.read_timeout.get())
 +    }
 +
 +    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-+        self.0
++        Ok(self.write_timeout.get())
 +    }
 +
-+    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
-+        self.0
++    pub fn peek(&self, data: &mut [u8]) -> io::Result<usize> {
++        self.inner.peek(data).map_err(cvt_err)
 +    }
 +
-+    pub fn read(&self, _: &mut [u8]) -> io::Result<usize> {
-+        self.0
++    pub fn read(&self, data: &mut [u8]) -> io::Result<usize> {
++        self.inner.read(data).map_err(cvt_err)
 +    }
 +
-+    pub fn read_vectored(&self, _: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-+        self.0
++    pub fn read_vectored(&self, _data: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        unsupported()
 +    }
 +
 +    pub fn is_read_vectored(&self) -> bool {
-+        self.0
++        false
 +    }
 +
-+    pub fn write(&self, _: &[u8]) -> io::Result<usize> {
-+        self.0
++    pub fn write(&self, data: &[u8]) -> io::Result<usize> {
++        self.inner.write(data).map_err(cvt_err)
 +    }
 +
-+    pub fn write_vectored(&self, _: &[IoSlice<'_>]) -> io::Result<usize> {
-+        self.0
++    pub fn write_vectored(&self, _data: &[IoSlice<'_>]) -> io::Result<usize> {
++        unsupported()
 +    }
 +
 +    pub fn is_write_vectored(&self) -> bool {
-+        self.0
++        false
 +    }
 +
 +    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-+        self.0
-+    }
-+
-+    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        self.0
-+    }
-+
-+    pub fn shutdown(&self, _: Shutdown) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn duplicate(&self) -> io::Result<TcpStream> {
-+        self.0
-+    }
-+
-+    pub fn set_linger(&self, _: Option<Duration>) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn linger(&self) -> io::Result<Option<Duration>> {
-+        self.0
-+    }
-+
-+    pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn nodelay(&self) -> io::Result<bool> {
-+        self.0
-+    }
-+
-+    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn ttl(&self) -> io::Result<u32> {
-+        self.0
-+    }
-+
-+    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        self.0
-+    }
-+
-+    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        self.0
-+    }
-+}
-+
-+impl fmt::Debug for TcpStream {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
-+    }
-+}
-+
-+pub struct TcpListener(!);
-+
-+impl TcpListener {
-+    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
 +        unsupported()
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        self.0
++        unsupported()
 +    }
 +
-+    pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-+        self.0
++    pub fn shutdown(&self, _: Shutdown) -> io::Result<()> {
++        unsupported()
 +    }
 +
-+    pub fn duplicate(&self) -> io::Result<TcpListener> {
-+        self.0
++    pub fn duplicate(&self) -> io::Result<TcpStream> {
++        self.inner
++            .duplicate()
++            .map(|inner| Self {
++                inner,
++                read_timeout: self.read_timeout.clone(),
++                write_timeout: self.write_timeout.clone(),
++            })
++            .map_err(cvt_err)
++    }
++
++    pub fn set_linger(&self, _: Option<Duration>) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn linger(&self) -> io::Result<Option<Duration>> {
++        unsupported()
++    }
++
++    pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn nodelay(&self) -> io::Result<bool> {
++        unsupported()
 +    }
 +
 +    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn ttl(&self) -> io::Result<u32> {
-+        self.0
-+    }
-+
-+    pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
-+        self.0
-+    }
-+
-+    pub fn only_v6(&self) -> io::Result<bool> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +}
 +
-+impl fmt::Debug for TcpListener {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
++#[derive(Debug)]
++pub struct TcpListener {
++    inner: rt::Object,
++}
++
++impl TcpListener {
++    pub fn bind(address: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
++        let (l, p) = netpath!("net/{}/tcp/listen/{}", address);
++        Ok(Self { inner: rt::io::base_object().create(&p[..l]).map_err(cvt_err)? })
++    }
++
++    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
++        unsupported()
++    }
++
++    pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
++        self.inner.open(b"accept").map_err(cvt_err).and_then(|inner| {
++            let peer =
++                TcpStream { inner, read_timeout: Cell::new(None), write_timeout: Cell::new(None) };
++            // FIXME
++            Ok((peer, "0.0.0.0:0".parse().unwrap()))
++            //peer.socket_addr().map(|addr| (peer, addr))
++        })
++    }
++
++    pub fn duplicate(&self) -> io::Result<TcpListener> {
++        unsupported()
++    }
++
++    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
++        unsupported()
++    }
++
++    pub fn ttl(&self) -> io::Result<u32> {
++        unsupported()
++    }
++
++    // The corresponding function still exists in std::net::TcpStream but is deprecated and
++    // hidden from the docs, so we don't need to support it ever.
++    pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
++        unsupported()
++    }
++
++    // Ditto
++    pub fn only_v6(&self) -> io::Result<bool> {
++        unsupported()
++    }
++
++    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
++        unsupported()
++    }
++
++    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
++        unsupported()
 +    }
 +}
 +
-+pub struct UdpSocket(!);
++#[derive(Debug)]
++pub struct UdpSocket {
++    inner: super::fs::File,
++    read_timeout: Cell<Option<Duration>>,
++    write_timeout: Cell<Option<Duration>>,
++}
 +
 +impl UdpSocket {
 +    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<UdpSocket> {
@@ -1820,129 +1358,129 @@ index 00000000000..dbb6ce22c22
 +    }
 +
 +    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn recv_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn peek_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn send_to(&self, _: &[u8], _: &SocketAddr) -> io::Result<usize> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<UdpSocket> {
-+        self.0
++        self.inner.duplicate().map(|inner| Self {
++            inner,
++            read_timeout: self.read_timeout.clone(),
++            write_timeout: self.write_timeout.clone(),
++        })
 +    }
 +
-+    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-+        self.0
++    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
++        self.read_timeout.set(timeout);
++        Ok(())
 +    }
 +
-+    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
-+        self.0
++    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
++        self.write_timeout.set(timeout);
++        Ok(())
 +    }
 +
 +    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-+        self.0
++        Ok(self.read_timeout.get())
 +    }
 +
 +    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-+        self.0
++        Ok(self.write_timeout.get())
 +    }
 +
 +    pub fn set_broadcast(&self, _: bool) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn broadcast(&self) -> io::Result<bool> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_multicast_loop_v4(&self, _: bool) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn multicast_loop_v4(&self) -> io::Result<bool> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_multicast_ttl_v4(&self, _: u32) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn multicast_ttl_v4(&self) -> io::Result<u32> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_multicast_loop_v6(&self, _: bool) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn multicast_loop_v6(&self) -> io::Result<bool> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn ttl(&self) -> io::Result<u32> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn recv(&self, _: &mut [u8]) -> io::Result<usize> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn send(&self, _: &[u8]) -> io::Result<usize> {
-+        self.0
++        unsupported()
 +    }
 +
 +    pub fn connect(&self, _: io::Result<&SocketAddr>) -> io::Result<()> {
-+        self.0
-+    }
-+}
-+
-+impl fmt::Debug for UdpSocket {
-+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-+        self.0
++        unsupported()
 +    }
 +}
 +
@@ -1977,6 +1515,7 @@ index 00000000000..dbb6ce22c22
 +    }
 +}
 +
++/// Used by [`std::net::addr`].
 +#[allow(nonstandard_style)]
 +pub mod netc {
 +    pub const AF_INET: u8 = 0;
@@ -2016,10 +1555,10 @@ index 00000000000..dbb6ce22c22
 +}
 diff --git a/library/std/src/sys/norostb/os.rs b/library/std/src/sys/norostb/os.rs
 new file mode 100644
-index 00000000000..94cfcc15453
+index 00000000000..230ac6d0a77
 --- /dev/null
 +++ b/library/std/src/sys/norostb/os.rs
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,82 @@
 +use super::unsupported;
 +use crate::error::Error as StdError;
 +use crate::ffi::{OsStr, OsString};
@@ -2027,7 +1566,6 @@ index 00000000000..94cfcc15453
 +use crate::io;
 +use crate::marker::PhantomData;
 +use crate::path::{self, PathBuf};
-+use norostb_rt::kernel::syscall;
 +
 +pub use super::args::{env, getenv, setenv, unsetenv, Env};
 +
@@ -2097,7 +1635,7 @@ index 00000000000..94cfcc15453
 +}
 +
 +pub fn exit(code: i32) -> ! {
-+    syscall::exit(code)
++    norostb_rt::exit(code)
 +}
 +
 +pub fn getpid() -> u32 {
@@ -2148,7 +1686,7 @@ index 00000000000..25514c2322f
 +}
 diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
 new file mode 100644
-index 00000000000..f4874b3d196
+index 00000000000..344e622ec7a
 --- /dev/null
 +++ b/library/std/src/sys/norostb/process.rs
 @@ -0,0 +1,214 @@
@@ -2162,7 +1700,7 @@ index 00000000000..f4874b3d196
 +use crate::sys::pipe::AnonPipe;
 +use crate::sys::unsupported;
 +use crate::sys_common::process::{CommandEnv, CommandEnvs};
-+use norostb_rt::kernel::io::Handle;
++use norostb_rt::Handle;
 +
 +pub use crate::ffi::OsString as EnvKey;
 +
@@ -2442,12 +1980,12 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..01c8cdc0e6e
+index 00000000000..aff39df5492
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,79 @@
 +use crate::{io, sync::atomic::Ordering};
-+use norostb_rt::kernel::AtomicHandle;
++use norostb_rt::{self as rt, AtomicHandle};
 +
 +static STDIN: AtomicHandle = AtomicHandle::new(0);
 +static STDOUT: AtomicHandle = AtomicHandle::new(0);
@@ -2467,7 +2005,7 @@ index 00000000000..01c8cdc0e6e
 +
 +impl io::Read for Stdin {
 +    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-+        super::io::read(STDIN.load(Ordering::Relaxed), buf)
++        rt::io::read(STDIN.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
 +    }
 +}
 +
@@ -2479,7 +2017,7 @@ index 00000000000..01c8cdc0e6e
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        super::io::write(STDOUT.load(Ordering::Relaxed), buf)
++        rt::io::write(STDOUT.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2495,7 +2033,7 @@ index 00000000000..01c8cdc0e6e
 +
 +impl io::Write for Stderr {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        super::io::write(STDERR.load(Ordering::Relaxed), buf)
++        rt::io::write(STDERR.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2515,141 +2053,41 @@ index 00000000000..01c8cdc0e6e
 +///
 +/// Must be called only once during runtime initialization.
 +pub(super) unsafe fn init() {
-+    // Find the UART table
-+    let mut tbl = None;
-+    for (id, info) in super::io::tables() {
-+        if info.name() == b"uart" {
-+            tbl = Some(id);
-+            break;
-+        }
-+    }
-+    // If we couldn't find the table, there is absolutely nothing we can do, so just abort.
-+    let tbl = tbl.unwrap_or_else(|| core::intrinsics::abort());
-+
-+    STDIN.store(super::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
-+    STDOUT.store(super::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
-+    STDERR.store(super::io::open(tbl, b"0").unwrap(), Ordering::Relaxed);
++    let f = || {
++        rt::io::base_object()
++            .open(b"uart/0")
++            .unwrap_or_else(|_| core::intrinsics::abort())
++            .into_raw()
++    };
++    STDIN.store(f(), Ordering::Relaxed);
++    STDOUT.store(f(), Ordering::Relaxed);
++    STDERR.store(f(), Ordering::Relaxed);
 +}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..637b716dff0
+index 00000000000..e439f997705
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,47 @@
 +use super::unsupported;
 +use crate::ffi::CStr;
 +use crate::io;
-+use crate::mem;
 +use crate::num::NonZeroUsize;
-+use crate::ptr;
 +use crate::time::Duration;
-+use norostb_rt::kernel::io::Handle;
-+use norostb_rt::kernel::syscall::{self, RWX};
++use norostb_rt as rt;
 +
-+pub struct Thread {
-+    handle: Handle,
-+}
++pub struct Thread(rt::thread::Thread);
 +
 +pub const DEFAULT_MIN_STACK_SIZE: usize = 4096;
 +
 +impl Thread {
 +    // unsafe: see thread::Builder::spawn_unchecked for safety requirements
-+    pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
-+        // Allocate stack
-+        let (stack, stack_size) = syscall::alloc(None, stack, RWX::RW).map_err(|_| {
-+            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to allocate stack space")
-+        })?;
-+        let stack = stack.cast::<u8>();
-+
-+        // Push closure on the stack of the new thread
-+        let (ptr, meta) = Box::into_raw(p).to_raw_parts();
-+        let stack_top = stack.as_ptr().wrapping_add(stack_size.get()).cast::<usize>();
-+        let mut stack_ptr = stack_top;
-+        let mut push = |v: usize| {
-+            stack_ptr = stack_ptr.wrapping_sub(1);
-+            // SAFETY: we will only push four usizes, which should fit well within a single
-+            // page.
-+            unsafe {
-+                stack_ptr.write(v);
-+            }
-+        };
-+        push(ptr as usize);
-+        push(unsafe { mem::transmute(meta) });
-+        push(stack.as_ptr() as usize);
-+        push(stack_size.get());
-+
-+        unsafe extern "C" fn main(
-+            ptr: *mut (),
-+            meta: usize,
-+            stack_base: *const (),
-+            stack_size: usize,
-+            handle: Handle,
-+        ) -> ! {
-+            let meta = unsafe { mem::transmute(meta) };
-+            let p: Box<dyn FnOnce()> = unsafe { Box::from_raw(ptr::from_raw_parts_mut(ptr, meta)) };
-+
-+            unsafe {
-+                super::thread_local_key::init_thread();
-+            }
-+
-+            p();
-+
-+            unsafe {
-+                super::thread_local_key::deinit_thread();
-+            }
-+
-+            // We're going to free the stack, so we need to resort to assembly
-+            unsafe {
-+                core::arch::asm!(
-+                    // Deallocate stack
-+                    "syscall",
-+                    // Kill current thread
-+                    "mov eax, {kill_thread}",
-+                    "mov rdi, r12",
-+                    "syscall",
-+                    kill_thread = const syscall::ID_KILL_THREAD,
-+                    in("eax") syscall::ID_DEALLOC,
-+                    in("rdi") stack_base,
-+                    in("rsi") stack_size,
-+                    in("rdx") 0,
-+                    // Rust is retarded and doesn't let us specify clobbers with out
-+                    // so we have to avoid rax, rdx, rcx and r11 manually *sigh*
-+                    in("r12") handle,
-+                    options(noreturn, nostack),
-+                );
-+            }
-+        }
-+
-+        #[naked]
-+        unsafe extern "C" fn start() -> ! {
-+            unsafe {
-+                crate::arch::asm!("
-+					mov rdi, [rsp - 8 * 1]
-+					mov rsi, [rsp - 8 * 2]
-+					mov rdx, [rsp - 8 * 3]
-+					mov rcx, [rsp - 8 * 4]
-+					mov r8, rax
-+					jmp {main}
-+					",
-+                    main = sym main,
-+                    options(noreturn),
-+                );
-+            }
-+        }
-+
-+        // Spawn thread
-+        unsafe {
-+            syscall::spawn_thread(start, stack_top as *const ())
-+                .map_err(|_| {
-+                    syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
-+                    io::const_io_error!(io::ErrorKind::Other, "failed to spawn thread")
-+                })
-+                .map(|handle| Self { handle })
-+        }
++    pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Self> {
++        unsafe { rt::thread::Thread::new(stack, p).map_err(super::cvt_err).map(Self) }
 +    }
 +
 +    pub fn yield_now() {
-+        syscall::sleep(Duration::ZERO);
++        rt::thread::sleep(Duration::ZERO);
 +    }
 +
 +    pub fn set_name(_name: &CStr) {
@@ -2657,11 +2095,11 @@ index 00000000000..637b716dff0
 +    }
 +
 +    pub fn sleep(dur: Duration) {
-+        syscall::sleep(dur);
++        rt::thread::sleep(dur);
 +    }
 +
 +    pub fn join(self) {
-+        let _ = syscall::wait_thread(self.handle);
++        self.0.wait()
 +    }
 +}
 +
@@ -2695,54 +2133,33 @@ index 00000000000..85d66098302
 +}
 diff --git a/library/std/src/sys/norostb/thread_local_key.rs b/library/std/src/sys/norostb/thread_local_key.rs
 new file mode 100644
-index 00000000000..55333804ce6
+index 00000000000..720c7fe1995
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread_local_key.rs
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,34 @@
 +// TODO move part of this to the runtime crate as other languages will need
 +// to share the same implementation.
 +
-+use crate::ptr::NonNull;
 +use norostb_rt::tls;
 +
 +pub type Key = usize;
 +
-+/// # Safety
-+///
-+/// This must be called exactly once when a thread is created.
-+pub(super) unsafe fn init_thread() {
-+    unsafe {
-+        tls::init_thread(|s| {
-+            NonNull::new(Box::into_raw(Box::<[u8]>::new_uninit_slice(s)) as *mut [u8]).unwrap()
-+        })
-+    }
-+}
-+/// # Safety
-+///
-+/// This must be called exactly once when a thread is created.
-+pub(super) unsafe fn deinit_thread() {
-+    unsafe {
-+        tls::deinit_thread(|p| {
-+            Box::from_raw(p.as_ptr());
-+        })
-+    }
-+}
-+
 +#[inline]
 +pub unsafe fn create(dtor: Option<unsafe extern "C" fn(*mut u8)>) -> Key {
++    let dtor = unsafe { core::mem::transmute(dtor) };
 +    tls::allocate(dtor).expect("failed to allocate TLS slot").0
 +}
 +
 +#[inline]
 +pub unsafe fn set(key: Key, value: *mut u8) {
 +    unsafe {
-+        tls::set(tls::Key(key), value);
++        tls::set(tls::Key(key), value.cast());
 +    }
 +}
 +
 +#[inline]
 +pub unsafe fn get(key: Key) -> *mut u8 {
-+    unsafe { tls::get(tls::Key(key)) }
++    unsafe { tls::get(tls::Key(key)).cast() }
 +}
 +
 +#[inline]

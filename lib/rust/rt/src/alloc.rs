@@ -2,13 +2,19 @@
 //!
 //! The current allocator is a wrapper around `slabmalloc`.
 
-use core::alloc::{self, AllocError, Layout};
+use core::alloc::{self, AllocError, Allocator as IAllocator, Layout};
 use core::mem;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 use norostb_kernel::syscall::{self, RWX};
 
+/// The default global allocator
+// No weak linkage is necessary yet as it's a ZST.
+pub static ALLOCATOR: Allocator = Allocator { _private: () };
+
 /// An allocator that gets its memory from the OS.
-pub struct Allocator {}
+pub struct Allocator {
+	_private: (),
+}
 
 /// Whether we should allocate pages directly from the os or rely on slabmalloc
 /// for the given layout.
@@ -30,18 +36,15 @@ fn dealloc_pages(ptr: NonNull<u8>, size: usize) {
 	}
 }
 
-impl Allocator {
-	pub const fn new() -> Self {
-		Self {}
-	}
-}
-
 unsafe impl alloc::Allocator for Allocator {
 	#[inline]
 	fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
 		// Keep in mind this is a *safe* function, so we have to avoid UB even if the arguments'
 		// values are beyond reason.
 		if layout.align() >= mem::size_of::<norostb_kernel::Page>() {
+			unsafe {
+				core::arch::asm!("ud2");
+			}
 			// We don't support ridiculous alignment requirements.
 			Err(AllocError)
 		} else if should_alloc_pages(layout) {
@@ -108,10 +111,12 @@ unsafe impl alloc::Allocator for Allocator {
 			//   been allocated beyond the old pages (which is something we should keep
 			//   track of, probably...)
 			let new = alloc_pages(new_layout)?;
-			new.as_ptr()
-				.as_mut_ptr()
-				.copy_from_nonoverlapping(ptr.as_ptr(), old_layout.size());
-			self.deallocate(ptr, old_layout);
+			unsafe {
+				new.as_ptr()
+					.as_mut_ptr()
+					.copy_from_nonoverlapping(ptr.as_ptr(), old_layout.size());
+				self.deallocate(ptr, old_layout);
+			}
 			Ok(new)
 		} else {
 			// There is still enough room, so we don't need to do anything.
@@ -126,16 +131,18 @@ unsafe impl alloc::Allocator for Allocator {
 		old_layout: Layout,
 		new_layout: Layout,
 	) -> Result<NonNull<[u8]>, AllocError> {
-		let ptr = self.grow(ptr, old_layout, new_layout)?;
+		let ptr = unsafe { self.grow(ptr, old_layout, new_layout)? };
 		if should_alloc_pages(new_layout) {
 			// The pages have already been cleared by the kernel, so no need to do anything.
 			Ok(ptr)
 		} else {
 			// slabmalloc doesn't clear memory.
-			ptr.as_ptr()
-				.as_mut_ptr()
-				.wrapping_add(old_layout.size())
-				.write_bytes(0, new_layout.size() - old_layout.size());
+			unsafe {
+				ptr.as_ptr()
+					.as_mut_ptr()
+					.wrapping_add(old_layout.size())
+					.write_bytes(0, new_layout.size() - old_layout.size());
+			}
 			Ok(ptr)
 		}
 	}
@@ -157,10 +164,12 @@ unsafe impl alloc::Allocator for Allocator {
 		{
 			// We need to copy from directly allocated pages to slabmalloc.
 			let new = alloc_pages(new_layout)?;
-			new.as_ptr()
-				.as_mut_ptr()
-				.copy_from_nonoverlapping(ptr.as_ptr(), old_layout.size());
-			self.deallocate(ptr, old_layout);
+			unsafe {
+				new.as_ptr()
+					.as_mut_ptr()
+					.copy_from_nonoverlapping(ptr.as_ptr(), old_layout.size());
+				self.deallocate(ptr, old_layout);
+			}
 			Ok(new)
 		} else if should_alloc_pages(new_layout) {
 			// Give any pages we don't need back to the kernel.
@@ -173,6 +182,45 @@ unsafe impl alloc::Allocator for Allocator {
 		} else {
 			// We don't need to do anything.
 			Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()))
+		}
+	}
+}
+
+unsafe impl alloc::GlobalAlloc for Allocator {
+	#[inline]
+	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+		self.allocate(layout)
+			.map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
+	}
+
+	#[inline]
+	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+		self.allocate_zeroed(layout)
+			.map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
+	}
+
+	#[inline]
+	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+		debug_assert!(!ptr.is_null());
+		unsafe { self.deallocate(NonNull::new_unchecked(ptr), layout) }
+	}
+
+	#[inline]
+	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+		debug_assert!(!ptr.is_null());
+		let old_layout = layout;
+		if let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) {
+			unsafe {
+				if new_layout.size() > old_layout.size() {
+					self.grow(NonNull::new_unchecked(ptr), old_layout, new_layout)
+						.map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
+				} else {
+					self.shrink(NonNull::new_unchecked(ptr), old_layout, new_layout)
+						.map_or(ptr::null_mut(), |p| p.as_ptr().as_mut_ptr())
+				}
+			}
+		} else {
+			ptr::null_mut()
 		}
 	}
 }

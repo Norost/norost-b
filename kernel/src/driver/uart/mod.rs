@@ -35,8 +35,8 @@ pub unsafe fn post_init() {
 		x86::init();
 	}
 
-	let table = Arc::new(table::UartTable) as Arc<dyn object_table::Table>;
-	object_table::add_table(Arc::downgrade(&table));
+	let table = Arc::new(table::UartTable) as Arc<dyn object_table::Object>;
+	object_table::Root::add(*b"uart", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }
 
