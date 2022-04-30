@@ -82,8 +82,17 @@ impl TcpConnection {
 		iface.get_socket::<TcpSocket>(self.handle).send_slice(data)
 	}
 
-	pub fn close(self, iface: &mut Interface<impl for<'d> Device<'d>>) {
+	pub fn close(&mut self, iface: &mut Interface<impl for<'d> Device<'d>>) {
 		iface.get_socket::<TcpSocket>(self.handle).close();
+	}
+
+	pub fn remove(&mut self, iface: &mut Interface<impl for<'d> Device<'d>>) -> bool {
+		let sock = iface.get_socket::<TcpSocket>(self.handle);
+		let remove = sock.state() == TcpState::Closed;
+		if remove {
+			iface.remove_socket(self.handle);
+		}
+		remove
 	}
 }
 

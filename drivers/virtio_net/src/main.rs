@@ -147,6 +147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut queries = driver_utils::Arena::new();
 	let mut sockets = driver_utils::Arena::new();
 	let mut connecting_tcp_sockets = Vec::<(TcpConnection, _)>::new();
+	let mut accepting_tcp_sockets = Vec::new();
+	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
 	loop {
 		// Advance TCP connection state.
@@ -175,11 +177,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 		}
 
+		// Remove closed TCP connections.
+		for i in (0..closing_tcp_sockets.len()).rev() {
+			let sock = &mut closing_tcp_sockets[i];
+			if sock.remove(&mut iface) {
+				closing_tcp_sockets.swap_remove(i);
+			}
+		}
+
+		// Accept incoming TCP connections.
+		for i in (0..accepting_tcp_sockets.len()).rev() {
+			let (handle, _) = accepting_tcp_sockets[i];
+			let c = match &mut sockets[handle] {
+				Socket::TcpListener(l) => l.accept(&mut iface),
+				_ => unreachable!(),
+			};
+			if let Some(sock) = c {
+				let (_, job_id) = accepting_tcp_sockets.swap_remove(i);
+				connecting_tcp_sockets.push((sock, job_id));
+			}
+		}
+
 		syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
 
 		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
 			match job.ty {
+				Job::OPEN => {
+					assert_ne!(job.handle, driver_utils::Handle::MAX, "TODO");
+					let path = &buf[..job.operation_size as usize];
+					let path = core::str::from_utf8(path).unwrap();
+					match &mut sockets[job.handle] {
+						Socket::TcpListener(_) => match path {
+							"accept" => {
+								accepting_tcp_sockets.push((job.handle, job.job_id));
+								continue;
+							}
+							_ => todo!(),
+						},
+						Socket::TcpConnection(_) => todo!(),
+						Socket::Udp(_) => todo!(),
+					}
+				}
 				Job::CREATE => {
+					assert_eq!(job.handle, driver_utils::Handle::MAX, "TODO");
 					let s = &buf[..job.operation_size as usize];
 					let s = core::str::from_utf8(s).unwrap();
 					let mut parts = s.split('/');
@@ -266,14 +306,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				Job::CLOSE => {
 					match sockets.remove(job.handle).unwrap() {
 						Socket::TcpListener(_) => todo!(),
-						Socket::TcpConnection(sock) => sock.close(&mut iface),
+						Socket::TcpConnection(mut sock) => {
+							sock.close(&mut iface);
+							closing_tcp_sockets.push(sock);
+						}
 						Socket::Udp(sock) => {
 							todo!("address")
 						}
 					}
+					unsafe {
+						job_queue
+							.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+							.unwrap();
+					}
 					continue;
 				}
 				Job::QUERY => {
+					assert_eq!(job.handle, driver_utils::Handle::MAX, "TODO");
 					let mut path = core::str::from_utf8(&buf[..job.operation_size as usize])
 						.unwrap()
 						.split('/');

@@ -134,6 +134,7 @@ impl Object for StreamingTable {
 	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
 		self.submit_job(
 			JobRequest::Query {
+				handle: Handle::MAX,
 				filter: filter.into(),
 			},
 			prefix.into(),
@@ -141,11 +142,23 @@ impl Object for StreamingTable {
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(JobRequest::Open { path: path.into() }, Default::default())
+		self.submit_job(
+			JobRequest::Open {
+				handle: Handle::MAX,
+				path: path.into(),
+			},
+			Default::default(),
+		)
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(JobRequest::Create { path: path.into() }, Default::default())
+		self.submit_job(
+			JobRequest::Create {
+				handle: Handle::MAX,
+				path: path.into(),
+			},
+			Default::default(),
+		)
 	}
 
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
@@ -173,77 +186,87 @@ struct StreamObject {
 	table: Weak<StreamingTable>,
 }
 
+impl StreamObject {
+	fn submit_job<T>(&self, job: impl FnOnce() -> JobRequest, prefix: Vec<u8>) -> Ticket<T>
+	where
+		AnyTicketWaker: From<TicketWaker<T>>,
+	{
+		self.table.upgrade().map_or_else(
+			|| Ticket::new_complete(Err(Error::Cancelled)),
+			|tbl| tbl.submit_job(job(), prefix.into()),
+		)
+	}
+}
+
 impl Object for StreamObject {
-	fn query(self: Arc<Self>, _prefix: Vec<u8>, _filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		todo!()
+	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
+		self.submit_job(
+			|| JobRequest::Query {
+				handle: self.handle,
+				filter: filter.into(),
+			},
+			prefix.into(),
+		)
 	}
 
-	fn open(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		todo!()
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		self.submit_job(
+			|| JobRequest::Open {
+				handle: self.handle,
+				path: path.into(),
+			},
+			Default::default(),
+		)
 	}
 
-	fn create(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		todo!()
+	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		self.submit_job(
+			|| JobRequest::Create {
+				handle: self.handle,
+				path: path.into(),
+			},
+			Default::default(),
+		)
 	}
 
 	fn read(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
-		self.table
-			.upgrade()
-			.map(|tbl| {
-				tbl.submit_job(
-					JobRequest::Read {
-						handle: self.handle,
-						amount: length,
-					},
-					Default::default(),
-				)
-			})
-			.unwrap_or_else(|| todo!())
+		self.submit_job(
+			|| JobRequest::Read {
+				handle: self.handle,
+				amount: length,
+			},
+			Default::default(),
+		)
 	}
 
 	fn peek(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
-		self.table
-			.upgrade()
-			.map(|tbl| {
-				tbl.submit_job(
-					JobRequest::Peek {
-						handle: self.handle,
-						amount: length,
-					},
-					Default::default(),
-				)
-			})
-			.unwrap_or_else(|| todo!())
+		self.submit_job(
+			|| JobRequest::Peek {
+				handle: self.handle,
+				amount: length,
+			},
+			Default::default(),
+		)
 	}
 
 	fn write(&self, _: u64, data: &[u8]) -> Ticket<usize> {
-		self.table
-			.upgrade()
-			.map(|tbl| {
-				tbl.submit_job(
-					JobRequest::Write {
-						handle: self.handle,
-						data: data.into(),
-					},
-					Default::default(),
-				)
-			})
-			.unwrap_or_else(|| todo!())
+		self.submit_job(
+			|| JobRequest::Write {
+				handle: self.handle,
+				data: data.into(),
+			},
+			Default::default(),
+		)
 	}
 
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
-		self.table
-			.upgrade()
-			.map(|tbl| {
-				tbl.submit_job(
-					JobRequest::Seek {
-						handle: self.handle,
-						from,
-					},
-					Default::default(),
-				)
-			})
-			.unwrap_or_else(|| todo!())
+		self.submit_job(
+			|| JobRequest::Seek {
+				handle: self.handle,
+				from,
+			},
+			Default::default(),
+		)
 	}
 }
 

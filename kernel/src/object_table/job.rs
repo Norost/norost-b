@@ -17,12 +17,12 @@ pub use norostb_kernel::io::{JobId, SeekFrom};
 /// A job submitted by a client to be fulfilled by a server (i.e. table owner).
 #[derive(Debug)]
 pub enum JobRequest {
-	Open { path: Box<[u8]> },
-	Create { path: Box<[u8]> },
+	Open { handle: Handle, path: Box<[u8]> },
+	Create { handle: Handle, path: Box<[u8]> },
 	Read { handle: Handle, amount: usize },
 	Write { handle: Handle, data: Box<[u8]> },
 	Seek { handle: Handle, from: SeekFrom },
-	Query { filter: Box<[u8]> },
+	Query { handle: Handle, filter: Box<[u8]> },
 	QueryNext { handle: Handle },
 	Close { handle: Handle },
 	Peek { handle: Handle, amount: usize },

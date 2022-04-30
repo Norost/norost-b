@@ -449,12 +449,14 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	};
 
 	match info.1 {
-		JobRequest::Open { path } => {
+		JobRequest::Open { handle, path } => {
 			job.ty = Job::OPEN;
+			job.handle = handle;
 			copy_buf(&path);
 		}
-		JobRequest::Create { path } => {
+		JobRequest::Create { handle, path } => {
 			job.ty = Job::CREATE;
+			job.handle = handle;
 			copy_buf(&path);
 		}
 		JobRequest::Read { handle, amount } | JobRequest::Peek { handle, amount } => {
@@ -473,8 +475,9 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 			job.handle = handle;
 			(job.from_anchor, job.from_offset) = from.into_raw();
 		}
-		JobRequest::Query { filter } => {
+		JobRequest::Query { handle, filter } => {
 			job.ty = Job::QUERY;
+			job.handle = handle;
 			copy_buf(&filter);
 		}
 		JobRequest::QueryNext { handle } => {
