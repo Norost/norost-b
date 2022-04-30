@@ -174,6 +174,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mhttp"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34334252b387adb910abcc2afcf6a27eb04c6615a5838598e9b2c918f5005290"
+
+[[package]]
 name = "minish"
 version = "0.1.0"
 dependencies = [
@@ -305,6 +311,9 @@ dependencies = [
 [[package]]
 name = "static_http_server"
 version = "0.1.0"
+dependencies = [
+ "mhttp",
+]
 
 [[package]]
 name = "syn"
