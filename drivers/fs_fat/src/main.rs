@@ -1,4 +1,5 @@
 #![feature(norostb)]
+#![feature(seek_stream_len)]
 
 use norostb_rt as rt;
 use std::fs;
@@ -109,7 +110,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				};
 			}
 			Job::SEEK => {
-				todo!()
+				use rt::io::SeekFrom;
+				match SeekFrom::try_from_raw(job.from_anchor, job.from_offset).unwrap() {
+					SeekFrom::Start(n) => open_files[job.handle].1 = n,
+					SeekFrom::Current(n) => open_files[job.handle].1 += n as u64,
+					SeekFrom::End(n) => {
+						let mut file = fs.root_dir().open_file(&open_files[job.handle].0).unwrap();
+						let l = file.stream_len().unwrap();
+						open_files[job.handle].1 = l.wrapping_add(n as u64);
+					}
+				}
 			}
 			Job::CLOSE => {
 				open_files.remove(job.handle);
