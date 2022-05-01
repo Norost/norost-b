@@ -541,13 +541,13 @@ impl SeekFrom {
 #[repr(C)]
 pub struct Job {
 	pub ty: u8,
-	pub flags: [u8; 3],
+	pub from_anchor: u8,
+	pub result: i16,
 	pub job_id: JobId,
 	pub buffer_size: u32,
 	pub operation_size: u32,
 	pub handle: Handle,
 	pub buffer: Option<NonNull<u8>>,
-	pub from_anchor: u8,
 	pub from_offset: u64,
 }
 

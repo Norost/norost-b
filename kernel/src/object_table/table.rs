@@ -1,4 +1,4 @@
-use super::{JobId, JobResult, JobTask};
+use super::{Error, JobId, JobResult, JobTask};
 use alloc::sync::Arc;
 use core::time::Duration;
 
@@ -8,7 +8,11 @@ pub trait Table {
 		unimplemented!()
 	}
 
-	fn finish_job(self: Arc<Self>, _job: JobResult, _job_id: JobId) -> Result<(), ()> {
+	fn finish_job(
+		self: Arc<Self>,
+		_job: Result<JobResult, Error>,
+		_job_id: JobId,
+	) -> Result<(), ()> {
 		unimplemented!()
 	}
 

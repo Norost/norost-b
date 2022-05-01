@@ -32,6 +32,18 @@ mod raw {
 		}
 	}
 
+	impl RawError for i16 {
+		fn to_i64(&self) -> i64 {
+			(*self).into()
+		}
+	}
+
+	impl RawError for i32 {
+		fn to_i64(&self) -> i64 {
+			(*self).into()
+		}
+	}
+
 	impl RawError for i64 {
 		fn to_i64(&self) -> i64 {
 			*self

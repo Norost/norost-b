@@ -86,7 +86,7 @@ impl Table for StreamingTable {
 		job
 	}
 
-	fn finish_job(self: Arc<Self>, job: JobResult, job_id: JobId) -> Result<(), ()> {
+	fn finish_job(self: Arc<Self>, job: Result<JobResult, Error>, job_id: JobId) -> Result<(), ()> {
 		let (tw, mut prefix);
 		{
 			let mut c = self.tickets.lock();
@@ -95,23 +95,25 @@ impl Table for StreamingTable {
 			assert!(c.next().is_none());
 		}
 		match job {
-			JobResult::Open { handle } | JobResult::Create { handle } => {
+			Ok(JobResult::Open { handle }) | Ok(JobResult::Create { handle }) => {
 				let obj = Arc::new(StreamObject {
 					handle,
 					table: Arc::downgrade(&self),
 				});
 				tw.into_object().complete(Ok(obj))
 			}
-			JobResult::Write { amount } => tw.into_usize().complete(Ok(amount)),
-			JobResult::Read { data } | JobResult::Peek { data } => {
+			Ok(JobResult::Write { amount }) => tw.into_usize().complete(Ok(amount)),
+			Ok(JobResult::Read { data }) | Ok(JobResult::Peek { data }) => {
 				tw.into_data().complete(Ok(data))
 			}
-			JobResult::Query { handle } => tw.into_query().complete(Ok(Box::new(StreamQuery {
-				table: Arc::downgrade(&self),
-				handle,
-				prefix,
-			}))),
-			JobResult::QueryNext { path } => {
+			Ok(JobResult::Query { handle }) => {
+				tw.into_query().complete(Ok(Box::new(StreamQuery {
+					table: Arc::downgrade(&self),
+					handle,
+					prefix,
+				})))
+			}
+			Ok(JobResult::QueryNext { path }) => {
 				tw.into_query_result().complete(if path.len() > 0 {
 					prefix.extend(path.into_vec());
 					Ok(QueryResult {
@@ -122,9 +124,10 @@ impl Table for StreamingTable {
 					Err(Error::InvalidOperation)
 				});
 			}
-			JobResult::Seek { position } => {
+			Ok(JobResult::Seek { position }) => {
 				tw.into_u64().complete(Ok(position));
 			}
+			Err(e) => tw.complete_err(e),
 		}
 		Ok(())
 	}

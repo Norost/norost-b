@@ -40,33 +40,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut job = Job::default();
 		job.buffer = NonNull::new(buf.as_mut_ptr());
 		job.buffer_size = buf.len().try_into().unwrap();
+		job.result = 0;
 		tbl.take_job(&mut job).unwrap();
 
 		match job.ty {
 			Job::OPEN => {
 				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
 					.expect("what do?");
-				if fs.root_dir().open_file(path).is_ok() {
-					job.handle = open_files.insert((path.to_string(), 0u64));
-				} else {
-					match fs.root_dir().open_file(path) {
-						Ok(_) => unreachable!(),
-						Err(e) => dbg!(e),
-					};
-					todo!("how do I return an error?");
-				}
+				job.result = match fs.root_dir().open_file(path) {
+					Ok(_) => {
+						job.handle = open_files.insert((path.to_string(), 0u64));
+						0
+					}
+					Err(e) => {
+						(match e {
+							fatfs::Error::NotFound => rt::Error::DoesNotExist,
+							fatfs::Error::AlreadyExists => rt::Error::AlreadyExists,
+							_ => rt::Error::Unknown,
+						}) as i16
+					}
+				};
 			}
 			Job::CREATE => {
 				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
 					.expect("what do?");
-				if fs.root_dir().create_file(path).is_ok() {
-					job.handle = open_files.insert((path.to_string(), 0u64));
-				} else {
-					match fs.root_dir().open_file(path) {
-						Ok(_) => unreachable!(),
-						Err(e) => dbg!(e),
-					};
-					todo!("how do I return an error?");
+				match fs.root_dir().create_file(path) {
+					Ok(_) => job.handle = open_files.insert((path.to_string(), 0u64)),
+					Err(e) => todo!("{:?}", e),
 				}
 			}
 			Job::READ => {

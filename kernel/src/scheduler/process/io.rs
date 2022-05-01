@@ -136,7 +136,7 @@ impl super::Process {
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::PEEK => {
@@ -148,7 +148,7 @@ impl super::Process {
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::WRITE => {
@@ -161,7 +161,7 @@ impl super::Process {
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(b.try_into().unwrap()),
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::OPEN => {
@@ -176,7 +176,7 @@ impl super::Process {
 						Poll::Ready(Ok(o)) => {
 							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
 						}
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::CREATE => {
@@ -191,7 +191,7 @@ impl super::Process {
 						Poll::Ready(Ok(o)) => {
 							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
 						}
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::QUERY => {
@@ -206,7 +206,7 @@ impl super::Process {
 						Poll::Ready(Ok(q)) => {
 							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
 						}
-						Poll::Ready(Err(_)) => push_resp(-1),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::QUERY_NEXT => {
@@ -218,7 +218,7 @@ impl super::Process {
 						Some(mut ticket) => match poll(&mut ticket) {
 							Poll::Pending => push_pending(info.cast(), 0, ticket.into()),
 							Poll::Ready(Ok(o)) => push_resp(copy_object_info(info, o)),
-							Poll::Ready(Err(_)) => push_resp(0),
+							Poll::Ready(Err(e)) => push_resp(e as i64),
 						},
 					}
 				}
@@ -231,7 +231,7 @@ impl super::Process {
 							match poll(&mut ticket) {
 								Poll::Pending => push_pending(job.cast(), 0, ticket.into()),
 								Poll::Ready(Ok(info)) => push_resp(take_job(job, info)),
-								Poll::Ready(Err(_)) => push_resp(-1),
+								Poll::Ready(Err(e)) => todo!(), //push_resp(e as i64),
 							}
 						}
 						None => push_resp(-1),
@@ -253,29 +253,33 @@ impl super::Process {
 					};
 
 					let job_id = job.job_id;
-					let job = match job.ty {
-						Job::OPEN => JobResult::Open { handle: job.handle },
-						Job::CREATE => JobResult::Create { handle: job.handle },
-						Job::READ => JobResult::Read {
-							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-						},
-						Job::PEEK => JobResult::Peek {
-							data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-						},
-						Job::WRITE => JobResult::Write {
-							amount: job.operation_size.try_into().unwrap(),
-						},
-						Job::SEEK => JobResult::Seek {
-							position: job.from_offset,
-						},
-						Job::QUERY => JobResult::Query { handle: job.handle },
-						Job::QUERY_NEXT => JobResult::QueryNext {
-							path: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-						},
-						_ => {
-							push_resp(-1);
-							continue;
-						}
+					let job = if let Err(e) = norostb_kernel::error::result(job.result) {
+						Err(e)
+					} else {
+						Ok(match job.ty {
+							Job::OPEN => JobResult::Open { handle: job.handle },
+							Job::CREATE => JobResult::Create { handle: job.handle },
+							Job::READ => JobResult::Read {
+								data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+							},
+							Job::PEEK => JobResult::Peek {
+								data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+							},
+							Job::WRITE => JobResult::Write {
+								amount: job.operation_size.try_into().unwrap(),
+							},
+							Job::SEEK => JobResult::Seek {
+								position: job.from_offset,
+							},
+							Job::QUERY => JobResult::Query { handle: job.handle },
+							Job::QUERY_NEXT => JobResult::QueryNext {
+								path: get_buf()[..job.operation_size.try_into().unwrap()].into(),
+							},
+							_ => {
+								push_resp(-1);
+								continue;
+							}
+						})
 					};
 
 					tbl.finish_job(job, job_id).unwrap();
@@ -390,7 +394,7 @@ fn poll_tickets(
 						Ok(AnyTicketValue::QueryResult(o)) => {
 							push_resp(copy_object_info(tk.data_ptr.cast(), o))
 						}
-						Err(_) => push_resp(-1),
+						Err(e) => push_resp(e as i64),
 					}
 				}
 			},

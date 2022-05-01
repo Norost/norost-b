@@ -160,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				let std_job = Job {
 					ty: Job::CREATE,
 					job_id,
-					flags: [0; 3],
+					result: 0,
 					handle,
 					buffer: None,
 					buffer_size: 0,
