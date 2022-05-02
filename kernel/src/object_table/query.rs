@@ -1,5 +1,5 @@
 use super::Ticket;
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 
 /// A query into a table.
 pub trait Query
@@ -42,3 +42,24 @@ impl Iterator for OneQuery {
 pub struct QueryResult {
 	pub path: Box<[u8]>,
 }
+
+/// Convienence wrapper to make queries from any iterator.
+pub struct QueryIter<I: Iterator<Item = Vec<u8>>>(I);
+
+impl<I: Iterator<Item = Vec<u8>>> QueryIter<I> {
+	pub fn new(iter: I) -> Self {
+		Self(iter)
+	}
+}
+
+impl<I: Iterator<Item = Vec<u8>>> Iterator for QueryIter<I> {
+	type Item = Ticket<QueryResult>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0
+			.next()
+			.map(|path| Ticket::new_complete(Ok(QueryResult { path: path.into() })))
+	}
+}
+
+impl<I: Iterator<Item = Vec<u8>>> Query for QueryIter<I> {}

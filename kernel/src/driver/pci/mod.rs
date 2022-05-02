@@ -21,7 +21,7 @@ pub use device::PciDevice;
 
 static PCI: SpinLock<Option<Pci>> = SpinLock::new(None);
 
-pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>)
+pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>, root: &crate::object_table::Root)
 where
 	H: AcpiHandler,
 {
@@ -49,7 +49,7 @@ where
 	*PCI.lock() = Some(pci);
 
 	let table = Arc::new(table::PciTable) as Arc<dyn object_table::Object>;
-	object_table::Root::add(*b"pci", Arc::downgrade(&table));
+	root.add(*b"pci", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }
 

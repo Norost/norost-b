@@ -7,18 +7,55 @@ use alloc::{
 	vec::Vec,
 };
 
-/// The root object. This object is passed to all other processes on the system.
-pub struct Root;
-
-impl Root {
-	/// Add a new object to the root.
-	pub fn add(name: impl Into<Box<[u8]>>, object: Weak<dyn Object>) {
-		OBJECTS.lock().insert(name.into(), object);
-	}
+/// A root object. This object has multiple child objects which can be accessed by a name, e.g.
+///
+/// ```
+/// net/
+/// 	tcp
+/// 	...
+/// disk/
+/// 	data
+/// fs/
+/// 	bin/
+/// 	README/
+/// 	...
+/// process/
+/// ```
+pub struct Root {
+	objects: Mutex<BTreeMap<Box<[u8]>, Weak<dyn Object>>>,
 }
 
-/// All objects located at the root.
-static OBJECTS: Mutex<BTreeMap<Box<[u8]>, Weak<dyn Object>>> = Mutex::new(BTreeMap::new());
+impl Root {
+	/// Create a new root
+	pub fn new() -> Self {
+		Self {
+			objects: Mutex::new(BTreeMap::new()),
+		}
+	}
+
+	/// Add a new object to the root.
+	pub fn add(&self, name: impl Into<Box<[u8]>>, object: Weak<dyn Object>) {
+		self.objects.lock().insert(name.into(), object);
+	}
+
+	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], &'a [u8])> {
+		let (object, rest) = path
+			.iter()
+			.position(|c| *c == b'/')
+			.map_or((path, &b""[..]), |i| (&path[..i], &path[i + 1..]));
+		let mut objects = self.objects.lock();
+		if let Some(obj) = objects.get(object) {
+			if let Some(obj) = Weak::upgrade(&obj) {
+				Some((obj, object, rest))
+			} else {
+				objects.remove(object);
+				None
+			}
+		} else {
+			None
+		}
+	}
+}
 
 impl Object for Root {
 	fn query(self: Arc<Self>, mut prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
@@ -33,7 +70,7 @@ impl Object for Root {
 			impl<I: Iterator<Item = Ticket<QueryResult>>> Query for Q<I> {}
 
 			// Filter any dead objects before querying.
-			let mut objects = OBJECTS.lock();
+			let mut objects = self.objects.lock();
 			objects.retain(|k, v| v.strong_count() > 0);
 			Ticket::new_complete(Ok(Box::new(Q(objects
 				.keys()
@@ -42,16 +79,17 @@ impl Object for Root {
 				.into_iter()
 				.map(|e| Ticket::new_complete(Ok(QueryResult { path: e })))))))
 		} else {
-			find(filter).map_or_else(not_found, move |(obj, obj_prefix, filter)| {
-				prefix.extend(obj_prefix);
-				prefix.push(b'/');
-				obj.query(prefix, filter)
-			})
+			self.find(filter)
+				.map_or_else(not_found, move |(obj, obj_prefix, filter)| {
+					prefix.extend(obj_prefix);
+					prefix.push(b'/');
+					obj.query(prefix, filter)
+				})
 		}
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		find(path).map_or_else(not_found, |(obj, _, path)| {
+		self.find(path).map_or_else(not_found, |(obj, _, path)| {
 			if path == b"" {
 				Ticket::new_complete(Ok(obj))
 			} else {
@@ -61,12 +99,12 @@ impl Object for Root {
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		find(path).map_or_else(
+		self.find(path).map_or_else(
 			|| {
 				Ticket::new_complete(if path.contains(&b'/') {
 					Err(Error::DoesNotExist)
 				} else {
-					let mut objects = OBJECTS.lock();
+					let mut objects = self.objects.lock();
 					let tbl = StreamingTable::new() as Arc<dyn Object>;
 					let r = objects.insert(path.into(), Arc::downgrade(&tbl));
 					assert!(r.is_none());
@@ -81,24 +119,6 @@ impl Object for Root {
 				}
 			},
 		)
-	}
-}
-
-fn find(path: &[u8]) -> Option<(Arc<dyn Object>, &[u8], &[u8])> {
-	let (object, rest) = path
-		.iter()
-		.position(|c| *c == b'/')
-		.map_or((path, &b""[..]), |i| (&path[..i], &path[i + 1..]));
-	let mut objects = OBJECTS.lock();
-	if let Some(obj) = objects.get(object) {
-		if let Some(obj) = Weak::upgrade(&obj) {
-			Some((obj, object, rest))
-		} else {
-			objects.remove(object);
-			None
-		}
-	} else {
-		None
 	}
 }
 

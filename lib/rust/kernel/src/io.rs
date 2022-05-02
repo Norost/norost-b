@@ -56,6 +56,7 @@ impl Request {
 	pub const POLL: u8 = 9;
 	pub const CLOSE: u8 = 10;
 	pub const PEEK: u8 = 11;
+	pub const SHARE: u8 = 12;
 
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
@@ -192,6 +193,16 @@ impl Request {
 			ty: Self::PEEK,
 			arguments_32: [handle],
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	pub fn share(user_data: u64, handle: Handle, share: Handle) -> Self {
+		Self {
+			ty: Self::SHARE,
+			arguments_32: [handle],
+			arguments_64: [share.into(), 0],
 			user_data,
 			..Default::default()
 		}

@@ -12,16 +12,28 @@ pub use norostb_kernel::{
 	io::{Job, ObjectInfo, Request, Response, SeekFrom},
 };
 
-#[linkage = "weak"]
-#[export_name = "__rt_io_base_object"]
-static BASE_HANDLE: Handle = 0; // FIXME don't hardcode this.
-
-static BASE_OBJECT: Object = Object::from_raw(BASE_HANDLE);
-
-#[inline]
-pub fn base_object() -> &'static Object {
-	&BASE_OBJECT
+#[inline(always)]
+fn transmute_handle_to_object(handle: &Handle) -> Option<&Object> {
+	// SAFETY: an object is a simple wrapper around a handle
+	unsafe { (handle != &Handle::MAX).then(|| mem::transmute(handle)) }
 }
+
+macro_rules! transmute_handle {
+	($fn:ident -> $handle:ident) => {
+		#[inline(always)]
+		pub fn $fn() -> Option<&'static Object> {
+			// SAFETY: $handle is only set once at the start of the program
+			unsafe { transmute_handle_to_object(&crate::globals::GLOBALS.get_ref().$handle) }
+		}
+	};
+}
+
+transmute_handle!(stdin -> stdin_handle);
+transmute_handle!(stdout -> stdout_handle);
+transmute_handle!(stderr -> stderr_handle);
+transmute_handle!(file_root -> file_root_handle);
+transmute_handle!(net_root -> net_root_handle);
+transmute_handle!(process_root -> process_root_handle);
 
 #[derive(Copy, Clone)]
 pub struct IoSlice<'a>(&'a [u8]);
@@ -86,7 +98,7 @@ pub(crate) unsafe extern "C" fn queue_dtor(ptr: *mut ()) {
 /// This function may only be called once.
 ///
 /// TLS storage must be initialized with [`crate::tls::init`].
-pub(crate) unsafe fn init() {
+pub(crate) unsafe fn init(_arguments: *const u8) {
 	let (k, v) = create_for_thread()
 		.ok()
 		.and_then(|mut it| it.next())
@@ -220,10 +232,22 @@ pub fn close(handle: Handle) {
 	enqueue(Request::close(0, handle));
 }
 
+/// Blocking share
+#[inline]
+pub fn share(handle: Handle, share: Handle) -> Result<u64> {
+	result(enqueue(Request::share(0, handle, share)).value).map(|v| v as u64)
+}
+
 /// Blocking duplicate
 #[inline]
 pub fn duplicate(handle: Handle) -> Result<Handle> {
 	syscall::duplicate_handle(handle).map_err(|_| todo!())
+}
+
+/// Blocking create root
+#[inline]
+pub fn create_root() -> Result<Handle> {
+	syscall::create_root().map_err(|_| todo!())
 }
 
 #[derive(Debug)]

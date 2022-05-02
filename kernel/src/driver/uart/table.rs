@@ -29,6 +29,12 @@ impl Object for UartTable {
 #[derive(Clone, Copy)]
 pub struct UartId(u8);
 
+impl UartId {
+	pub fn new(id: u8) -> Self {
+		Self(id)
+	}
+}
+
 impl Object for UartId {
 	fn read(&self, _offset: u64, length: usize) -> Ticket<Box<[u8]>> {
 		if length == 0 {

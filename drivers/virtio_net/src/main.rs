@@ -87,7 +87,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
 	// Register new table of Streaming type
-	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
+	let tbl = rt::io::file_root()
+		.unwrap()
+		.create(table_name.as_bytes())
+		.unwrap();
 
 	#[derive(Clone, Copy)]
 	enum Protocol {

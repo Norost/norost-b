@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 152689953b8..20779a31c39 100644
+index 152689953b8..9af4681c4a6 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -520,6 +520,10 @@ name = "cfg-if"
@@ -13,7 +13,7 @@ index 152689953b8..20779a31c39 100644
  
  [[package]]
  name = "chalk-derive"
-@@ -2371,6 +2375,25 @@ dependencies = [
+@@ -2371,6 +2375,35 @@ dependencies = [
   "version_check",
  ]
  
@@ -36,19 +36,30 @@ index 152689953b8..20779a31c39 100644
 + "rustc-std-workspace-core",
 +]
 +
++[[package]]
++name = "norostb_rt_alloc"
++version = "0.1.0"
++dependencies = [
++ "compiler_builtins",
++ "norostb_kernel",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
  [[package]]
  name = "ntapi"
  version = "0.3.6"
-@@ -4794,6 +4817,7 @@ dependencies = [
+@@ -4794,6 +4827,8 @@ dependencies = [
   "hermit-abi 0.2.0",
   "libc",
   "miniz_oxide",
 + "norostb_rt",
++ "norostb_rt_alloc",
   "object 0.26.2",
   "panic_abort",
   "panic_unwind",
 diff --git a/Cargo.toml b/Cargo.toml
-index cae48d79517..98912997cf1 100644
+index cae48d79517..ff16e9b9ee6 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -124,6 +124,7 @@ rustfmt-nightly = { path = "src/tools/rustfmt" }
@@ -59,12 +70,13 @@ index cae48d79517..98912997cf1 100644
  
  # See comments in `library/rustc-std-workspace-core/README.md` for what's going on
  # here
-@@ -131,5 +132,8 @@ rustc-std-workspace-core = { path = 'library/rustc-std-workspace-core' }
+@@ -131,5 +132,9 @@ rustc-std-workspace-core = { path = 'library/rustc-std-workspace-core' }
  rustc-std-workspace-alloc = { path = 'library/rustc-std-workspace-alloc' }
  rustc-std-workspace-std = { path = 'library/rustc-std-workspace-std' }
  
 +# No norostb packages are published to crates.io
 +norostb_rt = { path = "../../norost/b/lib/rust/rt" }
++norostb_rt_alloc = { path = "../../norost/b/lib/rust/rt_alloc" }
 +
  [patch."https://github.com/rust-lang/rust-clippy"]
  clippy_lints = { path = "src/tools/clippy/clippy_lints" }
@@ -262,15 +274,16 @@ index 00000000000..1213919ab9a
 +    __rust_abort();
 +}
 diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
-index dd9b035e86d..c3af6a2bf81 100644
+index dd9b035e86d..097ef09a241 100644
 --- a/library/std/Cargo.toml
 +++ b/library/std/Cargo.toml
-@@ -47,6 +47,9 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
+@@ -47,6 +47,10 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
  [target.wasm32-wasi.dependencies]
  wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features = false }
  
 +[target.'cfg(target_os = "norostb")'.dependencies]
 +norostb_rt = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
++norostb_rt_alloc = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
 +
  [features]
  backtrace = [
@@ -422,7 +435,7 @@ index 167c918c94c..dbfba32bd66 100644
          pub use self::unsupported::*;
 diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
 new file mode 100644
-index 00000000000..da879fb0b9d
+index 00000000000..70a82ee098f
 --- /dev/null
 +++ b/library/std/src/sys/norostb/alloc.rs
 @@ -0,0 +1,20 @@
@@ -433,7 +446,7 @@ index 00000000000..da879fb0b9d
 +        #[inline]
 +        unsafe fn $fn(&self, $($args:$ty),*) -> $ret {
 +            unsafe {
-+                norostb_rt::alloc::ALLOCATOR.$fn($($args),*)
++                norostb_rt_alloc::Allocator.$fn($($args),*)
 +            }
 +        }
 +    };
@@ -623,10 +636,10 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..e39561c384d
+index 00000000000..3749c8709a9
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,313 @@
 +use super::cvt_err;
 +/// ## Path format
 +///
@@ -783,11 +796,10 @@ index 00000000000..e39561c384d
 +
 +impl File {
 +    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
-+        if opts.create {
-+            rt_io::base_object().create(path_inner(path)).map(File).map_err(cvt_err)
-+        } else {
-+            rt_io::base_object().open(path_inner(path)).map(File).map_err(cvt_err)
-+        }
++        let root = rt_io::file_root().ok_or(super::ERR_UNSET)?;
++        if opts.create { root.create(path_inner(path)) } else { root.open(path_inner(path)) }
++            .map(File)
++            .map_err(cvt_err)
 +    }
 +
 +    pub fn file_attr(&self) -> io::Result<FileAttr> {
@@ -876,7 +888,11 @@ index 00000000000..e39561c384d
 +}
 +
 +pub fn readdir(path: &Path) -> io::Result<ReadDir> {
-+    rt_io::base_object().query(path_inner(path)).map(ReadDir).map_err(cvt_err)
++    rt_io::file_root()
++        .ok_or(super::ERR_UNSET)?
++        .query(path_inner(path))
++        .map(ReadDir)
++        .map_err(cvt_err)
 +}
 +
 +pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -992,10 +1008,10 @@ index 00000000000..d5f475b4310
 +}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..5f58cbcdb05
+index 00000000000..6d692d70ba2
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,78 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -1067,8 +1083,13 @@ index 00000000000..5f58cbcdb05
 +        Error::DoesNotExist => const_io_error!(ErrorKind::NotFound, "does not exist"),
 +        Error::AlreadyExists => const_io_error!(ErrorKind::AlreadyExists, "already exists"),
 +        Error::Cancelled => const_io_error!(ErrorKind::Uncategorized, "cancelled"),
++        Error::CantCreateObject => const_io_error!(ErrorKind::InvalidInput, "can't create object"),
++        Error::InvalidObject => const_io_error!(ErrorKind::InvalidInput, "invalid object"),
 +    }
 +}
++
++const ERR_UNSET: crate::io::Error =
++    crate::io::const_io_error!(crate::io::ErrorKind::Uncategorized, "handle is not set");
 diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
 new file mode 100644
 index 00000000000..b3203c16c50
@@ -1138,10 +1159,10 @@ index 00000000000..b3203c16c50
 +}
 diff --git a/library/std/src/sys/norostb/net.rs b/library/std/src/sys/norostb/net.rs
 new file mode 100644
-index 00000000000..74e738357c6
+index 00000000000..879928aca32
 --- /dev/null
 +++ b/library/std/src/sys/norostb/net.rs
-@@ -0,0 +1,411 @@
+@@ -0,0 +1,413 @@
 +use super::cvt_err;
 +use crate::cell::Cell;
 +use crate::convert::TryFrom;
@@ -1174,9 +1195,9 @@ index 00000000000..74e738357c6
 +
 +impl TcpStream {
 +    pub fn connect(address: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
-+        let (l, p) = netpath!("net/default/tcp/connect/{}/{}", address);
++        let (l, p) = netpath!("default/tcp/connect/{}/{}", address);
 +        Ok(Self {
-+            inner: rt::io::base_object().create(&p[..l]).map_err(cvt_err)?,
++            inner: rt::io::net_root().ok_or(super::ERR_UNSET)?.create(&p[..l]).map_err(cvt_err)?,
 +            read_timeout: Cell::new(None),
 +            write_timeout: Cell::new(None),
 +        })
@@ -1295,8 +1316,10 @@ index 00000000000..74e738357c6
 +
 +impl TcpListener {
 +    pub fn bind(address: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
-+        let (l, p) = netpath!("net/{}/tcp/listen/{}", address);
-+        Ok(Self { inner: rt::io::base_object().create(&p[..l]).map_err(cvt_err)? })
++        let (l, p) = netpath!("{}/tcp/listen/{}", address);
++        Ok(Self {
++            inner: rt::io::net_root().ok_or(super::ERR_UNSET)?.create(&p[..l]).map_err(cvt_err)?,
++        })
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
@@ -1686,21 +1709,22 @@ index 00000000000..25514c2322f
 +}
 diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
 new file mode 100644
-index 00000000000..344e622ec7a
+index 00000000000..a086a1a3084
 --- /dev/null
 +++ b/library/std/src/sys/norostb/process.rs
-@@ -0,0 +1,214 @@
-+use crate::ffi::OsStr;
+@@ -0,0 +1,243 @@
++use crate::ffi::{OsStr, OsString};
 +use crate::fmt;
 +use crate::io;
-+use crate::marker::PhantomData;
 +use crate::num::NonZeroI32;
++use crate::os::norostb::prelude::*;
 +use crate::path::Path;
++use crate::slice::Iter;
 +use crate::sys::fs::File;
 +use crate::sys::pipe::AnonPipe;
 +use crate::sys::unsupported;
 +use crate::sys_common::process::{CommandEnv, CommandEnvs};
-+use norostb_rt::Handle;
++use norostb_rt as rt;
 +
 +pub use crate::ffi::OsString as EnvKey;
 +
@@ -1709,7 +1733,10 @@ index 00000000000..344e622ec7a
 +////////////////////////////////////////////////////////////////////////////////
 +
 +pub struct Command {
++    program: OsString,
 +    env: CommandEnv,
++    dir: OsString,
++    args: Vec<OsString>,
 +}
 +
 +// passed back to std::process with the pipes connected to the child, if any
@@ -1727,30 +1754,45 @@ index 00000000000..344e622ec7a
 +}
 +
 +impl Command {
-+    pub fn new(_program: &OsStr) -> Command {
-+        Command { env: Default::default() }
++    pub fn new(program: &OsStr) -> Self {
++        Self {
++            program: program.into(),
++            env: Default::default(),
++            dir: Default::default(),
++            args: Default::default(),
++        }
 +    }
 +
-+    pub fn arg(&mut self, _arg: &OsStr) {}
++    pub fn arg(&mut self, arg: &OsStr) {
++        self.args.push(arg.into());
++    }
 +
 +    pub fn env_mut(&mut self) -> &mut CommandEnv {
 +        &mut self.env
 +    }
 +
-+    pub fn cwd(&mut self, _dir: &OsStr) {}
++    pub fn cwd(&mut self, dir: &OsStr) {
++        self.dir = dir.into();
++    }
 +
-+    pub fn stdin(&mut self, _stdin: Stdio) {}
++    pub fn stdin(&mut self, _stdin: Stdio) {
++        todo!()
++    }
 +
-+    pub fn stdout(&mut self, _stdout: Stdio) {}
++    pub fn stdout(&mut self, _stdout: Stdio) {
++        todo!()
++    }
 +
-+    pub fn stderr(&mut self, _stderr: Stdio) {}
++    pub fn stderr(&mut self, _stderr: Stdio) {
++        todo!()
++    }
 +
 +    pub fn get_program(&self) -> &OsStr {
 +        panic!("unsupported")
 +    }
 +
 +    pub fn get_args(&self) -> CommandArgs<'_> {
-+        CommandArgs { _p: PhantomData }
++        CommandArgs(self.args.iter())
 +    }
 +
 +    pub fn get_envs(&self) -> CommandEnvs<'_> {
@@ -1766,7 +1808,17 @@ index 00000000000..344e622ec7a
 +        _default: Stdio,
 +        _needs_stdin: bool,
 +    ) -> io::Result<(Process, StdioPipes)> {
-+        unsupported()
++        rt::Process::new(
++            &rt::io::file_root()
++                .ok_or(super::ERR_UNSET)?
++                .open(self.program.as_bytes())
++                .map_err(super::cvt_err)?,
++            rt::process::Process::default_handles(),
++            self.args.iter().map(|s| s.as_bytes()),
++            self.env.capture().iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())),
++        )
++        .map_err(super::cvt_err)
++        .map(|p| (Process(p), StdioPipes { stdin: None, stdout: None, stderr: None }))
 +    }
 +}
 +
@@ -1864,13 +1916,11 @@ index 00000000000..344e622ec7a
 +    }
 +}
 +
-+pub struct Process {
-+    handle: Handle,
-+}
++pub struct Process(rt::Process);
 +
 +impl Process {
 +    pub fn id(&self) -> u32 {
-+        self.handle
++        self.0.as_object().as_raw()
 +    }
 +
 +    pub fn kill(&mut self) -> io::Result<()> {
@@ -1886,14 +1936,16 @@ index 00000000000..344e622ec7a
 +    }
 +}
 +
-+pub struct CommandArgs<'a> {
-+    _p: PhantomData<&'a ()>,
-+}
++pub struct CommandArgs<'a>(Iter<'a, OsString>);
 +
 +impl<'a> Iterator for CommandArgs<'a> {
 +    type Item = &'a OsStr;
 +    fn next(&mut self) -> Option<&'a OsStr> {
-+        None
++        self.0.next().map(|s| &**s)
++    }
++
++    fn size_hint(&self) -> (usize, Option<usize>) {
++        self.0.size_hint()
 +    }
 +}
 +
@@ -1980,16 +2032,12 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..aff39df5492
+index 00000000000..189daacc6c4
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,79 @@
-+use crate::{io, sync::atomic::Ordering};
-+use norostb_rt::{self as rt, AtomicHandle};
-+
-+static STDIN: AtomicHandle = AtomicHandle::new(0);
-+static STDOUT: AtomicHandle = AtomicHandle::new(0);
-+static STDERR: AtomicHandle = AtomicHandle::new(0);
+@@ -0,0 +1,66 @@
++use crate::io;
++use norostb_rt as rt;
 +
 +pub struct Stdin;
 +pub struct Stdout;
@@ -2005,7 +2053,7 @@ index 00000000000..aff39df5492
 +
 +impl io::Read for Stdin {
 +    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-+        rt::io::read(STDIN.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
++        rt::io::stdin().ok_or(super::ERR_UNSET)?.read(buf).map_err(super::cvt_err)
 +    }
 +}
 +
@@ -2017,7 +2065,8 @@ index 00000000000..aff39df5492
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        rt::io::write(STDOUT.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
++        unsafe { core::arch::asm!("int3") }
++        rt::io::stdout().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2033,7 +2082,7 @@ index 00000000000..aff39df5492
 +
 +impl io::Write for Stderr {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        rt::io::write(STDERR.load(Ordering::Relaxed), buf).map_err(super::cvt_err)
++        rt::io::stderr().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2046,23 +2095,13 @@ index 00000000000..aff39df5492
 +}
 +
 +pub fn panic_output() -> Option<impl io::Write> {
-+    Some(Stderr)
++    rt::io::stderr().map(|_| Stderr)
 +}
 +
 +/// # Safety
 +///
 +/// Must be called only once during runtime initialization.
-+pub(super) unsafe fn init() {
-+    let f = || {
-+        rt::io::base_object()
-+            .open(b"uart/0")
-+            .unwrap_or_else(|_| core::intrinsics::abort())
-+            .into_raw()
-+    };
-+    STDIN.store(f(), Ordering::Relaxed);
-+    STDOUT.store(f(), Ordering::Relaxed);
-+    STDERR.store(f(), Ordering::Relaxed);
-+}
++pub(super) unsafe fn init() {}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
 index 00000000000..e439f997705

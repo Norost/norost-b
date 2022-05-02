@@ -19,7 +19,7 @@ impl acpi::AcpiHandler for Handler {
 	fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {}
 }
 
-pub unsafe fn init(boot: &boot::Info) {
+pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 	boot.rsdp.validate().unwrap();
 
 	unsafe {
@@ -31,7 +31,7 @@ pub unsafe fn init(boot: &boot::Info) {
 		super::apic::init_acpi(&acpi);
 
 		#[cfg(feature = "driver-pci")]
-		super::pci::init_acpi(&acpi);
+		super::pci::init_acpi(&acpi, root);
 
 		#[cfg(feature = "driver-hpet")]
 		super::hpet::init_acpi(&acpi);

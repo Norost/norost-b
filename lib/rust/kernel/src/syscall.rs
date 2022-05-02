@@ -11,7 +11,7 @@ pub const ID_READ: usize = 11;
 pub const ID_KILL_THREAD: usize = 14;
 pub const ID_WAIT_THREAD: usize = 15;
 pub const ID_EXIT: usize = 16;
-
+pub const ID_CREATE_ROOT: usize = 17;
 pub const ID_DUPLICATE_HANDLE: usize = 18;
 pub const ID_SPAWN_THREAD: usize = 19;
 pub const ID_CREATE_IO_QUEUE: usize = 20;
@@ -70,7 +70,7 @@ macro_rules! syscall {
 			asm!(
 				"syscall",
 				in("eax") $id,
-				$(in($reg) $val),*,
+				$(in($reg) $val,)*
 				lateout("rax") status,
 				lateout("rdx") value,
 				lateout("rcx") _,
@@ -78,6 +78,9 @@ macro_rules! syscall {
 			);
 			(status, value)
 		}
+	};
+	($id:ident()) => {
+		syscall!(@INTERNAL $id [])
 	};
 	($id:ident($a1:expr)) => {
 		syscall!(@INTERNAL $id [in("rdi") $a1])
@@ -183,6 +186,11 @@ pub fn read_uninit(
 	data: &mut [MaybeUninit<u8>],
 ) -> Result<usize, (NonZeroUsize, usize)> {
 	ret(syscall!(ID_READ(object, data.as_mut_ptr(), data.len())))
+}
+
+#[inline]
+pub fn create_root() -> Result<Handle, (NonZeroUsize, usize)> {
+	ret(syscall!(ID_CREATE_ROOT())).map(|v| v as u32)
 }
 
 #[inline]

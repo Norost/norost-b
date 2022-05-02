@@ -15,6 +15,8 @@ use core::task::{Context, Poll};
 pub use memory_object::*;
 pub use thread::Thread;
 
+pub use process::init;
+
 /// Switch to the next thread. This does not save the current thread's state!
 ///
 /// If no thread is scheduled, the `Monotonic` **when** the next thread becomes available is

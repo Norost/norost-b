@@ -49,7 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Register new table of Streaming type
-	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
+	let tbl = rt::io::file_root()
+		.unwrap()
+		.create(table_name.as_bytes())
+		.unwrap();
 
 	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
 	let sectors_phys = virtio::PhysRegion {

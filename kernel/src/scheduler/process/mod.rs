@@ -1,5 +1,6 @@
 mod elf;
 mod io;
+mod table;
 
 use super::{MemoryObject, Thread};
 use crate::arch;
@@ -14,6 +15,8 @@ use arena::Arena;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use norostb_kernel::Handle;
+
+pub use table::init;
 
 pub struct Process {
 	address_space: Mutex<AddressSpace>,
@@ -186,6 +189,8 @@ impl Drop for Process {
 		debug!("cleaning up process");
 	}
 }
+
+impl Object for Process {}
 
 #[derive(Debug)]
 pub enum AddObjectError {}

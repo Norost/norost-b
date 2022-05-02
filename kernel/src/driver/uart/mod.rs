@@ -29,14 +29,14 @@ pub unsafe fn early_init() {
 /// # Safety
 ///
 /// This function may only be called once after [`init`] and when the APIC is initialized.
-pub unsafe fn post_init() {
+pub unsafe fn post_init(root: &crate::object_table::Root) {
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 	unsafe {
 		x86::init();
 	}
 
 	let table = Arc::new(table::UartTable) as Arc<dyn object_table::Object>;
-	object_table::Root::add(*b"uart", Arc::downgrade(&table));
+	root.add(*b"uart", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }
 

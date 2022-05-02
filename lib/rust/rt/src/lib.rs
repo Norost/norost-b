@@ -5,8 +5,9 @@
 // This is *very* annoying since we'll have to either:
 // - move global things to a crate that doesn't even use *libcore*. This isn't a practical option.
 // - ensure globals point to the same objects somehow. This can be achieved with weak linking.
-// The latter option has been chosen since it's the most practical. It should also be safe since
-// the rustc-dep-of-std feature doesn't affect the layout of any structs.
+// The latter option has been tried with the #[linkage] attribute but Rust is being a giant PITA
+// and seems inconsistent in what types it allows for weak linking. global_asm! does work for our
+// needs though it is easy to misuse.
 
 #![no_std]
 #![feature(allocator_api)]
@@ -18,19 +19,19 @@
 #![feature(naked_functions)]
 #![feature(new_uninit)]
 #![feature(ptr_metadata)]
-#![feature(nonnull_slice_from_raw_parts)]
-#![feature(slice_ptr_get, slice_ptr_len)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-pub mod alloc;
 pub mod args;
+mod globals;
 pub mod io;
+pub mod process;
 pub mod sync;
 pub mod table;
 pub mod thread;
 pub mod tls;
 
 pub use norostb_kernel::{error::Error, AtomicHandle, Handle};
+pub use process::Process;
 pub use table::Object;
 
 cfg_if::cfg_if! {
@@ -50,7 +51,7 @@ cfg_if::cfg_if! {
 unsafe extern "C" fn rt_start(arguments: *mut u8) -> ! {
 	unsafe {
 		tls::init();
-		io::init();
+		io::init(arguments);
 		args::init(arguments);
 	}
 	// SAFETY: we can't actually guarantee safety due to weak linkage.
@@ -69,6 +70,8 @@ unsafe extern "C" fn rt_start(arguments: *mut u8) -> ! {
 /// This is weakly linked so it can be adapted as necessary for any programming language.
 ///
 /// The default implementation is tailored for Rust's standard library.
+///
+/// To override it, export a strong symbol with the name `__rt_main`.
 #[linkage = "weak"]
 #[export_name = "__rt_main"]
 unsafe extern "C" fn rt_main(_arguments: *mut u8) -> i32 {

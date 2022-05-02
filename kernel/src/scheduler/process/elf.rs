@@ -1,6 +1,7 @@
 use crate::memory::frame::{self, AllocateHints, OwnedPageFrames};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
+use crate::object_table::Object;
 use crate::scheduler::{process::frame::PageFrame, MemoryObject};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
@@ -93,6 +94,7 @@ impl super::Process {
 		data_object: Arc<dyn MemoryObject>,
 		stack_frames: OwnedPageFrames,
 		stack_offset: usize,
+		objects: arena::Arena<Arc<dyn Object>, u8>,
 	) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
 		let mut data = data_object.physical_pages();
@@ -105,6 +107,7 @@ impl super::Process {
 		};
 
 		let slf = Self::new()?;
+		*slf.objects.lock() = objects;
 
 		(data.len() >= 16)
 			.then(|| ())

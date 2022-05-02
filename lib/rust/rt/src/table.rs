@@ -56,6 +56,11 @@ impl Object {
 	}
 
 	#[inline]
+	pub fn share(&self, share: &Object) -> io::Result<u64> {
+		io::share(self.0, share.0)
+	}
+
+	#[inline]
 	pub fn duplicate(&self) -> io::Result<Self> {
 		io::duplicate(self.0).map(Self)
 	}
@@ -68,6 +73,11 @@ impl Object {
 	#[inline]
 	pub fn finish_job(&self, job: &Job) -> io::Result<()> {
 		io::finish_job(self.0, job)
+	}
+
+	#[inline]
+	pub fn create_root() -> io::Result<Self> {
+		io::create_root().map(Self)
 	}
 
 	#[inline]

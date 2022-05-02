@@ -44,6 +44,10 @@ pub trait Object {
 		not_implemented()
 	}
 
+	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
+		not_implemented()
+	}
+
 	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
 		None
 	}

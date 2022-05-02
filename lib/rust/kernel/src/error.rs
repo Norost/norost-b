@@ -5,6 +5,8 @@ pub enum Error {
 	AlreadyExists = -3,
 	InvalidOperation = -4,
 	Cancelled = -5,
+	CantCreateObject = -6,
+	InvalidObject = -7,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -14,7 +16,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub fn result<T: raw::RawError>(value: T) -> Result<T> {
 	Err(match value.to_i64() {
 		// SAFETY: the value is a valid Error variant
-		e @ -5..=-1 => unsafe { core::mem::transmute(e as i8) },
+		e @ -7..=-1 => unsafe { core::mem::transmute(e as i8) },
 		-4096..=-1 => Error::Unknown,
 		_ => return Ok(value),
 	})

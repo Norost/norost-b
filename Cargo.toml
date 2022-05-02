@@ -16,6 +16,9 @@ members = [
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",
 	"lib/rust/rt",
+	"lib/rust/rt_alloc",
+	"base/init",
+	"base/jail",
 	"base/minish",
 	"base/static_http_server",
 ]

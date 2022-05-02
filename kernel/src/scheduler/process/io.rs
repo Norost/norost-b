@@ -4,7 +4,9 @@ use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTick
 use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{AnyTicketValue, JobRequest, JobResult, Object, Query, QueryResult};
+use crate::object_table::{
+	AnyTicketValue, Error, Handle, JobRequest, JobResult, Object, Query, QueryResult,
+};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::{self, NonNull};
 use core::task::Poll;
@@ -169,7 +171,10 @@ impl super::Process {
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					let object = objects.get(handle).unwrap();
+					let object = match objects.get(handle) {
+						Some(o) => o,
+						None => todo!("{:?}", handle),
+					};
 					let mut ticket = object.clone().open(path);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
@@ -234,7 +239,7 @@ impl super::Process {
 								Poll::Ready(Err(e)) => todo!(), //push_resp(e as i64),
 							}
 						}
-						None => push_resp(-1),
+						None => push_resp(Error::InvalidObject as i64),
 					}
 				}
 				Request::FINISH_JOB => {
@@ -302,10 +307,10 @@ impl super::Process {
 							match poll(&mut ticket) {
 								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 								Poll::Ready(Ok(n)) => push_resp(n as i64),
-								Poll::Ready(Err(_)) => push_resp(-1),
+								Poll::Ready(Err(e)) => push_resp(e as i64),
 							}
 						}
-						None => push_resp(-1),
+						None => push_resp(Error::InvalidObject as i64),
 					}
 				}
 				Request::POLL => {
@@ -316,19 +321,37 @@ impl super::Process {
 							match poll(&mut ticket) {
 								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 								Poll::Ready(Ok(n)) => push_resp(n as i64),
-								Poll::Ready(Err(_)) => push_resp(-1),
+								Poll::Ready(Err(e)) => push_resp(e as i64),
 							}
 						}
-						None => push_resp(-1),
+						None => push_resp(Error::InvalidObject as i64),
 					}
 				}
 				Request::CLOSE => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					push_resp(objects.remove(handle).map_or(-1, |_| 0));
+					push_resp(
+						objects
+							.remove(handle)
+							.map_or(Error::InvalidObject as i64, |_| 0),
+					);
+				}
+				Request::SHARE => {
+					let handle = unerase_handle(e.arguments_32[0]);
+					let share = unerase_handle(e.arguments_64[0] as Handle);
+					if let (Some(obj), Some(shr)) = (objects.get(handle), objects.get(share)) {
+						let mut ticket = obj.clone().share(shr);
+						match poll(&mut ticket) {
+							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+							Poll::Ready(Ok(n)) => push_resp(n as i64),
+							Poll::Ready(Err(e)) => push_resp(e as i64),
+						}
+					} else {
+						push_resp(Error::InvalidObject as i64)
+					}
 				}
 				op => {
 					warn!("Unknown I/O queue operation {}", op);
-					push_resp(-1);
+					push_resp(Error::InvalidOperation as i64);
 				}
 			}
 		}

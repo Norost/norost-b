@@ -1,5 +1,5 @@
 virtio-net net
 virtio-blk disk
-fs-fat fat disk/data
-#minish
-static_http_server
+fs-fat file disk/data
+minish
+#jail fat -- drivers/static_http_server

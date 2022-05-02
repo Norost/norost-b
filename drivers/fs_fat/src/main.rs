@@ -25,7 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		fatfs::FileSystem::new(disk, fatfs::FsOptions::new()).expect("failed to open filesystem");
 
 	// Create a new table.
-	let tbl = rt::io::base_object().create(table_name.as_bytes()).unwrap();
+	let tbl = rt::io::file_root()
+		.unwrap()
+		.create(table_name.as_bytes())
+		.unwrap();
 
 	let mut queries = driver_utils::Arena::new();
 	let mut open_files = driver_utils::Arena::new();

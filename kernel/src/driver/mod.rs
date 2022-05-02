@@ -28,10 +28,10 @@ pub unsafe fn early_init(_boot: &boot::Info) {
 /// # Safety
 ///
 /// This function may only be called once at boot time
-pub unsafe fn init(boot: &boot::Info) {
+pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 	// Do not reorder the calls!
 	unsafe {
-		acpi::init(boot);
+		acpi::init(boot, root);
 
 		#[cfg(feature = "driver-pic")]
 		pic::init();
@@ -40,6 +40,6 @@ pub unsafe fn init(boot: &boot::Info) {
 
 		apic::post_init();
 
-		uart::post_init();
+		uart::post_init(root);
 	}
 }

@@ -144,6 +144,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "init"
+version = "0.1.0"
+dependencies = [
+ "norostb_rt",
+ "norostb_rt_alloc",
+]
+
+[[package]]
+name = "jail"
+version = "0.1.0"
+dependencies = [
+ "norostb_rt",
+ "norostb_rt_alloc",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -218,6 +234,16 @@ name = "norostb_rt"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "compiler_builtins",
+ "norostb_kernel",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+]
+
+[[package]]
+name = "norostb_rt_alloc"
+version = "0.1.0"
+dependencies = [
  "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",

@@ -42,7 +42,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	kill_thread,
 	wait_thread,
 	exit,
-	undefined,
+	create_root,
 	duplicate_handle,
 	spawn_thread,
 	create_io_rings,
@@ -459,6 +459,19 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 		// SAFETY: there is no thread state to save.
 		unsafe { scheduler::next_thread() }
 	}
+}
+
+extern "C" fn create_root(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	Process::current()
+		.unwrap()
+		.add_object(Arc::new(crate::object_table::Root::new()))
+		.map_or_else(
+			|e| todo!(),
+			|h| Return {
+				status: 0,
+				value: h.try_into().unwrap(),
+			},
+		)
 }
 
 extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {

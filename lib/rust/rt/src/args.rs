@@ -22,6 +22,13 @@ static ARGS_AND_ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 static ENV: Mutex<(bool, BTreeMap<Cow<'static, [u8]>, Cow<'static, [u8]>>)> =
 	Mutex::new((false, BTreeMap::new()));
 
+pub const ID_STDIN: u32 = 0;
+pub const ID_STDOUT: u32 = 1;
+pub const ID_STDERR: u32 = 2;
+pub const ID_FILE_ROOT: u32 = 3;
+pub const ID_NET_ROOT: u32 = 4;
+pub const ID_PROCESS_ROOT: u32 = 5;
+
 pub struct Args {
 	count: usize,
 	ptr: NonNull<u8>,
@@ -160,9 +167,33 @@ impl Env {
 
 /// # Safety
 ///
-/// Must be called only once during runtime initialization.
-pub(crate) unsafe fn init(args_and_env: *const u8) {
-	ARGS_AND_ENV.store(args_and_env as _, Ordering::Relaxed)
+/// Must be called exactly once during runtime initialization.
+pub(crate) unsafe fn init(arguments: *const u8) {
+	// Parse handles
+	unsafe {
+		let mut arguments = arguments.cast::<u32>();
+		let count = *arguments;
+		arguments = arguments.wrapping_add(1);
+		for _ in 0..count {
+			let ty = *arguments;
+			arguments = arguments.wrapping_add(1);
+			let handle = *arguments;
+			let globals = crate::globals::GLOBALS.get_mut();
+			match ty {
+				ID_STDIN => globals.stdin_handle = handle,
+				ID_STDOUT => globals.stdout_handle = handle,
+				ID_STDERR => globals.stderr_handle = handle,
+				ID_FILE_ROOT => globals.file_root_handle = handle,
+				ID_NET_ROOT => globals.net_root_handle = handle,
+				ID_PROCESS_ROOT => globals.process_root_handle = handle,
+				_ => {} // Just ignore.
+			}
+			arguments = arguments.wrapping_add(1);
+		}
+
+		// Store pointer for later use
+		ARGS_AND_ENV.store(arguments.cast::<u8>() as *mut _, Ordering::Relaxed)
+	}
 }
 
 unsafe fn get_str<'a>(ptr: *mut u8) -> (&'a [u8], *mut u8) {

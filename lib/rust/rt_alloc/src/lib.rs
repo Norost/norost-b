@@ -1,20 +1,20 @@
 //! # Global allocator & memory mapping utilities.
-//!
-//! The current allocator is a wrapper around `slabmalloc`.
+
+#![no_std]
+#![feature(allocator_api)]
+#![feature(nonnull_slice_from_raw_parts)]
+#![feature(slice_ptr_get, slice_ptr_len)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use core::alloc::{self, AllocError, Allocator as IAllocator, Layout};
 use core::mem;
 use core::ptr::{self, NonNull};
 use norostb_kernel::syscall::{self, RWX};
 
-/// The default global allocator
-// No weak linkage is necessary yet as it's a ZST.
-pub static ALLOCATOR: Allocator = Allocator { _private: () };
-
 /// An allocator that gets its memory from the OS.
-pub struct Allocator {
-	_private: (),
-}
+///
+/// All instances use the same memory pool.
+pub struct Allocator;
 
 /// Whether we should allocate pages directly from the os or rely on slabmalloc
 /// for the given layout.

@@ -1,7 +1,7 @@
 use super::{AllocateError, AllocateHints, Page, PageFrame};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, vec::Vec};
-use core::num::NonZeroUsize;
+use core::{num::NonZeroUsize, ops::Range};
 
 /// An allocation of page frames.
 pub struct OwnedPageFrames {
@@ -18,6 +18,7 @@ impl OwnedPageFrames {
 			size.get(),
 			|f| {
 				unsafe {
+					assert_eq!(f.p2size, 0, "TODO");
 					f.base.as_ptr().write_bytes(0, 1 << f.p2size);
 				}
 				frames.push(f);
@@ -34,6 +35,18 @@ impl OwnedPageFrames {
 		for f in self.frames.iter() {
 			unsafe {
 				f.base.as_ptr().cast::<Page>().write_bytes(0, 1 << f.p2size);
+			}
+		}
+	}
+
+	pub unsafe fn write(&self, start: usize, data: &[u8]) {
+		dbg!(start, data.len());
+		// FIXME don't assume page frames are 0 p2size each.
+		for (i, b) in (start..).zip(data) {
+			let frame = &self.frames[i / Page::SIZE];
+			// FIXME unsynchronized writes are UB.
+			unsafe {
+				*frame.base.as_ptr().cast::<u8>().add(i % Page::SIZE) = *b;
 			}
 		}
 	}

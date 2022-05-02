@@ -38,6 +38,7 @@ where
 	/// Somewhat intelligent read function that accounts for backspace.
 	fn read(&mut self, data: &mut [u8]) -> io::Result<usize> {
 		match self.delete_line() {
+			//Ok(_) => unsafe { core::arch::asm!("ud2") },
 			Ok(_) => (),
 			Err(Error::Io(e)) => return Err(e),
 			Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
