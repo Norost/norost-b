@@ -27,12 +27,12 @@ impl DerefMut for DmaPacket {
 }
 
 struct DevInner<'d> {
-	virtio: virtio_net::Device<'d>,
-	rx_buffer: DmaPacket,
-	tx_buffer: DmaPacket,
+	virtio: RefCell<virtio_net::Device<'d>>,
+	rx_buffer: RefCell<DmaPacket>,
+	tx_buffer: RefCell<DmaPacket>,
 }
 
-pub struct Dev<'d>(RefCell<DevInner<'d>>);
+pub struct Dev<'d>(DevInner<'d>);
 
 impl<'d> Dev<'d> {
 	pub fn new(mut virtio: virtio_net::Device<'d>) -> Self {
@@ -62,11 +62,11 @@ impl<'d> Dev<'d> {
 		let rx_phys = rx_buffer.packet_phys;
 		virtio.insert_buffer(&mut rx_buffer, rx_phys).unwrap();
 
-		Self(RefCell::new(DevInner {
-			virtio,
-			rx_buffer,
-			tx_buffer,
-		}))
+		Self(DevInner {
+			virtio: RefCell::new(virtio),
+			rx_buffer: RefCell::new(rx_buffer),
+			tx_buffer: RefCell::new(tx_buffer),
+		})
 	}
 }
 
@@ -75,14 +75,15 @@ impl<'a, 'd: 'a> Device<'a> for Dev<'d> {
 	type TxToken = DevTxToken<'a, 'd>;
 
 	fn receive(&'a mut self) -> Option<(Self::RxToken, Self::TxToken)> {
-		let mut dev = self.0.borrow_mut();
-		let dev = &mut *dev;
 		unsafe {
-			let n = dev
+			let n = self
+				.0
 				.virtio
+				.borrow_mut()
 				.receive(|_, phys| {
 					assert_eq!(
-						phys.base, dev.rx_buffer.packet_phys,
+						phys.base,
+						self.0.rx_buffer.borrow().packet_phys,
 						"rx packet region doesn't match"
 					);
 				})
@@ -115,11 +116,15 @@ impl<'a, 'd: 'a> RxToken for DevRxToken<'a, 'd> {
 	where
 		F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
 	{
-		let mut dev = self.0 .0.borrow_mut();
-		let dev = &mut *dev;
-		let r = f(&mut dev.rx_buffer.data);
-		let phys = dev.rx_buffer.packet_phys;
-		dev.virtio.insert_buffer(&mut dev.rx_buffer, phys).unwrap();
+		let mut rx_buffer = self.0 .0.rx_buffer.borrow_mut();
+		let r = f(&mut rx_buffer.data);
+		let phys = rx_buffer.packet_phys;
+		self.0
+			 .0
+			.virtio
+			.borrow_mut()
+			.insert_buffer(&mut rx_buffer, phys)
+			.unwrap();
 		r
 	}
 }
@@ -131,14 +136,16 @@ impl<'a, 'd: 'a> TxToken for DevTxToken<'a, 'd> {
 	where
 		F: FnOnce(&mut [u8]) -> smoltcp::Result<R>,
 	{
-		let mut dev = self.0 .0.borrow_mut();
-		let dev = &mut *dev;
-		let r = f(&mut dev.tx_buffer.data[..len]);
-		let phys = dev.tx_buffer.packet_phys;
+		let mut tx_buffer = self.0 .0.tx_buffer.borrow_mut();
+		let r = f(&mut tx_buffer.data[..len]);
+		let phys = tx_buffer.packet_phys;
 		unsafe {
-			dev.virtio
+			self.0
+				 .0
+				.virtio
+				.borrow_mut()
 				.send(
-					&mut dev.tx_buffer,
+					&mut tx_buffer,
 					PhysRegion {
 						base: phys,
 						size: virtio_net::Packet::size_with_data(len),
