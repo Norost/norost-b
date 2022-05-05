@@ -73,10 +73,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	use smoltcp::{iface, socket, time};
 	let dev = dev::Dev::new(dev);
 	let mut ip_addrs = [wire::IpCidr::new(wire::Ipv4Address::UNSPECIFIED.into(), 0)];
-	let mut sockets = [iface::SocketStorage::EMPTY; 8];
+	let mut sockets = Vec::new();
+	sockets.resize_with(1024, || iface::SocketStorage::EMPTY);
 	let mut neighbors = [None; 8];
 	let mut routes = [None; 8];
-	let mut iface = iface::InterfaceBuilder::new(dev, &mut sockets[..])
+	let mut iface = iface::InterfaceBuilder::new(dev, sockets)
 		.ip_addrs(&mut ip_addrs[..])
 		.hardware_addr(wire::EthernetAddress(*addr.as_ref()).into())
 		.neighbor_cache(iface::NeighborCache::new(&mut neighbors[..]))
@@ -299,7 +300,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					match &mut sockets[job.handle] {
 						Socket::TcpListener(_) => todo!(),
 						Socket::TcpConnection(sock) => {
-							sock.write(data, &mut iface).unwrap();
+							let l = sock.write(data, &mut iface).unwrap();
+							job.operation_size = l.try_into().unwrap();
 						}
 						Socket::Udp(sock) => {
 							todo!("address")

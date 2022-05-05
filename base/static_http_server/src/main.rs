@@ -30,8 +30,13 @@ fn main() {
 				},
 				Err(_) => bad_request(&mut buf2, false),
 			};
-			let _ = c.write(header);
-			let _ = c.write(&body);
+			let mut wr = |mut data: &[u8]| {
+				while let Some(Ok(n)) = (!data.is_empty()).then(|| c.write(data)) {
+					data = &data[n..];
+				}
+			};
+			wr(header);
+			wr(&body);
 			if !keep_alive {
 				break;
 			}
