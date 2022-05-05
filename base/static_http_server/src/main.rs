@@ -104,6 +104,8 @@ fn create_response(
 			.unwrap()
 			.add_header("content-length", num_to_str(body.len(), &mut l))
 			.unwrap()
+			.add_header("connection", "close") // TODO
+			.unwrap()
 			.finish()
 			.0,
 		body,
