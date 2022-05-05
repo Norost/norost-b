@@ -44,22 +44,34 @@ fn handle_client<'a>(
 	request: mhttp::RequestParser,
 	buf: &'a mut [u8],
 ) -> (&'a [u8], Cow<'static, [u8]>, bool) {
+	println!("{:?}", request.path);
 	let keep_alive = request.header("connection") == Some("keep-alive");
 	match request.header("host") {
 		None => bad_request(buf, keep_alive),
 		Some(_) if !request.path.starts_with("/") => bad_request(buf, keep_alive),
-		Some(_) => match std::fs::read(&request.path[1..]) {
-			Ok(v) => create_response(buf, mhttp::Status::Ok, v, keep_alive),
-			Err(e) => {
-				use mhttp::Status::*;
-				match e.kind() {
-					ErrorKind::NotFound => create_response(buf, NotFound, NOT_FOUND, keep_alive),
-					_ => {
-						create_response(buf, InternalServerError, INTERNAL_SERVER_ERROR, keep_alive)
+		Some(_) => {
+			let path = match &request.path[1..] {
+				"" => "index",
+				p => p,
+			};
+			match std::fs::read(path) {
+				Ok(v) => create_response(buf, mhttp::Status::Ok, v, keep_alive),
+				Err(e) => {
+					use mhttp::Status::*;
+					match e.kind() {
+						ErrorKind::NotFound => {
+							create_response(buf, NotFound, NOT_FOUND, keep_alive)
+						}
+						_ => create_response(
+							buf,
+							InternalServerError,
+							INTERNAL_SERVER_ERROR,
+							keep_alive,
+						),
 					}
 				}
 			}
-		},
+		}
 	}
 }
 
