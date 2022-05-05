@@ -82,7 +82,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	use multiboot2::bootinfo as bi;
 
 	let mut kernel = None;
-	let mut init = None;
 	let mut rsdp = None;
 
 	let (boot_start, boot_end) = unsafe {
@@ -99,7 +98,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// no reallocations are necessary.
 	let boot_info = || unsafe { bi::BootInfo::new(arg) };
 
-	// Find kernel, init & RSDP but just count amount of drivers & ignore the rest
+	// Find kernel & RSDP but just count amount of drivers & ignore the rest
 	for e in boot_info() {
 		match e {
 			bi::Info::Unknown(_) => {}
@@ -107,10 +106,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				b"kernel" => {
 					assert!(kernel.is_none(), "kernel has already been specified");
 					kernel = Some(m);
-				}
-				b"init" => {
-					assert!(init.is_none(), "init has already been specified");
-					init = Some(m);
 				}
 				s if s.starts_with(b"driver ") || s.starts_with(b"driver\t") => {
 					info.drivers_len += 1
@@ -126,8 +121,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let _ = writeln!(Stdout, "Kernel: {:#x} - {:#x}", kernel.start, kernel.end);
 	info.rsdp.write(*rsdp.unwrap());
 
-	// Only parse drivers so we can exclude them from the final memory regions & we need
-	// them for init.
+	// Only parse drivers so we can exclude them from the final memory regions
 	let (offset, drivers) = alloc_slice(info.drivers_len.into());
 	info.drivers_offset = offset;
 	let mut i = 0;
@@ -149,52 +143,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 			}
 		}
 	}
-
-	// Parse init programs
-	let init = init.expect("no init specified");
-	let text = unsafe {
-		slice::from_raw_parts(
-			init.start as *const u8,
-			(init.end - init.start).try_into().unwrap(),
-		)
-	};
-	let lines_iter = || {
-		text.split(|c| *c == b'\n')
-			.flat_map(|l| l.split(|c| *c == b'#').next())
-			.map(|l| l.trim_ascii())
-			.filter(|l| !l.is_empty())
-	};
-	let (offset, init) = alloc_slice::<info::InitProgram>(lines_iter().count());
-	info.init_offset = offset;
-	info.init_len = init.len().try_into().unwrap();
-	for (line, init) in lines_iter().zip(init) {
-		// Split into words
-		let mut words = line
-			.split(|c| b"\t ".contains(c))
-			.filter(|l| !l.is_empty())
-			.peekable();
-
-		// Get program name & find the corresponding index.
-		let program = words.next().expect("no program name specified");
-		init.driver = drivers
-			.iter()
-			.position(|d| get_alloc_str(d.name_offset) == program)
-			.unwrap_or_else(|| panic!("no matching driver {:?}", from_utf8(program)))
-			.try_into()
-			.unwrap();
-
-		// Parse program arguments
-		// We rely on the fact that alloc() is a bump allocator.
-		for arg in words {
-			let s = alloc_str(arg);
-			if init.args_offset == 0 {
-				init.args_offset = s;
-			}
-			init.args_len += 1;
-		}
-	}
-
-	assert_ne!(info.init_len, 0, "no init programs specified");
 
 	// Determine free memory regions
 	let iter_regions = |callback: &mut dyn FnMut(info::MemoryRegion)| {

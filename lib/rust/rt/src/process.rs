@@ -1,49 +1,67 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-use crate::{args, io, Error, Handle, Object};
+use crate::{args, io, Object, RefObject};
 use alloc::vec::Vec;
 
 pub struct Process(Object);
 
 impl Process {
 	pub fn new<'a>(
+		process_root: &Object,
 		binary_elf: &Object,
-		objects: impl Iterator<Item = (u32, Handle)>,
-		args: impl Iterator<Item = &'a [u8]> + ExactSizeIterator,
-		env: impl Iterator<Item = (&'a [u8], &'a [u8])> + ExactSizeIterator,
+		objects: impl Iterator<Item = (u32, RefObject<'a>)>,
+		args: impl Iterator<Item = impl AsRef<[u8]>>,
+		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
 	) -> io::Result<Self> {
 		let f = |n| u16::try_from(n).unwrap().to_ne_bytes();
-		let proc = io::process_root()
-			.ok_or(Error::InvalidOperation)?
-			.create(b"process/new")?;
+		let proc = process_root.create(b"new")?;
+		let mut stack = Vec::new();
 
 		// binary
 		proc.open(b"binary")?.share(&binary_elf)?;
-		let mut stack = Vec::new();
 
 		// objects
-		let proc_objects = proc.open(b"objects")?;
-		for (ty, h) in objects {
-			let t = u32::try_from(io::share(proc_objects.as_raw(), h)?).unwrap();
-			stack.extend(ty.to_ne_bytes());
-			stack.extend(t.to_ne_bytes());
+		{
+			let proc_objects = proc.open(b"objects")?;
+			let i = stack.len();
+			let mut l = 0u32;
+			stack.extend(0u32.to_ne_bytes());
+			for (ty, h) in objects {
+				let t = u32::try_from(io::share(proc_objects.as_raw(), h.as_raw())?).unwrap();
+				stack.extend(ty.to_ne_bytes());
+				stack.extend(t.to_ne_bytes());
+				l += 1;
+			}
+			stack[i..i + 4].copy_from_slice(&l.to_ne_bytes());
 		}
 
 		// args
-		stack.extend(f(args.len()));
-		for a in args {
-			stack.extend(f(a.len()));
-			stack.extend(a);
+		{
+			let i = stack.len();
+			let mut l = 0;
+			stack.extend(f(0));
+			for a in args {
+				stack.extend(f(a.as_ref().len()));
+				stack.extend(a.as_ref());
+				l += 1;
+			}
+			stack[i..i + 2].copy_from_slice(&f(l));
 		}
 
 		// env
-		stack.extend(f(env.len()));
-		for (k, v) in env {
-			stack.extend(f(k.len()));
-			stack.extend(k);
-			stack.extend(f(v.len()));
-			stack.extend(v);
+		{
+			let i = stack.len();
+			let mut l = 0;
+			stack.extend(f(0));
+			for (k, v) in env {
+				stack.extend(f(k.as_ref().len()));
+				stack.extend(k.as_ref());
+				stack.extend(f(v.as_ref().len()));
+				stack.extend(v.as_ref());
+				l += 1;
+			}
+			stack[i..i + 2].copy_from_slice(&f(l));
 		}
 
 		proc.open(b"stack")?.write(&stack)?;
@@ -57,29 +75,29 @@ impl Process {
 	}
 
 	#[inline]
-	pub fn default_handles() -> impl Iterator<Item = (u32, Handle)> {
+	pub fn default_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
 		Self::default_stdio_handles().chain(Self::default_root_handles())
 	}
 
 	#[inline]
-	pub fn default_root_handles() -> impl Iterator<Item = (u32, Handle)> {
+	pub fn default_root_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
 		[
 			(args::ID_FILE_ROOT, io::file_root()),
 			(args::ID_NET_ROOT, io::net_root()),
 			(args::ID_PROCESS_ROOT, io::process_root()),
 		]
 		.into_iter()
-		.flat_map(|(ty, o)| o.map(|o| (ty, o.as_raw())))
+		.flat_map(|(ty, h)| h.map(|h| (ty, h)))
 	}
 
 	#[inline]
-	pub fn default_stdio_handles() -> impl Iterator<Item = (u32, Handle)> {
+	pub fn default_stdio_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
 		[
 			(args::ID_STDIN, io::stdin()),
 			(args::ID_STDOUT, io::stdout()),
 			(args::ID_STDERR, io::stderr()),
 		]
 		.into_iter()
-		.flat_map(|(ty, o)| o.map(|o| (ty, o.as_raw())))
+		.flat_map(|(ty, h)| h.map(|h| (ty, h)))
 	}
 }

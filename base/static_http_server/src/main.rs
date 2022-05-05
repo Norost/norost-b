@@ -10,9 +10,6 @@ const NOT_FOUND: &[u8] = b"<!DOCTYPE html><h1>404 Not Found</h1>";
 const INTERNAL_SERVER_ERROR: &[u8] = b"<!DOCTYPE html><h1>500 Internal Server Error</h1>";
 
 fn main() {
-	eprintln!("yield because OS is kinda shit rn");
-	std::thread::yield_now();
-
 	eprintln!("creating listener");
 	let listener = TcpListener::bind("0.0.0.0:80").unwrap();
 	eprintln!("accepting incoming connections");

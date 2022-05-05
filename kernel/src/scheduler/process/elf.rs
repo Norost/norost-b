@@ -92,7 +92,7 @@ impl MemoryObject for MemorySlice {
 impl super::Process {
 	pub fn from_elf(
 		data_object: Arc<dyn MemoryObject>,
-		stack_frames: OwnedPageFrames,
+		stack_frames: Option<OwnedPageFrames>,
 		stack_offset: usize,
 		objects: arena::Arena<Arc<dyn Object>, u8>,
 	) -> Result<Arc<Self>, ElfError> {
@@ -231,16 +231,20 @@ impl super::Process {
 		}
 
 		// Map in stack
-		let stack = address_space
-			.map_object(None, Box::new(stack_frames), RWX::RW, slf.hint_color)
-			.map_err(ElfError::MapError)?;
-		let stack = stack.as_ptr().wrapping_add(stack_offset);
+		let stack = if let Some(stack_frames) = stack_frames {
+			let stack = address_space
+				.map_object(None, Box::new(stack_frames), RWX::RW, slf.hint_color)
+				.map_err(ElfError::MapError)?;
+			stack.as_ptr().wrapping_add(stack_offset) as usize
+		} else {
+			0
+		};
 
 		drop(address_space);
 
 		let slf = Arc::new(slf);
 
-		slf.spawn_thread(header.entry.try_into().unwrap(), stack as usize)
+		slf.spawn_thread(header.entry.try_into().unwrap(), stack)
 			.unwrap();
 
 		Ok(slf)

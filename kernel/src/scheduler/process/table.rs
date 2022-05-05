@@ -69,7 +69,7 @@ impl Object for ProcessBuilder {
 			Ok({
 				super::Process::from_elf(
 					self.bin.take().unwrap(),
-					self.stack.take().take().unwrap(),
+					self.stack.take().take(),
 					0,
 					self.objects.take(),
 				)
@@ -102,12 +102,10 @@ struct AddObject {
 
 impl Object for AddObject {
 	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
-		if let Some(object) = object.memory_object(0) {
-			self.builder.bin.set(Some(object.into()));
-			Ticket::new_complete(Ok(0))
-		} else {
-			todo!()
-		}
+		let mut objs = self.builder.objects.take();
+		let h = objs.insert(object.clone());
+		self.builder.objects.set(objs);
+		Ticket::new_complete(Ok(super::erase_handle(h).into()))
 	}
 }
 

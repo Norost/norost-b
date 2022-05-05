@@ -40,7 +40,6 @@ impl OwnedPageFrames {
 	}
 
 	pub unsafe fn write(&self, start: usize, data: &[u8]) {
-		dbg!(start, data.len());
 		// FIXME don't assume page frames are 0 p2size each.
 		for (i, b) in (start..).zip(data) {
 			let frame = &self.frames[i / Page::SIZE];

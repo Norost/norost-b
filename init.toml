@@ -1,0 +1,32 @@
+[program.minish]
+path = "minish"
+target = "user"
+file_root = ""
+
+[program.fs_fat]
+path = "fs-fat"
+args = [ "file", "disk/data" ]
+target = "file"
+after = [ "disk/data" ]
+file_root = ""
+
+[program.virtio_blk]
+path = "virtio-blk"
+args = [ "disk" ]
+target = "disk"
+file_root = ""
+
+[program.virtio_net]
+path = "virtio-net"
+args = [ "net" ]
+target = "net"
+file_root = ""
+
+[program.static_http_server]
+#disabled = true
+#path = "jail"
+path = "static_http_server"
+#args = [ "fat", "--", "drivers/static_http_server" ]
+after = [ "file", "net" ]
+file_root = "file"
+net_root = "net"

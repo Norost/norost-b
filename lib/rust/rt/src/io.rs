@@ -1,9 +1,13 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-use crate::{table::Object, tls};
+use crate::{tls, RefObject};
 use alloc::{boxed::Box, vec::Vec};
-use core::mem::{self, MaybeUninit};
+use core::{
+	mem::{self, MaybeUninit},
+	ptr::NonNull,
+	sync::atomic::Ordering,
+};
 use norostb_kernel::{error::result, io::Queue, syscall};
 use norostb_kernel::{error::Error, Handle};
 
@@ -12,28 +16,35 @@ pub use norostb_kernel::{
 	io::{Job, ObjectInfo, Request, Response, SeekFrom},
 };
 
-#[inline(always)]
-fn transmute_handle_to_object(handle: &Handle) -> Option<&Object> {
-	// SAFETY: an object is a simple wrapper around a handle
-	unsafe { (handle != &Handle::MAX).then(|| mem::transmute(handle)) }
-}
-
 macro_rules! transmute_handle {
-	($fn:ident -> $handle:ident) => {
+	($fn:ident, $set_fn:ident -> $handle:ident) => {
 		#[inline(always)]
-		pub fn $fn() -> Option<&'static Object> {
+		pub fn $fn() -> Option<RefObject<'static>> {
+			let h = crate::globals::GLOBALS
+				.get_ref()
+				.$handle
+				.load(Ordering::Relaxed);
+			(h != Handle::MAX).then(|| RefObject::from_raw(h))
+		}
+
+		#[inline(always)]
+		pub fn $set_fn(h: Option<RefObject<'static>>) {
+			let h = h.map_or(Handle::MAX, |h| h.into_raw());
 			// SAFETY: $handle is only set once at the start of the program
-			unsafe { transmute_handle_to_object(&crate::globals::GLOBALS.get_ref().$handle) }
+			crate::globals::GLOBALS
+				.get_ref()
+				.$handle
+				.store(h, Ordering::Relaxed);
 		}
 	};
 }
 
-transmute_handle!(stdin -> stdin_handle);
-transmute_handle!(stdout -> stdout_handle);
-transmute_handle!(stderr -> stderr_handle);
-transmute_handle!(file_root -> file_root_handle);
-transmute_handle!(net_root -> net_root_handle);
-transmute_handle!(process_root -> process_root_handle);
+transmute_handle!(stdin, set_stdin -> stdin_handle);
+transmute_handle!(stdout, set_stdout -> stdout_handle);
+transmute_handle!(stderr, set_stderr -> stderr_handle);
+transmute_handle!(file_root, set_file_root -> file_root_handle);
+transmute_handle!(net_root, set_net_root -> net_root_handle);
+transmute_handle!(process_root, set_process_root -> process_root_handle);
 
 #[derive(Copy, Clone)]
 pub struct IoSlice<'a>(&'a [u8]);
@@ -98,7 +109,7 @@ pub(crate) unsafe extern "C" fn queue_dtor(ptr: *mut ()) {
 /// This function may only be called once.
 ///
 /// TLS storage must be initialized with [`crate::tls::init`].
-pub(crate) unsafe fn init(_arguments: *const u8) {
+pub(crate) unsafe fn init(_arguments: Option<NonNull<u8>>) {
 	let (k, v) = create_for_thread()
 		.ok()
 		.and_then(|mut it| it.next())

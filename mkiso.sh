@@ -15,7 +15,7 @@ mkdir -p isodir/boot/grub isodir/drivers
 cp target/$TARGET_KERNEL/release/nora isodir/boot/nora
 cp target/$TARGET_BOOT/release/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
-cp init isodir/init
+cp init.toml isodir/init.toml
 
 install () {
 	(cd $1/$2 && cargo build --release --target $TARGET_USER)

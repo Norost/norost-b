@@ -1,5 +1,8 @@
 use super::io;
-use core::mem::{self, MaybeUninit};
+use core::{
+	marker::PhantomData,
+	mem::{self, MaybeUninit},
+};
 
 pub use norostb_kernel::{
 	io::{Job, ObjectInfo},
@@ -92,6 +95,14 @@ impl Object {
 		h
 	}
 
+	#[inline(always)]
+	pub fn as_ref_object(&self) -> RefObject<'_> {
+		RefObject {
+			handle: self.0,
+			_marker: PhantomData,
+		}
+	}
+
 	#[inline]
 	pub const fn from_raw(handle: Handle) -> Self {
 		Self(handle)
@@ -101,5 +112,41 @@ impl Object {
 impl Drop for Object {
 	fn drop(&mut self) {
 		io::close(self.0)
+	}
+}
+
+/// An object by "reference" but with less indirection.
+#[derive(Clone, Copy)]
+pub struct RefObject<'a> {
+	handle: Handle,
+	_marker: PhantomData<&'a Object>,
+}
+
+impl<'a> RefObject<'a> {
+	#[inline]
+	pub const fn from_raw(handle: Handle) -> Self {
+		Self {
+			handle,
+			_marker: PhantomData,
+		}
+	}
+
+	#[inline]
+	pub const fn as_raw(&self) -> Handle {
+		self.handle
+	}
+
+	#[inline]
+	pub const fn into_raw(self) -> Handle {
+		self.handle
+	}
+}
+
+impl<'a> core::ops::Deref for RefObject<'a> {
+	type Target = Object;
+
+	fn deref(&self) -> &Self::Target {
+		// SAFETY: Object is a simple wrapper around the handle.
+		unsafe { mem::transmute(&self.handle) }
 	}
 }

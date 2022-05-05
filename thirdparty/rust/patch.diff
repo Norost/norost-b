@@ -1709,10 +1709,10 @@ index 00000000000..25514c2322f
 +}
 diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
 new file mode 100644
-index 00000000000..a086a1a3084
+index 00000000000..1af6994d09c
 --- /dev/null
 +++ b/library/std/src/sys/norostb/process.rs
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,244 @@
 +use crate::ffi::{OsStr, OsString};
 +use crate::fmt;
 +use crate::io;
@@ -1809,6 +1809,7 @@ index 00000000000..a086a1a3084
 +        _needs_stdin: bool,
 +    ) -> io::Result<(Process, StdioPipes)> {
 +        rt::Process::new(
++            &*rt::io::process_root().ok_or(super::ERR_UNSET)?,
 +            &rt::io::file_root()
 +                .ok_or(super::ERR_UNSET)?
 +                .open(self.program.as_bytes())
@@ -2032,10 +2033,10 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..189daacc6c4
+index 00000000000..855ddc4330e
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,65 @@
 +use crate::io;
 +use norostb_rt as rt;
 +
@@ -2065,7 +2066,6 @@ index 00000000000..189daacc6c4
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        unsafe { core::arch::asm!("int3") }
 +        rt::io::stdout().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
 +    }
 +

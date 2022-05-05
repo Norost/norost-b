@@ -7,8 +7,6 @@ pub struct Info {
 	pub memory_regions_len: u16,
 	pub drivers_offset: u16,
 	pub drivers_len: u16,
-	pub init_offset: u16,
-	pub init_len: u16,
 	_padding: u32,
 	#[cfg(target_arch = "x86_64")]
 	pub rsdp: rsdp::Rsdp,
@@ -35,16 +33,6 @@ impl Info {
 		}
 	}
 
-	/// All init programs & arguments to run.
-	pub fn init_programs(&self) -> impl Iterator<Item = InitProgram<'_>> {
-		unsafe {
-			let b = (self as *const _ as *const u8).add(self.init_offset.into());
-			core::slice::from_raw_parts(b.cast(), usize::from(self.init_len))
-				.iter()
-				.map(|inner: &RawInitProgram| InitProgram { info: self, inner })
-		}
-	}
-
 	/// Get a byte string from the buffer.
 	///
 	/// A byte string is prefixed with a single byte that indicates its length.
@@ -66,7 +54,6 @@ impl fmt::Debug for Info {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
 			.field("drivers", &DebugIter::new(self.drivers()))
-			.field("init_programs", &DebugIter::new(self.init_programs()))
 			.field("rsdp", &self.rsdp)
 			.finish()
 	}

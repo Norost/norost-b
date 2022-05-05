@@ -30,21 +30,27 @@ pub const ID_NET_ROOT: u32 = 4;
 pub const ID_PROCESS_ROOT: u32 = 5;
 
 pub struct Args {
-	count: usize,
-	ptr: NonNull<u8>,
+	count: u16,
+	ptr: *const u8,
 }
 
 impl Args {
 	pub fn new() -> Self {
-		unsafe {
-			let ptr = NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed))
-				.expect("No arguments were set")
-				.cast::<u16>();
-			Args {
-				count: usize::from(ptr.as_ptr().read_unaligned()),
-				ptr: NonNull::new(ptr.as_ptr().add(1).cast()).unwrap(),
-			}
-		}
+		NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed)).map_or(
+			Self {
+				count: 0,
+				ptr: ptr::null(),
+			},
+			|ptr| {
+				let ptr = ptr.cast::<u16>();
+				unsafe {
+					Self {
+						count: ptr.as_ptr().read_unaligned(),
+						ptr: ptr.as_ptr().add(1).cast(),
+					}
+				}
+			},
+		)
 	}
 
 	/// This method is used by Rust's standard library as Args is a [`DoubleEndedIterator`] for
@@ -53,7 +59,7 @@ impl Args {
 	pub fn next_back(&mut self) -> Option<&'static [u8]> {
 		self.count.checked_sub(1).map(|c| {
 			// Very inefficient but w/e, it shouldn't matter.
-			let args = Args {
+			let args = Self {
 				count: self.count,
 				ptr: self.ptr,
 			};
@@ -84,21 +90,21 @@ impl Iterator for Args {
 		self.count.checked_sub(1).map(|c| {
 			self.count = c;
 			unsafe {
-				let (val, ptr) = get_str(self.ptr.as_ptr());
-				self.ptr = NonNull::new(ptr).unwrap();
+				let (val, ptr) = get_str(self.ptr);
+				self.ptr = ptr;
 				val
 			}
 		})
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		(self.count, Some(self.count))
+		(self.len(), Some(self.len()))
 	}
 }
 
 impl ExactSizeIterator for Args {
 	fn len(&self) -> usize {
-		self.count
+		usize::from(self.count)
 	}
 }
 
@@ -123,15 +129,17 @@ impl Env {
 			let mut args = Args::new();
 			(&mut args).last();
 			// Load all env variables in a map so we can easily modify & remove variables.
-			unsafe {
-				let ptr = args.ptr.as_ptr().cast::<u16>();
-				let count = usize::from(ptr.read_unaligned());
-				let mut ptr = ptr.add(1).cast::<u8>();
-				for _ in 0..count {
-					let (key, p) = get_str(ptr);
-					let (val, p) = get_str(p);
-					map.1.insert(key.into(), val.into());
-					ptr = p;
+			if args.ptr != core::ptr::null() {
+				unsafe {
+					let ptr = args.ptr.cast::<u16>();
+					let count = usize::from(ptr.read_unaligned());
+					let mut ptr = ptr.add(1).cast::<u8>();
+					for _ in 0..count {
+						let (key, p) = get_str(ptr);
+						let (val, p) = get_str(p);
+						map.1.insert(key.into(), val.into());
+						ptr = p;
+					}
 				}
 			}
 			map.0 = true;
@@ -168,24 +176,25 @@ impl Env {
 /// # Safety
 ///
 /// Must be called exactly once during runtime initialization.
-pub(crate) unsafe fn init(arguments: *const u8) {
+pub(crate) unsafe fn init(arguments: Option<NonNull<u8>>) {
+	let Some(arguments) = arguments else { return };
 	// Parse handles
 	unsafe {
-		let mut arguments = arguments.cast::<u32>();
+		let mut arguments = arguments.as_ptr().cast::<u32>();
 		let count = *arguments;
 		arguments = arguments.wrapping_add(1);
 		for _ in 0..count {
 			let ty = *arguments;
 			arguments = arguments.wrapping_add(1);
 			let handle = *arguments;
-			let globals = crate::globals::GLOBALS.get_mut();
+			let globals = crate::globals::GLOBALS.get_ref();
 			match ty {
-				ID_STDIN => globals.stdin_handle = handle,
-				ID_STDOUT => globals.stdout_handle = handle,
-				ID_STDERR => globals.stderr_handle = handle,
-				ID_FILE_ROOT => globals.file_root_handle = handle,
-				ID_NET_ROOT => globals.net_root_handle = handle,
-				ID_PROCESS_ROOT => globals.process_root_handle = handle,
+				ID_STDIN => globals.stdin_handle.store(handle, Ordering::Relaxed),
+				ID_STDOUT => globals.stdout_handle.store(handle, Ordering::Relaxed),
+				ID_STDERR => globals.stderr_handle.store(handle, Ordering::Relaxed),
+				ID_FILE_ROOT => globals.file_root_handle.store(handle, Ordering::Relaxed),
+				ID_NET_ROOT => globals.net_root_handle.store(handle, Ordering::Relaxed),
+				ID_PROCESS_ROOT => globals.process_root_handle.store(handle, Ordering::Relaxed),
 				_ => {} // Just ignore.
 			}
 			arguments = arguments.wrapping_add(1);
@@ -196,7 +205,7 @@ pub(crate) unsafe fn init(arguments: *const u8) {
 	}
 }
 
-unsafe fn get_str<'a>(ptr: *mut u8) -> (&'a [u8], *mut u8) {
+unsafe fn get_str<'a>(ptr: *const u8) -> (&'a [u8], *const u8) {
 	let len = usize::from(unsafe { ptr.cast::<u16>().read_unaligned() });
 	let ptr = ptr.wrapping_add(2);
 	(

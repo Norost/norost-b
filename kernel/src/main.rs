@@ -79,94 +79,34 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	scheduler::init(&root);
 
-	let drivers = boot_info
-		.drivers()
-		.inspect(|d| {
-			// SAFETY: only one thread is running at the moment and there are no other
-			// mutable references to DRIVERS.
-			unsafe {
-				DRIVERS.insert(d.name().into(), Driver(d.as_slice()));
-			}
-		})
-		.map(|d| Arc::new(Driver(unsafe { d.as_slice() })))
-		.collect::<alloc::vec::Vec<_>>();
-
-	let stdout = Arc::new(driver::uart::UartId::new(0));
-
-	for program in boot_info.init_programs() {
-		let driver = drivers[usize::from(program.driver())].clone();
-		let mut stack = OwnedPageFrames::new(
-			NonZeroUsize::new(1).unwrap(),
-			memory::frame::AllocateHints {
-				address: 0 as _,
-				color: 0,
-			},
-		)
-		.unwrap();
+	let mut init = None;
+	for d in boot_info.drivers() {
+		// SAFETY: only one thread is running at the moment and there are no other
+		// mutable references to DRIVERS.
+		// FIXME we can make this entirely safe by creating the drivers map here.
 		unsafe {
-			stack.clear();
-		}
-		unsafe {
-			let ptr = stack.physical_pages()[0].base.as_ptr().cast::<u8>();
-
-			// handles
-			let mut ptr = ptr.cast::<u32>();
-			let mut f = |n| {
-				ptr.write(n);
-				ptr = ptr.add(1);
-			};
-			f(4);
-			// FIXME don't hardcode this.
-			f(0);
-			f(0x00_000000);
-			f(1);
-			f(0x01_000001);
-			f(2);
-			f(0x02_000002);
-			f(3);
-			f(0x03_000003);
-			let mut ptr = ptr.cast::<u8>();
-
-			// args
-			// Include driver name since basically every program ever expects that.
-			let name = boot_info
-				.drivers()
-				.skip(usize::from(program.driver()))
-				.next()
-				.unwrap()
-				.name();
-			let count = (1 + program.args().count()).try_into().unwrap();
-
-			ptr.cast::<u16>().write_unaligned(count);
-			ptr = ptr.add(2);
-
-			for s in [name].into_iter().chain(program.args()) {
-				ptr.cast::<u16>()
-					.write_unaligned(s.len().try_into().unwrap());
-				ptr = ptr.add(2);
-				ptr.copy_from_nonoverlapping(s.as_ptr(), s.len());
-				ptr = ptr.add(s.len());
-			}
-
-			// env (should already be zero but meh, let's be clear)
-			ptr.add(0).cast::<u16>().write_unaligned(0);
-		}
-		let mut objects = arena::Arena::<Arc<dyn Object>, _>::new();
-		objects.insert(stdout.clone());
-		objects.insert(stdout.clone());
-		objects.insert(stdout.clone());
-		objects.insert(root.clone());
-		match scheduler::process::Process::from_elf(driver, stack, 0, objects) {
-			Ok(_) => {}
-			Err(e) => {
-				error!("failed to start driver: {:?}", e)
+			DRIVERS.insert(d.name().into(), Driver(d.as_slice()));
+			if d.name() == b"init" {
+				assert!(init.is_none(), "init has already been set");
+				init = Some(Driver(d.as_slice()));
 			}
 		}
 	}
+	let init = init.expect("no init has been specified");
 
 	root.add(&b"drivers"[..], {
 		Arc::downgrade(&ManuallyDrop::new(Arc::new(Drivers) as Arc<dyn Object>))
 	});
+
+	// Spawn init
+	let mut objects = arena::Arena::<Arc<dyn Object>, _>::new();
+	objects.insert(root);
+	match scheduler::process::Process::from_elf(Arc::new(init), None, 0, objects) {
+		Ok(_) => {}
+		Err(e) => {
+			error!("failed to start driver: {:?}", e)
+		}
+	}
 
 	// SAFETY: there is no thread state to save.
 	unsafe { scheduler::next_thread() }

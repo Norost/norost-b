@@ -16,6 +16,7 @@
 #![feature(const_btree_new)]
 #![feature(inline_const)]
 #![feature(linkage)]
+#![feature(let_else)]
 #![feature(naked_functions)]
 #![feature(new_uninit)]
 #![feature(ptr_metadata)]
@@ -30,9 +31,11 @@ pub mod table;
 pub mod thread;
 pub mod tls;
 
+use core::ptr::NonNull;
+
 pub use norostb_kernel::{error::Error, AtomicHandle, Handle};
 pub use process::Process;
-pub use table::Object;
+pub use table::{Object, RefObject};
 
 cfg_if::cfg_if! {
 	if #[cfg(target_arch = "x86_64")] {
@@ -48,7 +51,7 @@ cfg_if::cfg_if! {
 /// # Safety
 ///
 /// This may only be called once at the very start of the program.
-unsafe extern "C" fn rt_start(arguments: *mut u8) -> ! {
+unsafe extern "C" fn rt_start(arguments: Option<NonNull<u8>>) -> ! {
 	unsafe {
 		tls::init();
 		io::init(arguments);
@@ -74,13 +77,13 @@ unsafe extern "C" fn rt_start(arguments: *mut u8) -> ! {
 /// To override it, export a strong symbol with the name `__rt_main`.
 #[linkage = "weak"]
 #[export_name = "__rt_main"]
-unsafe extern "C" fn rt_main(_arguments: *mut u8) -> i32 {
+unsafe extern "C" fn rt_main(_arguments: Option<NonNull<u8>>) -> i32 {
 	extern "C" {
-		fn main(argc: isize, argv: *const *const u8) -> i32;
+		fn main(argc: isize, argv: Option<NonNull<*const u8>>) -> i32;
 	}
 	// We don't use any of the parameters in stdlib but I haven't figured out how to
 	// get rid of them yet :(
-	unsafe { main(0, core::ptr::null()) }
+	unsafe { main(0, None) }
 }
 
 #[inline]

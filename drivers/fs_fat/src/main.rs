@@ -12,13 +12,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let table_name = args.next().ok_or("expected table name")?;
 	let disk = args.next().ok_or("expected disk path")?;
 
-	let disk = loop {
-		if let Ok(disk) = fs::OpenOptions::new().read(true).write(true).open(&disk) {
-			break disk;
-		}
-		// TODO we probably should add a syscall to monitor the table list
-		std::thread::yield_now();
-	};
+	let disk = fs::OpenOptions::new()
+		.read(true)
+		.write(true)
+		.open(&disk)
+		.expect("disk not found");
 
 	let disk = driver_utils::io::BufBlock::new(disk);
 	let fs =
