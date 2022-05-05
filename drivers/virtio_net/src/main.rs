@@ -409,8 +409,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			continue;
 		}
 
-		syscall::sleep(Duration::from_secs(1) / 10);
-		t += time::Duration::from_secs(1) / 10;
+		let d = Duration::from_millis(2);
+		syscall::sleep(d);
+		t += d.into();
 	}
 }
 
