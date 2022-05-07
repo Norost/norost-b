@@ -15,10 +15,11 @@ norostb_kernel = { path = "../lib/rust/kernel" }
 arena = { path = "../lib/rust/arena" }
 
 [features]
-default = ["mem-max-16t", "driver-pci", "driver-hpet"]
+default = ["mem-max-16t", "driver-pci", "driver-hpet", "driver-vga"]
 mem-max-16t = []
 mem-max-256m = []
 driver-pci = []
 driver-hpet = []
 driver-pic = []
+driver-vga = []
 debug-sanitize-heap = []

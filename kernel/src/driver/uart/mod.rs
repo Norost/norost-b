@@ -1,7 +1,7 @@
 cfg_if::cfg_if! {
 	if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
 		mod x86;
-		use x86::*;
+		pub use x86::Uart;
 	} else {
 		compile_error!("UART not supported on this platform");
 	}

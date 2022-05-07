@@ -49,10 +49,6 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		driver::early_init(boot_info);
 	}
 
-	unsafe {
-		log::init();
-	}
-
 	for region in boot_info.memory_regions() {
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
@@ -74,6 +70,10 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 
 	unsafe {
 		driver::init(boot_info, &root);
+	}
+
+	unsafe {
+		log::post_init(&root);
 	}
 
 	scheduler::init(&root);
