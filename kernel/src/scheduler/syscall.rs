@@ -468,7 +468,10 @@ extern "C" fn create_root(_: usize, _: usize, _: usize, _: usize, _: usize, _: u
 		.unwrap()
 		.add_object(Arc::new(crate::object_table::Root::new()))
 		.map_or_else(
-			|e| todo!(),
+			|e| Return {
+				status: e as _,
+				value: 0,
+			},
 			|h| Return {
 				status: 0,
 				value: h.try_into().unwrap(),

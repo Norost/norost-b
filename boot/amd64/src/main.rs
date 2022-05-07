@@ -60,11 +60,6 @@ fn alloc_slice<T>(count: usize) -> (u16, &'static mut [T]) {
 	(alloc::offset(s.as_ptr().cast()), s)
 }
 
-fn get_alloc_str(offset: u16) -> &'static [u8] {
-	let ptr = alloc::from_offset(offset);
-	unsafe { slice::from_raw_parts::<u8>(ptr.add(1), (*ptr).into()) }
-}
-
 fn from_utf8(s: &[u8]) -> &str {
 	str::from_utf8(s).unwrap_or("<invalid utf-8>")
 }

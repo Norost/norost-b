@@ -21,14 +21,13 @@
 
 extern crate alloc;
 
-use crate::memory::frame::{OwnedPageFrames, PageFrame, PageFrameIter, PPN};
+use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
 use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, QueryIter, Ticket};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
-use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
 
 #[macro_use]
@@ -201,9 +200,7 @@ impl Object for Drivers {
 			};
 			Box::new(QueryIter::new(it))
 		} else if drivers().contains_key(path) {
-			Box::new(OneQuery {
-				path: Some(path.into()),
-			})
+			Box::new(OneQuery::new(path.into()))
 		} else {
 			Box::new(NoneQuery)
 		}))

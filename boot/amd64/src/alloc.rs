@@ -28,7 +28,3 @@ pub fn alloc(layout: Layout) -> *mut u8 {
 pub fn offset(n: *const u8) -> u16 {
 	(n as usize - buffer_ptr() as usize).try_into().unwrap()
 }
-
-pub fn from_offset(n: u16) -> *const u8 {
-	buffer_ptr().wrapping_add(n.into())
-}

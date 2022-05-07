@@ -231,7 +231,7 @@ impl super::Process {
 							match poll(&mut ticket) {
 								Poll::Pending => push_pending(job.cast(), 0, ticket.into()),
 								Poll::Ready(Ok(info)) => push_resp(take_job(job, info)),
-								Poll::Ready(Err(e)) => todo!(), //push_resp(e as i64),
+								Poll::Ready(Err(_e)) => todo!(), //push_resp(e as i64),
 							}
 						}
 						None => push_resp(Error::InvalidObject as i64),

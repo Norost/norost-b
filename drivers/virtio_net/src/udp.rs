@@ -22,8 +22,8 @@ impl UdpSocket {
 		let handle = iface.add_socket(sock);
 		Self { handle }
 	}
-}
 
-pub struct TcpConnection {
-	handle: SocketHandle,
+	pub fn close(self, iface: &mut Interface<impl for<'d> Device<'d>>) {
+		iface.remove_socket(self.handle);
+	}
 }

@@ -71,7 +71,7 @@ impl Object for Root {
 
 			// Filter any dead objects before querying.
 			let mut objects = self.objects.lock();
-			objects.retain(|k, v| v.strong_count() > 0);
+			objects.retain(|_, v| v.strong_count() > 0);
 			Ticket::new_complete(Ok(Box::new(Q(objects
 				.keys()
 				.cloned()

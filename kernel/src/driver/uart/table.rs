@@ -1,5 +1,5 @@
 use super::Uart;
-use crate::object_table::{Error, NoneQuery, Object, Query, Ticket, TicketWaker};
+use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, Ticket, TicketWaker};
 use crate::sync::IsrSpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
@@ -10,30 +10,27 @@ static PENDING_READS: [IsrSpinLock<Vec<TicketWaker<Box<[u8]>>>>; 1] =
 	[IsrSpinLock::new(Vec::new())];
 
 impl Object for UartTable {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
-		match tags {
-			&[] => todo!(),
-			_ => Ticket::new_complete(Ok(Box::new(NoneQuery))),
-		}
+	fn query(self: Arc<Self>, mut prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
+		Ticket::new_complete(Ok(match tags {
+			&[] => Box::new(OneQuery::new({
+				prefix.push(b'0');
+				prefix
+			})),
+			_ => Box::new(NoneQuery),
+		}))
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		if path == b"0" {
 			Ticket::new_complete(Ok(Arc::new(UartId(0))))
 		} else {
-			todo!()
+			Ticket::new_complete(Err(Error::DoesNotExist))
 		}
 	}
 }
 
 #[derive(Clone, Copy)]
 pub struct UartId(u8);
-
-impl UartId {
-	pub fn new(id: u8) -> Self {
-		Self(id)
-	}
-}
 
 impl Object for UartId {
 	fn read(&self, _offset: u64, length: usize) -> Ticket<Box<[u8]>> {

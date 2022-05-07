@@ -49,16 +49,18 @@ impl Object for PciTable {
 	}
 
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let r = path_to_bdf(path)
-			.and_then(|(bus, dev, func)| {
-				let pci = super::PCI.lock();
-				pci.as_ref()
-					.unwrap()
-					.get(bus, dev, func)
-					.map(|d| pci_dev_object(d, bus, dev, func))
-			})
-			.ok_or_else(|| todo!());
-		Ticket::new_complete(r)
+		Ticket::new_complete(
+			path_to_bdf(path)
+				.and_then(|(bus, dev, func)| {
+					let pci = super::PCI.lock();
+					pci.as_ref()
+						.unwrap()
+						.get(bus, dev, func)
+						.map(|d| pci_dev_object(d, bus, dev, func))
+						.map(Ok)
+				})
+				.unwrap_or_else(|| Err(Error::DoesNotExist)),
+		)
 	}
 }
 

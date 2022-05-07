@@ -23,7 +23,15 @@ impl Iterator for NoneQuery {
 
 /// A query that returns a single result.
 pub struct OneQuery {
-	pub path: Option<Box<[u8]>>,
+	path: Option<Box<[u8]>>,
+}
+
+impl OneQuery {
+	pub fn new(path: Vec<u8>) -> Self {
+		Self {
+			path: Some(path.into()),
+		}
+	}
 }
 
 impl Query for OneQuery {}

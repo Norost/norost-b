@@ -14,7 +14,7 @@ use norostb_rt::{
 	self as rt,
 	io::{Job, Request},
 };
-use smoltcp::{iface::SocketHandle, socket::TcpState, wire};
+use smoltcp::wire;
 use std::fs;
 use std::os::norostb::prelude::*;
 use std::str::FromStr;
@@ -131,17 +131,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	enum Query {
 		Root(QueryRoot),
 		SourceAddr(wire::Ipv6Address, Protocol),
-		DestAddr {
-			source: wire::IpAddress,
-			protocol: Protocol,
-			dest: wire::IpAddress,
-		},
-		DestPort {
-			source: wire::IpAddress,
-			protocol: Protocol,
-			dest: wire::IpAddress,
-			port: u16,
-		},
 	}
 
 	enum QueryRoot {
@@ -304,8 +293,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 								sock.read(data, &mut iface).unwrap().try_into().unwrap();
 							job.buffer = NonNull::new(data.as_mut_ptr());
 						}
-						Socket::Udp(sock) => {
-							todo!("address")
+						Socket::Udp(_sock) => {
+							todo!("udp remote address")
 						}
 					}
 				}
@@ -317,8 +306,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							let l = sock.write(data, &mut iface).unwrap();
 							job.operation_size = l.try_into().unwrap();
 						}
-						Socket::Udp(sock) => {
-							todo!("address")
+						Socket::Udp(_sock) => {
+							todo!("udp remote address")
 						}
 					}
 				}
@@ -329,9 +318,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							sock.close(&mut iface);
 							closing_tcp_sockets.push(sock);
 						}
-						Socket::Udp(sock) => {
-							todo!("address")
-						}
+						Socket::Udp(sock) => sock.close(&mut iface),
 					}
 					unsafe {
 						job_queue
@@ -399,7 +386,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							job.operation_size = (buf.len() - l).try_into().unwrap();
 							queries.remove(job.handle);
 						}
-						Some(_) => todo!(),
 						None => job.operation_size = 0,
 					}
 				}

@@ -4,7 +4,7 @@ use crate::memory::{
 	Page,
 };
 use crate::scheduler::MemoryObject;
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
 use core::ptr::NonNull;
@@ -13,7 +13,6 @@ use core::ptr::NonNull;
 pub enum MapError {
 	Overflow,
 	ZeroSize,
-	NoFreeVirtualAddressSpace,
 	Arch(crate::arch::r#virtual::MapError),
 }
 
@@ -48,7 +47,8 @@ impl AddressSpace {
 			.flat_map(|f| f)
 			.count();
 		let count = NonZeroUsize::new(count).ok_or(MapError::ZeroSize)?;
-		let (base, base_index) = match base {
+		// TODO use base_index to avoid redundant sorting
+		let (base, _base_index) = match base {
 			Some(base) => (base, usize::MAX),
 			None => self.find_free_range(count)?,
 		};
@@ -124,13 +124,17 @@ impl AddressSpace {
 	}
 
 	/// Find a range of free address space.
-	fn find_free_range(&mut self, count: NonZeroUsize) -> Result<(NonNull<Page>, usize), MapError> {
+	fn find_free_range(
+		&mut self,
+		_count: NonZeroUsize,
+	) -> Result<(NonNull<Page>, usize), MapError> {
+		// FIXME we need to check if there actually is enough room
 		// Try to allocate past the last object, which is very easy & fast to check.
 		// Also insert a guard page inbetween.
 		self.objects
 			.last()
 			.map_or(Ok((NonNull::new(Page::SIZE as _).unwrap(), 0)), |o| {
-				(Ok((
+				Ok((
 					NonNull::new(
 						o.0.end()
 							.as_ptr()
@@ -141,7 +145,7 @@ impl AddressSpace {
 					)
 					.unwrap(),
 					self.objects.len(),
-				)))
+				))
 			})
 	}
 

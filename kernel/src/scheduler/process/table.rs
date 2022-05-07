@@ -1,9 +1,9 @@
 use crate::{
-	memory::frame::{AllocateHints, OwnedPageFrames, PageFrame},
-	object_table::{Error, Object, Root, Ticket},
+	memory::frame::{AllocateHints, OwnedPageFrames},
+	object_table::{Error, Object, Ticket},
 	scheduler::MemoryObject,
 };
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
 use core::{cell::Cell, mem::ManuallyDrop};
 
 /// The table with all the processes running on this system.

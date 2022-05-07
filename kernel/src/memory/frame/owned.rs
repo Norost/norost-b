@@ -1,7 +1,7 @@
 use super::{AllocateError, AllocateHints, Page, PageFrame};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, vec::Vec};
-use core::{num::NonZeroUsize, ops::Range};
+use core::num::NonZeroUsize;
 
 /// An allocation of page frames.
 pub struct OwnedPageFrames {
