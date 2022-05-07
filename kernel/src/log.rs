@@ -2,16 +2,14 @@ pub unsafe fn init() {}
 
 #[macro_export]
 macro_rules! debug {
-	($($args:tt)*) => {
-		#[cfg(debug_assertions)]
+	($($args:tt)*) => {{
+		#[cfg(feature = "debug")]
 		{
 			#[allow(unused_imports)]
 			use core::fmt::Write;
 			writeln!($crate::driver::uart::get(0), $($args)*).unwrap();
 		}
-		#[cfg(not(debug_assertions))]
-		{}
-	}
+	}}
 }
 
 #[macro_export]

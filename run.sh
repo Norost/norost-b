@@ -1,6 +1,6 @@
 #!/bin/sh
 
-./mkiso.sh || exit $?
+./mkiso.sh $MKISO_ARGS || exit $?
 make disk0 || exit $?
 
 cpu="--enable-kvm -cpu host"

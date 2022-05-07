@@ -25,18 +25,22 @@ members = [
 
 [profile.dev]
 panic = "abort"
-opt-level = 3
+opt-level = 2
+lto = "fat"
 
 [profile.release]
+codegen-units = 1
 panic = "abort"
 lto = "fat"
-debug = true
-#strip = "symbols"
+strip = "symbols"
+
+[profile.dev.package.noraboot]
+opt-level = 'z'
 
 [profile.release.package.noraboot]
 codegen-units = 1
 opt-level = 'z'
-#strip = "symbols"
+strip = "symbols"
 
 [patch.crates-io]
 dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }

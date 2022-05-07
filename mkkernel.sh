@@ -5,7 +5,7 @@
 set -e
 
 cd kernel
-cargo rustc --release -- \
+cargo rustc "$@" -- \
 	-C link-arg=-Tkernel/src/arch/$ARCH/link.ld \
 	-C link-arg=kernel/src/arch/$ARCH/start.s \
 	-C linker=$CC \

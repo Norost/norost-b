@@ -1,9 +1,18 @@
-#!/bin/sh
+#!/usr/bin/env bash
+
+if [ "$1" == --release ]
+then
+	args="--release"
+	build_dir=release
+else
+	args=
+	build_dir=debug
+fi
 
 . ./env.sh
 
-./mkkernel.sh || exit $?
-./mkboot.sh || exit $?
+./mkkernel.sh $args || exit $?
+./mkboot.sh $args || exit $?
 
 set -e
 
@@ -12,14 +21,14 @@ TARGET_KERNEL=x86_64-unknown-none-norostbkernel
 TARGET_USER=x86_64-unknown-norostb
 
 mkdir -p isodir/boot/grub isodir/drivers
-cp target/$TARGET_KERNEL/release/nora isodir/boot/nora
-cp target/$TARGET_BOOT/release/noraboot isodir/boot/noraboot
+cp target/$TARGET_KERNEL/$build_dir/nora isodir/boot/nora
+cp target/$TARGET_BOOT/$build_dir/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 cp init.toml isodir/init.toml
 
 install () {
-	(cd $1/$2 && cargo build --release --target $TARGET_USER)
-	cp target/$TARGET_USER/release/$3 isodir/drivers/$2
+	(cd $1/$2 && cargo build $args --target $TARGET_USER)
+	cp target/$TARGET_USER/$build_dir/$3 isodir/drivers/$2
 }
 
 install drivers fs_fat             driver_fs_fat
