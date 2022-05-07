@@ -1,39 +1,5 @@
 use super::common;
-use crate::memory::frame;
 use core::fmt;
-
-/// # Safety
-///
-/// This function may only be called once.
-pub(super) unsafe fn init() {
-	let root = common::get_current();
-
-	// Add tables for all of the higher half memory.
-	//
-	// This is so these global tables can be reused for new page tables without modifying
-	// existing tables.
-	let mut i = 256
-		+ root[256..256 + 128]
-			.iter()
-			.filter(|e| e.is_present())
-			.count();
-
-	frame::allocate(
-		256 + 128 - i,
-		|frame| {
-			assert_eq!(frame.p2size, 0); // shouldn't happen on amd64 platforms with count < 512
-			while root[i].is_present() {
-				i += 1;
-				assert!(i < 256 + 128);
-			}
-			root[i].new_table(frame, false);
-			i += 1;
-		},
-		common::IDENTITY_MAP_ADDRESS,
-		0,
-	)
-	.unwrap();
-}
 
 pub struct DumpCurrent;
 

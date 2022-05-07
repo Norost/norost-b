@@ -66,6 +66,5 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 ///
 /// This function may only be called once.
 pub(super) unsafe fn init() {
-	unsafe { pml4::init() }
 	unsafe { address_space::init() }
 }

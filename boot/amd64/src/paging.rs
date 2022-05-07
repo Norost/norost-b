@@ -85,6 +85,12 @@ impl PML4 {
 
 		let use_1gb = cpuid.pdpe1gb();
 
+		// Unconditionally add pages to the top half of the PML4 so the kernel can easily
+		// share them between all address spaces.
+		for t in 256..512 {
+			self.0[t].set(page_alloc().cast::<DirectoryPointers>());
+		}
+
 		// Identity map the first 64T of available physical memory to 0xffff_c000_0000_0000
 
 		let mtrrs = mtrr::AllRanges::new();
@@ -95,7 +101,7 @@ impl PML4 {
 			if addr > memory_top {
 				break;
 			}
-			let pdp = &mut *page_alloc().cast::<DirectoryPointers>();
+			let pdp = self.0[t].get().expect("no pdp entry");
 
 			for g in 0..512 {
 				let addr = addr | u64::try_from(g).unwrap() << 30;
@@ -164,7 +170,6 @@ impl PML4 {
 					pdp.0[g].set(pd);
 				}
 			}
-			self.0[t].set(pdp);
 		}
 	}
 
