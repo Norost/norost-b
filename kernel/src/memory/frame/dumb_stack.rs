@@ -46,12 +46,12 @@ impl Stack {
 
 		// Sort so we can easily find a sufficiently large range.
 		// The depth is limited for now to avoid overflowing the tiny, weenie 4KB stack.
-		s[..256].sort_unstable();
+		s[..128].sort_unstable();
 
 		// Find the smallest range to split.
 		let mut best: Option<(PPN, NonZeroUsize, usize)> = None;
 		let mut candidate = (s[0], NonZeroUsize::new(1).unwrap(), 0);
-		for (i, &n) in s[..256].iter().enumerate().skip(1) {
+		for (i, &n) in s[..128].iter().enumerate().skip(1) {
 			// TODO don't unwrap
 			if candidate.0.skip(candidate.1.get().try_into().unwrap()) != n {
 				if candidate.1 >= count && best.map_or(true, |b| b.1 > candidate.1) {
