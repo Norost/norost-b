@@ -78,6 +78,11 @@ impl AddressSpace {
 				.map_err(|_| UnmapError::Unset)?;
 			e.clear().ok_or(UnmapError::Unset)?;
 		}
+		// Flush the unmapped addresses from the TLB.
+		// TODO avoid flushing the entire TLB.
+		unsafe {
+			asm!("mov {0}, cr3", "mov cr3, {0}", out(reg) _);
+		}
 		Ok(())
 	}
 
