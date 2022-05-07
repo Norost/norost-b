@@ -40,13 +40,8 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<NonNull<Page>, MapError> {
-		let count = object
-			.physical_pages()
-			.into_vec()
-			.into_iter()
-			.flat_map(|f| f)
-			.count();
-		let count = NonZeroUsize::new(count).ok_or(MapError::ZeroSize)?;
+		let frames = object.physical_pages();
+		let count = NonZeroUsize::new(frames.len()).ok_or(MapError::ZeroSize)?;
 		// TODO use base_index to avoid redundant sorting
 		let (base, _base_index) = match base {
 			Some(base) => (base, usize::MAX),
@@ -66,14 +61,7 @@ impl AddressSpace {
 		let e = unsafe {
 			self.mmu_address_space.map(
 				base.as_ptr() as *const _,
-				// TODO avoid collect()
-				object
-					.physical_pages()
-					.into_vec()
-					.into_iter()
-					.flat_map(|f| f)
-					.collect::<Vec<_>>()
-					.into_iter(),
+				frames.into_vec().into_iter(),
 				rwx,
 				hint_color,
 			)

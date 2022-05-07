@@ -1,7 +1,7 @@
 //! # I/O with user processes
 
 use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket, TicketOrJob};
-use crate::memory::frame::{self, PageFrame, PageFrameIter, PPN};
+use crate::memory::frame::{self, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{
@@ -35,12 +35,11 @@ struct IoQueue {
 }
 
 impl MemoryObject for IoQueue {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
+	fn physical_pages(&self) -> Box<[PPN]> {
 		PageFrameIter {
 			base: self.base,
 			count: self.count,
 		}
-		.map(|p| PageFrame { base: p, p2size: 0 })
 		.collect()
 	}
 }
@@ -63,11 +62,7 @@ impl super::Process {
 		assert_eq!(count, 1, "TODO");
 		let mut frame = None;
 		frame::allocate(count, |f| frame = Some(f), 0 as *const _, self.hint_color).unwrap();
-		/*
-		let frame = frame::allocate_contiguous(count.try_into().unwrap())
-			.map_err(CreateQueueError::OutOfMemory)?;
-		*/
-		let frame = frame.unwrap().base;
+		let frame = frame.unwrap();
 
 		unsafe {
 			frame.as_ptr().cast::<Page>().write_bytes(0, count);

@@ -30,7 +30,7 @@ pub unsafe fn init() {
 
 		let mut cpu_stack = None;
 		frame::allocate(1, |f| cpu_stack = Some(f), 0 as _, 0).unwrap();
-		let cpu_stack = cpu_stack.unwrap().base.as_ptr();
+		let cpu_stack = cpu_stack.unwrap().as_ptr();
 		let cpu_stack_ptr = cpu_stack.cast::<Page>().wrapping_add(1).cast();
 
 		// Set GS_BASE to a per-cpu structure

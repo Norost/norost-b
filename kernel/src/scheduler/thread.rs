@@ -1,7 +1,7 @@
 use super::process::Process;
 use crate::arch;
 use crate::memory::{
-	frame::{self, PageFrame, PPN},
+	frame::{self, PPN},
 	Page,
 };
 use crate::sync::Mutex;
@@ -45,7 +45,7 @@ impl Thread {
 		unsafe {
 			let mut kernel_stack_base = None;
 			frame::allocate(1, |f| kernel_stack_base = Some(f), 0 as _, 0).unwrap();
-			let kernel_stack_base = kernel_stack_base.unwrap().base;
+			let kernel_stack_base = kernel_stack_base.unwrap();
 			let kernel_stack_base = kernel_stack_base.as_ptr().cast::<[usize; 512]>();
 			let mut kernel_stack = kernel_stack_base.add(1).cast::<usize>();
 			let mut push = |val: usize| {
@@ -182,11 +182,7 @@ impl Thread {
 		unsafe {
 			let kernel_stack = self.kernel_stack.take().unwrap().as_ptr() as usize & !Page::MASK;
 			let kernel_stack = PPN::from_ptr(kernel_stack as *mut _);
-			frame::deallocate(1, || PageFrame {
-				base: kernel_stack,
-				p2size: 0,
-			})
-			.unwrap();
+			frame::deallocate(1, || kernel_stack).unwrap();
 		}
 
 		for w in self.waiters.lock().drain(..) {
