@@ -25,7 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
 	let root = rt::Object::from_raw(0);
-	let stdin @ stdout @ stderr = rt::io::open(root.as_raw(), b"uart/0").unwrap();
+	let stdin = rt::io::open(root.as_raw(), b"uart/0").unwrap();
+	let stdout @ stderr = rt::io::open(root.as_raw(), b"system/log").unwrap();
 	let stdin = rt::RefObject::from_raw(stdin);
 	let stdout = rt::RefObject::from_raw(stdout);
 	let stderr = rt::RefObject::from_raw(stderr);
