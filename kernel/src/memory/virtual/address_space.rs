@@ -47,7 +47,7 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<NonNull<Page>, MapError> {
-		let (range, frames) = Self::map_object_common(
+		let (range, frames, index) = Self::map_object_common(
 			&self.objects,
 			NonNull::new(Page::SIZE as _).unwrap(),
 			base,
@@ -64,8 +64,7 @@ impl AddressSpace {
 				)
 				.map_err(MapError::Arch)?
 		};
-		self.objects.push((range.clone(), object));
-		self.objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
+		self.objects.insert(index, (range.clone(), object));
 		Ok(*range.start())
 	}
 
@@ -77,7 +76,7 @@ impl AddressSpace {
 	) -> Result<NonNull<Page>, MapError> {
 		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
 
-		let (range, frames) = Self::map_object_common(
+		let (range, frames, index) = Self::map_object_common(
 			&objects,
 			// TODO don't hardcode base address
 			// Current one is between kernel base & identity map base,
@@ -95,8 +94,7 @@ impl AddressSpace {
 			)
 			.map_err(MapError::Arch)?
 		};
-		objects.push((range.clone(), object));
-		objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
+		objects.insert(index, (range.clone(), object));
 		Ok(*range.start())
 	}
 
@@ -105,14 +103,14 @@ impl AddressSpace {
 		default: NonNull<Page>,
 		base: Option<NonNull<Page>>,
 		object: &dyn MemoryObject,
-	) -> Result<(RangeInclusive<NonNull<Page>>, Box<[PPN]>), MapError> {
+	) -> Result<(RangeInclusive<NonNull<Page>>, Box<[PPN]>, usize), MapError> {
 		let frames = object.physical_pages();
 		let count = NonZeroUsize::new(frames.len()).ok_or(MapError::ZeroSize)?;
-		// TODO use base_index to avoid redundant sorting
-		let (base, _base_index) = match base {
-			Some(base) => (base, usize::MAX),
+		let (base, index) = match base {
+			Some(base) => (base, objects.partition_point(|e| e.0.start() < &base)),
 			None => Self::find_free_range(objects, count, default)?,
 		};
+		// FIXME we need to ensure the range doesn't overlap with any other range.
 		let end = base
 			.as_ptr()
 			.wrapping_add(count.get())
@@ -123,7 +121,7 @@ impl AddressSpace {
 			return Err(MapError::Overflow);
 		}
 		let end = NonNull::new(end).unwrap();
-		Ok((base..=end, frames))
+		Ok((base..=end, frames, index))
 	}
 
 	pub fn unmap_object(

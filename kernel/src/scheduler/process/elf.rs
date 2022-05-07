@@ -95,8 +95,7 @@ impl super::Process {
 		objects: arena::Arena<Arc<dyn Object>, u8>,
 	) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
-		let mut data = data_object.physical_pages();
-		data.sort();
+		let data = data_object.physical_pages();
 
 		// FIXME definitely don't require unsafe code.
 		let data = unsafe {
