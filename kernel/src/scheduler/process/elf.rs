@@ -203,30 +203,66 @@ impl super::Process {
 			let virt_address = usize::try_from(virt_address).unwrap();
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
 
-			if count > 0 {
-				// Map part of the ELF file.
-				let virt = NonNull::new(virt_address as *mut _).unwrap();
-				let mem = Box::new(MemorySlice {
-					inner: data_object.clone(),
-					range: page_offset..page_offset + count,
-				});
-				address_space
-					.map_object(Some(virt), mem, rwx, slf.hint_color)
-					.map_err(ElfError::MapError)?;
-			}
-
-			// Allocate memory for the region that isn't present in the ELF file.
-			if let Some(size) = NonZeroUsize::new(alloc - count) {
-				let virt = NonNull::new((virt_address + count * Page::SIZE) as *mut _).unwrap();
-				let hint = AllocateHints {
-					address: virt.cast().as_ptr(),
-					color: slf.hint_color,
-				};
-				let mem =
-					Box::new(OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?);
-				address_space
-					.map_object(Some(virt), mem, rwx, slf.hint_color)
-					.map_err(ElfError::MapError)?;
+			if rwx.w() {
+				if let Some(alloc) = NonZeroUsize::new(alloc) {
+					// Allocate & copy
+					let virt = NonNull::new(virt_address as *mut _).unwrap();
+					let hint = AllocateHints {
+						address: virt.cast().as_ptr(),
+						color: slf.hint_color,
+					};
+					let mem = Box::new(
+						OwnedPageFrames::new(alloc, hint).map_err(ElfError::AllocateError)?,
+					);
+					// FIXME this is utter shit
+					let mut offt = 0;
+					let page_offt = usize::try_from(header.offset).unwrap() & Page::MASK;
+					let mut wr_i = page_offt;
+					for p in data_object.physical_pages().into_vec() {
+						assert_eq!(p.p2size, 0, "TODO");
+						let (from, to) = (offt, offt + u64::try_from(Page::SIZE).unwrap());
+						for i in from.max(header.offset)..to.min(header.offset + header.file_size) {
+							let rd_i = usize::try_from(i).unwrap() & Page::MASK;
+							assert_eq!(rd_i & Page::MASK, wr_i & Page::MASK);
+							unsafe {
+								let b = p.base.as_ptr().cast::<u8>().add(rd_i).read();
+								mem.write(wr_i, &[b]);
+							}
+							wr_i += 1;
+						}
+						offt = to;
+					}
+					assert_eq!(u64::try_from(wr_i - page_offt).unwrap(), header.file_size);
+					address_space
+						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_err(ElfError::MapError)?;
+				}
+			} else {
+				if let Some(count) = NonZeroUsize::new(count) {
+					// Map part of the ELF file.
+					let virt = NonNull::new(virt_address as *mut _).unwrap();
+					let mem = Box::new(MemorySlice {
+						inner: data_object.clone(),
+						range: page_offset..page_offset + count.get(),
+					});
+					address_space
+						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_err(ElfError::MapError)?;
+				}
+				// Allocate memory for the region that isn't present in the ELF file.
+				if let Some(size) = NonZeroUsize::new(alloc - count) {
+					let virt = NonNull::new((virt_address + count * Page::SIZE) as *mut _).unwrap();
+					let hint = AllocateHints {
+						address: virt.cast().as_ptr(),
+						color: slf.hint_color,
+					};
+					let mem = Box::new(
+						OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?,
+					);
+					address_space
+						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_err(ElfError::MapError)?;
+				}
 			}
 		}
 
