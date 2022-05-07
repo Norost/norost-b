@@ -2104,7 +2104,7 @@ index 00000000000..855ddc4330e
 +pub(super) unsafe fn init() {}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..e439f997705
+index 00000000000..62c8249dd6d
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
 @@ -0,0 +1,47 @@
@@ -2117,7 +2117,7 @@ index 00000000000..e439f997705
 +
 +pub struct Thread(rt::thread::Thread);
 +
-+pub const DEFAULT_MIN_STACK_SIZE: usize = 4096;
++pub const DEFAULT_MIN_STACK_SIZE: usize = 1 << 16;
 +
 +impl Thread {
 +    // unsafe: see thread::Builder::spawn_unchecked for safety requirements
