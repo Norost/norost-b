@@ -14,11 +14,10 @@ fn main() {
 	let listener = TcpListener::bind("0.0.0.0:80").unwrap();
 	eprintln!("accepting incoming connections");
 
-	let mut buf = [0; 1 << 11];
-	let mut buf2 = [0; 1 << 14];
-
 	for mut c in listener.incoming().map(Result::unwrap) {
-		loop {
+		std::thread::spawn(move || loop {
+			let mut buf = [0; 1 << 11];
+			let mut buf2 = [0; 1 << 14];
 			let mut headers = [""; 128];
 			c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
 			c.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
@@ -31,8 +30,12 @@ fn main() {
 				Err(_) => bad_request(&mut buf2, false),
 			};
 			let mut wr = |mut data: &[u8]| {
-				while let Some(Ok(n)) = (!data.is_empty()).then(|| c.write(data)) {
+				while let Ok(n) = c.write(data) {
 					data = &data[n..];
+					if data.is_empty() {
+						break;
+					}
+					std::thread::sleep(Duration::from_millis(1));
 				}
 			};
 			wr(header);
@@ -41,7 +44,7 @@ fn main() {
 				break;
 			}
 			break; // TODO
-		}
+		});
 	}
 }
 

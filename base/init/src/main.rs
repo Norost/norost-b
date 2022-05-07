@@ -81,6 +81,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				Some(Some(r)) => Some(r.as_ref_object()),
 			};
 
+			let proc_root = match program.process_root.as_deref() {
+				None => None,
+				Some("") => Some(None),
+				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
+			};
+			let proc_root = match &proc_root {
+				None => None,
+				Some(None) => Some(root.as_ref_object()),
+				Some(Some(r)) => Some(r.as_ref_object()),
+			};
+
 			let binary = drivers.open(program.path.as_bytes()).unwrap();
 			let r = rt::Process::new(
 				&process_root,
@@ -92,7 +103,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				]
 				.into_iter()
 				.chain(file_root.map(|r| (rt::args::ID_FILE_ROOT, r)))
-				.chain(net_root.map(|r| (rt::args::ID_NET_ROOT, r))),
+				.chain(net_root.map(|r| (rt::args::ID_NET_ROOT, r)))
+				.chain(proc_root.map(|r| (rt::args::ID_PROCESS_ROOT, r))),
 				[name]
 					.into_iter()
 					.chain(program.args.iter().flat_map(|i| i.iter()))

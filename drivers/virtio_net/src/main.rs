@@ -100,24 +100,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	}
 
 	let mut t = time::Instant::from_secs(0);
-	let mut buf = [0; 2048];
-
-	let mut job = Job::default();
-	job.buffer = NonNull::new(buf.as_mut_ptr());
-	job.buffer_size = buf.len().try_into().unwrap();
 
 	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
-	let job_queue = syscall::create_io_queue(None, 0, 0).unwrap();
+	let jobs_p2size = 6; // 64
+	let job_queue = syscall::create_io_queue(None, jobs_p2size, jobs_p2size).unwrap();
 	let mut job_queue = Queue {
 		base: job_queue.cast(),
-		requests_mask: 0,
-		responses_mask: 0,
+		requests_mask: (1 << jobs_p2size) - 1,
+		responses_mask: (1 << jobs_p2size) - 1,
 	};
 
-	unsafe {
-		job_queue
-			.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
-			.unwrap();
+	for _ in 0..1 << jobs_p2size {
+		unsafe {
+			let buf = Box::leak(Box::new([0; 2048]));
+			let job = Box::leak(Box::new(Job::default()));
+			job.buffer_size = buf.len().try_into().unwrap();
+			job.buffer = Some(NonNull::from(buf).cast());
+			job_queue
+				.enqueue_request(Request::take_job(job as *mut _ as _, tbl.as_raw(), job))
+				.unwrap();
+		}
 	}
 
 	let mut alloc_port = 50_000u16;
@@ -154,6 +156,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut accepting_tcp_sockets = Vec::new();
 	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
+	let mut free_jobs = Vec::new();
+
 	loop {
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
@@ -174,8 +178,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				};
 				tbl.finish_job(&std_job).unwrap();
 				unsafe {
+					let job = free_jobs.pop().unwrap();
 					job_queue
-						.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+						.enqueue_request(Request::take_job(job as *mut _ as _, tbl.as_raw(), job))
 						.unwrap();
 				}
 			}
@@ -204,7 +209,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		syscall::process_io_queue(Some(job_queue.base.cast())).unwrap();
 
-		if let Ok(_) = unsafe { job_queue.dequeue_response() } {
+		if let Ok(resp) = unsafe { job_queue.dequeue_response() } {
+			let job = unsafe { &mut *(resp.user_data as *mut Job) };
+			let buf = unsafe {
+				core::slice::from_raw_parts_mut(
+					job.buffer.unwrap().as_ptr(),
+					job.buffer_size.try_into().unwrap(),
+				)
+			};
 			match job.ty {
 				Job::OPEN => {
 					assert_ne!(job.handle, driver_utils::Handle::MAX, "TODO");
@@ -214,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						Socket::TcpListener(_) => match path {
 							"accept" => {
 								accepting_tcp_sockets.push((job.handle, job.job_id));
+								free_jobs.push(job);
 								continue;
 							}
 							_ => todo!(),
@@ -268,6 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 										TcpConnection::new(&mut iface, source, dest),
 										job.job_id,
 									));
+									free_jobs.push(job);
 									continue;
 								}
 								"active" => todo!(),
@@ -321,7 +335,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					}
 					unsafe {
 						job_queue
-							.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+							.enqueue_request(Request::take_job(
+								job as *mut _ as _,
+								tbl.as_raw(),
+								job,
+							))
 							.unwrap();
 					}
 					continue;
@@ -391,7 +409,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			tbl.finish_job(&job).unwrap();
 			unsafe {
 				job_queue
-					.enqueue_request(Request::take_job(0, tbl.as_raw(), &mut job))
+					.enqueue_request(Request::take_job(job as *mut _ as _, tbl.as_raw(), job))
 					.unwrap();
 			}
 		}

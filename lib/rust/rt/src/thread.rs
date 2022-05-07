@@ -18,6 +18,26 @@ impl Thread {
 			syscall::alloc(None, stack, syscall::RWX::RW).map_err(|_| error::Error::Unknown)?;
 		let stack = stack.cast::<u8>();
 
+		// Allocate TLS
+		let tls_ptr = match crate::io::create_for_thread() {
+			Ok(queue) => match crate::tls::create_for_thread(queue) {
+				Ok(tls) => tls,
+				Err(e) => {
+					// TODO free queue
+					unsafe {
+						syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+					}
+					return Err(e);
+				}
+			},
+			Err(e) => {
+				unsafe {
+					syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+				}
+				return Err(e);
+			}
+		};
+
 		// Push closure on the stack of the new thread
 		let (ptr, meta) = Box::into_raw(p).to_raw_parts();
 		let stack_top = stack
@@ -37,6 +57,7 @@ impl Thread {
 		push(unsafe { mem::transmute(meta) });
 		push(stack.as_ptr() as usize);
 		push(stack_size.get());
+		push(tls_ptr as usize);
 
 		unsafe extern "C" fn main(
 			ptr: *mut (),
@@ -50,8 +71,6 @@ impl Thread {
 			let p: Box<dyn FnOnce()> = unsafe { Box::from_raw(ptr::from_raw_parts_mut(ptr, meta)) };
 
 			unsafe {
-				// TODO we should notify the spawner on failure.
-				// Alternatively, do the work in the spawner.
 				super::tls::init_thread(tls_ptr);
 			}
 

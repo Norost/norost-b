@@ -22,12 +22,8 @@ pub enum UnmapError {}
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
-	/// All mapped objects
+	/// All mapped objects. This vector is sorted.
 	objects: Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
-	/// All free virtual addresses. Used to speed up allocation.
-	///
-	/// The value refers to the amount of free *pages*, not bytes!
-	free_virtual_addresses: BTreeMap<NonNull<Page>, NonZeroUsize>,
 }
 
 impl AddressSpace {
@@ -35,13 +31,6 @@ impl AddressSpace {
 		Ok(Self {
 			mmu_address_space: r#virtual::AddressSpace::new()?,
 			objects: Default::default(),
-			// TODO the available range is arch-defined.
-			//free_virtual_addresses: [(NonNull::dangling(), NonZeroUsize::new(4096).unwrap())].into(),
-			free_virtual_addresses: [(
-				NonNull::new(0x1000_0000 as *mut _).unwrap(),
-				NonZeroUsize::new(4096).unwrap(),
-			)]
-			.into(),
 		})
 	}
 
@@ -59,10 +48,10 @@ impl AddressSpace {
 			.flat_map(|f| f)
 			.count();
 		let count = NonZeroUsize::new(count).ok_or(MapError::ZeroSize)?;
-		let base = base
-			.ok_or(())
-			.or_else(|()| self.allocate_virtual_address_range(count))
-			.map_err(|NoFreeVirtualAddressSpace| MapError::NoFreeVirtualAddressSpace)?;
+		let (base, base_index) = match base {
+			Some(base) => (base, usize::MAX),
+			None => self.find_free_range(count)?,
+		};
 		let end = base
 			.as_ptr()
 			.wrapping_add(count.get())
@@ -91,6 +80,7 @@ impl AddressSpace {
 		};
 		e.map(|()| {
 			self.objects.push((base..=end, object));
+			self.objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
 			base
 		})
 		.map_err(MapError::Arch)
@@ -133,25 +123,26 @@ impl AddressSpace {
 		self.mmu_address_space.get_physical_address(address)
 	}
 
-	/// Allocate a range of virtual address space.
-	pub fn allocate_virtual_address_range(
-		&mut self,
-		count: NonZeroUsize,
-	) -> Result<NonNull<Page>, NoFreeVirtualAddressSpace> {
-		for (&addr, &c) in self.free_virtual_addresses.iter() {
-			if c >= count {
-				// Allocate from the bottom half to the top, as lower addresses are usually
-				// more readable (i.e. more ergonomic).
-				self.free_virtual_addresses.remove(&addr);
-				if let Some(new_count) = NonZeroUsize::new(c.get() - count.get()) {
-					let addr = addr.as_ptr().wrapping_add(count.get());
-					self.free_virtual_addresses
-						.insert(NonNull::new(addr).unwrap(), new_count);
-				}
-				return Ok(addr);
-			}
-		}
-		Err(NoFreeVirtualAddressSpace)
+	/// Find a range of free address space.
+	fn find_free_range(&mut self, count: NonZeroUsize) -> Result<(NonNull<Page>, usize), MapError> {
+		// Try to allocate past the last object, which is very easy & fast to check.
+		// Also insert a guard page inbetween.
+		self.objects
+			.last()
+			.map_or(Ok((NonNull::new(Page::SIZE as _).unwrap(), 0)), |o| {
+				(Ok((
+					NonNull::new(
+						o.0.end()
+							.as_ptr()
+							.cast::<u8>()
+							.wrapping_add(1)
+							.cast::<Page>()
+							.wrapping_add(1),
+					)
+					.unwrap(),
+					self.objects.len(),
+				)))
+			})
 	}
 
 	pub unsafe fn activate(&self) {
@@ -182,5 +173,3 @@ impl AddressSpace {
 		unsafe { r#virtual::AddressSpace::activate_default() }
 	}
 }
-
-pub struct NoFreeVirtualAddressSpace;

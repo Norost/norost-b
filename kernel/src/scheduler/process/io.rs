@@ -97,7 +97,6 @@ impl super::Process {
 			.iter_mut()
 			.find(|(q, _)| q.base == base.cast())
 			.ok_or(ProcessQueueError::InvalidAddress)?;
-		let (req_mask, resp_mask) = (queue.requests_mask, queue.responses_mask);
 
 		let mut objects = self.objects.lock();
 		let mut queries = self.queries.lock();
@@ -105,19 +104,15 @@ impl super::Process {
 		// Poll tickets first as it may shrink the ticket Vec.
 		poll_tickets(queue, tickets, &mut objects, &mut queries);
 
-		while let Ok(e) = unsafe { queue.request_ring_mut().dequeue(req_mask) } {
+		while let Ok(e) = unsafe { queue.dequeue_request() } {
 			let mut push_resp = |value| {
-				let resps = unsafe { queue.response_ring_mut() };
 				// It is the responsibility of the user process to ensure no more requests are in
 				// flight than there is space for responses.
 				let _ = unsafe {
-					resps.enqueue(
-						resp_mask,
-						Response {
-							user_data: e.user_data,
-							value,
-						},
-					)
+					queue.enqueue_response(Response {
+						user_data: e.user_data,
+						value,
+					})
 				};
 			};
 			let mut push_pending = |data_ptr, data_len, ticket| {
@@ -359,24 +354,33 @@ impl super::Process {
 	}
 
 	pub fn wait_io_queue(&self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
-		let mut io_queues = self.io_queues.lock();
-		let (queue, tickets) = io_queues
-			.iter_mut()
-			.find(|(q, _)| q.base == base.cast())
-			.ok_or(WaitQueueError::InvalidAddress)?;
+		loop {
+			let mut io_queues = self.io_queues.lock();
+			let (queue, tickets) = io_queues
+				.iter_mut()
+				.find(|(q, _)| q.base == base.cast())
+				.ok_or(WaitQueueError::InvalidAddress)?;
 
-		while queue.responses_available() == 0 {
+			if queue.responses_available() > 0 {
+				break;
+			}
+
 			let polls = poll_tickets(
 				queue,
 				tickets,
 				&mut self.objects.lock(),
 				&mut self.queries.lock(),
 			);
-			if polls == 0 {
-				super::super::Thread::current()
-					.unwrap()
-					.sleep(core::time::Duration::MAX);
+			if polls > 0 {
+				break;
 			}
+
+			// Prevent blocking other threads.
+			drop(io_queues);
+
+			super::super::Thread::current()
+				.unwrap()
+				.sleep(core::time::Duration::MAX);
 		}
 		Ok(())
 	}
@@ -439,11 +443,9 @@ fn poll_tickets(
 }
 
 fn push_resp(queue: &mut Queue, user_data: u64, value: i64) {
-	let resp_mask = queue.responses_mask;
-	let resps = unsafe { queue.response_ring_mut() };
 	// It is the responsibility of the user process to ensure no more requests are in
 	// flight than there is space for responses.
-	let _ = unsafe { resps.enqueue(resp_mask, Response { user_data, value }) };
+	let _ = unsafe { queue.enqueue_response(Response { user_data, value }) };
 }
 
 fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> i64 {

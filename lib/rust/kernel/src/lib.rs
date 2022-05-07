@@ -3,7 +3,7 @@
 //! This crate provides structures & functions to facilitate communication with the
 //! Nora kernel.
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![feature(allow_internal_unsafe)]
 #![feature(asm_sym)]

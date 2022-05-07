@@ -26,8 +26,12 @@ impl OwnedPageFrames {
 			hints.address,
 			hints.color,
 		)?;
-		Ok(Self {
-			frames: frames.into(),
+		Ok({
+			let mut s = Self {
+				frames: frames.into(),
+			};
+			unsafe { s.clear() };
+			s
 		})
 	}
 

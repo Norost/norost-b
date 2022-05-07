@@ -34,10 +34,6 @@ pub unsafe fn write_tls_offset(offset: usize, data: usize) {
 // - Scratch: rcx, ...
 // - DF is cleared by default
 
-#[repr(align(16))]
-struct E([u8; 16]);
-static mut STACK: [E; 1 << 12] = [const { E([0; 1 << 4]) }; 1 << 12];
-
 // See lib.rs
 #[linkage = "weak"]
 #[export_name = "_start"]
@@ -47,11 +43,29 @@ extern "C" fn _start() -> ! {
 		// rax: thread handle
 		// rsp: pointer to program arguments & environment variables
 		asm!(
+			// Allocate stack space manually so the OS provides a guard page for us.
+			"mov eax, {alloc}",
+			"xor edi, edi", // Any base
+			"mov esi, 1 << 16", // 64 KiB ought to be enough for now.
+			"mov edx, 4 | 2", // RW
+			"syscall",
+
+			// The program arguments are located at $rsp
 			"mov rdi, rsp",
-			"lea rsp, [rip + ({stack} + (1 << 16))]",
-			"jmp {start}",
-			stack = sym STACK,
+			// The stack is located at $rdx, if successful
+			// $rax denotes tha actual amount of allocated memory
+			"lea rsp, [rdx + rax]",
+			// Only jump if stack allocation did *not* fail, i.e. $rax is not negative
+			"test eax, eax",
+			"jns {start}",
+
+			// Exit (abort) immediately as a last resort
+			"mov eax, {exit}",
+			"mov edi, 130", // Exit code
+			"syscall",
 			start = sym super::rt_start,
+			alloc = const norostb_kernel::syscall::ID_ALLOC,
+			exit = const norostb_kernel::syscall::ID_EXIT,
 			options(noreturn),
 		);
 	}

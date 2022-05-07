@@ -63,7 +63,7 @@ fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 }
 
 extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("alloc");
+	debug!("alloc {:#x} {} {:#b}", base, size, rwx);
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
 			status: 1,
@@ -79,18 +79,20 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 	let proc = Process::current().unwrap();
 	let base = base as *mut _;
 	match OwnedPageFrames::new(count, proc.allocate_hints(base)) {
-		Ok(mem) => proc
-			.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
-			.map_or(
-				Return {
-					status: usize::MAX,
-					value: 0,
-				},
-				|base| Return {
-					status: count.get() * Page::SIZE,
-					value: base.as_ptr() as usize,
-				},
-			),
+		Ok(mut mem) => {
+			unsafe { mem.clear() };
+			proc.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
+				.map_or(
+					Return {
+						status: usize::MAX,
+						value: 0,
+					},
+					|base| Return {
+						status: count.get() * Page::SIZE,
+						value: base.as_ptr() as usize,
+					},
+				)
+		}
 		Err(_) => Return {
 			status: usize::MAX - 1,
 			value: 0,

@@ -20,10 +20,10 @@ const _: usize = 8 - mem::size_of::<usize>();
 
 pub type Handle = u32;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Full;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Empty;
 
 /// A single request to submit to the kernel.
@@ -302,6 +302,7 @@ impl RequestRing {
 }
 
 /// A single response from the kernel.
+#[derive(Default)]
 #[repr(C)]
 pub struct Response {
 	pub value: i64,
@@ -430,13 +431,11 @@ impl Queue {
 		}
 	}
 
-	#[inline]
-	pub unsafe fn request_ring_mut(&mut self) -> &mut RequestRing {
+	unsafe fn request_ring_mut(&mut self) -> &mut RequestRing {
 		unsafe { self.base.cast::<RequestRing>().as_mut() }
 	}
 
-	#[inline]
-	pub unsafe fn response_ring_mut(&mut self) -> &mut ResponseRing {
+	unsafe fn response_ring_mut(&mut self) -> &mut ResponseRing {
 		unsafe {
 			&mut *self
 				.base
@@ -451,6 +450,18 @@ impl Queue {
 	pub unsafe fn enqueue_request(&mut self, request: Request) -> Result<(), Full> {
 		let mask = self.requests_mask;
 		unsafe { self.request_ring_mut().enqueue(mask, request) }
+	}
+
+	#[inline]
+	pub unsafe fn dequeue_request(&mut self) -> Result<Request, Empty> {
+		let mask = self.requests_mask;
+		unsafe { self.request_ring_mut().dequeue(mask) }
+	}
+
+	#[inline]
+	pub unsafe fn enqueue_response(&mut self, response: Response) -> Result<(), Full> {
+		let mask = self.responses_mask;
+		unsafe { self.response_ring_mut().enqueue(mask, response) }
 	}
 
 	#[inline]
@@ -601,6 +612,309 @@ impl Default for ObjectInfo {
 			path_ptr: core::ptr::null_mut(),
 			path_len: Default::default(),
 			path_capacity: Default::default(),
+		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn enqueue_request() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_request(Request::default()).unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+		}
+	}
+
+	#[test]
+	fn dequeue_request() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue
+				.enqueue_request(Request {
+					user_data: 1337,
+					..Default::default()
+				})
+				.unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			let req = queue.dequeue_request().unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 1);
+			assert_eq!(req.user_data, 1337);
+		}
+	}
+
+	#[test]
+	fn enqueue_2_requests() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_request(Request::default()).unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			queue.enqueue_request(Request::default()).unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 2);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+		}
+	}
+
+	#[test]
+	fn enqueue_8_requests() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 7,
+			responses_mask: 7,
+		};
+		unsafe {
+			for i in 1..9 {
+				queue.enqueue_request(Request::default()).unwrap();
+				assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), i);
+				assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			}
+		}
+	}
+
+	#[test]
+	fn dequeue_8_requests() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 7,
+			responses_mask: 7,
+		};
+		unsafe {
+			for i in 1..9 {
+				queue
+					.enqueue_request(Request {
+						user_data: i.into(),
+						..Default::default()
+					})
+					.unwrap();
+				assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), i);
+				assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			}
+			for i in 1..9 {
+				let req = queue.dequeue_request().unwrap();
+				assert_eq!(req.user_data, i.into());
+				assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 8);
+				assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), i);
+			}
+		}
+	}
+
+	#[test]
+	fn fail_enqueue_request() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_request(Request::default()).unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			queue.enqueue_request(Request::default()).unwrap();
+			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 2);
+			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
+			assert_eq!(Err(Full), queue.enqueue_request(Request::default()));
+		}
+	}
+
+	#[test]
+	fn fail_dequeue_request() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			assert!(queue.dequeue_request().is_err());
+		}
+	}
+
+	#[test]
+	fn enqueue_response() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_response(Response::default()).unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				1
+			);
+		}
+	}
+
+	#[test]
+	fn dequeue_response() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue
+				.enqueue_response(Response {
+					user_data: 1337,
+					..Default::default()
+				})
+				.unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				1
+			);
+			let req = queue.dequeue_response().unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 1);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				1
+			);
+			assert_eq!(req.user_data, 1337);
+		}
+	}
+
+	#[test]
+	fn enqueue_2_responses() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_response(Response::default()).unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				1
+			);
+			queue.enqueue_response(Response::default()).unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				2
+			);
+		}
+	}
+
+	#[test]
+	fn enqueue_8_responses() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 7,
+			responses_mask: 7,
+		};
+		unsafe {
+			for i in 1..9 {
+				queue.enqueue_response(Response::default()).unwrap();
+				assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+				assert_eq!(
+					queue.response_ring().kernel_index.load(Ordering::Relaxed),
+					i
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn dequeue_8_responses() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 7,
+			responses_mask: 7,
+		};
+		unsafe {
+			for i in 1..9 {
+				queue
+					.enqueue_response(Response {
+						user_data: i.into(),
+						..Default::default()
+					})
+					.unwrap();
+				assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+				assert_eq!(
+					queue.response_ring().kernel_index.load(Ordering::Relaxed),
+					i
+				);
+			}
+			for i in 1..9 {
+				let req = queue.dequeue_response().unwrap();
+				assert_eq!(req.user_data, i.into());
+				assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), i);
+				assert_eq!(
+					queue.response_ring().kernel_index.load(Ordering::Relaxed),
+					8
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn fail_enqueue_response() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			queue.enqueue_response(Response::default()).unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				1
+			);
+			queue.enqueue_response(Response::default()).unwrap();
+			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
+			assert_eq!(
+				queue.response_ring().kernel_index.load(Ordering::Relaxed),
+				2
+			);
+			assert_eq!(Err(Full), queue.enqueue_response(Response::default()));
+		}
+	}
+
+	#[test]
+	fn fail_dequeue_response() {
+		let base = Box::new([0; 4096]);
+		let mut queue = Queue {
+			base: NonNull::from(&*base).cast(),
+			requests_mask: 1,
+			responses_mask: 1,
+		};
+		unsafe {
+			assert!(queue.dequeue_response().is_err());
 		}
 	}
 }
