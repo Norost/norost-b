@@ -12,7 +12,7 @@ struct GDTEntry {
 	limit_low: u16,
 	base_low: u16,
 	base_mid: u8,
-	/// `access` bits:
+	/// `access` bits for data segments:
 	/// * 0:0 accessed (set by CPU)
 	/// * 1:1
 	///   * data: writeable (0 = read-only, 1 = read-write)
@@ -21,7 +21,13 @@ struct GDTEntry {
 	///   * data: direction (0 = grows up & limit > offset, 1 = grows down & limit < offset)
 	///   * code: conforming (0 = ring set == privilege, 1 = ring set >= privilege)
 	/// * 3:3 executable (1 = code, 0 = data)
-	/// * 4:4 descriptor type (1 = code/data, 0 = everything else)
+	/// * 4:4 descriptor type (1 = code/data, 0 = system)
+	/// * 5:7 privilege (0 = kernel, 3 = user)
+	/// * 7:7 present
+	///
+	/// `access` bits for system segments:
+	/// * 0:3 type (0x2 = LDT, 0x9 = 64-bit TSS available, 0xB = 64-bit TSS busy)
+	/// * 4:4 descriptor type (1 = code/data, 0 = system)
 	/// * 5:7 privilege (0 = kernel, 3 = user)
 	/// * 7:7 present
 	access: u8,
@@ -76,11 +82,11 @@ impl<'a> GDT<'a> {
 		// See syscall::init() for reasoning
 		Self {
 			null: GDTEntry {
-				limit_low: 0xffff,
+				limit_low: 0,
 				base_low: 0,
 				base_mid: 0,
 				access: 0,
-				granularity: 1,
+				granularity: 0,
 				base_high: 0,
 			},
 			kernel_code: GDTEntry {
@@ -116,11 +122,11 @@ impl<'a> GDT<'a> {
 				base_high: 0,
 			},
 			tss: GDTEntry {
-				limit_low: 0x0067,
+				limit_low: (mem::size_of::<TSS>() - 1).try_into().unwrap(),
 				base_low: (tss >> 0) as u16,
 				base_mid: (tss >> 16) as u8,
-				access: 0xe9,
-				granularity: (1 << 5) | (1 << 7) | 0xf,
+				access: (0b1_11_0 << 4) | 0x9,
+				granularity: 1 << 5,
 				base_high: (tss >> 24) as u8,
 			},
 			tss_extra: GDTEntryHigh {
@@ -143,24 +149,17 @@ impl GDTPointer {
 
 	pub unsafe fn activate(&self) {
 		unsafe {
-			asm!("
-				lgdt	[{0}]
-
-				lea		rax, [rip + 0f]
-				push	0x8					# cs
-				push	rax					# rîp
-				rex64 retf
-
-			0:
-				mov		ax, 2 * 8
-				mov		ds, ax
-				mov		es, ax
-				mov		ss, ax
-
-				# Set TSS
-				mov		ax, 5 * 8
-				ltr		ax
-			", in(reg) &self.limit);
+			asm!(
+				"lgdt [{0}]",
+				"mov ax, 2 * 8",
+				"mov ds, ax",
+				"mov es, ax",
+				"mov ss, ax",
+				// Set TSS
+				"mov ax, 5 * 8 | 3",
+				"ltr ax",
+				in(reg) &self.limit
+			);
 		}
 	}
 }

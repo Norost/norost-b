@@ -1,6 +1,6 @@
 use crate::arch::amd64::{self, asm::io};
 use crate::driver::apic::{io_apic, local_apic};
-use core::fmt;
+use core::{fmt, mem::ManuallyDrop};
 
 pub struct Uart {
 	port: u16,
@@ -24,6 +24,10 @@ impl Uart {
 
 	pub unsafe fn new(port: u16) -> Self {
 		Self { port }
+	}
+
+	pub unsafe fn new_no_init(port: u16) -> ManuallyDrop<Self> {
+		ManuallyDrop::new(Self { port })
 	}
 
 	pub fn send(&mut self, byte: u8) {

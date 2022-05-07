@@ -1,3 +1,5 @@
+use core::num::NonZeroUsize;
+
 #[repr(C)]
 pub struct TSS {
 	_reserved_0: [u32; 1],
@@ -25,5 +27,10 @@ impl TSS {
 	pub unsafe fn set_rsp(&mut self, rsp: usize, pointer: *const usize) {
 		self.rsp[rsp][0] = pointer as u32;
 		self.rsp[rsp][1] = ((pointer as u64) >> 32) as u32;
+	}
+
+	pub unsafe fn set_ist(&mut self, ist: NonZeroUsize, pointer: *const usize) {
+		self.ist[ist.get() - 1][0] = pointer as u32;
+		self.ist[ist.get() - 1][1] = ((pointer as u64) >> 32) as u32;
 	}
 }

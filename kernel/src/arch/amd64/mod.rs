@@ -35,10 +35,13 @@ static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
 // Start from 33, where IRQs 0..31 are used for exceptions and 32 is reserved for the timer.
 static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
 
+static mut DOUBLE_FAULT_STACK: [usize; 512] = [0; 512];
+
 pub unsafe fn init() {
 	unsafe {
 		// Setup TSS
-		TSS.set_rsp(0, TSS_STACK.as_ptr());
+		TSS.set_rsp(0, TSS_STACK.as_ptr().add(512));
+		TSS.set_ist(1.try_into().unwrap(), DOUBLE_FAULT_STACK.as_ptr().add(512));
 
 		// Setup GDT
 		GDT.write(gdt::GDT::new(&TSS));
@@ -58,7 +61,7 @@ pub unsafe fn init() {
 		);
 		IDT.set(
 			8,
-			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 0),
+			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 1),
 		);
 		IDT.set(
 			13,

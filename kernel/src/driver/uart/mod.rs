@@ -11,6 +11,7 @@ mod table;
 use crate::object_table;
 use crate::sync::spinlock::{Guard, SpinLock};
 use alloc::sync::Arc;
+use core::fmt;
 pub use table::UartId;
 
 pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
@@ -44,4 +45,14 @@ pub unsafe fn post_init(root: &crate::object_table::Root) {
 pub fn get(i: usize) -> Guard<'static, Uart> {
 	// SAFETY: No thread sets DEVICES[i] to None
 	unsafe { DEVICES[i].as_ref().unwrap().lock() }
+}
+
+/// UART device for emergency situations. This function bypasses the lock and should only be used
+/// when things are in an extremely bad state (e.g. double fault).
+pub struct EmergencyWriter;
+
+impl fmt::Write for EmergencyWriter {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		unsafe { Uart::new_no_init(0x3f8) }.write_str(s)
+	}
 }

@@ -191,7 +191,7 @@ impl IDTEntry {
 	const ATTRIBUTE_GATETYPE_INTERRUPT: u8 = 0xe;
 	const ATTRIBUTE_GATETYPE_TRAP: u8 = 0xf;
 	const ATTRIBUTE_PRESENT: u8 = 0x80;
-	const ATTRIBUTE_DPL: u8 = 0x60;
+	const ATTRIBUTE_DPL: u8 = 0x00;
 
 	const EMPTY: Self = Self {
 		offset_low: 0,

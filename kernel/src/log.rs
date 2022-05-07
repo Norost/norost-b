@@ -46,7 +46,7 @@ macro_rules! fatal {
 	($($args:tt)*) => {{
 		#[allow(unused_imports)]
 		use core::fmt::Write;
-		writeln!($crate::driver::uart::get(0), $($args)*).unwrap();
+		writeln!($crate::driver::uart::EmergencyWriter, $($args)*).unwrap();
 	}}
 }
 
