@@ -26,7 +26,6 @@ members = [
 [profile.dev]
 panic = "abort"
 opt-level = 2
-lto = "fat"
 
 [profile.release]
 codegen-units = 1
