@@ -2,7 +2,7 @@ use crate::memory::frame::{self, AllocateHints, OwnedPageFrames};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::Object;
-use crate::scheduler::{process::frame::PageFrame, MemoryObject};
+use crate::scheduler::{process::frame::PPN, MemoryObject};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
@@ -76,15 +76,13 @@ struct MemorySlice {
 }
 
 impl MemoryObject for MemorySlice {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
+	fn physical_pages(&self) -> Box<[PPN]> {
 		self.inner
 			.physical_pages()
-			.iter()
-			.flat_map(|f| f.iter())
-			.flatten()
+			.into_vec()
+			.into_iter()
 			.skip(self.range.start)
 			.take(self.range.end - self.range.start)
-			.map(|f| PageFrame { base: f, p2size: 0 })
 			.collect()
 	}
 }
@@ -98,12 +96,11 @@ impl super::Process {
 	) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
 		let mut data = data_object.physical_pages();
-		data.sort_by(|a, b| a.base.cmp(&b.base));
-		let l: usize = data.iter().map(|p| 1 << p.p2size).sum();
+		data.sort();
 
 		// FIXME definitely don't require unsafe code.
 		let data = unsafe {
-			core::slice::from_raw_parts(data[0].base.as_ptr().cast::<u8>(), Page::SIZE * l)
+			core::slice::from_raw_parts(data[0].as_ptr().cast::<u8>(), Page::SIZE * data.len())
 		};
 
 		let slf = Self::new()?;
@@ -219,13 +216,12 @@ impl super::Process {
 					let page_offt = usize::try_from(header.offset).unwrap() & Page::MASK;
 					let mut wr_i = page_offt;
 					for p in data_object.physical_pages().into_vec() {
-						assert_eq!(p.p2size, 0, "TODO");
 						let (from, to) = (offt, offt + u64::try_from(Page::SIZE).unwrap());
 						for i in from.max(header.offset)..to.min(header.offset + header.file_size) {
 							let rd_i = usize::try_from(i).unwrap() & Page::MASK;
 							assert_eq!(rd_i & Page::MASK, wr_i & Page::MASK);
 							unsafe {
-								let b = p.base.as_ptr().cast::<u8>().add(rd_i).read();
+								let b = p.as_ptr().cast::<u8>().add(rd_i).read();
 								mem.write(wr_i, &[b]);
 							}
 							wr_i += 1;

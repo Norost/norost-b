@@ -1,4 +1,4 @@
-use crate::memory::frame::PageFrame;
+use crate::memory::frame::PPN;
 use alloc::boxed::Box;
 use core::any::Any;
 use core::ops::Range;
@@ -9,7 +9,7 @@ where
 	Self: Any,
 {
 	/// The physical pages used by this object that must be mapped.
-	fn physical_pages(&self) -> Box<[PageFrame]>;
+	fn physical_pages(&self) -> Box<[PPN]>;
 
 	/// Mark a range of physical pages as dirty. May panic if the range
 	/// is invalid.

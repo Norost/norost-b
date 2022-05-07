@@ -78,10 +78,9 @@ impl Entry {
 		}
 	}
 
-	pub fn new_table(&mut self, frame: frame::PageFrame, user: bool) -> &mut [Entry; 512] {
-		assert_eq!(frame.p2size, 0);
+	pub fn new_table(&mut self, frame: frame::PPN, user: bool) -> &mut [Entry; 512] {
 		assert!(!self.is_present());
-		let frame = frame.base.try_into().unwrap();
+		let frame = frame.try_into().unwrap();
 		// SAFETY: FIXME the allocator makes no guarantees about the address of the frame.
 		let tbl = unsafe { phys_to_virt(frame).cast::<[Entry; 512]>() };
 		// SAFETY: a fully zeroed Entry is valid.

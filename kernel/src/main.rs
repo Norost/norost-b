@@ -21,7 +21,7 @@
 
 extern crate alloc;
 
-use crate::memory::frame::{PageFrame, PageFrameIter, PPN};
+use crate::memory::frame::{PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
 use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, QueryIter, Ticket};
 use crate::scheduler::MemoryObject;
@@ -124,7 +124,7 @@ fn panic(info: &PanicInfo) -> ! {
 struct Driver(&'static [u8]);
 
 impl MemoryObject for Driver {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
+	fn physical_pages(&self) -> Box<[PPN]> {
 		let address = unsafe { memory::r#virtual::virt_to_phys(self.0.as_ptr()) };
 		assert_eq!(
 			address & u64::try_from(Page::MASK).unwrap(),
@@ -133,9 +133,7 @@ impl MemoryObject for Driver {
 		);
 		let base = PPN((address >> Page::OFFSET_BITS).try_into().unwrap());
 		let count = Page::min_pages_for_bytes(self.0.len());
-		PageFrameIter { base, count }
-			.map(|p| PageFrame { base: p, p2size: 0 })
-			.collect()
+		PageFrameIter { base, count }.collect()
 	}
 }
 

@@ -1,6 +1,5 @@
 use super::PCI;
-use crate::memory::frame::PageFrame;
-use crate::memory::frame::PPN;
+use crate::memory::frame::{PageFrameIter, PPN};
 use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
@@ -22,19 +21,16 @@ impl PciDevice {
 		Self { bus, device }
 	}
 
-	pub fn config_region(&self) -> PageFrame {
+	pub fn config_region(&self) -> PPN {
 		let pci = PCI.lock();
 		let pci = pci.as_ref().unwrap();
 		let addr = pci.get_physical_address(self.bus, self.device, 0);
-		PageFrame {
-			base: PPN::try_from_usize(addr).unwrap(),
-			p2size: 0,
-		}
+		PPN::try_from_usize(addr).unwrap()
 	}
 }
 
 impl MemoryObject for PciDevice {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
+	fn physical_pages(&self) -> Box<[PPN]> {
 		[self.config_region()].into()
 	}
 }
@@ -67,22 +63,24 @@ impl Object for PciDevice {
 		}
 		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
 		let addr = BaseAddress::address(orig, upper).unwrap();
-		let frame = PageFrame {
+		let frames = PageFrameIter {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
-			p2size: size.trailing_zeros() as u8 - 12, // log2
+			count: size.get().try_into().unwrap(),
 		};
-		Some(Box::new(BarRegion { frame }))
+		Some(Box::new(BarRegion {
+			frames: frames.collect(),
+		}))
 	}
 }
 
 /// A single MMIO region pointer to by a BAR of a PCI device.
 pub struct BarRegion {
-	frame: PageFrame,
+	frames: Box<[PPN]>,
 }
 
 impl MemoryObject for BarRegion {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
-		[self.frame].into()
+	fn physical_pages(&self) -> Box<[PPN]> {
+		self.frames.clone()
 	}
 }
 

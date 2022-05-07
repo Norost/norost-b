@@ -1,11 +1,11 @@
-use super::{AllocateError, AllocateHints, Page, PageFrame};
+use super::{AllocateError, AllocateHints, Page, PPN};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroUsize;
 
 /// An allocation of page frames.
 pub struct OwnedPageFrames {
-	frames: Box<[PageFrame]>,
+	frames: Box<[PPN]>,
 }
 
 impl OwnedPageFrames {
@@ -14,18 +14,7 @@ impl OwnedPageFrames {
 		// FIXME if we don't pre allocate we will deadlock.
 		// This is a shitty workaround
 		frames.reserve(size.get());
-		super::allocate(
-			size.get(),
-			|f| {
-				unsafe {
-					assert_eq!(f.p2size, 0, "TODO");
-					f.base.as_ptr().write_bytes(0, 1 << f.p2size);
-				}
-				frames.push(f);
-			},
-			hints.address,
-			hints.color,
-		)?;
+		super::allocate(size.get(), |f| frames.push(f), hints.address, hints.color)?;
 		Ok({
 			let mut s = Self {
 				frames: frames.into(),
@@ -38,25 +27,24 @@ impl OwnedPageFrames {
 	pub unsafe fn clear(&mut self) {
 		for f in self.frames.iter() {
 			unsafe {
-				f.base.as_ptr().cast::<Page>().write_bytes(0, 1 << f.p2size);
+				f.as_ptr().cast::<Page>().write_bytes(0, 1);
 			}
 		}
 	}
 
 	pub unsafe fn write(&self, start: usize, data: &[u8]) {
-		// FIXME don't assume page frames are 0 p2size each.
 		for (i, b) in (start..).zip(data) {
 			let frame = &self.frames[i / Page::SIZE];
 			// FIXME unsynchronized writes are UB.
 			unsafe {
-				*frame.base.as_ptr().cast::<u8>().add(i % Page::SIZE) = *b;
+				*frame.as_ptr().cast::<u8>().add(i % Page::SIZE) = *b;
 			}
 		}
 	}
 }
 
 impl MemoryObject for OwnedPageFrames {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
+	fn physical_pages(&self) -> Box<[PPN]> {
 		self.frames.clone()
 	}
 }

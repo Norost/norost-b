@@ -1,5 +1,5 @@
 use super::common;
-use crate::memory::frame::{self, PageFrame, PPN};
+use crate::memory::frame::{self, PPN};
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
 use core::arch::asm;
@@ -18,7 +18,7 @@ impl AddressSpace {
 	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
 		let mut ppn = None;
 		frame::allocate(1, |f| ppn = Some(f), 0 as _, 0).unwrap();
-		let ppn = ppn.unwrap().base;
+		let ppn = ppn.unwrap();
 		unsafe {
 			ppn.as_ptr().cast::<Page>().write_bytes(0, 1);
 		}
@@ -88,29 +88,22 @@ impl AddressSpace {
 
 	pub unsafe fn kernel_map(
 		mut address: *const Page,
-		frames: impl ExactSizeIterator<Item = frame::PageFrame>,
+		frames: impl ExactSizeIterator<Item = frame::PPN>,
 		rwx: RWX,
 	) -> Result<(), MapError> {
 		let tbl = unsafe { Self::current() };
-		for f in frames {
-			let level = (f.p2size >= 9).then(|| 1).unwrap_or(0);
-			let offset = (f.p2size >= 9).then(|| 1 << 9).unwrap_or(1);
-			let count = (f.p2size >= 9).then(|| 1 << (f.p2size - 9)).unwrap_or(1);
-			let mut ppn = f.base;
-			for _ in 0..count {
-				loop {
-					match common::get_entry_mut(tbl, address as u64, level, 3 - level) {
-						Ok(e) => {
-							e.set_page(ppn.as_phys() as u64, false, rwx.w()).unwrap();
-							address = address.wrapping_add(offset);
-							break;
-						}
-						Err((e, _)) => {
-							e.make_table(false, 0).unwrap();
-						}
+		for ppn in frames {
+			loop {
+				match common::get_entry_mut(tbl, address as u64, 0, 3) {
+					Ok(e) => {
+						e.set_page(ppn.as_phys() as u64, false, rwx.w()).unwrap();
+						address = address.wrapping_add(1);
+						break;
+					}
+					Err((e, _)) => {
+						e.make_table(false, 0).unwrap();
 					}
 				}
-				ppn = ppn.skip(offset.try_into().unwrap());
 			}
 		}
 		Ok(())
@@ -174,8 +167,7 @@ impl Drop for AddressSpace {
 				for e in entries.iter().filter_map(|e| e.as_table()) {
 					unsafe {
 						dealloc(e);
-						let base = PPN::from_ptr(e as *const _ as _);
-						frame::deallocate(1, || PageFrame { base, p2size: 0 }).unwrap()
+						frame::deallocate(1, || PPN::from_ptr(e as *const _ as _)).unwrap()
 					}
 				}
 			}

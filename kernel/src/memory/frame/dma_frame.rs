@@ -1,4 +1,4 @@
-use super::{PPNBox, PageFrame, PageFrameIter, PPN};
+use super::{PPNBox, PageFrameIter, PPN};
 use crate::memory::frame;
 use crate::scheduler::MemoryObject;
 use alloc::boxed::Box;
@@ -24,13 +24,8 @@ impl DMAFrame {
 }
 
 impl MemoryObject for DMAFrame {
-	fn physical_pages(&self) -> Box<[PageFrame]> {
-		(0..self.count)
-			.map(|i| PageFrame {
-				base: self.base.skip(i),
-				p2size: 0,
-			})
-			.collect()
+	fn physical_pages(&self) -> Box<[PPN]> {
+		(0..self.count).map(|i| self.base.skip(i)).collect()
 	}
 }
 
@@ -41,11 +36,7 @@ impl Drop for DMAFrame {
 			count: self.count.try_into().unwrap(),
 		};
 		unsafe {
-			super::deallocate(self.count.try_into().unwrap(), || PageFrame {
-				base: iter.next().unwrap(),
-				p2size: 0,
-			})
-			.unwrap();
+			super::deallocate(self.count.try_into().unwrap(), || iter.next().unwrap()).unwrap();
 		}
 	}
 }

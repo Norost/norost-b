@@ -112,34 +112,6 @@ pub enum PPNError {
 #[derive(Debug)]
 pub struct OutOfRange;
 
-/// A single page frame with a variable size.
-#[derive(Clone, Copy, Debug)]
-pub struct PageFrame {
-	pub base: PPN,
-	/// The size of the frame expressed as `2 ^ p2size`.
-	pub p2size: u8,
-}
-
-impl PageFrame {
-	pub fn iter(&self) -> Result<PageFrameIter, PageFrameIterError> {
-		Ok(PageFrameIter {
-			base: self.base,
-			count: 1usize
-				.checked_shl(self.p2size.into())
-				.ok_or(PageFrameIterError::TooLarge)?,
-		})
-	}
-}
-
-impl IntoIterator for PageFrame {
-	type Item = PPN;
-	type IntoIter = PageFrameIter;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.iter().unwrap()
-	}
-}
-
 pub struct PageFrameIter {
 	pub base: PPN,
 	pub count: usize,
@@ -166,11 +138,6 @@ impl ExactSizeIterator for PageFrameIter {
 	fn len(&self) -> usize {
 		self.count
 	}
-}
-
-#[derive(Debug)]
-pub enum PageFrameIterError {
-	TooLarge,
 }
 
 /// A region of physical memory
@@ -223,14 +190,13 @@ pub fn allocate<F>(
 	_hint_color: u8,
 ) -> Result<(), AllocateError>
 where
-	F: FnMut(PageFrame),
+	F: FnMut(PPN),
 {
 	let mut stack = dumb_stack::STACK.lock();
 	(stack.count() >= count)
 		.then(|| {
 			for _ in 0..count {
-				let base = stack.pop().unwrap();
-				callback(PageFrame { base, p2size: 0 });
+				callback(stack.pop().unwrap());
 			}
 		})
 		.ok_or(AllocateError::OutOfFrames)
@@ -251,15 +217,13 @@ pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguou
 /// The pages must be allocated and may not be freed multiple times in a row.
 pub unsafe fn deallocate<F>(count: usize, mut callback: F) -> Result<(), DeallocateError>
 where
-	F: FnMut() -> PageFrame,
+	F: FnMut() -> PPN,
 {
 	let mut stack = dumb_stack::STACK.lock();
 	for _ in 0..count {
-		let frame = callback();
-		for i in 0..(1 as PPNBox) << frame.p2size {
-			let ppn = PPN(frame.base.0 + i);
-			stack.push(ppn).expect("stack is full (double free?)");
-		}
+		stack
+			.push(callback())
+			.expect("stack is full (double free?)");
 	}
 	Ok(())
 }

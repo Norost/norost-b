@@ -4,7 +4,7 @@ mod sanitizer;
 #[cfg(not(feature = "debug-sanitize-heap"))]
 mod default {
 	use super::super::{
-		frame::{self, PageFrame, PPN},
+		frame::{self, PPN},
 		Page,
 	};
 	use core::alloc::{GlobalAlloc, Layout};
@@ -34,7 +34,7 @@ mod default {
 			let mut base = unsafe { PPN::from_ptr(ptr.cast::<Page>()) };
 			unsafe {
 				frame::deallocate(c, || {
-					let f = PageFrame { base, p2size: 0 };
+					let f = base;
 					base = base.next();
 					f
 				})
