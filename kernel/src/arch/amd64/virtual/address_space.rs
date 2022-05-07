@@ -50,16 +50,34 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<(), MapError> {
-		let tbl = unsafe { self.table_mut() };
-		for (i, f) in frames.enumerate() {
+		unsafe { Self::map_common(self.table_mut(), address, frames, rwx, hint_color, true) }
+	}
+
+	pub unsafe fn kernel_map(
+		address: *const Page,
+		frames: impl ExactSizeIterator<Item = frame::PPN>,
+		rwx: RWX,
+	) -> Result<(), MapError> {
+		unsafe { Self::map_common(Self::current(), address, frames, rwx, 0, false) }
+	}
+
+	unsafe fn map_common(
+		tbl: &mut [common::Entry; 512],
+		address: *const Page,
+		frames: impl ExactSizeIterator<Item = frame::PPN>,
+		rwx: RWX,
+		hint_color: u8,
+		user: bool,
+	) -> Result<(), MapError> {
+		for (i, ppn) in frames.enumerate() {
 			loop {
 				match common::get_entry_mut(tbl, address.wrapping_add(i) as u64, 0, 3) {
 					Ok(e) => {
-						e.set_page(f.as_phys() as u64, true, rwx.w()).unwrap();
+						e.set_page(ppn.as_phys() as u64, user, rwx.w()).unwrap();
 						break;
 					}
 					Err((e, _)) => {
-						e.make_table(true, hint_color).unwrap();
+						e.make_table(user, hint_color).unwrap();
 					}
 				}
 			}
@@ -72,7 +90,21 @@ impl AddressSpace {
 		address: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
-		let tbl = unsafe { self.table_mut() };
+		unsafe { Self::unmap_common(self.table_mut(), address, count) }
+	}
+
+	pub unsafe fn kernel_unmap(
+		address: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		unsafe { Self::unmap_common(Self::current(), address, count) }
+	}
+
+	unsafe fn unmap_common(
+		tbl: &mut [common::Entry; 512],
+		address: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
 		for i in 0..count.get() {
 			let e = common::get_entry_mut(tbl, address.as_ptr().wrapping_add(i) as u64, 0, 3)
 				.map_err(|_| UnmapError::Unset)?;
@@ -82,29 +114,6 @@ impl AddressSpace {
 		// TODO avoid flushing the entire TLB.
 		unsafe {
 			asm!("mov {0}, cr3", "mov cr3, {0}", out(reg) _);
-		}
-		Ok(())
-	}
-
-	pub unsafe fn kernel_map(
-		mut address: *const Page,
-		frames: impl ExactSizeIterator<Item = frame::PPN>,
-		rwx: RWX,
-	) -> Result<(), MapError> {
-		let tbl = unsafe { Self::current() };
-		for ppn in frames {
-			loop {
-				match common::get_entry_mut(tbl, address as u64, 0, 3) {
-					Ok(e) => {
-						e.set_page(ppn.as_phys() as u64, false, rwx.w()).unwrap();
-						address = address.wrapping_add(1);
-						break;
-					}
-					Err((e, _)) => {
-						e.make_table(false, 0).unwrap();
-					}
-				}
-			}
 		}
 		Ok(())
 	}

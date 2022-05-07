@@ -4,6 +4,7 @@ use crate::memory::{
 	Page,
 };
 use crate::scheduler::MemoryObject;
+use crate::sync::Mutex;
 use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
@@ -16,7 +17,12 @@ pub enum MapError {
 	Arch(crate::arch::r#virtual::MapError),
 }
 
+#[derive(Debug)]
 pub enum UnmapError {}
+
+/// All objects mapped in kernel space. This vector is sorted.
+static KERNEL_MAPPED_OBJECTS: Mutex<Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>> =
+	Mutex::new(Vec::new());
 
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
@@ -33,6 +39,7 @@ impl AddressSpace {
 		})
 	}
 
+	/// Map an object in this current address space in userspace.
 	pub fn map_object(
 		&mut self,
 		base: Option<NonNull<Page>>,
@@ -40,12 +47,71 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<NonNull<Page>, MapError> {
+		let (range, frames) = Self::map_object_common(
+			&self.objects,
+			NonNull::new(Page::SIZE as _).unwrap(),
+			base,
+			&*object,
+		)?;
+
+		unsafe {
+			self.mmu_address_space
+				.map(
+					range.start().as_ptr() as *const _,
+					frames.into_vec().into_iter(),
+					rwx,
+					hint_color,
+				)
+				.map_err(MapError::Arch)?
+		};
+		self.objects.push((range.clone(), object));
+		self.objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
+		Ok(*range.start())
+	}
+
+	/// Map a frame in kernel-space.
+	pub fn kernel_map_object(
+		base: Option<NonNull<Page>>,
+		object: Box<dyn MemoryObject>,
+		rwx: RWX,
+	) -> Result<NonNull<Page>, MapError> {
+		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
+
+		let (range, frames) = Self::map_object_common(
+			&objects,
+			// TODO don't hardcode base address
+			// Current one is between kernel base & identity map base,
+			// which gives us 32 TiB of address space, i.e. plenty for now.
+			NonNull::new(0xffff_a000_0000_0000usize as _).unwrap(),
+			base,
+			&*object,
+		)?;
+
+		unsafe {
+			r#virtual::AddressSpace::kernel_map(
+				range.start().as_ptr() as *const _,
+				frames.into_vec().into_iter(),
+				rwx,
+			)
+			.map_err(MapError::Arch)?
+		};
+		objects.push((range.clone(), object));
+		objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
+		Ok(*range.start())
+	}
+
+	fn map_object_common(
+		objects: &[(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)],
+		default: NonNull<Page>,
+		base: Option<NonNull<Page>>,
+		object: &dyn MemoryObject,
+	) -> Result<(RangeInclusive<NonNull<Page>>, Box<[PPN]>), MapError> {
 		let frames = object.physical_pages();
 		let count = NonZeroUsize::new(frames.len()).ok_or(MapError::ZeroSize)?;
 		// TODO use base_index to avoid redundant sorting
 		let (base, _base_index) = match base {
 			Some(base) => (base, usize::MAX),
-			None => self.find_free_range(count)?,
+			None => Self::find_free_range(objects, count, default)?,
 		};
 		let end = base
 			.as_ptr()
@@ -57,21 +123,7 @@ impl AddressSpace {
 			return Err(MapError::Overflow);
 		}
 		let end = NonNull::new(end).unwrap();
-
-		let e = unsafe {
-			self.mmu_address_space.map(
-				base.as_ptr() as *const _,
-				frames.into_vec().into_iter(),
-				rwx,
-				hint_color,
-			)
-		};
-		e.map(|()| {
-			self.objects.push((base..=end, object));
-			self.objects.sort_by(|l, r| l.0.start().cmp(r.0.start()));
-			base
-		})
-		.map_err(MapError::Arch)
+		Ok((base..=end, frames))
 	}
 
 	pub fn unmap_object(
@@ -79,12 +131,35 @@ impl AddressSpace {
 		base: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
-		let i = self
-			.objects
-			.iter()
-			.position(|e| e.0.contains(&base))
-			.unwrap();
-		let (range, _obj) = &self.objects[i];
+		unsafe {
+			Self::unmap_object_common(&mut self.objects, base, count)?;
+			self.mmu_address_space.unmap(base, count).unwrap();
+		}
+		Ok(())
+	}
+
+	/// # Safety
+	///
+	/// The memory region may no longer be used after this call.
+	pub unsafe fn kernel_unmap_object(
+		base: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
+		unsafe {
+			Self::unmap_object_common(&mut objects, base, count)?;
+			r#virtual::AddressSpace::kernel_unmap(base, count).unwrap();
+		}
+		Ok(())
+	}
+
+	unsafe fn unmap_object_common(
+		objects: &mut Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
+		base: NonNull<Page>,
+		count: NonZeroUsize,
+	) -> Result<(), UnmapError> {
+		let i = objects.iter().position(|e| e.0.contains(&base)).unwrap();
+		let (range, _obj) = &objects[i];
 		let end = base
 			.as_ptr()
 			.wrapping_add(count.get())
@@ -93,16 +168,10 @@ impl AddressSpace {
 			.cast();
 		let unmap_range = base..=NonNull::new(end).unwrap();
 		if &unmap_range == range {
-			self.objects.remove(i);
+			objects.remove(i);
 		} else {
 			todo!("partial unmap");
 		}
-
-		// Remove from page tables.
-		unsafe {
-			self.mmu_address_space.unmap(base, count).unwrap();
-		}
-
 		Ok(())
 	}
 
@@ -113,28 +182,27 @@ impl AddressSpace {
 
 	/// Find a range of free address space.
 	fn find_free_range(
-		&mut self,
+		objects: &[(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)],
 		_count: NonZeroUsize,
+		default: NonNull<Page>,
 	) -> Result<(NonNull<Page>, usize), MapError> {
 		// FIXME we need to check if there actually is enough room
 		// Try to allocate past the last object, which is very easy & fast to check.
 		// Also insert a guard page inbetween.
-		self.objects
-			.last()
-			.map_or(Ok((NonNull::new(Page::SIZE as _).unwrap(), 0)), |o| {
-				Ok((
-					NonNull::new(
-						o.0.end()
-							.as_ptr()
-							.cast::<u8>()
-							.wrapping_add(1)
-							.cast::<Page>()
-							.wrapping_add(1),
-					)
-					.unwrap(),
-					self.objects.len(),
-				))
-			})
+		objects.last().map_or(Ok((default, 0)), |o| {
+			Ok((
+				NonNull::new(
+					o.0.end()
+						.as_ptr()
+						.cast::<u8>()
+						.wrapping_add(1)
+						.cast::<Page>()
+						.wrapping_add(1),
+				)
+				.unwrap(),
+				objects.len(),
+			))
+		})
 	}
 
 	pub unsafe fn activate(&self) {

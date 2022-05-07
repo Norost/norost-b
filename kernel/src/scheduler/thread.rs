@@ -1,25 +1,31 @@
 use super::process::Process;
 use crate::arch;
 use crate::memory::{
-	frame::{self, PPN},
+	frame::{self, AllocateHints, OwnedPageFrames},
+	r#virtual::{AddressSpace, RWX},
 	Page,
 };
 use crate::sync::Mutex;
 use crate::time::Monotonic;
 use alloc::{
+	boxed::Box,
 	sync::{Arc, Weak},
 	vec::Vec,
 };
 use core::arch::asm;
 use core::cell::Cell;
+use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::task::Waker;
 use core::time::Duration;
 use norostb_kernel::Handle;
 
+const KERNEL_STACK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
+
 pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
 	pub kernel_stack: Cell<Option<NonNull<usize>>>,
+	kernel_stack_base: NonNull<Page>,
 	// This does create a cyclic reference and risks leaking memory, but should
 	// be faster & more convienent in the long run.
 	//
@@ -43,11 +49,21 @@ impl Thread {
 		handle: Handle,
 	) -> Result<Self, frame::AllocateContiguousError> {
 		unsafe {
-			let mut kernel_stack_base = None;
-			frame::allocate(1, |f| kernel_stack_base = Some(f), 0 as _, 0).unwrap();
-			let kernel_stack_base = kernel_stack_base.unwrap();
-			let kernel_stack_base = kernel_stack_base.as_ptr().cast::<[usize; 512]>();
-			let mut kernel_stack = kernel_stack_base.add(1).cast::<usize>();
+			let kernel_stack_base = OwnedPageFrames::new(
+				KERNEL_STACK_SIZE,
+				AllocateHints {
+					address: 0 as _,
+					color: 0,
+				},
+			)
+			.unwrap();
+			let kernel_stack_base =
+				AddressSpace::kernel_map_object(None, Box::new(kernel_stack_base), RWX::RW)
+					.unwrap();
+			let mut kernel_stack = kernel_stack_base
+				.as_ptr()
+				.add(KERNEL_STACK_SIZE.get())
+				.cast::<usize>();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
@@ -70,6 +86,7 @@ impl Thread {
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
 				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
+				kernel_stack_base,
 				process,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
@@ -177,12 +194,9 @@ impl Thread {
 
 		// FIXME ensure the thread has been stopped.
 
-		// SAFETY: the kernel pointer should be valid lest we smashed the stack.
-		// The caller also guaranteed it is not using this stack.
+		// SAFETY: The caller guarantees it is not using this stack.
 		unsafe {
-			let kernel_stack = self.kernel_stack.take().unwrap().as_ptr() as usize & !Page::MASK;
-			let kernel_stack = PPN::from_ptr(kernel_stack as *mut _);
-			frame::deallocate(1, || kernel_stack).unwrap();
+			AddressSpace::kernel_unmap_object(self.kernel_stack_base, KERNEL_STACK_SIZE).unwrap();
 		}
 
 		for w in self.waiters.lock().drain(..) {
