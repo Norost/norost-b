@@ -34,4 +34,4 @@ Once the compiler is properly configured, `mkiso.sh` will create a bootable imag
 
 [design]: DESIGN.md
 [rust]: thirdparty/rust
-[website]: TODO
+[website]: https://norost.com
