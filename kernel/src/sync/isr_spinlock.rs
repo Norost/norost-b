@@ -1,4 +1,7 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+	mem::ManuallyDrop,
+	ops::{Deref, DerefMut},
+};
 
 /// A spinlock intended for use with interrupt service routines.
 ///
@@ -11,7 +14,7 @@ pub struct IsrSpinLock<T> {
 
 /// A guard held *outside* ISRs.
 pub struct Guard<'a, T> {
-	inner: super::spinlock::Guard<'a, T>,
+	inner: ManuallyDrop<super::spinlock::Guard<'a, T>>,
 }
 
 /// A guard held *inside* ISRs.
@@ -31,7 +34,7 @@ impl<T> IsrSpinLock<T> {
 	pub fn lock(&self) -> Guard<T> {
 		crate::arch::disable_interrupts();
 		Guard {
-			inner: self.inner.lock(),
+			inner: ManuallyDrop::new(self.inner.lock()),
 		}
 	}
 
@@ -67,6 +70,8 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
+		// SAFETY: we only drop inner once here
+		unsafe { ManuallyDrop::drop(&mut self.inner) };
 		crate::arch::enable_interrupts();
 	}
 }
