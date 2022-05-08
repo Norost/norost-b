@@ -207,7 +207,7 @@ impl super::Process {
 						address: virt.cast().as_ptr(),
 						color: slf.hint_color,
 					};
-					let mem = Box::new(
+					let mem = Arc::new(
 						OwnedPageFrames::new(alloc, hint).map_err(ElfError::AllocateError)?,
 					);
 					// FIXME this is utter shit
@@ -236,7 +236,7 @@ impl super::Process {
 				if let Some(count) = NonZeroUsize::new(count) {
 					// Map part of the ELF file.
 					let virt = NonNull::new(virt_address as *mut _).unwrap();
-					let mem = Box::new(MemorySlice {
+					let mem = Arc::new(MemorySlice {
 						inner: data_object.clone(),
 						range: page_offset..page_offset + count.get(),
 					});
@@ -251,7 +251,7 @@ impl super::Process {
 						address: virt.cast().as_ptr(),
 						color: slf.hint_color,
 					};
-					let mem = Box::new(
+					let mem = Arc::new(
 						OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?,
 					);
 					address_space
@@ -264,7 +264,7 @@ impl super::Process {
 		// Map in stack
 		let stack = if let Some(stack_frames) = stack_frames {
 			let stack = address_space
-				.map_object(None, Box::new(stack_frames), RWX::RW, slf.hint_color)
+				.map_object(None, Arc::new(stack_frames), RWX::RW, slf.hint_color)
 				.map_err(ElfError::MapError)?;
 			stack.as_ptr().wrapping_add(stack_offset) as usize
 		} else {

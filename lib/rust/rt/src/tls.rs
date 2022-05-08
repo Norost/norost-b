@@ -126,7 +126,8 @@ pub(crate) unsafe fn init_thread(ptr: *mut ()) {
 	}
 }
 
-/// Initialize TLS storage for a single thread.
+/// Destroy the TLS storage for a single thread. This also runs the destructor
+/// on any stored values.
 ///
 /// # Safety
 ///
@@ -140,6 +141,16 @@ pub(crate) unsafe fn init_thread(ptr: *mut ()) {
 pub(crate) unsafe fn deinit_thread() {
 	unsafe {
 		let storage = super::get_tls().cast::<Entry>();
+		let dtors = destructors();
+		for key in (0..ENTRIES).map(Key) {
+			let val = get(key);
+			if !val.is_null() {
+				let dtor = dtors[key.0].load(Ordering::Relaxed);
+				if !dtor.is_null() {
+					mem::transmute::<_, unsafe extern "C" fn(*mut ())>(dtor)(val);
+				}
+			}
+		}
 		Box::from_raw(ptr::slice_from_raw_parts_mut(storage, ENTRIES));
 	}
 }

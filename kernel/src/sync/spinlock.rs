@@ -25,6 +25,7 @@ impl<T> SpinLock<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
+				Err(_) => todo!(),
 				Err(_) => core::hint::spin_loop(),
 			}
 		}

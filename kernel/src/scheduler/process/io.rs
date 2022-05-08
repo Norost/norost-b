@@ -1,8 +1,8 @@
 //! # I/O with user processes
 
 use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket, TicketOrJob};
-use crate::memory::frame::{self, PageFrameIter, PPN};
-use crate::memory::r#virtual::{MapError, RWX};
+use crate::memory::frame::OwnedPageFrames;
+use crate::memory::r#virtual::{MapError, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{
 	AnyTicketValue, Error, Handle, JobRequest, JobResult, Object, Query, QueryResult,
@@ -11,8 +11,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::{self, NonNull};
 use core::task::Poll;
 use core::time::Duration;
-pub use norostb_kernel::io::Queue;
-use norostb_kernel::io::{Job, ObjectInfo, Request, Response, SeekFrom};
+use norostb_kernel::io::{self as k_io, Job, ObjectInfo, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
 	TooLarge,
@@ -29,18 +28,23 @@ pub enum WaitQueueError {
 
 const MAX_SIZE_P2: u8 = 15;
 
-struct IoQueue {
-	base: PPN,
-	count: usize,
+pub(super) struct Queue {
+	user_ptr: NonNull<Page>,
+	frames: Arc<OwnedPageFrames>,
+	requests_mask: u32,
+	responses_mask: u32,
+	pending: Vec<PendingTicket>,
 }
 
-impl MemoryObject for IoQueue {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		PageFrameIter {
-			base: self.base,
-			count: self.count,
+impl Queue {
+	fn kernel_io_queue(&self) -> k_io::Queue {
+		let frames = self.frames.physical_pages();
+		assert_eq!(frames.len(), 1, "TODO");
+		k_io::Queue {
+			base: NonNull::new(frames[0].as_ptr()).unwrap().cast(),
+			requests_mask: self.requests_mask,
+			responses_mask: self.responses_mask,
 		}
-		.collect()
 	}
 }
 
@@ -56,48 +60,66 @@ impl super::Process {
 		}
 		let requests_mask = (1 << request_p2size) - 1;
 		let responses_mask = (1 << response_p2size) - 1;
-		let size = Queue::total_size(requests_mask, responses_mask);
+		let size = k_io::Queue::total_size(requests_mask, responses_mask);
 		let count = Page::min_pages_for_bytes(size);
 
+		// FIXME the user can manually unmap the queue, leading to very bad things.
+		// An easy work-around for now is to allow only one page, which is guaranteed to be
+		// contiguous and hence we can just use a pointer in identity-mapped space.
 		assert_eq!(count, 1, "TODO");
-		let mut frame = None;
-		frame::allocate(count, |f| frame = Some(f), 0 as *const _, self.hint_color).unwrap();
-		let frame = frame.unwrap();
+		let frames = Arc::new(
+			OwnedPageFrames::new(count.try_into().unwrap(), self.allocate_hints(0 as _)).unwrap(),
+		);
 
-		unsafe {
-			frame.as_ptr().cast::<Page>().write_bytes(0, count);
-		}
-
-		let queue = IoQueue { base: frame, count };
-
-		let base = self
+		let user_ptr = self
 			.address_space
 			.lock()
-			.map_object(base, Box::new(queue), RWX::RW, self.hint_color)
+			.map_object(base, frames.clone(), RWX::RW, self.hint_color)
 			.map_err(CreateQueueError::MapError)?;
-		self.io_queues.lock().push((
-			Queue {
-				base: base.cast(),
-				requests_mask,
-				responses_mask,
-			},
-			Default::default(),
-		));
-		Ok(base)
+		self.io_queues.lock().push(Queue {
+			user_ptr,
+			frames,
+			requests_mask,
+			responses_mask,
+			pending: Default::default(),
+		});
+		Ok(user_ptr)
+	}
+
+	pub fn destroy_io_queue(&self, base: NonNull<Page>) -> Result<(), RemoveQueueError> {
+		let queue = {
+			let mut queues = self.io_queues.lock();
+			let i = queues
+				.iter()
+				.position(|q| q.user_ptr == base)
+				.ok_or(RemoveQueueError::DoesNotExist)?;
+			queues.remove(i)
+		};
+
+		let size = k_io::Queue::total_size(queue.requests_mask, queue.responses_mask);
+		let count = Page::min_pages_for_bytes(size).try_into().unwrap();
+		self.address_space
+			.lock()
+			.unmap_object(base, count)
+			.map_err(RemoveQueueError::UnmapError)
 	}
 
 	pub fn process_io_queue(&self, base: NonNull<Page>) -> Result<(), ProcessQueueError> {
 		let mut io_queues = self.io_queues.lock();
-		let (queue, tickets) = io_queues
+		let queue = io_queues
 			.iter_mut()
-			.find(|(q, _)| q.base == base.cast())
+			.find(|q| q.user_ptr == base)
 			.ok_or(ProcessQueueError::InvalidAddress)?;
 
 		let mut objects = self.objects.lock();
 		let mut queries = self.queries.lock();
 
 		// Poll tickets first as it may shrink the ticket Vec.
-		poll_tickets(queue, tickets, &mut objects, &mut queries);
+		poll_tickets(queue, &mut objects, &mut queries);
+
+		let k_io_queue = queue.kernel_io_queue();
+		let tickets = &mut queue.pending;
+		let mut queue = k_io_queue;
 
 		while let Ok(e) = unsafe { queue.dequeue_request() } {
 			let mut push_resp = |value| {
@@ -351,21 +373,16 @@ impl super::Process {
 	pub fn wait_io_queue(&self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
 		loop {
 			let mut io_queues = self.io_queues.lock();
-			let (queue, tickets) = io_queues
+			let queue = io_queues
 				.iter_mut()
-				.find(|(q, _)| q.base == base.cast())
+				.find(|q| q.user_ptr == base)
 				.ok_or(WaitQueueError::InvalidAddress)?;
 
-			if queue.responses_available() > 0 {
+			if queue.kernel_io_queue().responses_available() > 0 {
 				break;
 			}
 
-			let polls = poll_tickets(
-				queue,
-				tickets,
-				&mut self.objects.lock(),
-				&mut self.queries.lock(),
-			);
+			let polls = poll_tickets(queue, &mut self.objects.lock(), &mut self.queries.lock());
 			if polls > 0 {
 				break;
 			}
@@ -383,18 +400,17 @@ impl super::Process {
 
 fn poll_tickets(
 	queue: &mut Queue,
-	tickets: &mut Vec<PendingTicket>,
 	objects: &mut arena::Arena<Arc<dyn Object>, u8>,
 	queries: &mut arena::Arena<Box<dyn Query>, u8>,
 ) -> usize {
 	let mut polls = 0;
-	for i in (0..tickets.len()).rev() {
-		match &mut tickets[i].ticket {
+	for i in (0..queue.pending.len()).rev() {
+		match &mut queue.pending[i].ticket {
 			TicketOrJob::Ticket(ticket) => match poll(ticket) {
 				Poll::Pending => {}
 				Poll::Ready(r) => {
 					polls += 1;
-					let tk = tickets.swap_remove(i);
+					let tk = queue.pending.swap_remove(i);
 					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
 					match r {
 						Ok(AnyTicketValue::Object(o)) => {
@@ -424,7 +440,7 @@ fn poll_tickets(
 				Poll::Pending => {}
 				Poll::Ready(r) => {
 					polls += 1;
-					let tk = tickets.swap_remove(i);
+					let tk = queue.pending.swap_remove(i);
 					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
 					match r {
 						Ok(info) => push_resp(take_job(tk.data_ptr.cast(), info)),
@@ -440,7 +456,11 @@ fn poll_tickets(
 fn push_resp(queue: &mut Queue, user_data: u64, value: i64) {
 	// It is the responsibility of the user process to ensure no more requests are in
 	// flight than there is space for responses.
-	let _ = unsafe { queue.enqueue_response(Response { user_data, value }) };
+	let _ = unsafe {
+		queue
+			.kernel_io_queue()
+			.enqueue_response(Response { user_data, value })
+	};
 }
 
 fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> i64 {
@@ -515,4 +535,9 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	}
 
 	0
+}
+
+pub enum RemoveQueueError {
+	DoesNotExist,
+	UnmapError(UnmapError),
 }

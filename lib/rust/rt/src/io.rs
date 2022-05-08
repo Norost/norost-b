@@ -96,9 +96,8 @@ impl<'a> IoSliceMut<'a> {
 const QUEUE_KEY: tls::Key = tls::Key(0);
 pub(crate) unsafe extern "C" fn queue_dtor(ptr: *mut ()) {
 	unsafe {
-		let _queue = Box::from_raw(ptr.cast::<Queue>());
-		// TODO dealloc the queue itself.
-		todo!()
+		let queue = Box::from_raw(ptr.cast::<Queue>());
+		syscall::destroy_io_queue(queue.base.cast()).unwrap_or_else(|_| core::intrinsics::abort());
 	}
 }
 

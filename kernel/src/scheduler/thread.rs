@@ -8,7 +8,6 @@ use crate::memory::{
 use crate::sync::Mutex;
 use crate::time::Monotonic;
 use alloc::{
-	boxed::Box,
 	sync::{Arc, Weak},
 	vec::Vec,
 };
@@ -58,7 +57,7 @@ impl Thread {
 			)
 			.unwrap();
 			let kernel_stack_base =
-				AddressSpace::kernel_map_object(None, Box::new(kernel_stack_base), RWX::RW)
+				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
 			let mut kernel_stack = kernel_stack_base
 				.as_ptr()

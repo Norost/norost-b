@@ -192,14 +192,14 @@ pub struct IrqsExhausted;
 #[inline(always)]
 pub fn enable_interrupts() {
 	unsafe {
-		asm!("sti", options(nostack, nomem, preserves_flags));
+		asm!("sti", options(nostack, preserves_flags));
 	}
 }
 
 #[inline(always)]
 pub fn disable_interrupts() {
 	unsafe {
-		asm!("cli", options(nostack, nomem, preserves_flags));
+		asm!("cli", options(nostack, preserves_flags));
 	}
 }
 

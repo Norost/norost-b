@@ -7,6 +7,7 @@ pub const ID_PHYSICAL_ADDRESS: usize = 4;
 pub const ID_MAP_OBJECT: usize = 9;
 pub const ID_SLEEP: usize = 10;
 
+pub const ID_DESTROY_IO_QUEUE: usize = 13;
 pub const ID_KILL_THREAD: usize = 14;
 pub const ID_WAIT_THREAD: usize = 15;
 pub const ID_EXIT: usize = 16;
@@ -197,6 +198,11 @@ pub fn create_io_queue(
 		response_p2size
 	)))
 	.map(|v| NonNull::new(v as *mut _).unwrap())
+}
+
+#[inline]
+pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> Result<(), (NonZeroUsize, usize)> {
+	ret(syscall!(ID_DESTROY_IO_QUEUE(base.as_ptr()))).map(|_| ())
 }
 
 #[inline]

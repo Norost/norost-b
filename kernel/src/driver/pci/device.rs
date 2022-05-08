@@ -4,7 +4,7 @@ use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
 use crate::sync::IsrSpinLock;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use pci::BaseAddress;
 
 /// A single PCI device.
@@ -42,12 +42,9 @@ impl Object for PciDevice {
 		ticket
 	}
 
-	fn memory_object(&self, offset: u64) -> Option<Box<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>, offset: u64) -> Option<Arc<dyn MemoryObject>> {
 		if offset == 0 {
-			return Some(Box::new(PciDevice {
-				device: self.device,
-				bus: self.bus,
-			}));
+			return Some(self);
 		}
 
 		let index = usize::try_from(offset - 1).ok()?;
@@ -67,7 +64,7 @@ impl Object for PciDevice {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			count: size.get().try_into().unwrap(),
 		};
-		Some(Box::new(BarRegion {
+		Some(Arc::new(BarRegion {
 			frames: frames.collect(),
 		}))
 	}

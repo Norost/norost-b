@@ -24,7 +24,7 @@ pub struct Process {
 	threads: Mutex<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
-	io_queues: Mutex<Vec<(io::Queue, Vec<PendingTicket>)>>,
+	io_queues: Mutex<Vec<io::Queue>>,
 }
 
 struct PendingTicket {
@@ -94,6 +94,7 @@ impl Process {
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
 		let obj = self.objects.lock()[unerase_handle(handle)]
+			.clone()
 			.memory_object(offset)
 			.unwrap();
 		self.address_space
