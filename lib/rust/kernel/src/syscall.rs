@@ -6,7 +6,6 @@ pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
 pub const ID_MAP_OBJECT: usize = 9;
 pub const ID_SLEEP: usize = 10;
-pub const ID_READ: usize = 11;
 
 pub const ID_KILL_THREAD: usize = 14;
 pub const ID_WAIT_THREAD: usize = 15;
@@ -21,7 +20,7 @@ pub const ID_WAIT_IO_QUEUE: usize = 22;
 use crate::Page;
 use core::arch::asm;
 use core::fmt;
-use core::mem::{self, MaybeUninit};
+use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::str;
@@ -171,21 +170,6 @@ pub unsafe fn spawn_thread(
 	stack: *const (),
 ) -> Result<Handle, (NonZeroUsize, usize)> {
 	ret(syscall!(ID_SPAWN_THREAD(start, stack))).map(|h| h as Handle)
-}
-
-#[inline]
-pub fn read(object: Handle, data: &mut [u8]) -> Result<usize, (NonZeroUsize, usize)> {
-	// SAFETY: MaybeUninit has the same layout as data.
-	let data = unsafe { mem::transmute(data) };
-	read_uninit(object, data)
-}
-
-#[inline]
-pub fn read_uninit(
-	object: Handle,
-	data: &mut [MaybeUninit<u8>],
-) -> Result<usize, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_READ(object, data.as_mut_ptr(), data.len())))
 }
 
 #[inline]
