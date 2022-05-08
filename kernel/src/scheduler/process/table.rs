@@ -114,7 +114,7 @@ struct SetStack {
 }
 
 impl Object for SetStack {
-	fn write(&self, _: u64, data: &[u8]) -> Ticket<usize> {
+	fn write(&self, data: &[u8]) -> Ticket<usize> {
 		let stack = self.builder.stack.take().unwrap();
 		unsafe {
 			stack.write(self.builder.stack_offset.get(), data);

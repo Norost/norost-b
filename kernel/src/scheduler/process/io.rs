@@ -146,7 +146,7 @@ impl super::Process {
 					let data_ptr = e.arguments_64[0] as *mut u8;
 					let data_len = e.arguments_64[1] as usize;
 					let object = objects.get(handle).unwrap();
-					let mut ticket = object.read(0, data_len.try_into().unwrap());
+					let mut ticket = object.read(data_len.try_into().unwrap());
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
@@ -158,7 +158,7 @@ impl super::Process {
 					let data_ptr = e.arguments_64[0] as *mut u8;
 					let data_len = e.arguments_64[1] as usize;
 					let object = objects.get(handle).unwrap();
-					let mut ticket = object.peek(0, data_len.try_into().unwrap());
+					let mut ticket = object.peek(data_len.try_into().unwrap());
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
@@ -171,7 +171,7 @@ impl super::Process {
 					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
-					let mut ticket = object.write(0, data);
+					let mut ticket = object.write(data);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(b.try_into().unwrap()),

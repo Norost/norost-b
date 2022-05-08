@@ -232,7 +232,7 @@ impl Object for StreamObject {
 		)
 	}
 
-	fn read(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		self.submit_job(
 			|| JobRequest::Read {
 				handle: self.handle,
@@ -242,7 +242,7 @@ impl Object for StreamObject {
 		)
 	}
 
-	fn peek(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
+	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
 		self.submit_job(
 			|| JobRequest::Peek {
 				handle: self.handle,
@@ -252,7 +252,7 @@ impl Object for StreamObject {
 		)
 	}
 
-	fn write(&self, _: u64, data: &[u8]) -> Ticket<usize> {
+	fn write(&self, data: &[u8]) -> Ticket<usize> {
 		self.submit_job(
 			|| JobRequest::Write {
 				handle: self.handle,

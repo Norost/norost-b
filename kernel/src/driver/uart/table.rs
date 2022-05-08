@@ -33,7 +33,7 @@ impl Object for UartTable {
 pub struct UartId(u8);
 
 impl Object for UartId {
-	fn read(&self, _offset: u64, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		if length == 0 {
 			Ticket::new_complete(Ok([].into()))
 		} else {
@@ -49,7 +49,7 @@ impl Object for UartId {
 		}
 	}
 
-	fn write(&self, _offset: u64, data: &[u8]) -> Ticket<usize> {
+	fn write(&self, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		let mut uart = super::get(self.0.into());
 		data.iter().for_each(|&c| uart.send(c));

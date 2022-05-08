@@ -33,7 +33,7 @@ impl Object for SystemTable {
 struct SystemLogRef;
 
 impl Object for SystemLogRef {
-	fn write(&self, _offset: u64, data: &[u8]) -> Ticket<usize> {
+	fn write(&self, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		// FIXME avoid panic
 		use fmt::Write;

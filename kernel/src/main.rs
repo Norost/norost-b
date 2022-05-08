@@ -144,14 +144,14 @@ struct DriverObject {
 }
 
 impl Object for DriverObject {
-	fn read(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		let bottom = self.data.len().min(self.position.get());
 		let top = self.data.len().min(self.position.get() + length);
 		self.position.set(top);
 		Ticket::new_complete(Ok(self.data[bottom..top].into()))
 	}
 
-	fn peek(&self, _: u64, length: usize) -> Ticket<Box<[u8]>> {
+	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
 		let bottom = self.data.len().min(self.position.get());
 		let top = self.data.len().min(self.position.get() + length);
 		Ticket::new_complete(Ok(self.data[bottom..top].into()))

@@ -24,15 +24,15 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn read(&self, _offset: u64, _length: usize) -> Ticket<Box<[u8]>> {
+	fn read(&self, _length: usize) -> Ticket<Box<[u8]>> {
 		not_implemented()
 	}
 
-	fn peek(&self, _offset: u64, _length: usize) -> Ticket<Box<[u8]>> {
+	fn peek(&self, _length: usize) -> Ticket<Box<[u8]>> {
 		not_implemented()
 	}
 
-	fn write(&self, _offset: u64, _data: &[u8]) -> Ticket<usize> {
+	fn write(&self, _data: &[u8]) -> Ticket<usize> {
 		not_implemented()
 	}
 
