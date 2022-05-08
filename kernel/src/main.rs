@@ -170,8 +170,8 @@ impl Object for DriverObject {
 		Ticket::new_complete(Ok(self.position.get().try_into().unwrap()))
 	}
 
-	fn memory_object(&self, _: u64) -> Option<Box<dyn MemoryObject>> {
-		Some(Box::new(Driver(self.data)))
+	fn memory_object(self: Arc<Self>, _: u64) -> Option<Arc<dyn MemoryObject>> {
+		Some(Arc::new(Driver(self.data)))
 	}
 }
 

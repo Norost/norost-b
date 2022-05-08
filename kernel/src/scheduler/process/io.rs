@@ -46,7 +46,7 @@ impl super::Process {
 
 		// FIXME the user can manually unmap the queue, leading to very bad things.
 		assert_eq!(count, 1, "TODO");
-		let frame = Box::new(
+		let frame = Arc::new(
 			OwnedPageFrames::new(count.try_into().unwrap(), self.allocate_hints(0 as _)).unwrap(),
 		);
 

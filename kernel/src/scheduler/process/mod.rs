@@ -94,6 +94,7 @@ impl Process {
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
 		let obj = self.objects.lock()[unerase_handle(handle)]
+			.clone()
 			.memory_object(offset)
 			.unwrap();
 		self.address_space

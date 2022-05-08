@@ -5,7 +5,7 @@ use crate::memory::{
 };
 use crate::scheduler::MemoryObject;
 use crate::sync::Mutex;
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
 use core::ptr::NonNull;
@@ -21,14 +21,14 @@ pub enum MapError {
 pub enum UnmapError {}
 
 /// All objects mapped in kernel space. This vector is sorted.
-static KERNEL_MAPPED_OBJECTS: Mutex<Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>> =
+static KERNEL_MAPPED_OBJECTS: Mutex<Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>> =
 	Mutex::new(Vec::new());
 
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
 	/// All mapped objects. This vector is sorted.
-	objects: Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
+	objects: Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>,
 }
 
 impl AddressSpace {
@@ -43,7 +43,7 @@ impl AddressSpace {
 	pub fn map_object(
 		&mut self,
 		base: Option<NonNull<Page>>,
-		object: Box<dyn MemoryObject>,
+		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<NonNull<Page>, MapError> {
@@ -71,7 +71,7 @@ impl AddressSpace {
 	/// Map a frame in kernel-space.
 	pub fn kernel_map_object(
 		base: Option<NonNull<Page>>,
-		object: Box<dyn MemoryObject>,
+		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
 		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
@@ -99,7 +99,7 @@ impl AddressSpace {
 	}
 
 	fn map_object_common(
-		objects: &[(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)],
+		objects: &[(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)],
 		default: NonNull<Page>,
 		base: Option<NonNull<Page>>,
 		object: &dyn MemoryObject,
@@ -152,7 +152,7 @@ impl AddressSpace {
 	}
 
 	unsafe fn unmap_object_common(
-		objects: &mut Vec<(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)>,
+		objects: &mut Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>,
 		base: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
@@ -180,7 +180,7 @@ impl AddressSpace {
 
 	/// Find a range of free address space.
 	fn find_free_range(
-		objects: &[(RangeInclusive<NonNull<Page>>, Box<dyn MemoryObject>)],
+		objects: &[(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)],
 		_count: NonZeroUsize,
 		default: NonNull<Page>,
 	) -> Result<(NonNull<Page>, usize), MapError> {

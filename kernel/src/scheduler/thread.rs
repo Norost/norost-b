@@ -58,7 +58,7 @@ impl Thread {
 			)
 			.unwrap();
 			let kernel_stack_base =
-				AddressSpace::kernel_map_object(None, Box::new(kernel_stack_base), RWX::RW)
+				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
 			let mut kernel_stack = kernel_stack_base
 				.as_ptr()

@@ -5,7 +5,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 pub trait Object {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
-	fn memory_object(&self, _offset: u64) -> Option<Box<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>, _offset: u64) -> Option<Arc<dyn MemoryObject>> {
 		None
 	}
 
