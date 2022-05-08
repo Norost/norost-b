@@ -72,7 +72,25 @@ impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
 		// SAFETY: we only drop inner once here
 		unsafe { ManuallyDrop::drop(&mut self.inner) };
-		crate::arch::enable_interrupts();
+		// Ensure interrupts weren't enabled in the meantime, which would lead to a potential
+		// deadlock.
+		#[cfg(debug_assertions)]
+		unsafe {
+			let flags: usize;
+			core::arch::asm!(
+				"pushf",
+				"pop {}",
+				out(reg) flags,
+			);
+			assert_eq!(
+				flags & (1 << 9),
+				0,
+				"interrupts are enabled inside ISR spinlock"
+			);
+		}
+		// FIXME for some reason interrupts are being enabled before the lock is released if this
+		// line is uncommented.
+		//crate::arch::enable_interrupts();
 	}
 }
 
