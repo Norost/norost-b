@@ -1,7 +1,7 @@
 //! # I/O with user processes
 
 use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket, TicketOrJob};
-use crate::memory::frame::{self, PageFrameIter, PPN};
+use crate::memory::frame::{self, OwnedPageFrames, PageFrameIter, PPN};
 use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{
@@ -29,21 +29,6 @@ pub enum WaitQueueError {
 
 const MAX_SIZE_P2: u8 = 15;
 
-struct IoQueue {
-	base: PPN,
-	count: usize,
-}
-
-impl MemoryObject for IoQueue {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		PageFrameIter {
-			base: self.base,
-			count: self.count,
-		}
-		.collect()
-	}
-}
-
 impl super::Process {
 	pub fn create_io_queue(
 		&self,
@@ -59,21 +44,16 @@ impl super::Process {
 		let size = Queue::total_size(requests_mask, responses_mask);
 		let count = Page::min_pages_for_bytes(size);
 
+		// FIXME the user can manually unmap the queue, leading to very bad things.
 		assert_eq!(count, 1, "TODO");
-		let mut frame = None;
-		frame::allocate(count, |f| frame = Some(f), 0 as *const _, self.hint_color).unwrap();
-		let frame = frame.unwrap();
-
-		unsafe {
-			frame.as_ptr().cast::<Page>().write_bytes(0, count);
-		}
-
-		let queue = IoQueue { base: frame, count };
+		let frame = Box::new(
+			OwnedPageFrames::new(count.try_into().unwrap(), self.allocate_hints(0 as _)).unwrap(),
+		);
 
 		let base = self
 			.address_space
 			.lock()
-			.map_object(base, Box::new(queue), RWX::RW, self.hint_color)
+			.map_object(base, frame, RWX::RW, self.hint_color)
 			.map_err(CreateQueueError::MapError)?;
 		self.io_queues.lock().push((
 			Queue {
@@ -84,6 +64,26 @@ impl super::Process {
 			Default::default(),
 		));
 		Ok(base)
+	}
+
+	pub fn destroy_io_queue(&self, base: NonNull<Page>) -> Result<(), RemoveQueueError> {
+		let (queue, pending) = {
+			let mut queues = self.io_queues.lock();
+			let i = queues
+				.iter()
+				.position(|q| q.0.base.cast() == base)
+				.ok_or(RemoveQueueError::DoesNotExist)?;
+			queues.remove(i)
+		};
+
+		let size = Queue::total_size(queue.requests_mask, queue.responses_mask);
+		let count = Page::min_pages_for_bytes(size).try_into().unwrap();
+		self.address_space
+			.lock()
+			.unmap_object(base, count)
+			.unwrap_or_else(|_| todo!());
+
+		Ok(())
 	}
 
 	pub fn process_io_queue(&self, base: NonNull<Page>) -> Result<(), ProcessQueueError> {
@@ -515,4 +515,9 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	}
 
 	0
+}
+
+pub enum RemoveQueueError {
+	DoesNotExist,
+	Unmapped,
 }

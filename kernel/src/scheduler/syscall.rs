@@ -38,7 +38,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	sleep,
 	undefined,
 	undefined,
-	undefined,
+	destroy_io_queue,
 	kill_thread,
 	wait_thread,
 	exit,
@@ -335,6 +335,38 @@ extern "C" fn create_io_rings(
 				value: base.as_ptr() as usize,
 			},
 		)
+}
+
+extern "C" fn destroy_io_queue(
+	base: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	debug!("destroy_io_queue {:#x}", base);
+	NonNull::new(base as *mut _).map_or(
+		Return {
+			status: 1,
+			value: 0,
+		},
+		|base| {
+			Process::current()
+				.unwrap()
+				.destroy_io_queue(base)
+				.map_or_else(
+					|_| Return {
+						status: 1,
+						value: 0,
+					},
+					|()| Return {
+						status: 0,
+						value: 0,
+					},
+				)
+		},
+	)
 }
 
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
