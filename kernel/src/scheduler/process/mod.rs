@@ -24,7 +24,7 @@ pub struct Process {
 	threads: Mutex<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
-	io_queues: Mutex<Vec<(io::Queue, Vec<PendingTicket>)>>,
+	io_queues: Mutex<Vec<io::Queue>>,
 }
 
 struct PendingTicket {

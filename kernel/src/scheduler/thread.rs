@@ -8,7 +8,6 @@ use crate::memory::{
 use crate::sync::Mutex;
 use crate::time::Monotonic;
 use alloc::{
-	boxed::Box,
 	sync::{Arc, Weak},
 	vec::Vec,
 };
