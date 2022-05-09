@@ -9,12 +9,12 @@ cfg_if::cfg_if! {
 mod table;
 
 use crate::object_table;
-use crate::sync::spinlock::{Guard, SpinLock};
+use crate::sync::mutex::{Guard, Mutex};
 use alloc::sync::Arc;
 use core::fmt;
 pub use table::UartId;
 
-pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
+pub static mut DEVICES: [Option<Mutex<Uart>>; 8] = [const { None }; 8];
 
 /// # Safety
 ///
@@ -23,7 +23,7 @@ pub unsafe fn early_init() {
 	// This port is guaranteed to exist.
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 	unsafe {
-		DEVICES[0] = Some(SpinLock::new(Uart::new(0x3f8)));
+		DEVICES[0] = Some(Mutex::new(Uart::new(0x3f8)));
 	}
 }
 

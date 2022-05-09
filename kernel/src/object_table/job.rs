@@ -1,5 +1,5 @@
 use super::{Handle, Table};
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
@@ -50,12 +50,12 @@ enum JobInner {
 }
 
 pub struct JobTask {
-	shared: Arc<SpinLock<JobInner>>,
+	shared: Arc<Mutex<JobInner>>,
 }
 
 impl JobTask {
 	pub fn new(table: Weak<dyn Table>, job: Option<(JobId, JobRequest)>) -> (Self, JobWaker) {
-		let shared = Arc::new(SpinLock::new(JobInner::Active {
+		let shared = Arc::new(Mutex::new(JobInner::Active {
 			waker: None,
 			job,
 			table,
@@ -99,7 +99,7 @@ impl Future for JobTask {
 }
 
 pub struct JobWaker {
-	shared: Arc<SpinLock<JobInner>>,
+	shared: Arc<Mutex<JobInner>>,
 }
 
 impl JobWaker {
@@ -112,7 +112,7 @@ impl JobWaker {
 	}
 }
 
-pub struct JobWakerGuard<'a>(crate::sync::spinlock::Guard<'a, JobInner>);
+pub struct JobWakerGuard<'a>(crate::sync::mutex::Guard<'a, JobInner>);
 
 impl JobWakerGuard<'_> {
 	pub fn complete(&mut self, job: (JobId, JobRequest)) {

@@ -9,7 +9,7 @@
 use crate::driver::apic::local_apic;
 use crate::memory::r#virtual::add_identity_mapping;
 use crate::object_table;
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
 use alloc::sync::Arc;
 use pci::Pci;
@@ -19,7 +19,7 @@ mod table;
 
 pub use device::PciDevice;
 
-static PCI: SpinLock<Option<Pci>> = SpinLock::new(None);
+static PCI: Mutex<Option<Pci>> = Mutex::new(None);
 
 pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>, root: &crate::object_table::Root)
 where

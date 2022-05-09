@@ -26,7 +26,8 @@ static mut SLEEP_THREADS: [MaybeUninit<Arc<Thread>>; 1] = MaybeUninit::uninit_ar
 /// # Safety
 ///
 /// The current thread's state must be properly saved.
-pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
+#[track_caller]
+unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let mut thr = round_robin::next().unwrap();
 	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
@@ -53,6 +54,7 @@ pub unsafe fn try_next_thread() -> Result<!, Monotonic> {
 pub unsafe fn next_thread() -> ! {
 	use crate::driver::apic;
 	loop {
+		arch::disable_interrupts();
 		if let Err(t) = unsafe { try_next_thread() } {
 			if let Some(d) = Monotonic::now().duration_until(t) {
 				apic::set_timer_oneshot(d);

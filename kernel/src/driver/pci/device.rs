@@ -3,7 +3,7 @@ use crate::memory::frame::{PageFrameIter, PPN};
 use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
-use crate::sync::IsrSpinLock;
+use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use pci::BaseAddress;
 
@@ -14,7 +14,7 @@ pub struct PciDevice {
 }
 
 /// List of tasks waiting for an interrupt.
-static IRQ_LISTENERS: IsrSpinLock<Vec<TicketWaker<usize>>> = IsrSpinLock::new(Vec::new());
+static IRQ_LISTENERS: SpinLock<Vec<TicketWaker<usize>>> = SpinLock::new(Vec::new());
 
 impl PciDevice {
 	pub(super) fn new(bus: u8, device: u8) -> Self {
@@ -82,7 +82,7 @@ impl MemoryObject for BarRegion {
 }
 
 pub(super) fn irq_handler() {
-	for e in IRQ_LISTENERS.lock().drain(..) {
+	for e in IRQ_LISTENERS.isr_lock().drain(..) {
 		e.complete(Ok(0));
 	}
 }

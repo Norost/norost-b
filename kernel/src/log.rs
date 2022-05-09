@@ -3,7 +3,7 @@ use crate::driver::uart;
 use crate::driver::vga;
 use crate::{
 	object_table::{Error, NoneQuery, Object, OneQuery, Query, Root, Ticket},
-	sync::spinlock::Guard,
+	sync::mutex::Guard,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;

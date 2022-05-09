@@ -1,5 +1,5 @@
 use super::{Error, Object, Query, QueryResult};
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
 	future::Future,
@@ -10,12 +10,12 @@ use core::{
 /// A ticket referring to a job to be completed.
 #[derive(Default)]
 pub struct Ticket<T> {
-	inner: Arc<SpinLock<TicketInner<T>>>,
+	inner: Arc<Mutex<TicketInner<T>>>,
 }
 
 impl<T> Ticket<T> {
 	pub fn new_complete(status: Result<T, Error>) -> Self {
-		let inner = SpinLock::new(TicketInner {
+		let inner = Mutex::new(TicketInner {
 			waker: None,
 			status: Some(status),
 		})
@@ -24,7 +24,7 @@ impl<T> Ticket<T> {
 	}
 
 	pub fn new() -> (Self, TicketWaker<T>) {
-		let inner = Arc::new(SpinLock::new(TicketInner {
+		let inner = Arc::new(Mutex::new(TicketInner {
 			waker: None,
 			status: None,
 		}));
@@ -38,7 +38,7 @@ impl<T> Ticket<T> {
 }
 
 pub struct TicketWaker<T> {
-	inner: Arc<SpinLock<TicketInner<T>>>,
+	inner: Arc<Mutex<TicketInner<T>>>,
 }
 
 impl<T> TicketWaker<T> {

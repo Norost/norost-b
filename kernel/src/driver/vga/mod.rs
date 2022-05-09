@@ -1,8 +1,8 @@
 pub mod text;
 
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 
-pub static TEXT: SpinLock<text::Text> = SpinLock::new(text::Text::new());
+pub static TEXT: Mutex<text::Text> = Mutex::new(text::Text::new());
 
 /// # Safety
 ///

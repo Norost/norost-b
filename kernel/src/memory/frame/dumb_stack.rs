@@ -1,13 +1,13 @@
 //! # Dumb stack-based frame allocator
 
 use super::*;
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
 use core::slice::SliceIndex;
 
 /// 64K * 4K = 256MiB. Not a lot but enough for now.
-pub static STACK: SpinLock<Stack> = SpinLock::new(Stack {
+pub static STACK: Mutex<Stack> = Mutex::new(Stack {
 	stack: MaybeUninit::uninit_array(),
 	count: 0,
 });

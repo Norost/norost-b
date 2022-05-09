@@ -109,6 +109,8 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		}
 	}
 
+	arch::enable_interrupts();
+
 	// SAFETY: there is no thread state to save.
 	unsafe { scheduler::next_thread() }
 }
