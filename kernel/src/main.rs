@@ -29,6 +29,7 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
 use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_use]
 mod log;
