@@ -3,21 +3,35 @@ use core::mem;
 
 #[macro_export]
 macro_rules! __idt_wrap_handler {
+	// FIXME we can't return from these handlers
 	(trap $fn:path) => {
 		{
 			const _: extern "C" fn(u32, *const ()) = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
 				unsafe {
-					core::arch::asm!("
-						pop		rdi		# Error code
-						pop		rsi		# RIP
+					core::arch::asm!(
+						"pop rdi", // Error code
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
 
-						cld
-						call	{f}
+						"pop rsi", // RIP
+						"push rsi",
+						"cld",
+						"call {f}",
 
-						rex64 iretq
-					", f = sym $fn, options(noreturn));
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn, options(noreturn)
+					);
 				}
 			}
 			$crate::arch::amd64::idt::Handler::Trap(f)
@@ -25,112 +39,98 @@ macro_rules! __idt_wrap_handler {
 	};
 	(int $fn:path) => {
 		{
-			const _: extern "C" fn(*const ()) = $fn;
+			const _: extern "C" fn() = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
 				unsafe {
-					core::arch::asm!("
-						# Save thread state
-						push	rax
-						push	rbx
-						push	rcx
-						push	rdx
-						push	rdi
-						push	rsi
-						push	rbp
-						push	r8
-						push	r9
-						push	r10
-						push	r11
-						push	r12
-						push	r13
-						push	r14
-						push	r15
-						mov		gs:[8], rsp		# Save kernel stack pointer
+					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
 
-						# Call handler
-						mov		rdi, [rsp + 15 * 8]		# RIP
-						cld
-						call	{f}
+						// Save scratch registers
+						"push rax",
+						"push rcx",
+						"push rdx",
+						"push rdi",
+						"push rsi",
+						"push r8",
+						"push r9",
+						"push r10",
+						"push r11",
 
-						# Mark EOI
-						mov		ecx, {msr}
-						rdmsr
-						and		eax, 0xfffff000
-						movabs	rcx, {virt_ident}
-						or		rax, rcx
-						mov		DWORD PTR [rax + {eoi}], 0
+						// Call handler
+						"cld",
+						"call {f}",
 
-						# Restore thread state
-						pop		r15
-						pop		r14
-						pop		r13
-						pop		r12
-						pop		r11
-						pop		r10
-						pop		r9
-						pop		r8
-						pop		rbp
-						pop		rsi
-						pop		rdi
-						pop		rdx
-						pop		rcx
-						pop		rbx
-						pop		rax
+						// Restore thread state
+						"pop r11",
+						"pop r10",
+						"pop r9",
+						"pop r8",
+						"pop rsi",
+						"pop rdi",
+						"pop rdx",
+						"pop rcx",
+						"pop rax",
 
-						iretq
-					", f = sym $fn,
-					msr = const $crate::arch::amd64::msr::IA32_APIC_BASE_MSR,
-					eoi = const 0xb0,
-					virt_ident = const 0xffff_c000_0000_0000u64,
-					options(noreturn));
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn,
+						options(noreturn)
+					);
 				}
 			}
 			$crate::arch::amd64::idt::Handler::Int(f)
 		}
 	};
-	(int noreturn $fn:path) => {
+	(int noreturn savethread $fn:path) => {
 		{
-			const _: extern "C" fn(*const ()) -> ! = $fn;
+			const _: extern "C" fn() -> ! = $fn;
 			#[naked]
 			unsafe extern "C" fn f() {
 				unsafe {
-					core::arch::asm!("
-						# Save thread state
-						push	rax
-						push	rbx
-						push	rcx
-						push	rdx
-						push	rdi
-						push	rsi
-						push	rbp
-						push	r8
-						push	r9
-						push	r10
-						push	r11
-						push	r12
-						push	r13
-						push	r14
-						push	r15
-						mov		gs:[8], rsp		# Save kernel stack pointer
+					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
 
-						# Mark EOI
-						mov		ecx, {msr}
-						rdmsr
-						and		eax, 0xfffff000
-						movabs	rcx, {virt_ident}
-						or		rax, rcx
-						mov		DWORD PTR [rax + {eoi}], 0
+						// Save full thread state
+						"push rax",
+						"push rbx",
+						"push rcx",
+						"push rdx",
+						"push rdi",
+						"push rsi",
+						"push rbp",
+						"push r8",
+						"push r9",
+						"push r10",
+						"push r11",
+						"push r12",
+						"push r13",
+						"push r14",
+						"push r15",
+						// Save kernel stack pointer
+						"mov gs:[{kernel_stack_ptr}], rsp",
 
-						# Call handler
-						mov		rdi, [rsp + 15 * 8]		# RIP
-						cld
-						jmp		{f}
-					", f = sym $fn,
-					msr = const $crate::arch::amd64::msr::IA32_APIC_BASE_MSR,
-					eoi = const 0xb0,
-					virt_ident = const 0xffff_c000_0000_0000u64,
-					options(noreturn));
+						// Call handler
+						"cld",
+						"jmp {f}",
+						f = sym $fn,
+						kernel_stack_ptr =
+							const $crate::arch::amd64::syscall::CpuData::KERNEL_STACK_PTR,
+						options(noreturn)
+					);
 				}
 			}
 			$crate::arch::amd64::idt::Handler::Int(f)

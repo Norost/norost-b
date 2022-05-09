@@ -23,10 +23,11 @@ pub unsafe fn init() {
 		// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
 		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
 		//   userland SS will be loaded from STAR 63:48 + 8
-		msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2) << 48);
+		msr::wrmsr(msr::STAR, (8 * 1) << 32);
 		// Set LSTAR to handler
-		//wrmsr(0xc0000082, handler as u32, (handler as u64 >> 32) as u32);
 		msr::wrmsr(msr::LSTAR, handler as u64);
+		// Ensure the interrupt flag is cleared on syscall enter
+		msr::wrmsr(msr::SFMASK, 0x200);
 
 		let mut cpu_stack = None;
 		frame::allocate(1, |f| cpu_stack = Some(f), 0 as _, 0).unwrap();
@@ -45,6 +46,86 @@ pub unsafe fn init() {
 	}
 }
 
+// Use repr(C) because manual offsets because there is literally no way to implement offset_of! in
+// a sound way, i.e. it needs compiler support.
+// https://github.com/rust-lang/rust/issues/48956
+#[repr(C)]
+pub struct CpuData {
+	user_stack_ptr: *mut usize,
+	kernel_stack_ptr: *mut usize,
+	process: *const Process,
+	thread: *const Thread,
+	cpu_stack_ptr: *mut (),
+}
+
+impl CpuData {
+	pub const USER_STACK_PTR: usize = 0 * 8;
+	pub const KERNEL_STACK_PTR: usize = 1 * 8;
+	pub const PROCESS: usize = 2 * 8;
+	pub const THREAD: usize = 3 * 8;
+	pub const CPU_STACK_PTR: usize = 4 * 8;
+}
+
+macro_rules! gs_load {
+	(user_stack_ptr) => {{
+		let v: *mut usize;
+		core::arch::asm!("mov {}, gs:[0 * 8]", out(reg) v);
+		v
+	}};
+	(kernel_stack_ptr) => {{
+		let v: *mut usize;
+		core::arch::asm!("mov {}, gs:[1 * 8]", out(reg) v);
+		v
+	}};
+	(process) => {{
+		let v: *const Process;
+		core::arch::asm!("mov {}, gs:[2 * 8]", out(reg) v);
+		v
+	}};
+	(thread) => {{
+		let v: *const Thread;
+		core::arch::asm!("mov {}, gs:[3 * 8]", out(reg) v);
+		v
+	}};
+	(cpu_stack_ptr) => {{
+		let v: *mut ();
+		core::arch::asm!("mov {}, gs:[4 * 8]", out(reg) v);
+		v
+	}};
+	(prev_kernel_stack_ptr) => {{
+		let v: *mut usize;
+		core::arch::asm!("mov {}, gs:[5 * 8]", out(reg) v);
+		v
+	}};
+}
+
+macro_rules! gs_store {
+	(user_stack_ptr = $val:expr) => {{
+		let v: *mut usize = $val;
+		core::arch::asm!("mov gs:[0 * 8], {}", in(reg) v);
+	}};
+	(kernel_stack_ptr = $val:expr) => {{
+		let v: *mut usize = $val;
+		core::arch::asm!("mov gs:[1 * 8], {}", in(reg) v);
+	}};
+	(process = $val:expr) => {{
+		let v: *const Process = $val;
+		core::arch::asm!("mov gs:[2 * 8], {}", in(reg) v);
+	}};
+	(thread = $val:expr) => {{
+		let v: *const Thread = $val;
+		core::arch::asm!("mov gs:[3 * 8], {}", in(reg) v);
+	}};
+	(cpu_stack_ptr = $val:expr) => {{
+		let v: *mut () = $val;
+		core::arch::asm!("mov gs:[4 * 8], {}", in(reg) v);
+	}};
+	(prev_kernel_stack_ptr = $val:expr) => {{
+		let v: *mut usize = $val;
+		core::arch::asm!("mov gs:[5 * 8], {}", in(reg) v);
+	}};
+}
+
 pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 	unsafe {
 		unref_current_thread();
@@ -58,37 +139,35 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.user_stack
 			.get()
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
-		asm!("mov gs:[0 * 8], {0}", in(reg) user_stack);
-		asm!("mov gs:[1 * 8], {0}", in(reg) thread.kernel_stack.get().unwrap().as_ptr());
-		asm!("mov gs:[2 * 8], {0}", in(reg) Arc::as_ptr(thread.process()));
-		asm!("mov gs:[3 * 8], {0}", in(reg) Arc::into_raw(thread));
+		gs_store!(user_stack_ptr = user_stack);
+		gs_store!(kernel_stack_ptr = thread.kernel_stack.get().unwrap().as_ptr());
+		gs_store!(process = thread.process().map_or_else(ptr::null, Arc::as_ptr));
+		gs_store!(thread = Arc::into_raw(thread));
 	}
 }
 
 /// Copy thread state from the CPU data to the thread.
-pub unsafe fn save_current_thread_state() {
+pub(super) unsafe fn save_current_thread_state() {
+	debug_assert!(
+		!super::interrupts_enabled(),
+		"interrupts may not be enabled while switching threads"
+	);
 	unsafe {
-		let (us, ks, tr): (*mut _, *mut _, *const Thread);
-		asm!("mov {0}, gs:[3 * 8]", lateout(reg) tr);
-		let tr = &*tr;
-		asm!("mov {0}, gs:[0 * 8]", lateout(reg) us);
-		tr.user_stack.set(NonNull::new(us));
-		asm!("mov {0}, gs:[1 * 8]", lateout(reg) ks);
-		tr.kernel_stack.set(Some(NonNull::new(ks).unwrap()));
+		let thread = gs_load!(thread);
+		if !thread.is_null() {
+			let thread = &*thread;
+			thread
+				.user_stack
+				.set(NonNull::new(gs_load!(user_stack_ptr)));
+			thread
+				.kernel_stack
+				.set(Some(NonNull::new(gs_load!(kernel_stack_ptr)).unwrap()));
 
-		// Save fs, gs
-		tr.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
-		tr.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
+			// Save fs, gs
+			thread.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
+			thread.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
+		}
 	}
-}
-
-#[repr(C)]
-struct CpuData {
-	user_stack_ptr: *mut usize,
-	kernel_stack_ptr: *mut usize,
-	process: *mut Process,
-	thread: *const Thread,
-	cpu_stack_ptr: *mut (),
 }
 
 #[derive(Default)]
@@ -100,81 +179,77 @@ pub struct ThreadData {
 #[naked]
 unsafe extern "C" fn handler() {
 	unsafe {
-		asm!("
-			# Load kernel stack
-			swapgs
-			mov		gs:[0], rsp		# Save user stack ptr
-			mov		rsp, gs:[8]		# Load kernel stack ptr
+		asm!(
+			// Load kernel stack
+			"swapgs",
+			"mov gs:[{user_stack_ptr}], rsp",
+			"mov rsp, gs:[{kernel_stack_ptr}]",
+			"sti",
 
-			# Save thread registers (except rax & rdx, we overwrite those anyways)
-			push	r15
-			push	r14
-			push	r13
-			push	r12
-			push	r11
-			push	r10
-			push	r9
-			push	r8
-			push	rbp
-			push	rdi
-			push	rsi
-			push	rdi
-			push	rcx
-			push	rbx
+			// Save thread registers (except rax & rdx, we overwrite those anyways)
+			"push r15",
+			"push r14",
+			"push r13",
+			"push r12",
+			"push r11",
+			"push r10",
+			"push r9",
+			"push r8",
+			"push rbp",
+			"push rdi",
+			"push rsi",
+			"push rdi",
+			"push rcx",
+			"push rbx",
 
-			# Check if the syscall ID is valid
-			# Jump forward to take advantage of static prediction
-			cmp		rax, {syscall_count}
-			jae		1f
+			// Check if the syscall ID is valid
+			"cmp rax, {syscall_count}",
+			"jae 1f",
+			// Call the appropriate handler
+			"lea rcx, [rip + syscall_table]",
+			"mov rax, [rcx + rax * 8]",
+			"mov rcx, r10", // r10 is used as 4th parameter
+			"call rax",
+			"2:",
 
-			# Call the appropriate handler
-			# TODO figure out how to do this in one instruction
-			lea		rcx, [rip + syscall_table]
-			lea		rax, [rcx + rax * 8]
-			mov		rcx, r10 # r10 is used as 4th parameter
-			call	[rax]
+			"pop rbx",
+			"pop rcx",
+			"pop rdi",
+			"pop rsi",
+			"pop rdi",
+			"pop rbp",
+			"pop r8",
+			"pop r9",
+			"pop r10",
+			"pop r11",
+			"pop r12",
+			"pop r13",
+			"pop r14",
+			"pop r15",
 
-		2:
-			pop		rbx
-			pop		rcx
-			pop		rdi
-			pop		rsi
-			pop		rdi
-			pop		rbp
-			pop		r8
-			pop		r9
-			pop		r10
-			pop		r11
-			pop		r12
-			pop		r13
-			pop		r14
-			pop		r15
+			// Restore user stack pointer & return
+			"cli",
+			"mov gs:[{kernel_stack_ptr}], rsp",
+			"mov rsp, gs:[{user_stack_ptr}]",
+			"swapgs",
+			"sysretq",
 
-			# Save kernel stack in case it got overwritten
-			mov		gs:[8], rsp
-
-			# Restore user stack pointer
-			mov		rsp, gs:[0]
-
-			# Swap to user GS for TLS
-			swapgs
-
-			# Go back to user mode
-			rex64 sysret
-
-			# Set error code and return
-		1:
-			mov		rax, -1
-			xor		edx, edx
-			jmp		2b
-		", syscall_count = const syscall::SYSCALLS_LEN, options(noreturn));
+			// Set error code and return
+			"1:",
+			"mov rax, -1",
+			"xor edx, edx",
+			"jmp 2b",
+			syscall_count = const syscall::SYSCALLS_LEN,
+			user_stack_ptr = const CpuData::USER_STACK_PTR,
+			kernel_stack_ptr = const CpuData::KERNEL_STACK_PTR,
+			options(noreturn)
+		);
 	}
 }
 
 pub fn current_process() -> Option<Arc<Process>> {
 	unsafe {
-		let process: *mut Process;
-		asm!("mov {0}, gs:[2 * 8]", out(reg) process);
+		let process = gs_load!(process);
 		(!process.is_null()).then(|| {
 			let process = Arc::from_raw(process);
 			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
@@ -186,8 +261,7 @@ pub fn current_process() -> Option<Arc<Process>> {
 
 pub fn current_thread() -> Option<Arc<Thread>> {
 	unsafe {
-		let thread: *const Thread;
-		asm!("mov {0}, gs:[3 * 8]", out(reg) thread);
+		let thread = gs_load!(thread);
 		(!thread.is_null()).then(|| {
 			let thread = Arc::from_raw(thread);
 			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
@@ -199,8 +273,7 @@ pub fn current_thread() -> Option<Arc<Thread>> {
 
 pub fn current_thread_weak() -> Option<Weak<Thread>> {
 	unsafe {
-		let thread: *const Thread;
-		asm!("mov {0}, gs:[0x18]", out(reg) thread);
+		let thread = gs_load!(thread);
 		(!thread.is_null()).then(|| {
 			let thread = Arc::from_raw(thread);
 			let weak = Arc::downgrade(&thread);
@@ -211,31 +284,26 @@ pub fn current_thread_weak() -> Option<Weak<Thread>> {
 }
 
 pub(super) fn cpu_stack() -> *mut () {
-	unsafe {
-		let stack: *mut ();
-		asm!("mov {0}, gs:[4 * 8]", out(reg) stack);
-		stack
-	}
+	unsafe { gs_load!(cpu_stack_ptr) }
 }
 
 /// Clear the current thread & process from the local CPU data.
 pub fn clear_current_thread() {
 	unsafe {
 		unref_current_thread();
-		asm!("mov gs:[0 * 8], {}", in(reg) ptr::null::<usize>());
-		asm!("mov gs:[1 * 8], {}", in(reg) ptr::null::<usize>());
-		asm!("mov gs:[2 * 8], {}", in(reg) ptr::null::<Process>());
-		asm!("mov gs:[3 * 8], {}", in(reg) ptr::null::<Thread>());
+		gs_store!(user_stack_ptr = ptr::null_mut());
+		gs_store!(kernel_stack_ptr = ptr::null_mut());
+		gs_store!(process = ptr::null_mut());
+		gs_store!(thread = ptr::null_mut());
 	}
 }
 
 /// Remove reference to current thread.
 unsafe fn unref_current_thread() {
 	unsafe {
-		let old_thr: *const Thread;
-		asm!("mov {0}, gs:[3 * 8]", lateout(reg) old_thr);
-		if !old_thr.is_null() {
-			Arc::from_raw(old_thr);
+		let thread = gs_load!(thread);
+		if !thread.is_null() {
+			Arc::from_raw(thread);
 		}
 	}
 }

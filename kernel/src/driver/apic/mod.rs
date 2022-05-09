@@ -6,37 +6,46 @@ use crate::arch::amd64::{self, msr};
 use crate::memory::Page;
 use crate::time::Monotonic;
 use acpi::{AcpiHandler, AcpiTables};
-use core::arch::asm;
 use core::time::Duration;
 use reg::*;
 
-// No atomic is necessary as the value is read only once anyways.
+#[cfg(feature = "driver-pic")]
+compile_error!("The PIC driver must be disabled");
+
+// No atomic is necessary as the value is written only once anyways.
 static mut TICKS_PER_SECOND: u32 = 0;
+
+const APIC_SW_ENABLE: u32 = 0x100;
 
 pub unsafe fn init_acpi<H>(_: &AcpiTables<H>)
 where
 	H: AcpiHandler,
 {
-	disable_pic();
 	local_apic::init();
 	io_apic::init();
+
+	enable_apic();
 }
 
 pub fn post_init() {
-	// Set interrupt vector
+	// Calibrate & enable timer
+	calibrate_timer(Duration::from_millis(10));
 	let t = local_apic::get().lvt_timer.get();
 	local_apic::get()
 		.lvt_timer
-		.set(t & !0xff | u32::from(amd64::TIMER_IRQ));
+		.set((t & !0xff) | (1 << 16) | u32::from(amd64::TIMER_IRQ));
 
-	calibrate_timer(Duration::from_millis(10));
+	// Enable APIC & map spurious IRQ
+	local_apic::get()
+		.spurious_interrupt_vector
+		.set(APIC_SW_ENABLE | 0xff);
 }
 
 /// Set the timer in one-shot mode for the given duration in the future.
 ///
 /// Smaller durations are more precise. The timer may end early if the duration
 /// is too large.
-pub fn set_timer_oneshot(t: Duration, irq: Option<u8>) {
+pub fn set_timer_oneshot(t: Duration) {
 	let mut ticks = t
 		.as_nanos()
 		.saturating_mul(unsafe { TICKS_PER_SECOND }.into())
@@ -63,13 +72,10 @@ pub fn set_timer_oneshot(t: Duration, irq: Option<u8>) {
 		_ => (0b0011, u32::MAX), // Default to highest
 	};
 
-	if let Some(irq) = irq {
-		let t = local_apic::get().lvt_timer.get();
-		local_apic::get()
-			.lvt_timer
-			.set(t & !(1 << 16 | 0xff) | u32::from(irq));
-	}
-
+	let t = local_apic::get().lvt_timer.get();
+	local_apic::get()
+		.lvt_timer
+		.set((t & !(1 << 16 | 0xff)) | u32::from(amd64::TIMER_IRQ));
 	local_apic::get().divide_configuration.set(shift);
 	local_apic::get().initial_count.set(ticks);
 }
@@ -92,16 +98,6 @@ fn calibrate_timer(t: Duration) {
 			.expect("division overflow")
 			.try_into()
 			.expect("too many ticks per second");
-	}
-}
-
-fn disable_pic() {
-	unsafe {
-		asm!("
-			mov al, 0xff
-			out 0x21, al
-			out 0xa1, al
-		", out("al") _)
 	}
 }
 

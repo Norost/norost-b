@@ -6,6 +6,7 @@ pub mod hpet;
 pub mod pci;
 #[cfg(feature = "driver-pic")]
 pub mod pic;
+#[cfg(feature = "driver-rtc")]
 pub mod rtc;
 pub mod uart;
 #[cfg(feature = "driver-vga")]
@@ -39,6 +40,7 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 		#[cfg(feature = "driver-pic")]
 		pic::init();
 
+		#[cfg(feature = "driver-rtc")]
 		rtc::init();
 
 		apic::post_init();

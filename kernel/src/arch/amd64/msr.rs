@@ -11,8 +11,16 @@ pub const IA32_EFER_SCE: u64 = 1;
 #[allow(dead_code)]
 pub const IA32_KERNEL_GS_BASE: u32 = 0xc0000102;
 
+/// Ring 0 and Ring 3 Segment bases, as well as SYSCALL EIP in protected mode.
 pub const STAR: u32 = 0xc0000081;
+/// The kernel's RIP SYSCALL entry in long mode.
 pub const LSTAR: u32 = 0xc0000082;
+/// The kernel's RIP for SYSCALL in compatibility mode.
+#[allow(dead_code)]
+pub const CSTAR: u32 = 0xc0000083;
+/// The low 32 bits are the SYSCALL flag mask. If a bit in this is set, the corresponding bit in
+/// RFLAGS is cleared.
+pub const SFMASK: u32 = 0xc0000084;
 
 pub const FS_BASE: u32 = 0xc0000100;
 pub const GS_BASE: u32 = 0xc0000101;

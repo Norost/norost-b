@@ -10,12 +10,13 @@ use crate::time::Monotonic;
 use alloc::sync::Arc;
 use core::future::Future;
 use core::marker::Unpin;
+use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 pub use memory_object::*;
 pub use thread::Thread;
 
-pub use process::init;
+static mut SLEEP_THREADS: [MaybeUninit<Arc<Thread>>; 1] = MaybeUninit::uninit_array();
 
 /// Switch to the next thread. This does not save the current thread's state!
 ///
@@ -54,10 +55,10 @@ pub unsafe fn next_thread() -> ! {
 	loop {
 		if let Err(t) = unsafe { try_next_thread() } {
 			if let Some(d) = Monotonic::now().duration_until(t) {
-				apic::set_timer_oneshot(d, Some(16));
-				arch::enable_interrupts();
-				arch::halt();
-				arch::disable_interrupts();
+				apic::set_timer_oneshot(d);
+				unsafe {
+					SLEEP_THREADS[0].assume_init_ref().clone().resume().unwrap();
+				}
 			}
 		}
 	}
@@ -67,4 +68,28 @@ pub unsafe fn next_thread() -> ! {
 fn poll<T>(mut task: impl Future<Output = T> + Unpin) -> Poll<T> {
 	let waker = waker::new_waker(Thread::current_weak().unwrap());
 	Pin::new(&mut task).poll(&mut Context::from_waker(&waker))
+}
+
+/// # Safety
+///
+/// This function must be called exactly once.
+pub unsafe fn init(root: &crate::object_table::Root) {
+	process::init(root);
+	unsafe {
+		for t in SLEEP_THREADS.iter_mut() {
+			t.write(
+				Thread::kernel_new(halt_forever)
+					.expect("failed to create sleep thread")
+					.into(),
+			);
+		}
+	}
+}
+
+/// Halt forever. Used to implement sleep.
+extern "C" fn halt_forever() -> ! {
+	loop {
+		arch::halt();
+		arch::yield_current_thread();
+	}
 }

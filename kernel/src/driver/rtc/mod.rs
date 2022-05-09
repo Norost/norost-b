@@ -1,4 +1,7 @@
 //! # RTC driver
+
+compile_error!("RTC driver is very likely broken");
+
 use core::arch::asm;
 
 use crate::time::Monotonic;
