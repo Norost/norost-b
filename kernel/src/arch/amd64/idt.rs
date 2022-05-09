@@ -3,8 +3,39 @@ use core::mem;
 
 #[macro_export]
 macro_rules! __idt_wrap_handler {
-	// FIXME we can't return from these handlers
 	(trap $fn:path) => {
+		{
+			const _: extern "C" fn(*const ()) = $fn;
+			#[naked]
+			unsafe extern "C" fn f() {
+				unsafe {
+					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"pop rsi", // RIP
+						"push rsi",
+						"cld",
+						"call {f}",
+
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn, options(noreturn)
+					);
+				}
+			}
+			$crate::arch::amd64::idt::Handler::Trap(f)
+		}
+	};
+	(trap error $fn:path) => {
 		{
 			const _: extern "C" fn(u32, *const ()) = $fn;
 			#[naked]
@@ -44,6 +75,61 @@ macro_rules! __idt_wrap_handler {
 			unsafe extern "C" fn f() {
 				unsafe {
 					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						// Save scratch registers
+						"push rax",
+						"push rcx",
+						"push rdx",
+						"push rdi",
+						"push rsi",
+						"push r8",
+						"push r9",
+						"push r10",
+						"push r11",
+
+						// Call handler
+						"cld",
+						"call {f}",
+
+						// Restore thread state
+						"pop r11",
+						"pop r10",
+						"pop r9",
+						"pop r8",
+						"pop rsi",
+						"pop rdi",
+						"pop rdx",
+						"pop rcx",
+						"pop rax",
+
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn,
+						options(noreturn)
+					);
+				}
+			}
+			$crate::arch::amd64::idt::Handler::Int(f)
+		}
+	};
+	(int nmi $fn:path) => {
+		{
+			const _: extern "C" fn() = $fn;
+			#[naked]
+			unsafe extern "C" fn f() {
+				unsafe {
+					core::arch::asm!(
+						// FIXME we need to use RDMSR to ensure swapgs has been executed.
 						// Check if we need to swapgs by checking $cl
 						"cmp DWORD PTR [rsp + 8], 8",
 						"jz 2f",
@@ -140,16 +226,22 @@ macro_rules! __idt_wrap_handler {
 
 #[macro_export]
 macro_rules! wrap_idt {
-	(@INTERNAL $($type:ident)+ $f:path) => {
+	(@INTERNAL [$($type:ident)+] $f:path [$ist:literal]) => {
 		$crate::arch::amd64::idt::IDTEntry::new(
 			1 * 8,
 			$crate::__idt_wrap_handler!($($type)+ $f),
 			0
 		)
 	};
-	(trap $f:path) => { $crate::wrap_idt!(@INTERNAL trap $f) };
-	(int $f:path) => { $crate::wrap_idt!(@INTERNAL int $f) };
-	(int noreturn $f:path) => { $crate::wrap_idt!(@INTERNAL int noreturn $f) };
+	(trap $f:path) => { $crate::wrap_idt!(@INTERNAL [trap] $f [0]) };
+	(trap error $f:path) => { $crate::wrap_idt!(@INTERNAL [trap error] $f [0]) };
+	(trap error $f:path [$ist:literal]) => { $crate::wrap_idt!(@INTERNAL [trap error] $f [$ist]) };
+	(int $f:path) => { $crate::wrap_idt!(@INTERNAL [int] $f [0]) };
+	(int nmi $f:path) => { $crate::wrap_idt!(@INTERNAL [int nmi] $f [0]) };
+	(int noreturn $f:path) => { $crate::wrap_idt!(@INTERNAL [int noreturn] $f [0]) };
+	(int noreturn savethread $f:path) => {
+		$crate::wrap_idt!(@INTERNAL [int noreturn savethread] $f [0])
+	};
 }
 
 #[derive(Clone, Copy)]
@@ -157,24 +249,6 @@ pub enum Handler {
 	Int(unsafe extern "C" fn()),
 	Trap(unsafe extern "C" fn()),
 }
-
-#[naked]
-unsafe extern "C" fn irq_noop() {
-	unsafe {
-		asm!("
-			push	rax
-			movabs	rax, {eoi}
-			mov		DWORD PTR [rax], 0
-			pop		rax
-			iretq
-			",
-			eoi = const 0xffff_c000_fee0_00b0u64,
-			options(noreturn),
-		);
-	}
-}
-
-pub const NOOP: Handler = Handler::Int(irq_noop);
 
 #[repr(C)]
 pub struct IDTEntry {

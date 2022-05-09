@@ -89,6 +89,7 @@ pub unsafe fn init(root: &crate::object_table::Root) {
 }
 
 /// Halt forever. Used to implement sleep.
+#[optimize(size)]
 extern "C" fn halt_forever() -> ! {
 	loop {
 		arch::halt();
