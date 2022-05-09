@@ -1,3 +1,7 @@
+compîle_error!(
+	"This driver is probably broken. Ensure it doesn't conflict with crate::arch::amd64"
+);
+
 pub(super) fn init() {
 	unsafe {
 		asm!("

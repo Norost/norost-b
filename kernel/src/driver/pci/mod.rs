@@ -119,7 +119,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 	}
 }
 
-extern "C" fn irq_handler(_: *const ()) {
+extern "C" fn irq_handler() {
 	device::irq_handler();
 	local_apic::get().eoi.set(0);
 }

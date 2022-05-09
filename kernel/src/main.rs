@@ -76,7 +76,9 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 		log::post_init(&root);
 	}
 
-	scheduler::init(&root);
+	unsafe {
+		scheduler::init(&root);
+	}
 
 	let mut init = None;
 	for d in boot_info.drivers() {

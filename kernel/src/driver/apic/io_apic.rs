@@ -40,7 +40,6 @@ pub(super) fn init() {
 	// Ensure the I/O APIC registers are mapped.
 	let a = PPN::try_from_usize(io_apic_address().try_into().unwrap()).unwrap();
 	AddressSpace::identity_map(a, 4096);
-	super::enable_apic();
 }
 
 /// Read a register from the IoApic

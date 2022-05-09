@@ -115,7 +115,7 @@ pub(super) unsafe fn init() {
 	}
 }
 
-extern "C" fn irq_handler(_rip: *const ()) {
+extern "C" fn irq_handler() {
 	super::table::irq_handler();
 	local_apic::get().eoi.set(0);
 }

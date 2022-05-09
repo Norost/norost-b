@@ -3,6 +3,9 @@ use crate::memory::frame::PPN;
 use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
 use core::fmt;
 
+const APIC_NMI: u32 = 1 << 4;
+const APIC_DISABLE: u32 = 0x1_0000;
+
 #[repr(C, align(4096))]
 pub struct LocalApic {
 	_reserved_0_1: [RegR; 0x1 - 0x0 + 1],
@@ -157,5 +160,15 @@ pub(super) fn init() {
 	// Ensure the LAPIC registers are mapped.
 	let a = PPN::try_from_usize(super::local_apic_address().try_into().unwrap()).unwrap();
 	AddressSpace::identity_map(a, 4096);
-	super::enable_apic();
+
+	// Initialize to a well-known state (https://wiki.osdev.org/APIC_timer#Example_code_in_ASM)
+	let apic = get();
+	apic.destination_format.set(0xffff_ffff);
+	apic.logical_destination
+		.set((apic.logical_destination.get() & 0xff_ffff) | 1);
+	apic.lvt_timer.set(APIC_DISABLE);
+	apic.lvt_performance_monitoring_counters.set(APIC_NMI);
+	apic.lvt_lint0.set(APIC_DISABLE);
+	apic.lvt_lint1.set(APIC_DISABLE);
+	apic.task_priority.set(0);
 }

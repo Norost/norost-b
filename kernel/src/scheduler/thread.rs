@@ -30,7 +30,7 @@ pub struct Thread {
 	//
 	// Especially, we don't need to store the processes anywhere as as long a thread
 	// is alive, the process itself will be alive too.
-	process: Arc<Process>,
+	process: Option<Arc<Process>>,
 	sleep_until: Cell<Monotonic>,
 	/// Async deadline set by [`super::waker::sleep`].
 	async_deadline: Cell<Option<Monotonic>>,
@@ -46,7 +46,7 @@ impl Thread {
 		stack: usize,
 		process: Arc<Process>,
 		handle: Handle,
-	) -> Result<Self, frame::AllocateContiguousError> {
+	) -> Result<Self, frame::AllocateError> {
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
@@ -54,8 +54,7 @@ impl Thread {
 					address: 0 as _,
 					color: 0,
 				},
-			)
-			.unwrap();
+			)?;
 			let kernel_stack_base =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
@@ -79,14 +78,58 @@ impl Thread {
 
 			// Reserve space for (zeroed) registers
 			// 14 GP registers without RSP and RAX
-			// FIXME save RFLAGS
 			kernel_stack = kernel_stack.sub(14);
 
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
 				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
 				kernel_stack_base,
-				process,
+				process: Some(process),
+				sleep_until: Cell::new(Monotonic::ZERO),
+				async_deadline: Cell::new(None),
+				arch_specific: Default::default(),
+				waiters: Default::default(),
+			})
+		}
+	}
+
+	/// Create a new kernel-only thread.
+	pub(super) fn kernel_new(start: extern "C" fn() -> !) -> Result<Self, frame::AllocateError> {
+		unsafe {
+			let kernel_stack_base = OwnedPageFrames::new(
+				KERNEL_STACK_SIZE,
+				AllocateHints {
+					address: 0 as _,
+					color: 0,
+				},
+			)?;
+			let kernel_stack_base =
+				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
+					.unwrap();
+			let mut kernel_stack = kernel_stack_base
+				.as_ptr()
+				.add(KERNEL_STACK_SIZE.get())
+				.cast::<usize>();
+			let stack = kernel_stack as usize;
+			let mut push = |val: usize| {
+				kernel_stack = kernel_stack.sub(1);
+				kernel_stack.write(val);
+			};
+			push(2 * 8); // ss
+			push(stack); // rsp
+			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
+			push(1 * 8); // cs
+			push(start as usize); // rip
+
+			// Reserve space for (zeroed) registers
+			// 15 GP registers without RSP
+			kernel_stack = kernel_stack.sub(15);
+
+			Ok(Self {
+				user_stack: Cell::new(None),
+				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
+				kernel_stack_base,
+				process: None,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
 				arch_specific: Default::default(),
@@ -96,8 +139,10 @@ impl Thread {
 	}
 
 	/// Get a reference to the owning process.
-	pub fn process(&self) -> &Arc<Process> {
-		&self.process
+	#[track_caller]
+	#[inline]
+	pub fn process(&self) -> Option<&Arc<Process>> {
+		self.process.as_ref()
 	}
 
 	/// Suspend the currently running thread & begin running this thread.
@@ -108,8 +153,14 @@ impl Thread {
 			return Err(Destroyed);
 		}
 
-		unsafe { self.process.as_ref().activate_address_space() };
+		unsafe {
+			self.process.as_ref().map_or_else(
+				|| AddressSpace::activate_default(),
+				|a| a.activate_address_space(),
+			);
+		}
 
+		let has_proc = self.process.is_some();
 		unsafe {
 			crate::arch::amd64::set_current_thread(self);
 		}
@@ -117,45 +168,34 @@ impl Thread {
 		// iretq is the only way to preserve all registers
 		unsafe {
 			asm!(
-				"
-				# Set kernel stack
-				mov		rsp, gs:[8]
+				"test {0}, {0}",
+				// Load kernel stack
+				"mov rsp, gs:[8]",
+				"pop r15",
+				"pop r14",
+				"pop r13",
+				"pop r12",
+				"pop r11",
+				"pop r10",
+				"pop r9",
+				"pop r8",
+				"pop rbp",
+				"pop rsi",
+				"pop rdi",
+				"pop rdx",
+				"pop rcx",
+				"pop rbx",
+				"pop rax",
+				// Save kernel stack
+				"mov gs:[8], rsp",
 
-				# TODO is this actually necessary?
-				mov		ax, (4 * 8) | 3		# ring 3 data with bottom 2 bits set for ring 3
-				mov		ds, ax
-				mov 	es, ax
-
-				# Don't execute swapgs if we're returning to kernel mode (1)
-				mov		eax, [rsp + 15 * 8 + 1 * 8]	# CS
-				and		eax, 3
-
-				pop		r15
-				pop		r14
-				pop		r13
-				pop		r12
-				pop		r11
-				pop		r10
-				pop		r9
-				pop		r8
-				pop		rbp
-				pop		rsi
-				pop		rdi
-				pop		rdx
-				pop		rcx
-				pop		rbx
-				pop		rax
-
-				# Save kernel stack
-				mov		gs:[8], rsp
-
-				# ditto (1)
-				je		2f
-				swapgs
-			2:
-
-				rex64 iretq
-			",
+				// Check if we need to swapgs by checking $cl
+				"cmp DWORD PTR [rsp + 8], 8",
+				"jz 2f",
+				"swapgs",
+				"2:",
+				"iretq",
+				in(reg) usize::from(has_proc),
 				options(noreturn),
 			);
 		}
