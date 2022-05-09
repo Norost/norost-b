@@ -54,7 +54,6 @@ unsafe fn try_next_thread() -> Result<!, Monotonic> {
 pub unsafe fn next_thread() -> ! {
 	use crate::driver::apic;
 	loop {
-		arch::disable_interrupts();
 		if let Err(t) = unsafe { try_next_thread() } {
 			if let Some(d) = Monotonic::now().duration_until(t) {
 				apic::set_timer_oneshot(d);
