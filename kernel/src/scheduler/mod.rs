@@ -57,6 +57,7 @@ pub unsafe fn next_thread() -> ! {
 				apic::set_timer_oneshot(d, Some(16));
 				arch::enable_interrupts();
 				arch::halt();
+				arch::disable_interrupts();
 			}
 		}
 	}

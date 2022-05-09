@@ -88,9 +88,7 @@ impl<T> Drop for Guard<'_, T> {
 				"interrupts are enabled inside ISR spinlock"
 			);
 		}
-		// FIXME for some reason interrupts are being enabled before the lock is released if this
-		// line is uncommented.
-		//crate::arch::enable_interrupts();
+		crate::arch::enable_interrupts();
 	}
 }
 
