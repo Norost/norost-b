@@ -88,7 +88,7 @@ impl<T> Drop for Guard<'_, T> {
 				"interrupts are enabled inside ISR spinlock"
 			);
 		}
-		//crate::arch::enable_interrupts();
+		crate::arch::enable_interrupts();
 	}
 }
 

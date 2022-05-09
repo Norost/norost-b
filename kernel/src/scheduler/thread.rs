@@ -68,8 +68,7 @@ impl Thread {
 			};
 			push(4 * 8 | 3); // ss
 			push(stack); // rsp
-			 //push(0x202);     // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(0x2); // rflags: Set reserved bit 1
+			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
 			push(3 * 8 | 3); // cs
 			push(start); // rip
 

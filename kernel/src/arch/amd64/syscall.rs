@@ -184,22 +184,23 @@ unsafe extern "C" fn handler() {
 			"swapgs",
 			"mov gs:[{user_stack_ptr}], rsp",
 			"mov rsp, gs:[{kernel_stack_ptr}]",
+			"sti",
 
 			// Save thread registers (except rax & rdx, we overwrite those anyways)
-			"push	r15
-			push	r14
-			push	r13
-			push	r12
-			push	r11
-			push	r10
-			push	r9
-			push	r8
-			push	rbp
-			push	rdi
-			push	rsi
-			push	rdi
-			push	rcx
-			push	rbx",
+			"push r15",
+			"push r14",
+			"push r13",
+			"push r12",
+			"push r11",
+			"push r10",
+			"push r9",
+			"push r8",
+			"push rbp",
+			"push rdi",
+			"push rsi",
+			"push rdi",
+			"push rcx",
+			"push rbx",
 
 			// Check if the syscall ID is valid
 			"cmp rax, {syscall_count}",
@@ -211,22 +212,23 @@ unsafe extern "C" fn handler() {
 			"call rax",
 			"2:",
 
-			"pop rbx
-			pop		rcx
-			pop		rdi
-			pop		rsi
-			pop		rdi
-			pop		rbp
-			pop		r8
-			pop		r9
-			pop		r10
-			pop		r11
-			pop		r12
-			pop		r13
-			pop		r14
-			pop		r15",
+			"pop rbx",
+			"pop rcx",
+			"pop rdi",
+			"pop rsi",
+			"pop rdi",
+			"pop rbp",
+			"pop r8",
+			"pop r9",
+			"pop r10",
+			"pop r11",
+			"pop r12",
+			"pop r13",
+			"pop r14",
+			"pop r15",
 
 			// Restore user stack pointer & return
+			"cli",
 			"mov gs:[{kernel_stack_ptr}], rsp",
 			"mov rsp, gs:[{user_stack_ptr}]",
 			"swapgs",
