@@ -21,9 +21,6 @@ pub struct IsrGuard<'a, T> {
 	lock: &'a SpinLock<T>,
 }
 
-#[cfg(debug_assertions)]
-static LOCK_NEST_COUNT: AtomicU8 = AtomicU8::new(0);
-
 impl<T> SpinLock<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
@@ -43,11 +40,6 @@ impl<T> SpinLock<T> {
 			"interrupts are disabled. If this is intended, use isr_lock()"
 		);
 		crate::arch::disable_interrupts();
-		debug_assert_eq!(
-			LOCK_NEST_COUNT.fetch_add(1, Ordering::Relaxed),
-			0,
-			"double spinlock nest"
-		);
 		loop {
 			match self
 				.lock
@@ -143,11 +135,6 @@ impl<T> DerefMut for Guard<'_, T> {
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
 		ensure_interrupts_off();
-		debug_assert_eq!(
-			LOCK_NEST_COUNT.fetch_sub(1, Ordering::Relaxed),
-			1,
-			"double spinlock nest"
-		);
 		self.lock.lock.store(0, Ordering::Release);
 		crate::arch::enable_interrupts();
 	}
