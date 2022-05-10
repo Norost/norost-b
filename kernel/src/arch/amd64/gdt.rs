@@ -59,14 +59,20 @@ pub struct GDT<'a> {
 	null: GDTEntry,        // 0
 	kernel_code: GDTEntry, // 1
 	kernel_data: GDTEntry, // 2
-	user_code: GDTEntry,   // 3
-	user_data: GDTEntry,   // 4
+	user_data: GDTEntry,   // 3
+	user_code: GDTEntry,   // 4
 	tss: GDTEntry,         // 5
 	tss_extra: GDTEntryHigh,
 	_marker: PhantomData<&'a ()>,
 }
 
 impl<'a> GDT<'a> {
+	pub const KERNEL_CS: u16 = 8 * 1 | 0;
+	pub const KERNEL_SS: u16 = 8 * 2 | 0;
+	pub const USER_CS: u16 = 8 * 4 | 3;
+	pub const USER_SS: u16 = 8 * 3 | 3;
+	pub const TSS: u16 = 5 * 8 | 3;
+
 	pub fn new(tss: &'a TSS) -> Self {
 		let tss = tss as *const _ as u64;
 
@@ -75,11 +81,15 @@ impl<'a> GDT<'a> {
 		// 0: null
 		// 1: kernel code
 		// 2: kernel data
-		// 3: user code
-		// 4: user data
+		// 3: user data
+		// 4: user code
 		// 5: tss
 		//
-		// See syscall::init() for reasoning
+		// Reasoning:
+		// - 0 always has to be a null segment.
+		// - kernel data has to come after kernel code because of SYSCALL
+		// - user data has to come *before* kernel code because of SYSRET (thanks AMD!)
+		// - TSS is necessary because of RSP when an interrupt switches from ring 3 to 0.
 		Self {
 			null: GDTEntry {
 				limit_low: 0,
@@ -105,19 +115,19 @@ impl<'a> GDT<'a> {
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},
-			user_code: GDTEntry {
-				limit_low: 0xffff,
-				base_low: 0,
-				base_mid: 0,
-				access: 0b1_11_1_1_0_1_0,
-				granularity: (1 << 5) | (1 << 7) | 0xf,
-				base_high: 0,
-			},
 			user_data: GDTEntry {
 				limit_low: 0xffff,
 				base_low: 0,
 				base_mid: 0,
 				access: 0b1_11_1_0_0_1_0,
+				granularity: (1 << 5) | (1 << 7) | 0xf,
+				base_high: 0,
+			},
+			user_code: GDTEntry {
+				limit_low: 0xffff,
+				base_low: 0,
+				base_mid: 0,
+				access: 0b1_11_1_1_0_1_0,
 				granularity: (1 << 5) | (1 << 7) | 0xf,
 				base_high: 0,
 			},
@@ -150,15 +160,17 @@ impl GDTPointer {
 	pub unsafe fn activate(&self) {
 		unsafe {
 			asm!(
-				"lgdt [{0}]",
-				"mov ax, 2 * 8",
+				"lgdt [{ptr}]",
+				"mov ax, {kernel_ss}",
 				"mov ds, ax",
 				"mov es, ax",
 				"mov ss, ax",
 				// Set TSS
-				"mov ax, 5 * 8 | 3",
+				"mov ax, {tss}",
 				"ltr ax",
-				in(reg) &self.limit
+				kernel_ss = const GDT::KERNEL_SS,
+				tss = const GDT::TSS,
+				ptr = in(reg) &self.limit
 			);
 		}
 	}

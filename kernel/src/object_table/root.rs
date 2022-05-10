@@ -35,7 +35,7 @@ impl Root {
 
 	/// Add a new object to the root.
 	pub fn add(&self, name: impl Into<Box<[u8]>>, object: Weak<dyn Object>) {
-		self.objects.lock().insert(name.into(), object);
+		self.objects.lock_unchecked().insert(name.into(), object);
 	}
 
 	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], &'a [u8])> {

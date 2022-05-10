@@ -5,7 +5,7 @@ use crate::memory::{
 	r#virtual::{AddressSpace, RWX},
 	Page,
 };
-use crate::sync::Mutex;
+use crate::sync::SpinLock;
 use crate::time::Monotonic;
 use alloc::{
 	sync::{Arc, Weak},
@@ -22,9 +22,12 @@ use norostb_kernel::Handle;
 const KERNEL_STACK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
 
 pub struct Thread {
+	// TODO make these field non-pub and find out some other way to let
+	// arch::amd64::syscall to access them.
 	pub user_stack: Cell<Option<NonNull<usize>>>,
-	pub kernel_stack: Cell<Option<NonNull<usize>>>,
+	pub kernel_stack: Cell<NonNull<usize>>,
 	kernel_stack_base: NonNull<Page>,
+	pub kernel_stack_top: NonNull<Page>,
 	// This does create a cyclic reference and risks leaking memory, but should
 	// be faster & more convienent in the long run.
 	//
@@ -37,7 +40,8 @@ pub struct Thread {
 	/// Architecture-specific data.
 	pub arch_specific: arch::ThreadData,
 	/// Tasks to notify when this thread finishes.
-	waiters: Mutex<Vec<Waker>>,
+	waiters: SpinLock<Vec<Waker>>,
+	destroyed: Cell<bool>,
 }
 
 impl Thread {
@@ -45,8 +49,8 @@ impl Thread {
 		start: usize,
 		stack: usize,
 		process: Arc<Process>,
-		handle: Handle,
 	) -> Result<Self, frame::AllocateError> {
+		// TODO move arch-specific code to crate::arch::amd64
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
@@ -58,22 +62,21 @@ impl Thread {
 			let kernel_stack_base =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
-			let mut kernel_stack = kernel_stack_base
-				.as_ptr()
-				.add(KERNEL_STACK_SIZE.get())
-				.cast::<usize>();
+			let kernel_stack_top =
+				NonNull::new(kernel_stack_base.as_ptr().add(KERNEL_STACK_SIZE.get())).unwrap();
+			let mut kernel_stack = kernel_stack_top.as_ptr().cast::<usize>();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(4 * 8 | 3); // ss
+			push(crate::arch::GDT::USER_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(3 * 8 | 3); // cs
+			push(crate::arch::GDT::USER_CS.into());
 			push(start); // rip
 
-			// Push thread handle (rax)
-			push(handle.try_into().unwrap());
+			// Push thread handle stub (rax)
+			push(usize::MAX);
 
 			// Reserve space for (zeroed) registers
 			// 14 GP registers without RSP and RAX
@@ -81,19 +84,36 @@ impl Thread {
 
 			Ok(Self {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
-				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
+				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				kernel_stack_base,
+				kernel_stack_top,
 				process: Some(process),
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
 				arch_specific: Default::default(),
 				waiters: Default::default(),
+				destroyed: Cell::new(false),
 			})
+		}
+	}
+
+	#[inline]
+	#[track_caller]
+	pub unsafe fn set_handle(&self, handle: Handle) {
+		// Replace thread handle with proper value (rax)
+		unsafe {
+			self.kernel_stack
+				.get()
+				.cast::<usize>()
+				.as_ptr()
+				.add(14)
+				.write(handle.try_into().unwrap());
 		}
 	}
 
 	/// Create a new kernel-only thread.
 	pub(super) fn kernel_new(start: extern "C" fn() -> !) -> Result<Self, frame::AllocateError> {
+		// TODO ditto
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
@@ -105,19 +125,18 @@ impl Thread {
 			let kernel_stack_base =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
-			let mut kernel_stack = kernel_stack_base
-				.as_ptr()
-				.add(KERNEL_STACK_SIZE.get())
-				.cast::<usize>();
+			let kernel_stack_top =
+				NonNull::new(kernel_stack_base.as_ptr().add(KERNEL_STACK_SIZE.get())).unwrap();
+			let mut kernel_stack = kernel_stack_top.as_ptr().cast::<usize>();
 			let stack = kernel_stack as usize;
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(2 * 8); // ss
+			push(crate::arch::amd64::GDT::KERNEL_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(1 * 8); // cs
+			push(crate::arch::amd64::GDT::KERNEL_CS.into());
 			push(start as usize); // rip
 
 			// Reserve space for (zeroed) registers
@@ -126,13 +145,15 @@ impl Thread {
 
 			Ok(Self {
 				user_stack: Cell::new(None),
-				kernel_stack: Cell::new(Some(NonNull::new(kernel_stack).unwrap())),
+				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				kernel_stack_base,
+				kernel_stack_top,
 				process: None,
 				sleep_until: Cell::new(Monotonic::ZERO),
 				async_deadline: Cell::new(None),
 				arch_specific: Default::default(),
 				waiters: Default::default(),
+				destroyed: Cell::new(false),
 			})
 		}
 	}
@@ -148,6 +169,7 @@ impl Thread {
 	///
 	/// The thread may not have been destroyed already.
 	pub fn resume(self: Arc<Self>) -> Result<!, Destroyed> {
+		// TODO ditto
 		if self.destroyed() {
 			return Err(Destroyed);
 		}
@@ -159,7 +181,41 @@ impl Thread {
 			);
 		}
 
-		let has_proc = self.process.is_some();
+		// Ensure the kernel stack hasn't been corrupted
+		#[cfg(debug_assertions)]
+		unsafe {
+			// 15 GP registers + RIP + CS + RFLAGS + RSP + SS
+			let p = self.kernel_stack.get().as_ptr();
+			match p
+				.add(15 + 1)
+				.read()
+				.try_into()
+				.expect("cs is not a 16 bit value")
+			{
+				crate::arch::amd64::GDT::KERNEL_CS => {
+					assert_eq!(
+						p.add(15 + 1 + 1 + 1 + 1).read(),
+						crate::arch::amd64::GDT::KERNEL_SS.into(),
+						"kernel stack is corrupted (ss mismatch)",
+					)
+				}
+				// On return to userspace $rsp should be exactly equal to kernel_stack_top
+				crate::arch::amd64::GDT::USER_CS => {
+					assert_eq!(
+						p.add(15 + 1 + 1 + 1 + 1 + 1),
+						self.kernel_stack_top.as_ptr().cast(),
+						"kernel stack is corrupted (rsp doesn't match kernel_stack_top)",
+					);
+					assert_eq!(
+						p.add(15 + 1 + 1 + 1 + 1).read(),
+						crate::arch::amd64::GDT::USER_SS.into(),
+						"kernel stack is corrupted (ss mismatch)",
+					)
+				}
+				cs => panic!("kernel stack is corrupted (cs is {:#x})", cs),
+			}
+		}
+
 		unsafe {
 			crate::arch::amd64::set_current_thread(self);
 		}
@@ -167,9 +223,8 @@ impl Thread {
 		// iretq is the only way to preserve all registers
 		unsafe {
 			asm!(
-				"test {0}, {0}",
-				// Load kernel stack
-				"mov rsp, gs:[8]",
+				// Restore thread state
+				"mov rsp, gs:[{kernel_stack}]",
 				"pop r15",
 				"pop r14",
 				"pop r13",
@@ -185,16 +240,13 @@ impl Thread {
 				"pop rcx",
 				"pop rbx",
 				"pop rax",
-				// Save kernel stack
-				"mov gs:[8], rsp",
-
 				// Check if we need to swapgs by checking $cl
 				"cmp DWORD PTR [rsp + 8], 8",
 				"jz 2f",
 				"swapgs",
 				"2:",
 				"iretq",
-				in(reg) usize::from(has_proc),
+				kernel_stack = const crate::arch::CpuData::KERNEL_STACK_PTR,
 				options(noreturn),
 			);
 		}
@@ -237,7 +289,9 @@ impl Thread {
 			AddressSpace::kernel_unmap_object(self.kernel_stack_base, KERNEL_STACK_SIZE).unwrap();
 		}
 
-		for w in self.waiters.lock().drain(..) {
+		self.destroyed.set(true);
+
+		for w in self.waiters.auto_lock().drain(..) {
 			w.wake();
 		}
 	}
@@ -277,7 +331,7 @@ impl Thread {
 
 	/// Whether this thread has been destroyed.
 	pub fn destroyed(&self) -> bool {
-		self.kernel_stack.get().is_none()
+		self.destroyed.get()
 	}
 }
 

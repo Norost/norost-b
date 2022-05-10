@@ -3,7 +3,7 @@ use crate::driver::uart;
 use crate::driver::vga;
 use crate::{
 	object_table::{Error, NoneQuery, Object, OneQuery, Query, Root, Ticket},
-	sync::spinlock::Guard,
+	sync::spinlock::AutoGuard,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
@@ -53,27 +53,19 @@ pub unsafe fn post_init(root: &Root) {
 	let _ = Arc::into_raw(table); // Intentionally leak the table.
 }
 
-pub struct SystemLog {
-	uart: Guard<'static, uart::Uart>,
-	#[cfg(feature = "driver-vga")]
-	vga: Guard<'static, vga::text::Text>,
-}
+pub struct SystemLog {}
 
 impl SystemLog {
 	pub fn new() -> Self {
-		Self {
-			uart: uart::get(0),
-			#[cfg(feature = "driver-vga")]
-			vga: vga::TEXT.lock(),
-		}
+		Self {}
 	}
 }
 
 impl fmt::Write for SystemLog {
 	fn write_str(&mut self, s: &str) -> fmt::Result {
-		self.uart.write_str(s)?;
+		uart::get(0).write_str(s)?;
 		#[cfg(feature = "driver-vga")]
-		self.vga.write_str(s)?;
+		vga::TEXT.auto_lock().write_str(s)?;
 		Ok(())
 	}
 }
@@ -145,13 +137,13 @@ macro_rules! dbg {
         // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
             tmp => {
-                $crate::info!("[{}:{}] {} = {:#?}",
+                $crate::fatal!("[{}:{}] {} = {:#?}",
                     file!(), line!(), stringify!($val), &tmp);
                 tmp
             }
         }
     };
     ($($val:expr),+ $(,)?) => {
-        ($($crate::dbg!($val)),+,)
+        ($($crate::fatal!($val)),+,)
     };
 }

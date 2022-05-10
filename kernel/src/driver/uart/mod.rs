@@ -9,7 +9,7 @@ cfg_if::cfg_if! {
 mod table;
 
 use crate::object_table;
-use crate::sync::spinlock::{Guard, SpinLock};
+use crate::sync::spinlock::{AutoGuard, SpinLock};
 use alloc::sync::Arc;
 use core::fmt;
 pub use table::UartId;
@@ -42,9 +42,10 @@ pub unsafe fn post_init(root: &crate::object_table::Root) {
 }
 
 /// Acquire a lock on a UART device.
-pub fn get(i: usize) -> Guard<'static, Uart> {
+#[track_caller]
+pub fn get(i: usize) -> AutoGuard<'static, Uart> {
 	// SAFETY: No thread sets DEVICES[i] to None
-	unsafe { DEVICES[i].as_ref().unwrap().lock() }
+	unsafe { DEVICES[i].as_ref().unwrap().auto_lock() }
 }
 
 /// UART device for emergency situations. This function bypasses the lock and should only be used

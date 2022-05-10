@@ -8,5 +8,5 @@ pub static TEXT: SpinLock<text::Text> = SpinLock::new(text::Text::new());
 ///
 /// This function must be called exactly once.
 pub unsafe fn init() {
-	TEXT.lock().clear();
+	TEXT.lock_manual().clear();
 }

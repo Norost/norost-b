@@ -192,7 +192,7 @@ pub fn allocate<F>(
 where
 	F: FnMut(PPN),
 {
-	let mut stack = dumb_stack::STACK.lock();
+	let mut stack = dumb_stack::STACK.auto_lock();
 	(stack.count() >= count)
 		.then(|| {
 			for _ in 0..count {
@@ -203,9 +203,10 @@ where
 }
 
 /// Allocate a physically contiguous range of pages.
+#[track_caller]
 pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
 	dumb_stack::STACK
-		.lock()
+		.auto_lock()
 		.pop_contiguous_range(count)
 		.ok_or(AllocateContiguousError::OutOfFrames)
 }
@@ -219,7 +220,7 @@ pub unsafe fn deallocate<F>(count: usize, mut callback: F) -> Result<(), Dealloc
 where
 	F: FnMut() -> PPN,
 {
-	let mut stack = dumb_stack::STACK.lock();
+	let mut stack = dumb_stack::STACK.auto_lock();
 	for _ in 0..count {
 		stack
 			.push(callback())
@@ -234,7 +235,7 @@ where
 ///
 /// The region may not already be in use.
 pub unsafe fn add_memory_region(mut region: MemoryRegion) {
-	let mut stack = dumb_stack::STACK.lock();
+	let mut stack = dumb_stack::STACK.isr_lock();
 	while let Some(ppn) = region.take() {
 		// Clear the page beforehand to improve alloc speed and clear any potential secrets.
 		ppn.clear();

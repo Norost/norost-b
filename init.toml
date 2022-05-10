@@ -23,7 +23,6 @@ target = "net"
 file_root = ""
 
 [program.static_http_server]
-disabled = false
 path = "static_http_server"
 after = [ "file", "net" ]
 file_root = "file"

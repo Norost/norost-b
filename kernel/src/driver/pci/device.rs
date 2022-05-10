@@ -3,7 +3,7 @@ use crate::memory::frame::{PageFrameIter, PPN};
 use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
-use crate::sync::IsrSpinLock;
+use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use pci::BaseAddress;
 
@@ -14,7 +14,12 @@ pub struct PciDevice {
 }
 
 /// List of tasks waiting for an interrupt.
-static IRQ_LISTENERS: IsrSpinLock<Vec<TicketWaker<usize>>> = IsrSpinLock::new(Vec::new());
+static IRQ_LISTENERS: SpinLock<Vec<TicketWaker<usize>>> = SpinLock::new(Vec::new());
+
+// FIXME this is a quick hack to work around a race condition if an interrupt is delivered
+// right before poll()
+use core::sync::atomic::*;
+static POLL_RACE_HACK: AtomicBool = AtomicBool::new(false);
 
 impl PciDevice {
 	pub(super) fn new(bus: u8, device: u8) -> Self {
@@ -37,6 +42,12 @@ impl MemoryObject for PciDevice {
 
 impl Object for PciDevice {
 	fn poll(&self) -> Ticket<usize> {
+		if POLL_RACE_HACK
+			.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+			.is_ok()
+		{
+			return Ticket::new_complete(Ok(0));
+		}
 		let (ticket, waker) = Ticket::new();
 		IRQ_LISTENERS.lock().push(waker);
 		ticket
@@ -82,7 +93,8 @@ impl MemoryObject for BarRegion {
 }
 
 pub(super) fn irq_handler() {
-	for e in IRQ_LISTENERS.lock().drain(..) {
-		e.complete(Ok(0));
+	POLL_RACE_HACK.store(true, Ordering::Relaxed);
+	for e in IRQ_LISTENERS.isr_lock().drain(..) {
+		e.isr_complete(Ok(0));
 	}
 }

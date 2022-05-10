@@ -20,7 +20,8 @@ pub fn insert(thread: Weak<Thread>) {
 		next: NonNull::new(0x1 as *mut _).unwrap(),
 		thread,
 	});
-	let mut cur_ptr = THREAD_LIST.lock();
+
+	let mut cur_ptr = THREAD_LIST.auto_lock();
 	let new = Box::leak(node);
 	let new_ptr = NonNull::new(new as *mut _).unwrap();
 	if let Some(mut cur_ptr) = cur_ptr.1 {
@@ -34,8 +35,14 @@ pub fn insert(thread: Weak<Thread>) {
 	cur_ptr.0 += 1;
 }
 
+/// # Note
+///
+/// This method should only be called inside ISRs! Internally it uses `SpinLock::isr_lock` to
+/// avoid having the current thread yielded, which could result in the lock being held for
+/// an excessive amount of time.
+#[track_caller]
 pub fn next() -> Option<Arc<Thread>> {
-	let mut l = THREAD_LIST.lock();
+	let mut l = THREAD_LIST.isr_lock();
 	let mut curr = l.1?;
 	loop {
 		let nn = {

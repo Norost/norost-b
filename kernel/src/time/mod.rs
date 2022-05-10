@@ -51,9 +51,6 @@ impl Monotonic {
 
 impl fmt::Debug for Monotonic {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = f.debug_struct(stringify!(Monotonic));
-		f.field("seconds", &(self.nanoseconds / 1_000_000_000));
-		f.field("nano_seconds", &(self.nanoseconds % 1_000_000_000));
-		f.finish()
+		core::time::Duration::from_nanos(self.nanoseconds).fmt(f)
 	}
 }

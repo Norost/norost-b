@@ -17,7 +17,18 @@ impl<T> Mutex<T> {
 		}
 	}
 
+	#[track_caller]
 	pub fn lock(&self) -> Guard<T> {
+		// Mutexes may never be locked inside an ISR since it can lead to deadlocks.
+		debug_assert!(
+			crate::arch::interrupts_enabled(),
+			"interrupts are disabled. Is the mutex being locked inside an ISR?"
+		);
+		self.lock_unchecked()
+	}
+
+	#[track_caller]
+	pub fn lock_unchecked(&self) -> Guard<T> {
 		// TODO detect double locks by same thread
 		loop {
 			match self

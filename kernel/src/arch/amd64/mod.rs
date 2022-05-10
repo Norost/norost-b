@@ -13,10 +13,11 @@ use crate::{driver::apic, scheduler};
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
+pub use gdt::GDT;
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
 	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
-	ThreadData,
+	CpuData, ThreadData,
 };
 
 /// The IRQ offset of the master PIC.
@@ -37,8 +38,6 @@ static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
 
 // Start from 33, where IRQs 0..31 are used for exceptions and 32 is reserved for the timer.
 static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
-
-static mut DOUBLE_FAULT_STACK: [usize; 512] = [0; 512];
 
 pub mod pic {
 	//! https://wiki.osdev.org/PIC
@@ -135,13 +134,16 @@ pub mod pic {
 }
 
 pub unsafe fn init() {
+	extern "C" {
+		static _stack_top: [usize; 0];
+	}
 	unsafe {
 		// Remap IBM-PC interrupts
 		// Even if the PIC is disabled it may generate spurious interrupts apparently *sigh*
 		pic::init();
 
 		// Setup TSS
-		TSS.set_ist(1.try_into().unwrap(), DOUBLE_FAULT_STACK.as_ptr().add(512));
+		TSS.set_ist(1.try_into().unwrap(), _stack_top.as_ptr());
 
 		// Setup GDT
 		GDT.write(gdt::GDT::new(&TSS));
@@ -151,43 +153,46 @@ pub unsafe fn init() {
 		GDT_PTR.assume_init_mut().activate();
 
 		// Setup IDT
+		// https://wiki.osdev.org/Exceptions
 		IDT.set(
 			TIMER_IRQ.into(),
-			idt::IDTEntry::new(
-				1 * 8,
-				__idt_wrap_handler!(int noreturn savethread handle_timer),
-				0,
-			),
+			wrap_idt!(int noreturn savethread handle_timer),
 		);
+		IDT.set(0, wrap_idt!(trap handle_divide_by_zero));
+		IDT.set(1, wrap_idt!(trap handle_debug));
+		IDT.set(2, wrap_idt!(int nmi handle_nmi));
+		IDT.set(3, wrap_idt!(trap handle_breakpoint));
+		IDT.set(4, wrap_idt!(trap handle_overflow));
+		IDT.set(5, wrap_idt!(trap handle_bound_range_exceeded));
+		IDT.set(6, wrap_idt!(trap handle_invalid_opcode));
+		IDT.set(7, wrap_idt!(trap handle_device_not_available));
+		IDT.set(8, wrap_idt!(trap error handle_double_fault [1]));
+		// 9 does not exist
+		IDT.set(10, wrap_idt!(trap error handle_invalid_tss));
+		IDT.set(11, wrap_idt!(trap error handle_segment_not_present));
+		IDT.set(12, wrap_idt!(trap error handle_stack_segment_fault));
+		IDT.set(13, wrap_idt!(trap error handle_general_protection_fault));
+		IDT.set(14, wrap_idt!(trap error handle_page_fault));
+		// 15 is reserved
+		IDT.set(16, wrap_idt!(trap handle_x87_fpe));
+		IDT.set(17, wrap_idt!(trap error handle_alignment_check));
+		IDT.set(18, wrap_idt!(trap handle_machine_check));
+		IDT.set(19, wrap_idt!(trap handle_simd_fpe));
+		IDT.set(20, wrap_idt!(trap handle_virtualization_exception));
 		IDT.set(
-			6,
-			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_invalid_opcode), 0),
+			21,
+			wrap_idt!(trap error handle_control_protection_exception),
 		);
-		IDT.set(
-			8,
-			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_double_fault), 1),
-		);
-		IDT.set(
-			13,
-			idt::IDTEntry::new(
-				1 * 8,
-				__idt_wrap_handler!(trap handle_general_protection_fault),
-				0,
-			),
-		);
-		IDT.set(
-			14,
-			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_page_fault), 0),
-		);
-		IDT.set(
-			16,
-			idt::IDTEntry::new(1 * 8, __idt_wrap_handler!(trap handle_x87_fpe), 0),
-		);
+		// 22 to 27 are reserved
+		IDT.set(28, wrap_idt!(trap handle_hypervisor_injection_exception));
+		IDT.set(29, wrap_idt!(trap error handle_vmm_communication_exception));
+		IDT.set(30, wrap_idt!(trap error handle_security_exception));
+		// 31 is reserved
 
 		IDT_PTR.write(idt::IDTPointer::new(&IDT));
 		IDT_PTR.assume_init_ref().activate();
 
-		syscall::init();
+		syscall::init(&TSS);
 
 		cpuid::enable_fsgsbase();
 
@@ -197,21 +202,62 @@ pub unsafe fn init() {
 
 extern "C" fn handle_timer() -> ! {
 	debug!("Timer interrupt!");
+	debug_assert!(!interrupts_enabled());
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
 	// SAFETY: we just saved the thread's state.
 	unsafe { scheduler::next_thread() }
 }
 
-extern "C" fn handle_invalid_opcode(error: u32, rip: *const ()) {
+extern "C" fn handle_debug(rip: *const ()) {
+	fatal!("Debug!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_divide_by_zero(rip: *const ()) {
+	fatal!("Divide by zero!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_nmi() {
+	fatal!("Non-maskable interrupt!");
+	halt();
+}
+
+extern "C" fn handle_breakpoint(rip: *const ()) {
+	fatal!("Breakpoint!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_overflow(rip: *const ()) {
+	fatal!("Overflow!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_bound_range_exceeded(rip: *const ()) {
+	fatal!("Bound range exceeded (wtf?)!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_invalid_opcode(rip: *const ()) {
 	fatal!("Invalid opcode!");
 	unsafe {
 		let addr: *const ();
 		asm!("mov {}, cr2", out(reg) addr);
-		fatal!("  error:   {:#x}", error);
 		fatal!("  RIP:     {:p}", rip);
 		fatal!("  address: {:p}", addr);
 	}
+	halt();
+}
+
+extern "C" fn handle_device_not_available(rip: *const ()) {
+	fatal!("Device missing!");
+	fatal!("  RIP:     {:p}", rip);
 	halt();
 }
 
@@ -227,10 +273,32 @@ extern "C" fn handle_double_fault(error: u32, rip: *const ()) {
 	halt();
 }
 
+extern "C" fn handle_invalid_tss(error: u32, rip: *const ()) {
+	fatal!("Invalid TSS!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_segment_not_present(error: u32, rip: *const ()) {
+	fatal!("Segment not present!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_stack_segment_fault(error: u32, rip: *const ()) {
+	fatal!("Stack-segment fault!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
 extern "C" fn handle_general_protection_fault(error: u32, rip: *const ()) {
 	fatal!("General protection fault!");
 	fatal!("  error:   {:#x}", error);
 	fatal!("  RIP:     {:p}", rip);
+	fatal!("  IF: {}", interrupts_enabled());
 	halt();
 }
 
@@ -242,12 +310,66 @@ extern "C" fn handle_page_fault(error: u32, rip: *const ()) {
 		fatal!("  error:   {:#x}", error);
 		fatal!("  RIP:     {:p}", rip);
 		fatal!("  address: {:p}", addr);
+		fatal!("  IF: {}", interrupts_enabled());
 	}
+	loop {
+		halt();
+	}
+}
+
+extern "C" fn handle_x87_fpe(rip: *const ()) {
+	fatal!("x87 FPE!");
+	fatal!("  RIP:     {:p}", rip);
 	halt();
 }
 
-extern "C" fn handle_x87_fpe(error: u32, rip: *const ()) {
-	fatal!("x87 FPE!");
+extern "C" fn handle_alignment_check(error: u32, rip: *const ()) {
+	fatal!("Alignment check!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_machine_check(rip: *const ()) {
+	fatal!("Machine check!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_simd_fpe(rip: *const ()) {
+	fatal!("SIMD FPE!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_virtualization_exception(rip: *const ()) {
+	fatal!("Virtualization exception!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_control_protection_exception(error: u32, rip: *const ()) {
+	fatal!("Control protection exception!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_hypervisor_injection_exception(rip: *const ()) {
+	fatal!("Hypervisor injection exception!");
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_vmm_communication_exception(error: u32, rip: *const ()) {
+	fatal!("VMM communication exception!");
+	fatal!("  error:   {:#x}", error);
+	fatal!("  RIP:     {:p}", rip);
+	halt();
+}
+
+extern "C" fn handle_security_exception(error: u32, rip: *const ()) {
+	fatal!("Security exception!");
 	fatal!("  error:   {:#x}", error);
 	fatal!("  RIP:     {:p}", rip);
 	halt();
@@ -264,7 +386,10 @@ pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 }
 
 pub fn yield_current_thread() {
-	unsafe { asm!("int {}", const TIMER_IRQ) } // Fake timer interrupt
+	unsafe {
+		// Fake timer interrupt
+		asm!("int {}", const TIMER_IRQ, options(nomem, nostack, preserves_flags))
+	}
 }
 
 /// Switch to this CPU's local stack and call the given function.

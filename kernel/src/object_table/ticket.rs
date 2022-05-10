@@ -2,6 +2,7 @@ use super::{Error, Object, Query, QueryResult};
 use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
+	fmt,
 	future::Future,
 	pin::Pin,
 	task::{Context, Poll, Waker},
@@ -43,13 +44,25 @@ pub struct TicketWaker<T> {
 
 impl<T> TicketWaker<T> {
 	pub fn complete(self, status: Result<T, Error>) {
-		let mut l = self.inner.lock();
+		let mut l = self.inner.auto_lock();
+		l.waker.take().map(|w| w.wake());
+		l.status = Some(status);
+	}
+
+	pub fn isr_complete(self, status: Result<T, Error>) {
+		let mut l = self.inner.isr_lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
 	}
 }
 
-#[derive(Default)]
+impl<T: fmt::Debug> fmt::Debug for TicketWaker<T> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		(&*self.inner.auto_lock()).fmt(f)
+	}
+}
+
+#[derive(Debug, Default)]
 pub struct TicketInner<T> {
 	waker: Option<Waker>,
 	/// The completion status of this job.

@@ -11,7 +11,7 @@ use core::arch::asm;
 use core::cell::Cell;
 use core::ptr::{self, NonNull};
 
-pub unsafe fn init() {
+pub unsafe fn init(tss: &'static super::tss::TSS) {
 	unsafe {
 		// Enable syscall/sysenter
 		msr::set_bits(msr::IA32_EFER, msr::IA32_EFER_SCE, true);
@@ -21,9 +21,9 @@ pub unsafe fn init() {
 		// * SYSCALL loads CS from STAR 47:32
 		// * It then loads SS from STAR 47:32 + 8.
 		// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
-		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
-		//   userland SS will be loaded from STAR 63:48 + 8
-		msr::wrmsr(msr::STAR, (8 * 1) << 32);
+		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 and userland
+		//   SS from STAR 63:48 + 8 on SYSRET.
+		msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2 | 3) << 48);
 		// Set LSTAR to handler
 		msr::wrmsr(msr::LSTAR, handler as u64);
 		// Ensure the interrupt flag is cleared on syscall enter
@@ -41,6 +41,7 @@ pub unsafe fn init() {
 			process: ptr::null_mut(),
 			thread: ptr::null(),
 			cpu_stack_ptr,
+			tss,
 		}));
 		msr::wrmsr(msr::GS_BASE, data as *mut _ as u64);
 	}
@@ -56,14 +57,20 @@ pub struct CpuData {
 	process: *const Process,
 	thread: *const Thread,
 	cpu_stack_ptr: *mut (),
+	tss: &'static super::tss::TSS,
 }
 
 impl CpuData {
 	pub const USER_STACK_PTR: usize = 0 * 8;
 	pub const KERNEL_STACK_PTR: usize = 1 * 8;
+	#[allow(dead_code)]
 	pub const PROCESS: usize = 2 * 8;
+	#[allow(dead_code)]
 	pub const THREAD: usize = 3 * 8;
+	#[allow(dead_code)]
 	pub const CPU_STACK_PTR: usize = 4 * 8;
+	#[allow(dead_code)]
+	pub const TSS: usize = 5 * 8;
 }
 
 macro_rules! gs_load {
@@ -92,11 +99,15 @@ macro_rules! gs_load {
 		core::arch::asm!("mov {}, gs:[4 * 8]", out(reg) v);
 		v
 	}};
-	(prev_kernel_stack_ptr) => {{
-		let v: *mut usize;
-		core::arch::asm!("mov {}, gs:[5 * 8]", out(reg) v);
-		v
-	}};
+	(tss) => {
+		#[allow(unused_unsafe)]
+		unsafe {
+			let v: *const super::tss::TSS;
+			core::arch::asm!("mov {}, gs:[5 * 8]", out(reg) v);
+			let v: &'static _ = &*v;
+			v
+		}
+	};
 }
 
 macro_rules! gs_store {
@@ -120,10 +131,6 @@ macro_rules! gs_store {
 		let v: *mut () = $val;
 		core::arch::asm!("mov gs:[4 * 8], {}", in(reg) v);
 	}};
-	(prev_kernel_stack_ptr = $val:expr) => {{
-		let v: *mut usize = $val;
-		core::arch::asm!("mov gs:[5 * 8], {}", in(reg) v);
-	}};
 }
 
 pub unsafe fn set_current_thread(thread: Arc<Thread>) {
@@ -140,7 +147,8 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.get()
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		gs_store!(user_stack_ptr = user_stack);
-		gs_store!(kernel_stack_ptr = thread.kernel_stack.get().unwrap().as_ptr());
+		gs_store!(kernel_stack_ptr = thread.kernel_stack.get().as_ptr());
+		gs_load!(tss).set_rsp(0, thread.kernel_stack_top.as_ptr().cast());
 		gs_store!(process = thread.process().map_or_else(ptr::null, Arc::as_ptr));
 		gs_store!(thread = Arc::into_raw(thread));
 	}
@@ -161,7 +169,7 @@ pub(super) unsafe fn save_current_thread_state() {
 				.set(NonNull::new(gs_load!(user_stack_ptr)));
 			thread
 				.kernel_stack
-				.set(Some(NonNull::new(gs_load!(kernel_stack_ptr)).unwrap()));
+				.set(NonNull::new(gs_load!(kernel_stack_ptr)).unwrap());
 
 			// Save fs, gs
 			thread.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
@@ -295,6 +303,7 @@ pub fn clear_current_thread() {
 		gs_store!(kernel_stack_ptr = ptr::null_mut());
 		gs_store!(process = ptr::null_mut());
 		gs_store!(thread = ptr::null_mut());
+		gs_load!(tss).set_rsp(0, 0 as _);
 	}
 }
 

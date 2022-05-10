@@ -1,13 +1,12 @@
 use super::Uart;
 use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, Ticket, TicketWaker};
-use crate::sync::IsrSpinLock;
+use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 /// Table with all UART devices.
 pub struct UartTable;
 
-static PENDING_READS: [IsrSpinLock<Vec<TicketWaker<Box<[u8]>>>>; 1] =
-	[IsrSpinLock::new(Vec::new())];
+static PENDING_READS: [SpinLock<Vec<TicketWaker<Box<[u8]>>>>; 1] = [SpinLock::new(Vec::new())];
 
 impl Object for UartTable {
 	fn query(self: Arc<Self>, mut prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
@@ -42,7 +41,7 @@ impl Object for UartId {
 				Ticket::new_complete(Ok([r].into()))
 			} else {
 				let (ticket, waker) = Ticket::new();
-				PENDING_READS[usize::from(self.0)].lock().push(waker);
+				PENDING_READS[usize::from(self.0)].auto_lock().push(waker);
 				uart.enable_interrupts(Uart::INTERRUPT_DATA_AVAILABLE);
 				ticket
 			}

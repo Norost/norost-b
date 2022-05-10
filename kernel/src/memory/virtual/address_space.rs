@@ -4,7 +4,7 @@ use crate::memory::{
 	Page,
 };
 use crate::scheduler::MemoryObject;
-use crate::sync::Mutex;
+use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
@@ -21,8 +21,9 @@ pub enum MapError {
 pub enum UnmapError {}
 
 /// All objects mapped in kernel space. This vector is sorted.
-static KERNEL_MAPPED_OBJECTS: Mutex<Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>> =
-	Mutex::new(Vec::new());
+static KERNEL_MAPPED_OBJECTS: SpinLock<
+	Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>,
+> = SpinLock::new(Vec::new());
 
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
@@ -74,7 +75,7 @@ impl AddressSpace {
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
-		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
+		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
 
 		let (range, frames, index) = Self::map_object_common(
 			&objects,
@@ -143,7 +144,7 @@ impl AddressSpace {
 		base: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
-		let mut objects = KERNEL_MAPPED_OBJECTS.lock();
+		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
 		unsafe {
 			Self::unmap_object_common(&mut objects, base, count)?;
 			r#virtual::AddressSpace::kernel_unmap(base, count).unwrap();
