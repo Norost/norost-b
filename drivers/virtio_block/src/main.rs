@@ -87,7 +87,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		tbl.take_job(&mut job).unwrap();
 
 		let wait = || {
-			rt::io::poll(dev_handle).unwrap();
+			// FIXME this API is fundamentally broken as it's subject to race conditions.
+			// There are two things missing to make this particular API useable:
+			//
+			// 1) Acknowledgement that the server has received the poll request
+			// 2) Receiving the event itself.
+			//
+			// 1) is required to prevent the race condition. 2) is so we know when to continue.
+			//
+			// Alternatively, some kind of "event" object should be created. The server then
+			// knows to keep track of events which will directly prevent race conditions from
+			// occuring as events are continuously collected.
+			//rt::io::poll(dev_handle).unwrap();
 		};
 
 		match job.ty {
