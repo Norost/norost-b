@@ -206,6 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					job.buffer_size.try_into().unwrap(),
 				)
 			};
+			assert_eq!(job.result, 0);
 			match job.ty {
 				Job::OPEN => {
 					assert_ne!(job.handle, driver_utils::Handle::MAX, "TODO");

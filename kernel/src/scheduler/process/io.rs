@@ -483,6 +483,7 @@ fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
 	let job = unsafe { &mut *job };
 
 	job.job_id = info.0;
+	job.result = 0;
 
 	let mut copy_buf = |p: &[u8]| unsafe {
 		let ptr = job.buffer.expect("no buffer ptr");
