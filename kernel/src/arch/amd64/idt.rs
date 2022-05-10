@@ -230,7 +230,7 @@ macro_rules! wrap_idt {
 		$crate::arch::amd64::idt::IDTEntry::new(
 			1 * 8,
 			$crate::__idt_wrap_handler!($($type)+ $f),
-			0
+			$ist,
 		)
 	};
 	(trap $f:path) => { $crate::wrap_idt!(@INTERNAL [trap] $f [0]) };
