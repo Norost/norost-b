@@ -20,7 +20,18 @@ pub mod io;
 
 #[repr(align(4096))]
 #[repr(C)]
-pub struct Page([u128; 256]);
+pub struct Page([u8; Self::SIZE]);
+
+impl Page {
+	pub const SIZE: usize = 0x1000;
+	pub const MASK: usize = 0xfff;
+
+	/// Return the minimum amount of pages to cover the given amount of bytes.
+	#[inline]
+	pub fn min_pages_for_bytes(bytes: usize) -> usize {
+		(bytes + Self::MASK) / Self::SIZE
+	}
+}
 
 pub type Handle = u32;
 

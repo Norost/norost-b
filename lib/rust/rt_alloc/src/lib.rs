@@ -9,7 +9,10 @@
 use core::alloc::{self, AllocError, Allocator as IAllocator, Layout};
 use core::mem;
 use core::ptr::{self, NonNull};
-use norostb_kernel::syscall::{self, RWX};
+use norostb_kernel::{
+	syscall::{self, RWX},
+	Page,
+};
 
 /// An allocator that gets its memory from the OS.
 ///
@@ -101,15 +104,12 @@ unsafe impl alloc::Allocator for Allocator {
 			old_layout.size() <= new_layout.size(),
 			"new layout must be larger"
 		);
-		if !should_alloc_pages(old_layout) && should_alloc_pages(new_layout)
-		//|| ZoneAllocator::get_max_size(old_layout.size())
-		//	.map_or(false, |s| s >= new_layout.size())
+		if !should_alloc_pages(old_layout) || !should_alloc_pages(new_layout) {
+			todo!()
+		} else if Page::min_pages_for_bytes(old_layout.size())
+			< Page::min_pages_for_bytes(new_layout.size())
 		{
-			// We need to either:
-			// - copy from slabmalloc to directly allocated pages.
-			// - copy from old pages to new pages because we don't know if anything has
-			//   been allocated beyond the old pages (which is something we should keep
-			//   track of, probably...)
+			// We need to copy & reallocate
 			let new = alloc_pages(new_layout)?;
 			unsafe {
 				new.as_ptr()
