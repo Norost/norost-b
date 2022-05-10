@@ -289,11 +289,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					let data = &mut buf[..len];
 					match &mut sockets[job.handle] {
 						Socket::TcpListener(_) => todo!(),
-						Socket::TcpConnection(sock) => {
-							job.operation_size =
-								sock.read(data, &mut iface).unwrap().try_into().unwrap();
-							job.buffer = NonNull::new(data.as_mut_ptr());
-						}
+						Socket::TcpConnection(sock) => match sock.read(data, &mut iface) {
+							Ok(l) => {
+								job.operation_size = l.try_into().unwrap();
+								job.buffer = NonNull::new(data.as_mut_ptr());
+							}
+							Err(smoltcp::Error::Illegal) => {
+								job.operation_size = 0;
+								job.result = -1;
+							}
+							Err(e) => todo!("handle {:?}", e),
+						},
 						Socket::Udp(_sock) => {
 							todo!("udp remote address")
 						}
@@ -303,10 +309,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					let data = &buf[..job.operation_size as usize];
 					match &mut sockets[job.handle] {
 						Socket::TcpListener(_) => todo!(),
-						Socket::TcpConnection(sock) => {
-							let l = sock.write(data, &mut iface).unwrap();
-							job.operation_size = l.try_into().unwrap();
-						}
+						Socket::TcpConnection(sock) => match sock.write(data, &mut iface) {
+							Ok(l) => job.operation_size = l.try_into().unwrap(),
+							Err(smoltcp::Error::Illegal) => {
+								job.operation_size = 0;
+								job.result = -1;
+							}
+							Err(e) => todo!("handle {:?}", e),
+						},
 						Socket::Udp(_sock) => {
 							todo!("udp remote address")
 						}
