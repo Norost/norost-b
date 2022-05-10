@@ -1,8 +1,9 @@
 #!/bin/sh
 
-. ./env.sh
-
 set -e
+set -x
+
+. ./env.sh
 
 cd kernel
 cargo rustc "$@" -- \
