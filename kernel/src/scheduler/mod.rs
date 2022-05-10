@@ -6,6 +6,7 @@ mod thread;
 mod waker;
 
 use crate::arch;
+use crate::driver::apic;
 use crate::time::Monotonic;
 use alloc::sync::Arc;
 use core::future::Future;
@@ -13,10 +14,13 @@ use core::marker::Unpin;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use core::time::Duration;
 pub use memory_object::*;
 pub use thread::Thread;
 
 static mut SLEEP_THREADS: [MaybeUninit<Arc<Thread>>; 1] = MaybeUninit::uninit_array();
+
+const TIME_SLICE: Duration = Duration::from_millis(33); // 30 times / sec
 
 /// Switch to the next thread. This does not save the current thread's state!
 ///
@@ -36,6 +40,7 @@ unsafe fn try_next_thread() -> Result<!, Monotonic> {
 		let sleep_until = thr.sleep_until();
 		if sleep_until <= now {
 			// Be very careful _not_ to clone here, as otherwise we'll start leaking references.
+			apic::set_timer_oneshot(TIME_SLICE);
 			let _ = thr.resume();
 		}
 		t = t.min(sleep_until);
@@ -52,7 +57,6 @@ unsafe fn try_next_thread() -> Result<!, Monotonic> {
 ///
 /// The current thread's state must be properly saved.
 pub unsafe fn next_thread() -> ! {
-	use crate::driver::apic;
 	loop {
 		if let Err(t) = unsafe { try_next_thread() } {
 			let now = Monotonic::now();
