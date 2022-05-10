@@ -21,9 +21,9 @@ pub unsafe fn init(tss: &'static super::tss::TSS) {
 		// * SYSCALL loads CS from STAR 47:32
 		// * It then loads SS from STAR 47:32 + 8.
 		// * SYSRET loads CS from STAR 63:48. It loads EIP from ECX and SS from STAR 63:48 + 8.
-		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 on SYSRET and
-		//   userland SS will be loaded from STAR 63:48 + 8
-		msr::wrmsr(msr::STAR, (8 * 1) << 32);
+		// * As well, in Long Mode, userland CS will be loaded from STAR 63:48 + 16 and userland
+		//   SS from STAR 63:48 + 8 on SYSRET.
+		msr::wrmsr(msr::STAR, (8 * 1) << 32 | (8 * 2 | 3) << 48);
 		// Set LSTAR to handler
 		msr::wrmsr(msr::LSTAR, handler as u64);
 		// Ensure the interrupt flag is cleared on syscall enter

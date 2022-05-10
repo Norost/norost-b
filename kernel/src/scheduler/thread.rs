@@ -50,6 +50,7 @@ impl Thread {
 		stack: usize,
 		process: Arc<Process>,
 	) -> Result<Self, frame::AllocateError> {
+		// TODO move arch-specific code to crate::arch::amd64
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
@@ -68,10 +69,10 @@ impl Thread {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(4 * 8 | 3); // ss
+			push(crate::arch::GDT::USER_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(3 * 8 | 3); // cs
+			push(crate::arch::GDT::USER_CS.into());
 			push(start); // rip
 
 			// Push thread handle stub (rax)
@@ -112,6 +113,7 @@ impl Thread {
 
 	/// Create a new kernel-only thread.
 	pub(super) fn kernel_new(start: extern "C" fn() -> !) -> Result<Self, frame::AllocateError> {
+		// TODO ditto
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
@@ -131,10 +133,10 @@ impl Thread {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(2 * 8); // ss
+			push(crate::arch::amd64::GDT::KERNEL_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
-			push(1 * 8); // cs
+			push(crate::arch::amd64::GDT::KERNEL_CS.into());
 			push(start as usize); // rip
 
 			// Reserve space for (zeroed) registers
@@ -167,6 +169,7 @@ impl Thread {
 	///
 	/// The thread may not have been destroyed already.
 	pub fn resume(self: Arc<Self>) -> Result<!, Destroyed> {
+		// TODO ditto
 		if self.destroyed() {
 			return Err(Destroyed);
 		}
@@ -182,19 +185,22 @@ impl Thread {
 		#[cfg(debug_assertions)]
 		unsafe {
 			// 15 GP registers + RIP + CS + RFLAGS + RSP + SS
-			const K_CS: usize = 8 * 1;
-			const U_CS: usize = 8 * 3 | 3;
 			let p = self.kernel_stack.get().as_ptr();
-			match p.add(15 + 1).read() {
-				K_CS => {
+			match p
+				.add(15 + 1)
+				.read()
+				.try_into()
+				.expect("cs is not a 16 bit value")
+			{
+				crate::arch::amd64::GDT::KERNEL_CS => {
 					assert_eq!(
 						p.add(15 + 1 + 1 + 1 + 1).read(),
-						8 * 2,
+						crate::arch::amd64::GDT::KERNEL_SS.into(),
 						"kernel stack is corrupted (ss mismatch)",
 					)
 				}
 				// On return to userspace $rsp should be exactly equal to kernel_stack_top
-				U_CS => {
+				crate::arch::amd64::GDT::USER_CS => {
 					assert_eq!(
 						p.add(15 + 1 + 1 + 1 + 1 + 1),
 						self.kernel_stack_top.as_ptr().cast(),
@@ -202,17 +208,12 @@ impl Thread {
 					);
 					assert_eq!(
 						p.add(15 + 1 + 1 + 1 + 1).read(),
-						8 * 4 | 3,
+						crate::arch::amd64::GDT::USER_SS.into(),
 						"kernel stack is corrupted (ss mismatch)",
 					)
 				}
 				cs => panic!("kernel stack is corrupted (cs is {:#x})", cs),
 			}
-			dbg!(p.add(15 + 0).read() as *const ()); // rip
-			dbg!(p.add(15 + 1).read() as *const ()); // cs
-			dbg!(p.add(15 + 2).read() as *const ()); // rflags
-			dbg!(p.add(15 + 3).read() as *const ()); // rsp
-			dbg!(p.add(15 + 4).read() as *const ()); // ss
 		}
 
 		unsafe {

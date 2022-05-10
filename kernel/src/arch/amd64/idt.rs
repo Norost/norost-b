@@ -1,9 +1,6 @@
 use core::arch::asm;
 use core::mem;
 
-pub static mut PRE_CS_DBG: *const () = 0 as _;
-pub static mut RSP_DBG: *const () = 0 as _;
-
 #[macro_export]
 macro_rules! __idt_wrap_handler {
 	(trap $fn:path) => {
@@ -95,16 +92,6 @@ macro_rules! __idt_wrap_handler {
 						"push r10",
 						"push r11",
 
-						// FIXME this is a temporary stub to figure out why $cs is bogus
-						"mov rax, [rsp + (8 + 1 + 1) * 8]",
-						"mov [rip + {dbg_cs_pre}], rax",
-						"cmp rax, 8 * 1",
-						"je 2f",
-						"cmp rax, 8 * 3 | 3",
-						"je 2f",
-						"hlt",
-						"2:",
-
 						// Call handler
 						"cld",
 						"call {f}",
@@ -126,12 +113,8 @@ macro_rules! __idt_wrap_handler {
 						"swapgs",
 						"2:",
 
-						"mov [rip + {dbg_rsp}], rsp",
-
 						"iretq",
 						f = sym $fn,
-						dbg_rsp = sym $crate::arch::amd64::idt::RSP_DBG,
-						dbg_cs_pre = sym $crate::arch::amd64::idt::PRE_CS_DBG,
 						options(noreturn)
 					);
 				}

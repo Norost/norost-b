@@ -87,9 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		tbl.take_job(&mut job).unwrap();
 
 		let wait = || {
-			dbg!();
 			rt::io::poll(dev_handle).unwrap();
-			dbg!();
 		};
 
 		match job.ty {

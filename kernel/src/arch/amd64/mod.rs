@@ -13,6 +13,7 @@ use crate::{driver::apic, scheduler};
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
+pub use gdt::GDT;
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
 	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
@@ -298,12 +299,6 @@ extern "C" fn handle_general_protection_fault(error: u32, rip: *const ()) {
 	fatal!("  error:   {:#x}", error);
 	fatal!("  RIP:     {:p}", rip);
 	fatal!("  IF: {}", interrupts_enabled());
-	unsafe {
-		dbg!(idt::RSP_DBG);
-	}
-	unsafe {
-		dbg!(idt::PRE_CS_DBG);
-	}
 	halt();
 }
 
