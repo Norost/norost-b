@@ -2,7 +2,7 @@ cargo-features = ["per-package-target"]
 
 [package]
 name = "driver_virtio_net"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 default-target = "x86_64-unknown-norostb"
 
