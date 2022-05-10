@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
 	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
-	ThreadData,
+	CpuData, ThreadData,
 };
 
 /// The IRQ offset of the master PIC.
@@ -37,8 +37,6 @@ static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
 
 // Start from 33, where IRQs 0..31 are used for exceptions and 32 is reserved for the timer.
 static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
-
-static mut DOUBLE_FAULT_STACK: [usize; 512] = [0; 512];
 
 pub mod pic {
 	//! https://wiki.osdev.org/PIC
@@ -135,13 +133,16 @@ pub mod pic {
 }
 
 pub unsafe fn init() {
+	extern "C" {
+		static _stack_top: [usize; 0];
+	}
 	unsafe {
 		// Remap IBM-PC interrupts
 		// Even if the PIC is disabled it may generate spurious interrupts apparently *sigh*
 		pic::init();
 
 		// Setup TSS
-		TSS.set_ist(1.try_into().unwrap(), DOUBLE_FAULT_STACK.as_ptr().add(512));
+		TSS.set_ist(1.try_into().unwrap(), _stack_top.as_ptr());
 
 		// Setup GDT
 		GDT.write(gdt::GDT::new(&TSS));
@@ -190,7 +191,7 @@ pub unsafe fn init() {
 		IDT_PTR.write(idt::IDTPointer::new(&IDT));
 		IDT_PTR.assume_init_ref().activate();
 
-		syscall::init();
+		syscall::init(&TSS);
 
 		cpuid::enable_fsgsbase();
 
@@ -200,6 +201,7 @@ pub unsafe fn init() {
 
 extern "C" fn handle_timer() -> ! {
 	debug!("Timer interrupt!");
+	debug_assert!(!interrupts_enabled());
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
 	// SAFETY: we just saved the thread's state.
@@ -295,6 +297,13 @@ extern "C" fn handle_general_protection_fault(error: u32, rip: *const ()) {
 	fatal!("General protection fault!");
 	fatal!("  error:   {:#x}", error);
 	fatal!("  RIP:     {:p}", rip);
+	fatal!("  IF: {}", interrupts_enabled());
+	unsafe {
+		dbg!(idt::RSP_DBG);
+	}
+	unsafe {
+		dbg!(idt::PRE_CS_DBG);
+	}
 	halt();
 }
 
@@ -306,8 +315,11 @@ extern "C" fn handle_page_fault(error: u32, rip: *const ()) {
 		fatal!("  error:   {:#x}", error);
 		fatal!("  RIP:     {:p}", rip);
 		fatal!("  address: {:p}", addr);
+		fatal!("  IF: {}", interrupts_enabled());
 	}
-	halt();
+	loop {
+		halt();
+	}
 }
 
 extern "C" fn handle_x87_fpe(rip: *const ()) {

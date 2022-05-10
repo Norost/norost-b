@@ -46,7 +46,7 @@ where
 		allocate_irqs(&mut pci);
 	}
 
-	*PCI.lock() = Some(pci);
+	*PCI.lock_unchecked() = Some(pci);
 
 	let table = Arc::new(table::PciTable) as Arc<dyn object_table::Object>;
 	root.add(*b"pci", Arc::downgrade(&table));

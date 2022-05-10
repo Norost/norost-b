@@ -1,7 +1,8 @@
 use super::{Error, Object, Query, QueryResult};
-use crate::sync::Mutex;
+use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
+	fmt,
 	future::Future,
 	pin::Pin,
 	task::{Context, Poll, Waker},
@@ -10,12 +11,12 @@ use core::{
 /// A ticket referring to a job to be completed.
 #[derive(Default)]
 pub struct Ticket<T> {
-	inner: Arc<Mutex<TicketInner<T>>>,
+	inner: Arc<SpinLock<TicketInner<T>>>,
 }
 
 impl<T> Ticket<T> {
 	pub fn new_complete(status: Result<T, Error>) -> Self {
-		let inner = Mutex::new(TicketInner {
+		let inner = SpinLock::new(TicketInner {
 			waker: None,
 			status: Some(status),
 		})
@@ -24,7 +25,7 @@ impl<T> Ticket<T> {
 	}
 
 	pub fn new() -> (Self, TicketWaker<T>) {
-		let inner = Arc::new(Mutex::new(TicketInner {
+		let inner = Arc::new(SpinLock::new(TicketInner {
 			waker: None,
 			status: None,
 		}));
@@ -38,18 +39,30 @@ impl<T> Ticket<T> {
 }
 
 pub struct TicketWaker<T> {
-	inner: Arc<Mutex<TicketInner<T>>>,
+	inner: Arc<SpinLock<TicketInner<T>>>,
 }
 
 impl<T> TicketWaker<T> {
 	pub fn complete(self, status: Result<T, Error>) {
-		let mut l = self.inner.lock();
+		let mut l = self.inner.auto_lock();
+		l.waker.take().map(|w| w.wake());
+		l.status = Some(status);
+	}
+
+	pub fn isr_complete(self, status: Result<T, Error>) {
+		let mut l = self.inner.isr_lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
 	}
 }
 
-#[derive(Default)]
+impl<T: fmt::Debug> fmt::Debug for TicketWaker<T> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		(&*self.inner.auto_lock()).fmt(f)
+	}
+}
+
+#[derive(Debug, Default)]
 pub struct TicketInner<T> {
 	waker: Option<Waker>,
 	/// The completion status of this job.

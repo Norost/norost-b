@@ -103,7 +103,7 @@ impl super::Process {
 		};
 
 		let slf = Self::new()?;
-		*slf.objects.lock() = objects;
+		*slf.objects.lock_unchecked() = objects;
 
 		(data.len() >= 16)
 			.then(|| ())
@@ -161,7 +161,7 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
-		let mut address_space = slf.address_space.lock();
+		let mut address_space = slf.address_space.lock_unchecked();
 
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.

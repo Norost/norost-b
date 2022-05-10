@@ -41,7 +41,7 @@ impl Object for UartId {
 				Ticket::new_complete(Ok([r].into()))
 			} else {
 				let (ticket, waker) = Ticket::new();
-				PENDING_READS[usize::from(self.0)].lock().push(waker);
+				PENDING_READS[usize::from(self.0)].auto_lock().push(waker);
 				uart.enable_interrupts(Uart::INTERRUPT_DATA_AVAILABLE);
 				ticket
 			}

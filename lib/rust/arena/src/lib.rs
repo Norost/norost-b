@@ -15,6 +15,7 @@ pub struct Arena<V, G: Generation> {
 	storage: vec::Vec<Entry<V, G>>,
 	free: usize,
 	generation: G,
+	count: usize,
 }
 
 enum Entry<V, G: Generation> {
@@ -94,6 +95,7 @@ impl<V, G: Generation> Arena<V, G> {
 				Entry::Free { next } => self.free = next,
 				Entry::Occupied { .. } => unreachable!(),
 			}
+			self.count += 1;
 			handle
 		} else {
 			let handle = Handle {
@@ -104,6 +106,7 @@ impl<V, G: Generation> Arena<V, G> {
 				value: f(handle),
 				generation,
 			});
+			self.count += 1;
 			handle
 		}
 	}
@@ -119,6 +122,7 @@ impl<V, G: Generation> Arena<V, G> {
 				match mem::replace(&mut self.storage[handle.index], entry) {
 					Entry::Occupied { value, .. } => {
 						self.free = handle.index;
+						self.count -= 1;
 						Some(value)
 					}
 					Entry::Free { .. } => unreachable!(),
@@ -129,6 +133,7 @@ impl<V, G: Generation> Arena<V, G> {
 
 	pub fn drain(&mut self) -> Drain<'_, V, G> {
 		self.free = usize::MAX;
+		self.count = 0;
 		Drain {
 			inner: self.storage.drain(..).enumerate(),
 		}
@@ -150,6 +155,10 @@ impl<V, G: Generation> Arena<V, G> {
 			}
 			_ => None,
 		}
+	}
+
+	pub fn len(&self) -> usize {
+		self.count
 	}
 }
 
@@ -173,6 +182,7 @@ impl<V, G: Generation + ~const Default> const Default for Arena<V, G> {
 			storage: Default::default(),
 			free: usize::MAX,
 			generation: Default::default(),
+			count: 0,
 		}
 	}
 }

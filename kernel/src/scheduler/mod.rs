@@ -55,7 +55,9 @@ pub unsafe fn next_thread() -> ! {
 	use crate::driver::apic;
 	loop {
 		if let Err(t) = unsafe { try_next_thread() } {
-			if let Some(d) = Monotonic::now().duration_until(t) {
+			let now = Monotonic::now();
+			if let Some(d) = now.duration_until(t) {
+				debug!("{:?} <- {:?} {:?}", d, now, t);
 				apic::set_timer_oneshot(d);
 				unsafe {
 					SLEEP_THREADS[0].assume_init_ref().clone().resume().unwrap();

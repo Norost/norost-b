@@ -32,6 +32,10 @@ impl<T> Arena<T> {
 		self.inner.get_mut(Self::convert_to_handle(handle)?)
 	}
 
+	pub fn len(&self) -> usize {
+		self.inner.len()
+	}
+
 	fn convert_to_handle(handle: Handle) -> Option<::arena::Handle<()>> {
 		handle
 			.try_into()

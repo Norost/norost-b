@@ -21,6 +21,9 @@ pub struct IsrGuard<'a, T> {
 	lock: &'a SpinLock<T>,
 }
 
+#[cfg(debug_assertions)]
+static LOCK_NEST_COUNT: AtomicU8 = AtomicU8::new(0);
+
 impl<T> SpinLock<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
@@ -35,27 +38,23 @@ impl<T> SpinLock<T> {
 	pub fn lock(&self) -> Guard<T> {
 		// Ensure interrupts weren't disabled already. Re-enabling them after dropping the
 		// guard could lead to bad behaviour.
-		#[cfg(debug_assertions)]
-		unsafe {
-			let flags: usize;
-			core::arch::asm!(
-				"pushf",
-				"pop {}",
-				out(reg) flags,
-			);
-			assert!(
-				flags & (1 << 9) != 0,
-				"interrupts are disabled. If this is intended, use isr_lock()"
-			);
-		}
+		debug_assert!(
+			crate::arch::interrupts_enabled(),
+			"interrupts are disabled. If this is intended, use isr_lock()"
+		);
 		crate::arch::disable_interrupts();
-		// TODO detect double locks by same thread
+		debug_assert_eq!(
+			LOCK_NEST_COUNT.fetch_add(1, Ordering::Relaxed),
+			0,
+			"double spinlock nest"
+		);
 		loop {
 			match self
 				.lock
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return Guard { lock: self },
+				Err(_) => unreachable!("deadlock on single-core system"),
 				Err(_) => core::hint::spin_loop(),
 			}
 		}
@@ -68,19 +67,22 @@ impl<T> SpinLock<T> {
 	pub fn isr_lock(&self) -> IsrGuard<T> {
 		// Ensure interrupts aren't enabled. If they are, we're most likely not inside
 		// an ISR and we also risk a deadlock.
-		#[cfg(debug_assertions)]
-		unsafe {
-			let flags: usize;
-			core::arch::asm!(
-				"pushf",
-				"pop {}",
-				out(reg) flags,
-			);
-			assert!(
-				flags & (1 << 9) == 0,
-				"interrupts are enabled. Are we not inside an ISR?"
-			);
-		}
+		debug_assert!(
+			!crate::arch::interrupts_enabled(),
+			"interrupts are enabled. Are we not inside an ISR?"
+		);
+		self.lock_manual()
+	}
+
+	/// Lock without automatically re-enabling interrupts. It is up to the caller to ensure
+	/// interrupts are *disabled* before locking!
+	#[track_caller]
+	#[inline]
+	pub fn lock_manual(&self) -> IsrGuard<T> {
+		debug_assert!(
+			!crate::arch::interrupts_enabled(),
+			"interrupts are enabled. Make sure interrupts are disabled!"
+		);
 		// TODO detect double locks by same thread
 		loop {
 			match self
@@ -88,8 +90,21 @@ impl<T> SpinLock<T> {
 				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
 			{
 				Ok(_) => return IsrGuard { lock: self },
+				Err(_) => unreachable!("deadlock on single-core system"),
 				Err(_) => core::hint::spin_loop(),
 			}
+		}
+	}
+
+	/// Lock and determine automatically whether interrupts need to be re-enabled when dropping the
+	/// guard.
+	#[track_caller]
+	#[inline]
+	pub fn auto_lock(&self) -> AutoGuard<T> {
+		if crate::arch::interrupts_enabled() {
+			AutoGuard(AutoGuardInner::NoIsr(self.lock()))
+		} else {
+			AutoGuard(AutoGuardInner::Isr(self.isr_lock()))
 		}
 	}
 }
@@ -128,6 +143,11 @@ impl<T> DerefMut for Guard<'_, T> {
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
 		ensure_interrupts_off();
+		debug_assert_eq!(
+			LOCK_NEST_COUNT.fetch_sub(1, Ordering::Relaxed),
+			1,
+			"double spinlock nest"
+		);
 		self.lock.lock.store(0, Ordering::Release);
 		crate::arch::enable_interrupts();
 	}
@@ -154,21 +174,40 @@ impl<T> Drop for IsrGuard<'_, T> {
 	}
 }
 
+enum AutoGuardInner<'a, T> {
+	Isr(IsrGuard<'a, T>),
+	NoIsr(Guard<'a, T>),
+}
+
+/// A guard that automatically determines whether interrupts need to be re-enabled or not.
+pub struct AutoGuard<'a, T>(AutoGuardInner<'a, T>);
+
+impl<'a, T> Deref for AutoGuard<'a, T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		match &self.0 {
+			AutoGuardInner::Isr(t) => t,
+			AutoGuardInner::NoIsr(t) => t,
+		}
+	}
+}
+
+impl<'a, T> DerefMut for AutoGuard<'a, T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		match &mut self.0 {
+			AutoGuardInner::Isr(t) => t,
+			AutoGuardInner::NoIsr(t) => t,
+		}
+	}
+}
+
 #[track_caller]
 fn ensure_interrupts_off() {
 	// Ensure interrupts weren't enabled in the meantime, which would lead to a potential
 	// deadlock.
-	#[cfg(debug_assertions)]
-	unsafe {
-		let flags: usize;
-		core::arch::asm!(
-			"pushf",
-			"pop {}",
-			out(reg) flags,
-		);
-		assert!(
-			flags & (1 << 9) == 0,
-			"interrupts are enabled inside ISR spinlock"
-		);
-	}
+	debug_assert!(
+		!crate::arch::interrupts_enabled(),
+		"interrupts are enabled inside ISR spinlock"
+	);
 }

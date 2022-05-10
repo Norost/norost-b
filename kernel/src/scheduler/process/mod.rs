@@ -21,7 +21,7 @@ pub use table::init;
 pub struct Process {
 	address_space: Mutex<AddressSpace>,
 	hint_color: u8,
-	threads: Mutex<Arena<Arc<Thread>, u8>>,
+	threads: crate::sync::SpinLock<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
@@ -64,7 +64,7 @@ impl Process {
 	}
 
 	pub unsafe fn activate_address_space(&self) {
-		unsafe { self.address_space.lock().activate() };
+		unsafe { self.address_space.lock_unchecked().activate() };
 	}
 
 	/// Add an object to the process' object table.
@@ -129,11 +129,15 @@ impl Process {
 
 	/// Spawn a new thread.
 	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
-		let mut threads = self.threads.lock();
-		let handle = threads.insert_with(|handle| {
-			Arc::new(Thread::new(start, stack, self.clone(), erase_handle(handle)).unwrap())
-		});
-		super::round_robin::insert(Arc::downgrade(&threads.get(handle).unwrap()));
+		let thread = Arc::new(Thread::new(start, stack, self.clone()).unwrap());
+		let weak = Arc::downgrade(&thread);
+		let mut threads = self.threads.auto_lock();
+		let handle = threads.insert(thread);
+		unsafe {
+			threads[handle].set_handle(erase_handle(handle));
+		}
+		drop(threads);
+		super::round_robin::insert(weak);
 		Ok(erase_handle(handle))
 	}
 
@@ -165,9 +169,10 @@ impl Process {
 	///
 	/// The caller may *not* be using any resources of this process, especially the address space
 	/// or a thread!
+	#[track_caller]
 	pub unsafe fn destroy(self: Arc<Self>) {
 		// Destroy all threads
-		let mut threads = self.threads.lock();
+		let mut threads = self.threads.auto_lock();
 		for (_, thr) in threads.drain() {
 			// SAFETY: the caller guarantees we're not using any resources of this thread.
 			unsafe {

@@ -20,12 +20,8 @@ pub fn insert(thread: Weak<Thread>) {
 		next: NonNull::new(0x1 as *mut _).unwrap(),
 		thread,
 	});
-	// Handle the interrupt flag manually since this function is also called in crate::main,
-	// which *must* have interrupts disabled.
-	let intr_enabled = crate::arch::interrupts_enabled();
-	crate::arch::disable_interrupts();
 
-	let mut cur_ptr = THREAD_LIST.isr_lock();
+	let mut cur_ptr = THREAD_LIST.auto_lock();
 	let new = Box::leak(node);
 	let new_ptr = NonNull::new(new as *mut _).unwrap();
 	if let Some(mut cur_ptr) = cur_ptr.1 {
@@ -37,11 +33,6 @@ pub fn insert(thread: Weak<Thread>) {
 		cur_ptr.1 = Some(new_ptr);
 	}
 	cur_ptr.0 += 1;
-
-	drop(cur_ptr);
-	if intr_enabled {
-		crate::arch::enable_interrupts();
-	}
 }
 
 /// # Note
