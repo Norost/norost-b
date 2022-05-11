@@ -6,6 +6,8 @@ pub mod hpet;
 pub mod pci;
 #[cfg(feature = "driver-pic")]
 pub mod pic;
+#[cfg(feature = "driver-ps2")]
+pub mod ps2;
 #[cfg(feature = "driver-rtc")]
 pub mod rtc;
 pub mod uart;

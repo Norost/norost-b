@@ -20,12 +20,8 @@ pub use syscall::{
 	CpuData, ThreadData,
 };
 
-/// The IRQ offset of the master PIC.
-pub const PIC1_IRQ_OFFSET: u8 = 32;
-/// The IRQ offset of the slae PIC.
-pub const PIC2_IRQ_OFFSET: u8 = 40;
 /// The IRQ used by the timer.
-pub const TIMER_IRQ: u8 = 48;
+pub const TIMER_IRQ: u8 = 32;
 
 static mut TSS: tss::TSS = tss::TSS::new();
 
@@ -102,8 +98,8 @@ pub mod pic {
 			outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
 			outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
 			// ICW2 (map IVT)
-			outb(PIC1_DATA, super::PIC1_IRQ_OFFSET);
-			outb(PIC2_DATA, super::PIC2_IRQ_OFFSET);
+			outb(PIC1_DATA, 240);
+			outb(PIC2_DATA, 248);
 			// ICW3 (tell master (PIC1) about slave (PIC2) & vice versa)
 			outb(PIC1_DATA, 4);
 			outb(PIC2_DATA, 2);
