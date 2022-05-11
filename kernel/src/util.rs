@@ -27,15 +27,31 @@ impl<I: Iterator<Item = T>, T: fmt::Debug> fmt::Debug for DebugIter<I, T> {
 }
 
 /// Lossy UTF-8 printer for byte slices without allocations.
-pub struct DebugByteStr<'a>(&'a [u8]);
+pub struct ByteStr<'a>(&'a [u8]);
 
-impl<'a> DebugByteStr<'a> {
+impl<'a> ByteStr<'a> {
 	pub fn new(s: &'a [u8]) -> Self {
 		Self(s)
 	}
 }
 
-impl fmt::Debug for DebugByteStr<'_> {
+impl fmt::Display for ByteStr<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let mut s = self.0;
+		loop {
+			match str::from_utf8(s) {
+				Ok(s) => break f.write_str(s),
+				Err(e) => {
+					f.write_str(str::from_utf8(&s[..e.valid_up_to()]).unwrap())?;
+					f.write_char('\u{fffe}')?;
+					s = &s[e.valid_up_to() + 1..];
+				}
+			}
+		}
+	}
+}
+
+impl fmt::Debug for ByteStr<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_char('"')?;
 		let mut s = self.0;
