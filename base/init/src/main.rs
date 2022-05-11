@@ -43,9 +43,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut args_buf = Vec::new();
 	args_buf.resize(args_len.try_into().unwrap(), 0);
 	args.read(&mut args_buf).unwrap();
-	let Programs {
-		program: mut programs,
-	} = toml::from_slice(&args_buf)?;
+	println!("{}", core::str::from_utf8(&args_buf).unwrap());
+	let mut programs = match toml::from_slice(&args_buf) {
+		Ok(Programs { program }) => program,
+		Err(e) => {
+			eprintln!("{}", e);
+			std::process::exit(1);
+		}
+	};
 
 	programs.retain(|_, p| !p.disabled.unwrap_or(false));
 
