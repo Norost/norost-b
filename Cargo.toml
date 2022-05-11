@@ -12,6 +12,7 @@ members = [
 	"lib/rust/driver_utils",
 	"lib/rust/endian",
 	"lib/rust/pci",
+	"lib/rust/scancodes",
 	"lib/rust/virtio",
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",

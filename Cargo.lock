@@ -215,6 +215,7 @@ dependencies = [
  "norostb_kernel",
  "pci",
  "rsdp",
+ "scancodes",
 ]
 
 [[package]]
@@ -325,6 +326,10 @@ name = "rustversion"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2cc38e8fa666e2de3c4aba7edeb5ffc5246c1c2ed0e3d17e560aeeba736b23f"
+
+[[package]]
+name = "scancodes"
+version = "0.1.0"
 
 [[package]]
 name = "serde"
