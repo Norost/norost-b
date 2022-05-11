@@ -130,6 +130,18 @@ impl const Default for ScanCode {
 	}
 }
 
+impl const From<ScanCode> for u32 {
+	fn from(code: ScanCode) -> u32 {
+		code as u32
+	}
+}
+
+impl const From<ScanCode> for [u8; 4] {
+	fn from(code: ScanCode) -> [u8; 4] {
+		u32::from(code).to_le_bytes()
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
 	Release(ScanCode),
@@ -139,5 +151,20 @@ pub enum Event {
 impl const Default for Event {
 	fn default() -> Self {
 		Self::Release(Default::default())
+	}
+}
+
+impl const From<Event> for u32 {
+	fn from(evt: Event) -> u32 {
+		match evt {
+			Event::Release(code) => (0 << 31) | u32::from(code),
+			Event::Press(code) => (1 << 31) | u32::from(code),
+		}
+	}
+}
+
+impl const From<Event> for [u8; 4] {
+	fn from(evt: Event) -> [u8; 4] {
+		u32::from(evt).to_le_bytes()
 	}
 }

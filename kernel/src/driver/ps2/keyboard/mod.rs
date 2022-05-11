@@ -1,5 +1,13 @@
+mod table;
+
 use super::*;
-use crate::{object_table::Root, sync::SpinLock, wrap_idt};
+use crate::{
+	object_table::{Root, TicketWaker},
+	sync::SpinLock,
+	wrap_idt,
+};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::mem;
 use scancodes::{
 	scanset::ps2::{scanset2_decode, DecodeError},
 	Event, ScanCode,
@@ -42,6 +50,7 @@ static EVENTS: SpinLock<LossyRingBuffer> = SpinLock::new(LossyRingBuffer {
 	pop: 0,
 	data: [Default::default(); 128],
 });
+static SCANCODE_READERS: SpinLock<Vec<TicketWaker<Box<[u8]>>>> = SpinLock::new(Vec::new());
 
 pub(super) unsafe fn init(port: Port, root: &Root) {
 	unsafe {
@@ -70,6 +79,10 @@ pub(super) unsafe fn init(port: Port, root: &Root) {
 		write_port_command(port, PortCommand::EnableScanning).unwrap();
 		read_port_data_with_acknowledge().unwrap();
 	}
+
+	let tbl = Arc::new(table::KeyboardTable) as Arc<dyn crate::object_table::Object>;
+	root.add(&b"ps2_keyboard"[..], Arc::downgrade(&tbl));
+	mem::forget(tbl)
 }
 
 extern "C" fn handle_irq() {
@@ -92,9 +105,12 @@ extern "C" fn handle_irq() {
 	let seq = unsafe { &BUF[..INDEX.into()] };
 	match scanset2_decode(seq) {
 		Ok(code) => {
-			dbg!(code);
 			unsafe { INDEX = 0 };
-			EVENTS.isr_lock().push(code);
+			if let Some(w) = SCANCODE_READERS.isr_lock().pop() {
+				w.isr_complete(Ok(<[u8; 4]>::from(code).into()));
+			} else {
+				EVENTS.isr_lock().push(code);
+			}
 		}
 		Err(DecodeError::Incomplete) => {}
 		Err(DecodeError::NotRecognized) => {
