@@ -377,8 +377,18 @@ pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 
 pub fn yield_current_thread() {
 	unsafe {
+		debug_assert!(
+			interrupts_enabled(),
+			"can't yield while interrupts are disabled"
+		);
 		// Fake timer interrupt
-		asm!("int {}", const TIMER_IRQ, options(nomem, nostack, preserves_flags))
+		asm!(
+			"cli",
+			"int {}",
+			"sti",
+			const TIMER_IRQ,
+			options(nomem, nostack, preserves_flags)
+		)
 	}
 }
 

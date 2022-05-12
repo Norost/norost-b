@@ -8,7 +8,7 @@ use crate::memory::frame::{self, AllocateHints};
 use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{AnyTicket, JobTask, Object, Query};
-use crate::sync::Mutex;
+use crate::sync::{Mutex, SpinLock};
 use crate::util::{erase_handle, unerase_handle};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
@@ -19,9 +19,9 @@ use norostb_kernel::Handle;
 pub use table::init;
 
 pub struct Process {
-	address_space: Mutex<AddressSpace>,
+	address_space: SpinLock<AddressSpace>,
 	hint_color: u8,
-	threads: crate::sync::SpinLock<Arena<Arc<Thread>, u8>>,
+	threads: SpinLock<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
@@ -54,7 +54,7 @@ impl From<JobTask> for TicketOrJob {
 impl Process {
 	fn new() -> Result<Self, frame::AllocateContiguousError> {
 		Ok(Self {
-			address_space: Mutex::new(AddressSpace::new()?),
+			address_space: SpinLock::new(AddressSpace::new()?),
 			hint_color: 0,
 			threads: Default::default(),
 			objects: Default::default(),
@@ -64,7 +64,7 @@ impl Process {
 	}
 
 	pub unsafe fn activate_address_space(&self) {
-		unsafe { self.address_space.lock_unchecked().activate() };
+		unsafe { self.address_space.auto_lock().activate() };
 	}
 
 	/// Add an object to the process' object table.
