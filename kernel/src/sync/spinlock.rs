@@ -99,6 +99,11 @@ impl<T> SpinLock<T> {
 			AutoGuard(AutoGuardInner::Isr(self.isr_lock()))
 		}
 	}
+
+	/// Borrow the lock mutably, which is safe since mutable references are always unique.
+	pub fn get_mut(&mut self) -> &mut T {
+		self.value.get_mut()
+	}
 }
 
 unsafe impl<T> Sync for SpinLock<T> {}

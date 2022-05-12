@@ -49,9 +49,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	unsafe {
 		driver::early_init(boot_info);
 	}
-	let s = sync::SpinLock::new(());
 
-	s.auto_lock();
 	for region in boot_info.memory_regions() {
 		let (base, size) = (region.base as usize, region.size as usize);
 		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;

@@ -90,6 +90,10 @@ realm64:
 	rep stosb
 	mov		rdi, rbx
 
+	# Reload PML4 to ensure the unmapped pages are flushed
+	mov rax, cr3
+	mov cr3, rax
+
 	# Jump to kernel entry
 	jmp		rsp
 	ud2

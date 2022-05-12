@@ -1,5 +1,6 @@
 pub mod asm;
 mod cpuid;
+mod emulate;
 mod gdt;
 #[macro_use]
 pub mod idt;
@@ -150,6 +151,8 @@ pub unsafe fn init() {
 
 		// Setup IDT
 		// https://wiki.osdev.org/Exceptions
+		// FIXME we need to ensure interrupts don't happen during exceptions. It's a flag
+		// somewhere in the IDT apparently...
 		IDT.set(
 			TIMER_IRQ.into(),
 			wrap_idt!(int noreturn savethread handle_timer),
@@ -160,7 +163,6 @@ pub unsafe fn init() {
 		IDT.set(3, wrap_idt!(trap handle_breakpoint));
 		IDT.set(4, wrap_idt!(trap handle_overflow));
 		IDT.set(5, wrap_idt!(trap handle_bound_range_exceeded));
-		IDT.set(6, wrap_idt!(trap handle_invalid_opcode));
 		IDT.set(7, wrap_idt!(trap handle_device_not_available));
 		IDT.set(8, wrap_idt!(trap error handle_double_fault [1]));
 		// 9 does not exist
@@ -188,9 +190,12 @@ pub unsafe fn init() {
 		IDT_PTR.write(idt::IDTPointer::new(&IDT));
 		IDT_PTR.assume_init_ref().activate();
 
+		emulate::init();
+
 		syscall::init(&TSS);
 
-		cpuid::enable_fsgsbase();
+		let features = cpuid::Features::new();
+		cpuid::try_enable_fsgsbase(&features);
 
 		r#virtual::init();
 	}
@@ -237,17 +242,6 @@ extern "C" fn handle_overflow(rip: *const ()) {
 extern "C" fn handle_bound_range_exceeded(rip: *const ()) {
 	fatal!("Bound range exceeded (wtf?)!");
 	fatal!("  RIP:     {:p}", rip);
-	halt();
-}
-
-extern "C" fn handle_invalid_opcode(rip: *const ()) {
-	fatal!("Invalid opcode!");
-	unsafe {
-		let addr: *const ();
-		asm!("mov {}, cr2", out(reg) addr);
-		fatal!("  RIP:     {:p}", rip);
-		fatal!("  address: {:p}", addr);
-	}
 	halt();
 }
 
@@ -383,8 +377,18 @@ pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 
 pub fn yield_current_thread() {
 	unsafe {
+		debug_assert!(
+			interrupts_enabled(),
+			"can't yield while interrupts are disabled"
+		);
 		// Fake timer interrupt
-		asm!("int {}", const TIMER_IRQ, options(nomem, nostack, preserves_flags))
+		asm!(
+			"cli",
+			"int {}",
+			"sti",
+			const TIMER_IRQ,
+			options(nomem, nostack, preserves_flags)
+		)
 	}
 }
 

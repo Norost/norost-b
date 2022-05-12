@@ -21,6 +21,10 @@ pub unsafe fn init_acpi<H>(_: &AcpiTables<H>)
 where
 	H: AcpiHandler,
 {
+	unsafe {
+		LOCAL_APIC_ADDRESS = msr::rdmsr(msr::IA32_APIC_BASE_MSR) & !(Page::MASK as u64);
+	}
+
 	local_apic::init();
 	io_apic::init();
 
@@ -101,8 +105,10 @@ fn calibrate_timer(t: Duration) {
 	}
 }
 
+static mut LOCAL_APIC_ADDRESS: u64 = 0;
+
 fn local_apic_address() -> u64 {
-	unsafe { msr::rdmsr(msr::IA32_APIC_BASE_MSR) & !(Page::MASK as u64) }
+	unsafe { LOCAL_APIC_ADDRESS }
 }
 
 fn enable_apic() {
