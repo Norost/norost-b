@@ -106,6 +106,7 @@ pub mod bootinfo {
 	impl<'a> BootInfo<'a> {
 		const MODULE: u32 = 3;
 		const MEMORY_MAP: u32 = 6;
+		const ACPI_OLD_RSDP: u32 = 13;
 		const ACPI_NEW_RSDP: u32 = 14;
 
 		/// # Safety
@@ -168,6 +169,11 @@ pub mod bootinfo {
 								),
 							})
 						}
+					}
+					Self::ACPI_OLD_RSDP => {
+						// FIXME the sizes differ. I don't know what to do about it.
+						//debug_assert_eq!(size, mem::size_of::<rsdp::Rsdp>());
+						unsafe { Info::AcpiRsdp(&*ptr.cast::<rsdp::Rsdp>()) }
 					}
 					Self::ACPI_NEW_RSDP => {
 						// FIXME the sizes differ. I don't know what to do about it.

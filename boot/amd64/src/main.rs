@@ -96,7 +96,9 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// Find kernel & RSDP but just count amount of drivers & ignore the rest
 	for e in boot_info() {
 		match e {
-			bi::Info::Unknown(_) => {}
+			bi::Info::Unknown(ty) => {
+				let _ = writeln!(Stderr, "multiboot2: unknown type {}", ty);
+			}
 			bi::Info::Module(m) => match m.string {
 				b"kernel" => {
 					assert!(kernel.is_none(), "kernel has already been specified");
@@ -114,7 +116,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 	let kernel = kernel.expect("No kernel module");
 	let _ = writeln!(Stdout, "Kernel: {:#x} - {:#x}", kernel.start, kernel.end);
-	info.rsdp.write(*rsdp.unwrap());
+	info.rsdp.write(*rsdp.expect("no RSDP found"));
 
 	// Only parse drivers so we can exclude them from the final memory regions
 	let (offset, drivers) = alloc_slice(info.drivers_len.into());
