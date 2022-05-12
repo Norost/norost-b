@@ -1,4 +1,5 @@
 use crate::msr::rdmsr;
+use core::fmt;
 
 pub struct Cap(u64);
 
@@ -67,6 +68,12 @@ impl Range {
 	}
 }
 
+impl fmt::Debug for Range {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:#x} - {:#x}", self.base, self.mask)
+	}
+}
+
 // TODO this implementation scales terribly. It would be much better to prefetch the ranges (
 // and assume the MTRRs are sane too).
 pub struct AllRanges {
@@ -86,18 +93,25 @@ impl AllRanges {
 	/// Check whether the given 2MB frame intersects with any range.
 	pub fn intersects_2mb(&self, address: u64) -> bool {
 		// SAFETY: All MTRRs up to count exist.
-		(0..self.count)
-			.filter_map(|i| unsafe { Range::get(i) })
-			.any(|r| r.intersects_2mb(address))
+		self.ranges().any(|r| r.intersects_2mb(address))
 	}
 
 	/// Check whether the given 1GB frame intersects with any range. Returns the index of the first
 	/// 2MB this range intersects.
 	pub fn intersects_1gb(&self, address: u64) -> Option<usize> {
 		// SAFETY: All MTRRs up to count exist.
-		(0..self.count)
-			.filter_map(|i| unsafe { Range::get(i) })
+		self.ranges()
 			.filter_map(|r| r.intersects_1gb(address))
 			.min()
+	}
+
+	fn ranges(&self) -> impl Iterator<Item = Range> {
+		(0..self.count).filter_map(|i| unsafe { Range::get(i) })
+	}
+}
+
+impl fmt::Debug for AllRanges {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_list().entries(self.ranges()).finish()
 	}
 }
