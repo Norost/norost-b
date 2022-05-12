@@ -86,7 +86,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			for f in program.after.as_ref().iter().flat_map(|i| i.iter()) {
 				// TODO open is inefficient.
 				if root.open(f.as_bytes()).is_err() {
-					dbg!(f);
 					return true;
 				}
 			}
