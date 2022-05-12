@@ -26,7 +26,13 @@ pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>, root: &crate::object_table::Roo
 where
 	H: AcpiHandler,
 {
-	let pci = PciConfigRegions::new(acpi).unwrap();
+	let pci = match PciConfigRegions::new(acpi) {
+		Ok(p) => p,
+		Err(e) => {
+			warn!("failed to load PCI configuration regions: {:?}", e);
+			return;
+		}
+	};
 	let mut avail = [0u128; 2];
 	// TODO this is ridiculous. Fork the crate or implement MCFG ourselves.
 	for bus in 0..=255 {
