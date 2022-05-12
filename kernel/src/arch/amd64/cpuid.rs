@@ -46,7 +46,6 @@ impl Features {
 }
 
 struct Cpuid {
-	#[allow(dead_code)]
 	eax: u32,
 	ebx: u32,
 	#[allow(dead_code)]
@@ -62,12 +61,13 @@ impl Cpuid {
 		unsafe {
 			asm!(
 				// Thanks LLVM for forbidding me from using ebx
-				"mov r11d, ebx",
+				"mov r11, rbx",
 				"cpuid",
-				"mov ebx, r11d",
+				"xchg rbx, r11",
 				inout("eax") id => eax,
+				// TODO sublevels
+				inout("ecx") 0 => ecx,
 				out("r11d") ebx,
-				out("ecx") ecx,
 				out("edx") edx,
 				options(nostack, nomem, preserves_flags, pure)
 			);
@@ -88,5 +88,7 @@ pub fn try_enable_fsgsbase(features: &Features) {
 				const cr4::FSGSBASE,
 			);
 		}
+	} else {
+		todo!()
 	}
 }
