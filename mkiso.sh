@@ -35,6 +35,7 @@ install () {
 }
 
 install drivers fs_fat             driver_fs_fat
+install drivers scancode_to_char   driver_scancode_to_char
 install drivers virtio_block       driver_virtio_block
 install drivers virtio_net         driver_virtio_net
 install base    init               init

@@ -88,6 +88,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_scancode_to_char"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "norostb_kernel",
+ "scancodes",
+]
+
+[[package]]
 name = "driver_utils"
 version = "0.1.0"
 dependencies = [

@@ -6,6 +6,7 @@ members = [
 	"kernel",
 	"boot/amd64",
 	"drivers/fs_fat",
+	"drivers/scancode_to_char",
 	"drivers/virtio_block",
 	"drivers/virtio_net",
 	"lib/rust/arena",

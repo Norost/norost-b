@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 #[derive(Debug, Deserialize)]
 struct Programs {
 	program: BTreeMap<String, Program>,
+	stdin: String,
+	stdout: String,
+	stderr: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -19,19 +22,15 @@ struct Program {
 	file_root: Option<String>,
 	net_root: Option<String>,
 	process_root: Option<String>,
+	stdin: Option<String>,
+	stdout: Option<String>,
+	stderr: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
 	let root = rt::Object::from_raw(0);
-	let stdin = rt::io::open(root.as_raw(), b"uart/0").unwrap();
-	let stdout @ stderr = rt::io::open(root.as_raw(), b"system/log").unwrap();
-	let stdin = rt::RefObject::from_raw(stdin);
-	let stdout = rt::RefObject::from_raw(stdout);
-	let stderr = rt::RefObject::from_raw(stderr);
-	rt::io::set_stdout(Some(stdout));
-	rt::io::set_stderr(Some(stderr));
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
 
@@ -43,14 +42,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut args_buf = Vec::new();
 	args_buf.resize(args_len.try_into().unwrap(), 0);
 	args.read(&mut args_buf).unwrap();
-	println!("{}", core::str::from_utf8(&args_buf).unwrap());
-	let mut programs = match toml::from_slice(&args_buf) {
-		Ok(Programs { program }) => program,
+	let Programs {
+		program: mut programs,
+		stdin: stdin_path,
+		stdout: stdout_path,
+		stderr: stderr_path,
+	} = match toml::from_slice(&args_buf) {
+		Ok(p) => p,
 		Err(e) => {
 			eprintln!("{}", e);
 			std::process::exit(1);
 		}
 	};
+
+	// Open stdin, stdout, stderr
+	// Try to share stdin/out/err handles as it reduces the real amount of handles used by the
+	// kernel and the servers.
+	let open =
+		|p: &str| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p.as_bytes()).unwrap());
+	let stdin = open(&stdin_path);
+	let stdout = if stdout_path == stdin_path {
+		stdin
+	} else {
+		open(&stdout_path)
+	};
+	let stderr = if stderr_path == stdin_path {
+		stdin
+	} else if stderr_path == stdout_path {
+		stdout
+	} else {
+		open(&stderr_path)
+	};
+	rt::io::set_stdin(Some(stdout));
+	rt::io::set_stdout(Some(stdout));
+	rt::io::set_stderr(Some(stderr));
 
 	programs.retain(|_, p| !p.disabled.unwrap_or(false));
 
@@ -61,42 +86,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			for f in program.after.as_ref().iter().flat_map(|i| i.iter()) {
 				// TODO open is inefficient.
 				if root.open(f.as_bytes()).is_err() {
+					dbg!(f);
 					return true;
 				}
 			}
 
-			let file_root = match program.file_root.as_deref() {
+			let open = |base: &Option<String>| match base.as_deref() {
 				None => None,
 				Some("") => Some(None),
 				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
 			};
-			let file_root = match &file_root {
-				None => None,
-				Some(None) => Some(root.as_ref_object()),
-				Some(Some(r)) => Some(r.as_ref_object()),
-			};
+			fn select<'a>(
+				base: &'a Option<Option<rt::Object>>,
+				default: &'a rt::Object,
+			) -> Option<rt::RefObject<'a>> {
+				match base {
+					None => None,
+					Some(None) => Some(default.as_ref_object()),
+					Some(Some(base)) => Some(base.as_ref_object()),
+				}
+			}
 
-			let net_root = match program.net_root.as_deref() {
-				None => None,
-				Some("") => Some(None),
-				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
-			};
-			let net_root = match &net_root {
-				None => None,
-				Some(None) => Some(root.as_ref_object()),
-				Some(Some(r)) => Some(r.as_ref_object()),
-			};
-
-			let proc_root = match program.process_root.as_deref() {
-				None => None,
-				Some("") => Some(None),
-				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
-			};
-			let proc_root = match &proc_root {
-				None => None,
-				Some(None) => Some(root.as_ref_object()),
-				Some(Some(r)) => Some(r.as_ref_object()),
-			};
+			let t = open(&program.stdin);
+			let stdin = select(&t, &stdin).unwrap_or(stdin.as_ref_object());
+			let t = open(&program.stdout);
+			let stdout = select(&t, &stdout).unwrap_or(stdout.as_ref_object());
+			let t = open(&program.stderr);
+			let stderr = select(&t, &stderr).unwrap_or(stderr.as_ref_object());
+			let t = open(&program.file_root);
+			let file_root = select(&t, &root);
+			let t = open(&program.net_root);
+			let net_root = select(&t, &root);
+			let t = open(&program.process_root);
+			let proc_root = select(&t, &process_root);
 
 			let binary = drivers.open(program.path.as_bytes()).unwrap();
 			let r = rt::Process::new(
