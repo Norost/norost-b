@@ -130,7 +130,7 @@ macro_rules! fatal {
 #[macro_export]
 macro_rules! dbg {
     () => {
-        $crate::info!("[{}:{}]", file!(), line!());
+        $crate::fatal!("[{}:{}]", file!(), line!());
     };
     ($val:expr $(,)?) => {
         // Use of `match` here is intentional because it affects the lifetimes
@@ -144,6 +144,6 @@ macro_rules! dbg {
         }
     };
     ($($val:expr),+ $(,)?) => {
-        ($($crate::fatal!($val)),+,)
+        ($($crate::dbg!($val)),+,)
     };
 }

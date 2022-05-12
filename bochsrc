@@ -5,3 +5,5 @@ com1: enabled=1
 cpu: reset_on_triple_fault=0
 info: action=report
 memory: guest=128, host=196
+clock: sync=none, time0=utc
+cpuid: level=6, fsgsbase=true

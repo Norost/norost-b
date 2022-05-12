@@ -2,14 +2,22 @@ use core::arch::asm;
 
 pub unsafe fn set_tls(tls: *mut ()) {
 	unsafe {
-		asm!("wrfsbase {tls}", tls = in(reg) tls);
+		asm!(
+			"wrfsbase {tls}",
+			tls = in(reg) tls,
+			options(nostack, preserves_flags),
+		);
 	}
 }
 
 pub unsafe fn get_tls() -> *mut () {
 	let tls: *mut ();
 	unsafe {
-		asm!("rdfsbase {tls}", tls = out(reg) tls);
+		asm!(
+			"rdfsbase {tls}",
+			tls = out(reg) tls,
+			options(nostack, readonly, pure, preserves_flags),
+		);
 	}
 	tls
 }
@@ -17,14 +25,24 @@ pub unsafe fn get_tls() -> *mut () {
 pub unsafe fn read_tls_offset(offset: usize) -> usize {
 	let data;
 	unsafe {
-		asm!("mov {data}, fs:[{offset} * 8]", offset = in(reg) offset, data = out(reg) data);
+		asm!(
+			"mov {data}, fs:[{offset} * 8]",
+			offset = in(reg) offset,
+			data = out(reg) data,
+			options(nostack, readonly, pure, preserves_flags),
+		);
 	}
 	data
 }
 
 pub unsafe fn write_tls_offset(offset: usize, data: usize) {
 	unsafe {
-		asm!("mov fs:[{offset} * 8], {data}", offset = in(reg) offset, data = in(reg) data);
+		asm!(
+			"mov fs:[{offset} * 8], {data}",
+			offset = in(reg) offset,
+			data = in(reg) data,
+			options(nostack, preserves_flags),
+		);
 	}
 }
 

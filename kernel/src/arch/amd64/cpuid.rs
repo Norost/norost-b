@@ -6,6 +6,7 @@ mod cr4 {
 
 pub struct Features {
 	max_basic_eax: u32,
+	#[allow(dead_code)]
 	max_extended_eax: u32,
 }
 
@@ -88,7 +89,5 @@ pub fn try_enable_fsgsbase(features: &Features) {
 				const cr4::FSGSBASE,
 			);
 		}
-	} else {
-		todo!()
 	}
 }

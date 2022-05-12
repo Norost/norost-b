@@ -161,7 +161,7 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
-		let mut address_space = slf.address_space.lock_unchecked();
+		let mut address_space = slf.address_space.auto_lock();
 
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
