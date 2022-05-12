@@ -4,11 +4,19 @@ use core::{
 	sync::atomic::{AtomicU16, Ordering},
 };
 
+#[derive(Clone, Copy)]
+enum AnsiState {
+	Escape,
+	BracketOpen,
+	Erase,
+}
+
 pub struct Text {
 	row: u8,
 	column: u8,
 	colors: u8,
 	lines: [[u8; Self::WIDTH as usize]; Self::HEIGHT as usize],
+	ansi_state: Option<AnsiState>,
 }
 
 impl Text {
@@ -21,6 +29,7 @@ impl Text {
 			column: 0,
 			colors: 0xf,
 			lines: [[0; 80]; 25],
+			ansi_state: None,
 		}
 	}
 
@@ -76,21 +85,48 @@ impl Text {
 	}
 
 	fn put_byte(&mut self, b: u8) {
-		match b {
-			b'\n' => {
-				self.column = 0;
-				self.row += 1;
+		let mut put = |b| {
+			self.lines[usize::from(self.row)][usize::from(self.column)] = b;
+			// SAFETY: x and y are in range (otherwise we'd have panicked already)
+			unsafe {
+				Self::write_byte(b, self.colors, self.column, self.row);
 			}
-			b'\r' => {
-				self.column = 0;
-			}
-			b => {
-				// SAFETY: x and y are in range
-				self.lines[usize::from(self.row)][usize::from(self.column)] = b;
-				unsafe {
-					Self::write_byte(b, self.colors, self.column, self.row);
+			self.column += 1;
+		};
+
+		if let Some(ansi_state) = self.ansi_state {
+			self.ansi_state = match (ansi_state, b) {
+				(AnsiState::Escape, b'[') => Some(AnsiState::BracketOpen),
+				(AnsiState::BracketOpen, b'2') => Some(AnsiState::Erase),
+				(AnsiState::Erase, b'K') => {
+					// Erase current line
+					self.column = 0;
+					self.lines[usize::from(self.row)].fill(b' ');
+					for x in 0..Self::WIDTH {
+						unsafe {
+							Self::write_byte(b' ', self.colors, x, self.row);
+						}
+					}
+					None
 				}
-				self.column += 1;
+				_ => {
+					put(b'?');
+					None
+				}
+			};
+		} else {
+			match b {
+				b'\n' => {
+					self.column = 0;
+					self.row += 1;
+				}
+				b'\r' => {
+					self.column = 0;
+				}
+				b'\x1b' => {
+					self.ansi_state = Some(AnsiState::Escape);
+				}
+				b => put(b),
 			}
 		}
 
