@@ -1,5 +1,8 @@
 use crate::memory::r#virtual::phys_to_virt;
-use core::fmt;
+use core::{
+	fmt,
+	sync::atomic::{AtomicU16, Ordering},
+};
 
 pub struct Text {
 	row: u8,
@@ -108,5 +111,49 @@ impl fmt::Write for Text {
 			self.put_byte(b);
 		}
 		Ok(())
+	}
+}
+
+/// VGA text device for emergency situations. This device writes straight over any other text
+/// and doesn't implement scroll. It should only be used when things are in an extremely bad state
+/// (e.g. panic). It does not use a lock for synchronization, though it is still thread-safe.
+pub struct EmergencyWriter;
+
+static EMERGENCY_WRITE_POS: AtomicU16 = AtomicU16::new(0);
+const EMERGENCY_COLOR: u8 = 0xc;
+
+impl EmergencyWriter {
+	fn put(c: u8) {
+		EMERGENCY_WRITE_POS
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pos| {
+				let (mut row, mut col) =
+					(pos / u16::from(Text::WIDTH), pos % u16::from(Text::WIDTH));
+				// Clear line if the cursor is at the start of it.
+				if col == 0 {
+					for x in 0..Text::WIDTH {
+						unsafe { Text::write_byte(b' ', EMERGENCY_COLOR, x, row as u8) };
+					}
+				}
+				if c == b'\n' {
+					row += 1;
+					col = 0;
+				} else {
+					unsafe { Text::write_byte(c, EMERGENCY_COLOR, col as u8, row as u8) }
+					col += 1;
+					if col >= Text::WIDTH.into() {
+						row += 1;
+						col = 0;
+					}
+				}
+				row %= u16::from(Text::HEIGHT);
+				Some(row * u16::from(Text::WIDTH) + col)
+			})
+			.unwrap();
+	}
+}
+
+impl fmt::Write for EmergencyWriter {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		Ok(s.bytes().for_each(Self::put))
 	}
 }
