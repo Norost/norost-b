@@ -11,7 +11,12 @@ use crate::memory::r#virtual::RWX;
 use crate::memory::Page;
 use core::ptr::NonNull;
 
-pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<Page>, ()> {
+#[derive(Debug)]
+pub enum IdentityMapError {
+	OutOfFrames,
+}
+
+pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<bool, IdentityMapError> {
 	assert_eq!(phys & 0xfff, 0, "base address is not aligned");
 	assert_eq!(size & 0xfff, 0, "size is not a multiple of the page size");
 	unsafe {
@@ -21,9 +26,11 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<NonNull<P
 			count: size / 4096,
 		};
 
-		AddressSpace::kernel_map(virt, iter, RWX::RW).unwrap();
-
-		Ok(NonNull::new_unchecked(virt))
+		match AddressSpace::kernel_map(virt, iter, RWX::RW) {
+			Ok(_) => Ok(true),
+			Err(MapError::AlreadyMapped) => Ok(false),
+			Err(MapError::OutOfFrames) => Err(IdentityMapError::OutOfFrames),
+		}
 	}
 }
 

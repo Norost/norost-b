@@ -39,7 +39,7 @@ pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMod
 pub(super) fn init() {
 	// Ensure the I/O APIC registers are mapped.
 	let a = PPN::try_from_usize(io_apic_address().try_into().unwrap()).unwrap();
-	AddressSpace::identity_map(a, 4096);
+	AddressSpace::identity_map(a, 4096).unwrap();
 }
 
 /// Read a register from the IoApic
