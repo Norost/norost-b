@@ -1,5 +1,5 @@
 use super::*;
-use crate::sync::Mutex;
+use crate::sync::{Mutex, SpinLock};
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
@@ -11,8 +11,8 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 pub struct StreamingTable {
 	job_id_counter: AtomicU32,
 	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>, Vec<u8>)>>,
-	tickets: Mutex<Vec<(JobId, AnyTicketWaker, Vec<u8>)>>,
-	job_handlers: Mutex<Vec<JobWaker>>,
+	tickets: SpinLock<Vec<(JobId, AnyTicketWaker, Vec<u8>)>>,
+	job_handlers: SpinLock<Vec<JobWaker>>,
 }
 
 impl StreamingTable {
@@ -38,7 +38,7 @@ impl StreamingTable {
 			if let Some(w) = j {
 				if let Ok(mut w) = w.lock() {
 					self.tickets
-						.lock()
+						.auto_lock()
 						.push((job_id, ticket_waker.into(), prefix));
 					w.complete((job_id, job));
 					break;
@@ -59,7 +59,7 @@ impl StreamingTable {
 		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
 
 		loop {
-			let j = self.job_handlers.lock().pop();
+			let j = self.job_handlers.auto_lock().pop();
 			if let Some(w) = j {
 				if let Ok(mut w) = w.lock() {
 					w.complete((job_id, job));
