@@ -1,4 +1,4 @@
-use crate::memory::r#virtual::add_identity_mapping;
+use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
 use crate::time::Monotonic;
 use acpi::{hpet::HpetInfo, AcpiHandler, AcpiTables};
 use core::cell::UnsafeCell;
@@ -91,10 +91,9 @@ where
 	let h = HpetInfo::new(acpi).unwrap();
 	assert!(h.main_counter_is_64bits());
 	unsafe {
-		ADDRESS = add_identity_mapping(h.base_address.try_into().unwrap(), 4096)
-			.unwrap()
-			.cast()
-			.as_ptr();
+		let base = h.base_address.try_into().unwrap();
+		add_identity_mapping(base, 4096).unwrap();
+		ADDRESS = phys_to_virt(base.try_into().unwrap()).cast();
 		// Period is in femtoseconds.
 		MULTIPLIER = u128::from(hpet().capabilities_id().period()) / 1_000_000;
 	}

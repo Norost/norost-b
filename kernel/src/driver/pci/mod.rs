@@ -7,11 +7,12 @@
 //! [osdev pci]: https://wiki.osdev.org/PCI
 
 use crate::driver::apic::local_apic;
-use crate::memory::r#virtual::add_identity_mapping;
+use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
 use crate::object_table;
 use crate::sync::Mutex;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
 use alloc::sync::Arc;
+use core::ptr::NonNull;
 use pci::Pci;
 
 mod device;
@@ -38,7 +39,8 @@ where
 
 	let phys = pci.physical_address(0, 0, 0, 0).unwrap();
 	let size = 256 * 32 * 8 * 4096;
-	let virt = unsafe { add_identity_mapping(phys.try_into().unwrap(), size).unwrap() };
+	unsafe { add_identity_mapping(phys.try_into().unwrap(), size).unwrap() };
+	let virt = unsafe { NonNull::new(phys_to_virt(phys.try_into().unwrap())).unwrap() };
 
 	let mut pci = unsafe { Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]) };
 
@@ -78,7 +80,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 					use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
 
 					let ppn = PPN::try_from_usize((table & !0xfff).try_into().unwrap()).unwrap();
-					AddressSpace::identity_map(ppn, 4096);
+					AddressSpace::identity_map(ppn, 4096).unwrap();
 					let table = unsafe { phys_to_virt(table) };
 					let table = unsafe {
 						core::slice::from_raw_parts_mut(
@@ -90,7 +92,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 					let pending_ppn =
 						PPN::try_from_usize((pending & !0xfff).try_into().unwrap()).unwrap();
 					if pending_ppn != ppn {
-						AddressSpace::identity_map(pending_ppn, 4096);
+						AddressSpace::identity_map(pending_ppn, 4096).unwrap();
 					}
 
 					for e in table.iter_mut() {

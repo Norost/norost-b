@@ -77,7 +77,10 @@ impl AddressSpace {
 						break;
 					}
 					Err((e, _)) => {
-						e.make_table(user, hint_color).unwrap();
+						e.make_table(user, hint_color).map_err(|e| match e {
+							common::MakeTableError::IsLeaf => MapError::AlreadyMapped,
+							common::MakeTableError::OutOfFrames => MapError::OutOfFrames,
+						})?;
 					}
 				}
 			}
@@ -185,7 +188,10 @@ impl Drop for AddressSpace {
 }
 
 #[derive(Debug)]
-pub enum MapError {}
+pub enum MapError {
+	AlreadyMapped,
+	OutOfFrames,
+}
 
 #[derive(Debug)]
 pub enum UnmapError {

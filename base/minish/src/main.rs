@@ -129,7 +129,7 @@ fn main() -> std::io::Result<()> {
 						term.write(&buf2[..l])?;
 						writeln!(term)?;
 					}
-					Err(e) => writeln!(term, "Failed to read from \"{}\"", e)?,
+					Err(e) => writeln!(term, "Failed to read from \"{}\": {}", name, e)?,
 				}
 			}
 			b"write" => {
@@ -146,7 +146,7 @@ fn main() -> std::io::Result<()> {
 				};
 				match f.write(data) {
 					Ok(l) => writeln!(term, "Wrote {} bytes", l)?,
-					Err(e) => writeln!(term, "Failed to read from \"{}\"", e)?,
+					Err(e) => writeln!(term, "Failed to read from \"{}\": {}", name, e)?,
 				}
 			}
 			b"vars" => {

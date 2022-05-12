@@ -56,11 +56,13 @@ pub(super) unsafe fn init(port: Port, root: &Root) {
 	unsafe {
 		// Use scancode set 2 since it's the only set that should be supported on all systems.
 		write_raw_port_command(port, KeyboardCommand::GetSetScanCodeSet as u8).unwrap();
+		read_port_data_with_acknowledge().unwrap();
 		write_raw_port_command(port, 2).unwrap();
 		read_port_data_with_acknowledge().unwrap();
 
 		// Just for sanity, ensure scancode set 2 is actually being used.
 		write_raw_port_command(port, KeyboardCommand::GetSetScanCodeSet as u8).unwrap();
+		read_port_data_with_acknowledge().unwrap();
 		write_raw_port_command(port, 0).unwrap();
 		read_port_data_with_acknowledge().unwrap();
 		assert_eq!(

@@ -1,11 +1,22 @@
-use crate::memory::r#virtual::phys_to_virt;
-use core::fmt;
+use crate::{arch::amd64::asm::io, memory::r#virtual::phys_to_virt};
+use core::{
+	fmt,
+	sync::atomic::{AtomicU16, Ordering},
+};
+
+#[derive(Clone, Copy)]
+enum AnsiState {
+	Escape,
+	BracketOpen,
+	Erase,
+}
 
 pub struct Text {
 	row: u8,
 	column: u8,
 	colors: u8,
 	lines: [[u8; Self::WIDTH as usize]; Self::HEIGHT as usize],
+	ansi_state: Option<AnsiState>,
 }
 
 impl Text {
@@ -18,6 +29,7 @@ impl Text {
 			column: 0,
 			colors: 0xf,
 			lines: [[0; 80]; 25],
+			ansi_state: None,
 		}
 	}
 
@@ -30,7 +42,7 @@ impl Text {
 		for y in 0..24 {
 			for x in 0..80 {
 				unsafe {
-					Self::write_byte(0, 0, x, y);
+					Self::write_byte(0, self.colors, x, y);
 				}
 			}
 		}
@@ -73,21 +85,48 @@ impl Text {
 	}
 
 	fn put_byte(&mut self, b: u8) {
-		match b {
-			b'\n' => {
-				self.column = 0;
-				self.row += 1;
+		let mut put = |b| {
+			self.lines[usize::from(self.row)][usize::from(self.column)] = b;
+			// SAFETY: x and y are in range (otherwise we'd have panicked already)
+			unsafe {
+				Self::write_byte(b, self.colors, self.column, self.row);
 			}
-			b'\r' => {
-				self.column = 0;
-			}
-			b => {
-				// SAFETY: x and y are in range
-				self.lines[usize::from(self.row)][usize::from(self.column)] = b;
-				unsafe {
-					Self::write_byte(b, self.colors, self.column, self.row);
+			self.column += 1;
+		};
+
+		if let Some(ansi_state) = self.ansi_state {
+			self.ansi_state = match (ansi_state, b) {
+				(AnsiState::Escape, b'[') => Some(AnsiState::BracketOpen),
+				(AnsiState::BracketOpen, b'2') => Some(AnsiState::Erase),
+				(AnsiState::Erase, b'K') => {
+					// Erase current line
+					self.column = 0;
+					self.lines[usize::from(self.row)].fill(b' ');
+					for x in 0..Self::WIDTH {
+						unsafe {
+							Self::write_byte(b' ', self.colors, x, self.row);
+						}
+					}
+					None
 				}
-				self.column += 1;
+				_ => {
+					put(b'?');
+					None
+				}
+			};
+		} else {
+			match b {
+				b'\n' => {
+					self.column = 0;
+					self.row += 1;
+				}
+				b'\r' => {
+					self.column = 0;
+				}
+				b'\x1b' => {
+					self.ansi_state = Some(AnsiState::Escape);
+				}
+				b => put(b),
 			}
 		}
 
@@ -100,6 +139,17 @@ impl Text {
 			self.scroll_down();
 		}
 	}
+
+	fn fix_cursor(&mut self) {
+		// https://wiki.osdev.org/Text_Mode_Cursor#Without_the_BIOS
+		unsafe {
+			let pos = u16::from(self.row) * u16::from(Self::WIDTH) + u16::from(self.column);
+			io::outb(0x3d4, 0x0f);
+			io::outb(0x3d5, pos as u8);
+			io::outb(0x3d4, 0x0e);
+			io::outb(0x3d5, (pos >> 8) as u8);
+		}
+	}
 }
 
 impl fmt::Write for Text {
@@ -107,6 +157,51 @@ impl fmt::Write for Text {
 		for b in s.bytes() {
 			self.put_byte(b);
 		}
+		self.fix_cursor();
 		Ok(())
+	}
+}
+
+/// VGA text device for emergency situations. This device writes straight over any other text
+/// and doesn't implement scroll. It should only be used when things are in an extremely bad state
+/// (e.g. panic). It does not use a lock for synchronization, though it is still thread-safe.
+pub struct EmergencyWriter;
+
+static EMERGENCY_WRITE_POS: AtomicU16 = AtomicU16::new(0);
+const EMERGENCY_COLOR: u8 = 0xc;
+
+impl EmergencyWriter {
+	fn put(c: u8) {
+		EMERGENCY_WRITE_POS
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pos| {
+				let (mut row, mut col) =
+					(pos / u16::from(Text::WIDTH), pos % u16::from(Text::WIDTH));
+				// Clear line if the cursor is at the start of it.
+				if col == 0 {
+					for x in 0..Text::WIDTH {
+						unsafe { Text::write_byte(b' ', EMERGENCY_COLOR, x, row as u8) };
+					}
+				}
+				if c == b'\n' {
+					row += 1;
+					col = 0;
+				} else {
+					unsafe { Text::write_byte(c, EMERGENCY_COLOR, col as u8, row as u8) }
+					col += 1;
+					if col >= Text::WIDTH.into() {
+						row += 1;
+						col = 0;
+					}
+				}
+				row %= u16::from(Text::HEIGHT);
+				Some(row * u16::from(Text::WIDTH) + col)
+			})
+			.unwrap();
+	}
+}
+
+impl fmt::Write for EmergencyWriter {
+	fn write_str(&mut self, s: &str) -> fmt::Result {
+		Ok(s.bytes().for_each(Self::put))
 	}
 }

@@ -217,9 +217,11 @@ impl AddressSpace {
 	/// # Panics
 	///
 	/// `size` must be a multiple of the page size.
-	pub fn identity_map(ppn: PPN, size: usize) -> bool {
+	pub fn identity_map(ppn: PPN, size: usize) -> Result<bool, IdentityMapError> {
 		assert_eq!(size % Page::SIZE, 0);
-		unsafe { r#virtual::add_identity_mapping(ppn.as_phys(), size).is_ok() }
+		unsafe {
+			r#virtual::add_identity_mapping(ppn.as_phys(), size).map_err(IdentityMapError::Arch)
+		}
 	}
 
 	/// Activate the default address space.
@@ -231,4 +233,9 @@ impl AddressSpace {
 	pub unsafe fn activate_default() {
 		unsafe { r#virtual::AddressSpace::activate_default() }
 	}
+}
+
+#[derive(Debug)]
+pub enum IdentityMapError {
+	Arch(r#virtual::IdentityMapError),
 }

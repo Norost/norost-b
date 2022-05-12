@@ -71,7 +71,10 @@ pub struct EmergencyWriter;
 
 impl fmt::Write for EmergencyWriter {
 	fn write_str(&mut self, s: &str) -> fmt::Result {
-		uart::EmergencyWriter.write_str(s)
+		uart::EmergencyWriter.write_str(s)?;
+		#[cfg(feature = "driver-vga")]
+		vga::EmergencyWriter.write_str(s)?;
+		Ok(())
 	}
 }
 

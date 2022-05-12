@@ -159,7 +159,7 @@ pub fn get_phys() -> u64 {
 pub(super) fn init() {
 	// Ensure the LAPIC registers are mapped.
 	let a = PPN::try_from_usize(super::local_apic_address().try_into().unwrap()).unwrap();
-	AddressSpace::identity_map(a, 4096);
+	AddressSpace::identity_map(a, 4096).unwrap();
 
 	// Initialize to a well-known state (https://wiki.osdev.org/APIC_timer#Example_code_in_ASM)
 	let apic = get();
