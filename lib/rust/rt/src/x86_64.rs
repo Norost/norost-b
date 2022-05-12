@@ -16,7 +16,7 @@ pub unsafe fn get_tls() -> *mut () {
 		asm!(
 			"rdfsbase {tls}",
 			tls = out(reg) tls,
-			options(nostack, readonly, pure, preserves_flags),
+			options(nostack, readonly, preserves_flags),
 		);
 	}
 	tls
@@ -29,7 +29,7 @@ pub unsafe fn read_tls_offset(offset: usize) -> usize {
 			"mov {data}, fs:[{offset} * 8]",
 			offset = in(reg) offset,
 			data = out(reg) data,
-			options(nostack, readonly, pure, preserves_flags),
+			options(nostack, readonly, preserves_flags),
 		);
 	}
 	data
