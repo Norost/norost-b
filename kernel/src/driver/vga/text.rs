@@ -1,4 +1,4 @@
-use crate::memory::r#virtual::phys_to_virt;
+use crate::{arch::amd64::asm::io, memory::r#virtual::phys_to_virt};
 use core::{
 	fmt,
 	sync::atomic::{AtomicU16, Ordering},
@@ -42,7 +42,7 @@ impl Text {
 		for y in 0..24 {
 			for x in 0..80 {
 				unsafe {
-					Self::write_byte(0, 0, x, y);
+					Self::write_byte(0, self.colors, x, y);
 				}
 			}
 		}
@@ -139,6 +139,17 @@ impl Text {
 			self.scroll_down();
 		}
 	}
+
+	fn fix_cursor(&mut self) {
+		// https://wiki.osdev.org/Text_Mode_Cursor#Without_the_BIOS
+		unsafe {
+			let pos = u16::from(self.row) * u16::from(Self::WIDTH) + u16::from(self.column);
+			io::outb(0x3d4, 0x0f);
+			io::outb(0x3d5, pos as u8);
+			io::outb(0x3d4, 0x0e);
+			io::outb(0x3d5, (pos >> 8) as u8);
+		}
+	}
 }
 
 impl fmt::Write for Text {
@@ -146,6 +157,7 @@ impl fmt::Write for Text {
 		for b in s.bytes() {
 			self.put_byte(b);
 		}
+		self.fix_cursor();
 		Ok(())
 	}
 }
