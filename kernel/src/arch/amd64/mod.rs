@@ -190,7 +190,8 @@ pub unsafe fn init() {
 
 		syscall::init(&TSS);
 
-		cpuid::enable_fsgsbase();
+		let features = cpuid::Features::new();
+		cpuid::try_enable_fsgsbase(&features);
 
 		r#virtual::init();
 	}
