@@ -316,43 +316,40 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
 		let port = Port::P1;
 		write_command(Command::EnablePort1).unwrap();
 		write_port_command(port, PortCommand::DisableScanning).unwrap();
+		read_port_data_with_acknowledge().unwrap();
 		write_port_command(port, PortCommand::Identify).unwrap();
-		match read_port_data_with_resend().unwrap() {
-			PORT_ACKNOWLEDGE => {
-				let mut id = [0; 2];
-				let id = match read_port_data() {
-					Ok(a) => match read_port_data() {
-						Ok(b) => {
-							id = [a, b];
-							&id[..2]
-						}
-						Err(Timeout) => {
-							id = [a, 0];
-							&id[..1]
-						}
-					},
-					Err(Timeout) => &id[..0],
-				};
-				match id {
-					// Ancient AT keyboard with translation
-					&[]
-					// MF2 keyboard with translation
-					| &[DEVICE_MF2_KEYBOARD, 0x41]
-					| &[DEVICE_MF2_KEYBOARD, 0xc1]
-					// MF2 keyboard without translation
-					| &[DEVICE_MF2_KEYBOARD, 0x83]
-					=> {
-						#[cfg(feature = "driver-ps2-keyboard")]
-						keyboard::init(port, root);
-						#[cfg(not(feature = "driver-ps2-keyboard"))]
-						info!("no driver for keyboard (device type {:#02x})", d);
-					}
-					&[a] => info!("unsupported device {:#02x}", a),
-					&[a, b] => info!("unsupported device {:#02x}{:#02x}", a, b),
-					_ => unreachable!(),
+		read_port_data_with_acknowledge().unwrap();
+		let mut id = [0; 2];
+		let id = match read_port_data() {
+			Ok(a) => match read_port_data() {
+				Ok(b) => {
+					id = [a, b];
+					&id[..2]
 				}
+				Err(Timeout) => {
+					id = [a, 0];
+					&id[..1]
+				}
+			},
+			Err(Timeout) => &id[..0],
+		};
+		match id {
+			// Ancient AT keyboard with translation
+			&[]
+			// MF2 keyboard with translation
+			| &[DEVICE_MF2_KEYBOARD, 0x41]
+			| &[DEVICE_MF2_KEYBOARD, 0xc1]
+			// MF2 keyboard without translation
+			| &[DEVICE_MF2_KEYBOARD, 0x83]
+			=> {
+				#[cfg(feature = "driver-ps2-keyboard")]
+				keyboard::init(port, root);
+				#[cfg(not(feature = "driver-ps2-keyboard"))]
+				info!("ps2: no driver for keyboard (device type {:#02x})", d);
 			}
-			d => todo!("status {:#x} from port", d),
+			&[a] => info!("ps2: unsupported device {:#02x}", a),
+			&[a, b] => info!("ps2: unsupported device {:#02x}{:02x}", a, b),
+			_ => unreachable!(),
 		}
 	}
 }
