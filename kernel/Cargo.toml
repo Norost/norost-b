@@ -13,9 +13,10 @@ pci = { path = "../lib/rust/pci" }
 cfg-if = "1.0"
 norostb_kernel = { path = "../lib/rust/kernel" }
 arena = { path = "../lib/rust/arena" }
+scancodes = { path = "../lib/rust/scancodes" }
 
 [features]
-default = ["mem-max-16t", "driver-pci", "driver-hpet", "driver-vga"]
+default = ["mem-max-16t", "driver-pci", "driver-hpet", "driver-vga", "driver-ps2-keyboard"]
 mem-max-16t = []
 mem-max-256m = []
 driver-pci = []
@@ -23,5 +24,7 @@ driver-hpet = []
 driver-pic = []
 driver-rtc = []
 driver-vga = []
+driver-ps2 = []
+driver-ps2-keyboard = ["driver-ps2"]
 debug = []
 debug-sanitize-heap = []

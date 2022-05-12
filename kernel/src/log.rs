@@ -6,7 +6,7 @@ use crate::{
 	sync::spinlock::AutoGuard,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::fmt;
+use core::fmt::{self, Write};
 
 struct SystemTable;
 
@@ -36,10 +36,7 @@ impl Object for SystemLogRef {
 	fn write(&self, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		// FIXME avoid panic
-		use fmt::Write;
-		SystemLog::new()
-			.write_str(core::str::from_utf8(data).unwrap())
-			.unwrap();
+		write!(SystemLog::new(), "{}", crate::util::ByteStr::new(data)).unwrap();
 		Ticket::new_complete(Ok(data.len()))
 	}
 }

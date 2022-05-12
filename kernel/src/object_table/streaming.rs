@@ -174,10 +174,10 @@ impl Drop for StreamingTable {
 		// Wake any waiting tasks so they don't get stuck endlessly.
 		for task in self
 			.jobs
-			.lock()
+			.get_mut()
 			.drain(..)
 			.flat_map(|e| e.1)
-			.chain(self.tickets.lock().drain(..).map(|e| e.1))
+			.chain(self.tickets.get_mut().drain(..).map(|e| e.1))
 		{
 			task.complete_err(Error::Cancelled)
 		}

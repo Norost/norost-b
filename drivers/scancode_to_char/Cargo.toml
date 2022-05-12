@@ -1,0 +1,9 @@
+[package]
+name = "driver_scancode_to_char"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+norostb_kernel = { path = "../../lib/rust/kernel" }
+driver_utils = { path = "../../lib/rust/driver_utils" }
+scancodes = { path = "../../lib/rust/scancodes" }

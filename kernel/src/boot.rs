@@ -1,4 +1,4 @@
-use crate::util::{DebugByteStr, DebugIter};
+use crate::util::{ByteStr, DebugIter};
 use core::fmt;
 
 #[repr(C)]
@@ -117,7 +117,7 @@ impl<'a> Driver<'a> {
 impl fmt::Debug for Driver<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Driver))
-			.field("name", &DebugByteStr::new(self.name()))
+			.field("name", &ByteStr::new(self.name()))
 			.field(
 				"range",
 				&format_args!(
@@ -164,7 +164,7 @@ impl fmt::Debug for InitProgram<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct(stringify!(InitProgram))
 			.field("driver", &self.driver())
-			.field("args", &DebugIter::new(self.args().map(DebugByteStr::new)))
+			.field("args", &DebugIter::new(self.args().map(ByteStr::new)))
 			.finish()
 	}
 }
