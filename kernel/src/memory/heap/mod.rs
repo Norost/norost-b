@@ -4,12 +4,14 @@ mod sanitizer;
 #[cfg(not(feature = "debug-sanitize-heap"))]
 mod default {
 	use super::super::{
-		frame::{self, PPN},
+		frame::{self, AllocateHints, OwnedPageFrames, PPN},
+		r#virtual::{AddressSpace, RWX},
 		Page,
 	};
+	use alloc::sync::Arc;
 	use core::alloc::{GlobalAlloc, Layout};
 	use core::num::NonZeroUsize;
-	use core::ptr;
+	use core::ptr::{self, NonNull};
 
 	#[global_allocator]
 	static GLOBAL: Global = Global;
@@ -21,7 +23,26 @@ mod default {
 			if layout.align() > Page::SIZE {
 				ptr::null_mut()
 			} else if let Some(c) = NonZeroUsize::new(Page::min_pages_for_bytes(layout.size())) {
-				frame::allocate_contiguous(c).unwrap().as_ptr().cast()
+				if c.get() > 1 {
+					let frames = Arc::new(
+						OwnedPageFrames::new(
+							c,
+							AllocateHints {
+								address: 0 as _,
+								color: 0,
+							},
+						)
+						.unwrap(),
+					);
+					AddressSpace::kernel_map_object(None, frames, RWX::RW)
+						.unwrap()
+						.as_ptr()
+						.cast()
+				} else {
+					let mut f = None;
+					frame::allocate(c.get(), |e| f = Some(e), 0 as _, 0).unwrap();
+					f.unwrap().as_ptr().cast()
+				}
 			} else {
 				ptr::null_mut()
 			}
@@ -31,15 +52,16 @@ mod default {
 
 		unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
 			let c = Page::min_pages_for_bytes(layout.size());
-			let mut base = unsafe { PPN::from_ptr(ptr.cast::<Page>()) };
-			unsafe {
-				frame::deallocate(c, || {
-					let f = base;
-					base = base.next();
-					f
-				})
+			let c = NonZeroUsize::new(c).unwrap();
+			if c.get() > 1 {
+				let ptr = NonNull::new(ptr).unwrap();
+				unsafe {
+					AddressSpace::kernel_unmap_object(ptr.cast(), c).unwrap();
+				}
+			} else {
+				unsafe { frame::deallocate(c.get(), || PPN::from_ptr(ptr.cast::<Page>())) }
+					.unwrap();
 			}
-			.unwrap();
 		}
 
 		unsafe fn realloc(&self, ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {

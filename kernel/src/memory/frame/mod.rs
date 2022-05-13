@@ -243,3 +243,7 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 		let _ = stack.push(ppn);
 	}
 }
+
+pub fn free_memory() -> usize {
+	dumb_stack::STACK.lock().count() * 4096
+}
