@@ -27,7 +27,7 @@ impl PciDevice {
 	}
 
 	pub fn config_region(&self) -> PPN {
-		let pci = PCI.lock();
+		let pci = PCI.auto_lock();
 		let pci = pci.as_ref().unwrap();
 		let addr = pci.get_physical_address(self.bus, self.device, 0);
 		PPN::try_from_usize(addr).unwrap()

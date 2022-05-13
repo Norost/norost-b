@@ -9,7 +9,7 @@
 use crate::driver::apic::local_apic;
 use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
 use crate::object_table;
-use crate::sync::Mutex;
+use crate::sync::SpinLock;
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
 use alloc::sync::Arc;
 use core::ptr::NonNull;
@@ -20,7 +20,7 @@ mod table;
 
 pub use device::PciDevice;
 
-static PCI: Mutex<Option<Pci>> = Mutex::new(None);
+static PCI: SpinLock<Option<Pci>> = SpinLock::new(None);
 
 pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>, root: &crate::object_table::Root)
 where
@@ -54,7 +54,7 @@ where
 		allocate_irqs(&mut pci);
 	}
 
-	*PCI.lock_unchecked() = Some(pci);
+	*PCI.auto_lock() = Some(pci);
 
 	let table = Arc::new(table::PciTable) as Arc<dyn object_table::Object>;
 	root.add(*b"pci", Arc::downgrade(&table));

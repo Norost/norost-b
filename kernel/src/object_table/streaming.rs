@@ -10,7 +10,7 @@ use norostb_kernel::{io::SeekFrom, syscall::Handle};
 
 pub struct StreamingTable {
 	job_id_counter: AtomicU32,
-	jobs: Mutex<Vec<(StreamJob, Option<AnyTicketWaker>, Vec<u8>)>>,
+	jobs: SpinLock<Vec<(StreamJob, Option<AnyTicketWaker>, Vec<u8>)>>,
 	tickets: SpinLock<Vec<(JobId, AnyTicketWaker, Vec<u8>)>>,
 	job_handlers: SpinLock<Vec<JobWaker>>,
 }
@@ -66,7 +66,7 @@ impl StreamingTable {
 					break;
 				}
 			} else {
-				let mut l = self.jobs.lock();
+				let mut l = self.jobs.auto_lock();
 				l.push((StreamJob { job_id, job }, None, Vec::new()));
 				break;
 			}
@@ -77,7 +77,7 @@ impl StreamingTable {
 impl Table for StreamingTable {
 	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
 		let job = self.jobs.lock().pop().map(|(job, tkt, prefix)| {
-			tkt.map(|tkt| self.tickets.lock().push((job.job_id, tkt, prefix)));
+			tkt.map(|tkt| self.tickets.auto_lock().push((job.job_id, tkt, prefix)));
 			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
