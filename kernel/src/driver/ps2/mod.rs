@@ -286,8 +286,6 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
 		two_channels = read_data().unwrap() & CTRL_CFG_PORT_2_CLOCK_DISABLED == 0;
 		write_command(Command::DisablePort2).unwrap();
 
-		dbg!(two_channels);
-
 		// Test ports
 		let test = |cmd, i| {
 			write_command(cmd).unwrap();
