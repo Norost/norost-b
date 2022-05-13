@@ -238,19 +238,15 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
 			.expect("no FADT table")
 	};
 
-	if dbg!(fadt.header().revision) < 2 {
+	if tables.revision < 2 {
 		// There is no iapc_boot_arch in this version of the FADT.
 		// Just assume the controller is present.
 	} else {
 		let iapc_boot_arch = unsafe { ptr::addr_of!(fadt.iapc_boot_arch).read_unaligned() };
-		dbg!(iapc_boot_arch.motherboard_implements_8042());
-		// FIXME for some reason QEMU doesn't set the 8042 bit even though it is present.
-		// It seems this was *very* recently fixed though?
-		// https://lore.kernel.org/qemu-devel/20220304082017-mutt-send-email-mst@kernel.org/T/
-		assert!(
-			true || iapc_boot_arch.motherboard_implements_8042(),
-			"no 8042 controller is present"
-		);
+		if !iapc_boot_arch.motherboard_implements_8042() {
+			warn!("no 8042 controller is present");
+			return;
+		}
 	}
 
 	let two_channels;

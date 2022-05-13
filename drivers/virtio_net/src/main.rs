@@ -294,7 +294,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 								job.operation_size = l.try_into().unwrap();
 								job.buffer = NonNull::new(data.as_mut_ptr());
 							}
-							Err(smoltcp::Error::Illegal) => {
+							Err(smoltcp::Error::Illegal) | Err(smoltcp::Error::Finished) => {
 								job.operation_size = 0;
 								job.result = -1;
 							}
