@@ -74,9 +74,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				let (path, offset) = &open_files[job.handle];
 				let mut file = fs.root_dir().open_file(path).unwrap();
 				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-				let l = file
-					.read(&mut buf[..job.operation_size.try_into().unwrap()])
-					.unwrap();
+				let max = buf.len().min(job.operation_size.try_into().unwrap());
+				let l = file.read(&mut buf[..max]).unwrap();
 				job.operation_size = l.try_into().unwrap();
 				open_files[job.handle].1 += u64::try_from(l).unwrap();
 			}
