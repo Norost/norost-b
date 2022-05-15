@@ -108,7 +108,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 							use crate::arch::amd64;
 							let irq = amd64::allocate_irq().expect("irq");
 							unsafe {
-								amd64::idt_set(irq.into(), crate::wrap_idt!(int irq_handler));
+								amd64::idt_set(irq.into(), crate::wrap_idt!(irq_handler));
 							}
 							irq
 						};

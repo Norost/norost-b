@@ -155,36 +155,33 @@ pub unsafe fn init() {
 		// somewhere in the IDT apparently...
 		IDT.set(
 			TIMER_IRQ.into(),
-			wrap_idt!(int noreturn savethread handle_timer),
+			wrap_idt!(noreturn savethread handle_timer),
 		);
-		IDT.set(0, wrap_idt!(trap handle_divide_by_zero));
-		IDT.set(1, wrap_idt!(trap handle_debug));
-		IDT.set(2, wrap_idt!(int nmi handle_nmi));
-		IDT.set(3, wrap_idt!(trap handle_breakpoint));
-		IDT.set(4, wrap_idt!(trap handle_overflow));
-		IDT.set(5, wrap_idt!(trap handle_bound_range_exceeded));
-		IDT.set(7, wrap_idt!(trap handle_device_not_available));
-		IDT.set(8, wrap_idt!(trap error handle_double_fault [1]));
+		IDT.set(0, wrap_idt!(rip handle_divide_by_zero));
+		IDT.set(1, wrap_idt!(rip handle_debug));
+		IDT.set(2, wrap_idt!(nmi handle_nmi));
+		IDT.set(3, wrap_idt!(rip handle_breakpoint));
+		IDT.set(4, wrap_idt!(rip handle_overflow));
+		IDT.set(5, wrap_idt!(rip handle_bound_range_exceeded));
+		IDT.set(7, wrap_idt!(rip handle_device_not_available));
+		IDT.set(8, wrap_idt!(error rip handle_double_fault [1]));
 		// 9 does not exist
-		IDT.set(10, wrap_idt!(trap error handle_invalid_tss));
-		IDT.set(11, wrap_idt!(trap error handle_segment_not_present));
-		IDT.set(12, wrap_idt!(trap error handle_stack_segment_fault));
-		IDT.set(13, wrap_idt!(trap error handle_general_protection_fault));
-		IDT.set(14, wrap_idt!(trap error handle_page_fault));
+		IDT.set(10, wrap_idt!(error rip handle_invalid_tss));
+		IDT.set(11, wrap_idt!(error rip handle_segment_not_present));
+		IDT.set(12, wrap_idt!(error rip handle_stack_segment_fault));
+		IDT.set(13, wrap_idt!(error rip handle_general_protection_fault));
+		IDT.set(14, wrap_idt!(error rip handle_page_fault));
 		// 15 is reserved
-		IDT.set(16, wrap_idt!(trap handle_x87_fpe));
-		IDT.set(17, wrap_idt!(trap error handle_alignment_check));
-		IDT.set(18, wrap_idt!(trap handle_machine_check));
-		IDT.set(19, wrap_idt!(trap handle_simd_fpe));
-		IDT.set(20, wrap_idt!(trap handle_virtualization_exception));
-		IDT.set(
-			21,
-			wrap_idt!(trap error handle_control_protection_exception),
-		);
+		IDT.set(16, wrap_idt!(rip handle_x87_fpe));
+		IDT.set(17, wrap_idt!(error rip handle_alignment_check));
+		IDT.set(18, wrap_idt!(rip handle_machine_check));
+		IDT.set(19, wrap_idt!(rip handle_simd_fpe));
+		IDT.set(20, wrap_idt!(rip handle_virtualization_exception));
+		IDT.set(21, wrap_idt!(error rip handle_control_protection_exception));
 		// 22 to 27 are reserved
-		IDT.set(28, wrap_idt!(trap handle_hypervisor_injection_exception));
-		IDT.set(29, wrap_idt!(trap error handle_vmm_communication_exception));
-		IDT.set(30, wrap_idt!(trap error handle_security_exception));
+		IDT.set(28, wrap_idt!(rip handle_hypervisor_injection_exception));
+		IDT.set(29, wrap_idt!(error rip handle_vmm_communication_exception));
+		IDT.set(30, wrap_idt!(error rip handle_security_exception));
 		// 31 is reserved
 
 		IDT_PTR.write(idt::IDTPointer::new(&IDT));

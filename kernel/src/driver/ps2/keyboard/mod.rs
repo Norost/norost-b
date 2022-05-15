@@ -75,7 +75,7 @@ pub(super) unsafe fn init(port: Port, root: &Root) {
 		PORT = port;
 
 		// Install an IRQ
-		install_irq(port, wrap_idt!(int handle_irq));
+		install_irq(port, wrap_idt!(handle_irq));
 
 		// Enable scanning
 		write_port_command(port, PortCommand::EnableScanning).unwrap();

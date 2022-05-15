@@ -1,74 +1,16 @@
 use core::arch::asm;
 use core::mem;
 
+pub macro __swap_gs() {
+	"cmp DWORD PTR [rsp + 8], 8",
+	"jz 2f",
+	"swapgs",
+	"2:",
+}
+
 #[macro_export]
 macro_rules! __idt_wrap_handler {
-	(trap $fn:path) => {
-		{
-			const _: extern "C" fn(*const ()) = $fn;
-			#[naked]
-			unsafe extern "C" fn f() {
-				unsafe {
-					core::arch::asm!(
-						// Check if we need to swapgs by checking $cl
-						"cmp DWORD PTR [rsp + 8], 8",
-						"jz 2f",
-						"swapgs",
-						"2:",
-
-						"pop rsi", // RIP
-						"push rsi",
-						"cld",
-						"call {f}",
-
-						// Check if we need to swapgs by checking $cl
-						"cmp DWORD PTR [rsp + 8], 8",
-						"jz 2f",
-						"swapgs",
-						"2:",
-
-						"iretq",
-						f = sym $fn, options(noreturn)
-					);
-				}
-			}
-			$crate::arch::amd64::idt::Handler::Trap(f)
-		}
-	};
-	(trap error $fn:path) => {
-		{
-			const _: extern "C" fn(u32, *const ()) = $fn;
-			#[naked]
-			unsafe extern "C" fn f() {
-				unsafe {
-					core::arch::asm!(
-						"pop rdi", // Error code
-						// Check if we need to swapgs by checking $cl
-						"cmp DWORD PTR [rsp + 8], 8",
-						"jz 2f",
-						"swapgs",
-						"2:",
-
-						"pop rsi", // RIP
-						"push rsi",
-						"cld",
-						"call {f}",
-
-						// Check if we need to swapgs by checking $cl
-						"cmp DWORD PTR [rsp + 8], 8",
-						"jz 2f",
-						"swapgs",
-						"2:",
-
-						"iretq",
-						f = sym $fn, options(noreturn)
-					);
-				}
-			}
-			$crate::arch::amd64::idt::Handler::Trap(f)
-		}
-	};
-	(int $fn:path) => {
+	($fn:path) => {
 		{
 			const _: extern "C" fn() = $fn;
 			#[naked]
@@ -119,10 +61,116 @@ macro_rules! __idt_wrap_handler {
 					);
 				}
 			}
-			$crate::arch::amd64::idt::Handler::Int(f)
+			f
 		}
 	};
-	(int nmi $fn:path) => {
+	(rip $fn:path) => {
+		{
+			const _: extern "C" fn(*const ()) = $fn;
+			#[naked]
+			unsafe extern "C" fn f() {
+				unsafe {
+					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						// Save scratch registers
+						"push rax",
+						"push rcx",
+						"push rdx",
+						"push rdi",
+						"push rsi",
+						"push r8",
+						"push r9",
+						"push r10",
+						"push r11",
+
+						"mov rsi, [rsp + 9 * 8]", // RIP
+						"cld",
+						"call {f}",
+
+						"pop r11",
+						"pop r10",
+						"pop r9",
+						"pop r8",
+						"pop rsi",
+						"pop rdi",
+						"pop rdx",
+						"pop rcx",
+						"pop rax",
+
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn, options(noreturn)
+					);
+				}
+			}
+			f
+		}
+	};
+	(error rip $fn:path) => {
+		{
+			const _: extern "C" fn(u32, *const ()) = $fn;
+			#[naked]
+			unsafe extern "C" fn f() {
+				unsafe {
+					core::arch::asm!(
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"xchg rdi, [rsp]", // Error code
+
+						// Save scratch registers
+						// Note that we already saved $rdi
+						"push rax",
+						"push rcx",
+						"push rdx",
+						"push rsi",
+						"push r8",
+						"push r9",
+						"push r10",
+						"push r11",
+
+						"mov rsi, [rsp + 9 * 8]", // RIP
+						"cld",
+						"call {f}",
+
+						"pop r11",
+						"pop r10",
+						"pop r9",
+						"pop r8",
+						"pop rsi",
+						"pop rdx",
+						"pop rcx",
+						"pop rax",
+						"pop rdi",
+
+						// Check if we need to swapgs by checking $cl
+						"cmp DWORD PTR [rsp + 8], 8",
+						"jz 2f",
+						"swapgs",
+						"2:",
+
+						"iretq",
+						f = sym $fn, options(noreturn)
+					);
+				}
+			}
+			f
+		}
+	};
+	(nmi $fn:path) => {
 		{
 			const _: extern "C" fn() = $fn;
 			#[naked]
@@ -174,10 +222,10 @@ macro_rules! __idt_wrap_handler {
 					);
 				}
 			}
-			$crate::arch::amd64::idt::Handler::Int(f)
+			f
 		}
 	};
-	(int noreturn savethread $fn:path) => {
+	(noreturn savethread $fn:path) => {
 		{
 			const _: extern "C" fn() -> ! = $fn;
 			#[naked]
@@ -219,36 +267,32 @@ macro_rules! __idt_wrap_handler {
 					);
 				}
 			}
-			$crate::arch::amd64::idt::Handler::Int(f)
+			f
 		}
 	};
 }
 
 #[macro_export]
 macro_rules! wrap_idt {
-	(@INTERNAL [$($type:ident)+] $f:path [$ist:literal]) => {
+	(@INTERNAL [$($type:ident)*] $f:path [$ist:literal]) => {
 		$crate::arch::amd64::idt::IDTEntry::new(
 			1 * 8,
-			$crate::__idt_wrap_handler!($($type)+ $f),
+			$crate::__idt_wrap_handler!($($type)* $f),
 			$ist,
 		)
 	};
-	(trap $f:path) => { $crate::wrap_idt!(@INTERNAL [trap] $f [0]) };
-	(trap error $f:path) => { $crate::wrap_idt!(@INTERNAL [trap error] $f [0]) };
-	(trap error $f:path [$ist:literal]) => { $crate::wrap_idt!(@INTERNAL [trap error] $f [$ist]) };
-	(int $f:path) => { $crate::wrap_idt!(@INTERNAL [int] $f [0]) };
-	(int nmi $f:path) => { $crate::wrap_idt!(@INTERNAL [int nmi] $f [0]) };
-	(int noreturn $f:path) => { $crate::wrap_idt!(@INTERNAL [int noreturn] $f [0]) };
-	(int noreturn savethread $f:path) => {
-		$crate::wrap_idt!(@INTERNAL [int noreturn savethread] $f [0])
+	($f:path) => { $crate::wrap_idt!(@INTERNAL [] $f [0]) };
+	(rip $f:path) => { $crate::wrap_idt!(@INTERNAL [rip] $f [0]) };
+	(error rip $f:path) => { $crate::wrap_idt!(@INTERNAL [error rip] $f [0]) };
+	(error rip $f:path [$ist:literal]) => { $crate::wrap_idt!(@INTERNAL [error rip] $f [$ist]) };
+	(nmi $f:path) => { $crate::wrap_idt!(@INTERNAL [nmi] $f [0]) };
+	(noreturn $f:path) => { $crate::wrap_idt!(@INTERNAL [noreturn] $f [0]) };
+	(noreturn savethread $f:path) => {
+		$crate::wrap_idt!(@INTERNAL [noreturn savethread] $f [0])
 	};
 }
 
-#[derive(Clone, Copy)]
-pub enum Handler {
-	Int(unsafe extern "C" fn()),
-	Trap(unsafe extern "C" fn()),
-}
+pub type Handler = unsafe extern "C" fn();
 
 #[repr(C)]
 pub struct IDTEntry {
@@ -262,7 +306,12 @@ pub struct IDTEntry {
 }
 
 impl IDTEntry {
+	/// Disables interrupts on ISR call. This has nothing to do with the actual type of interrupt
+	/// or exception.
 	const ATTRIBUTE_GATETYPE_INTERRUPT: u8 = 0xe;
+	/// Keep interrupts enabled on ISR call. This has nothing to do with the actual type of
+	/// interrupt or exception.
+	#[allow(dead_code)]
 	const ATTRIBUTE_GATETYPE_TRAP: u8 = 0xf;
 	const ATTRIBUTE_PRESENT: u8 = 0x80;
 	const ATTRIBUTE_DPL: u8 = 0x00;
@@ -279,19 +328,14 @@ impl IDTEntry {
 
 	pub fn new(selector: u16, handler: Handler, ist: u8) -> Self {
 		assert!(ist < 8, "ist out of bounds");
-		let (handler, is_trap) = match handler {
-			Handler::Int(h) => (h as usize, false),
-			Handler::Trap(h) => (h as usize, true),
-		};
+		let handler = handler as u64;
 		Self {
 			offset_low: (handler >> 0) as u16,
 			selector,
 			ist,
 			type_attributes: Self::ATTRIBUTE_PRESENT
 				| Self::ATTRIBUTE_DPL
-				| is_trap
-					.then(|| Self::ATTRIBUTE_GATETYPE_TRAP)
-					.unwrap_or(Self::ATTRIBUTE_GATETYPE_INTERRUPT),
+				| Self::ATTRIBUTE_GATETYPE_INTERRUPT,
 			offset_high: (handler >> 16) as u16,
 			offset_higher: (handler >> 32) as u32,
 			_unused_1: 0,

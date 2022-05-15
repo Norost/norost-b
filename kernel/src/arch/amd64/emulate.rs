@@ -191,11 +191,7 @@ pub(super) unsafe fn init() {
 	unsafe {
 		idt_set(
 			6,
-			IDTEntry::new(
-				gdt::GDT::KERNEL_CS,
-				idt::Handler::Trap(handle_invalid_opcode),
-				0,
-			),
+			IDTEntry::new(gdt::GDT::KERNEL_CS, handle_invalid_opcode, 0),
 		);
 	}
 }
