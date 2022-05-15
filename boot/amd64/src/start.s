@@ -8,14 +8,11 @@
 # identity-mapping it.
 .section	.init
 _start:
-	# Disable interrupts
-	cli
-
 	# Set up stack
 	lea		esp, [stack_top]
 	mov		ebp, esp
 
-	sub		esp, 12		# Reserve space for u64 returned value and u32 PML4 address
+	sub		esp, 16		# Reserve space for u64 returned value and u32 PML4 address
 	push	esp
 	mov		ecx, eax	# multiboot2 magic value
 	mov		edx, ebx	# multiboot2 information structure
