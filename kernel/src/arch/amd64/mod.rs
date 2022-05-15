@@ -17,8 +17,8 @@ use core::sync::atomic::{AtomicU8, Ordering};
 pub use gdt::GDT;
 pub use idt::{Handler, IDTEntry};
 pub use syscall::{
-	clear_current_thread, current_process, current_thread, current_thread_weak, set_current_thread,
-	CpuData, ThreadData,
+	clear_current_thread, current_process, current_thread, current_thread_ptr, current_thread_weak,
+	set_current_thread, CpuData, ThreadData,
 };
 
 /// The IRQ used by the timer.

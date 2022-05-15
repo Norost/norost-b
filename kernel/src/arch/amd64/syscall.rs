@@ -91,7 +91,10 @@ macro_rules! gs_load {
 	}};
 	(thread) => {{
 		let v: *const Thread;
-		core::arch::asm!("mov {}, gs:[3 * 8]", out(reg) v);
+		#[allow(unused_unsafe)]
+		unsafe {
+			core::arch::asm!("mov {}, gs:[3 * 8]", out(reg) v);
+		}
 		v
 	}};
 	(cpu_stack_ptr) => {{
@@ -269,9 +272,8 @@ pub fn current_process() -> Option<Arc<Process>> {
 
 pub fn current_thread() -> Option<Arc<Thread>> {
 	unsafe {
-		let thread = gs_load!(thread);
-		(!thread.is_null()).then(|| {
-			let thread = Arc::from_raw(thread);
+		current_thread_ptr().map(|thread| {
+			let thread = Arc::from_raw(thread.as_ptr());
 			// Intentionally leak as CpuData doesn't actually have ownership of the Arc.
 			let _ = Arc::into_raw(thread.clone());
 			thread
@@ -281,14 +283,18 @@ pub fn current_thread() -> Option<Arc<Thread>> {
 
 pub fn current_thread_weak() -> Option<Weak<Thread>> {
 	unsafe {
-		let thread = gs_load!(thread);
-		(!thread.is_null()).then(|| {
-			let thread = Arc::from_raw(thread);
+		current_thread_ptr().map(|thread| {
+			let thread = Arc::from_raw(thread.as_ptr());
 			let weak = Arc::downgrade(&thread);
 			let _ = Arc::into_raw(thread);
 			weak
 		})
 	}
+}
+
+#[inline(always)]
+pub fn current_thread_ptr() -> Option<NonNull<Thread>> {
+	NonNull::new(gs_load!(thread) as *mut _)
 }
 
 pub(super) fn cpu_stack() -> *mut () {

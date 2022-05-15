@@ -1,18 +1,21 @@
 use crate::scheduler::Thread;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::{
+	ptr,
+	sync::atomic::{AtomicPtr, Ordering},
+};
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.
 pub struct Mutex<T> {
-	lock: AtomicU8,
+	lock: AtomicPtr<Thread>,
 	value: UnsafeCell<T>,
 }
 
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
-			lock: AtomicU8::new(0),
+			lock: AtomicPtr::new(ptr::null_mut()),
 			value: UnsafeCell::new(value),
 		}
 	}
@@ -24,14 +27,21 @@ impl<T> Mutex<T> {
 			crate::arch::interrupts_enabled(),
 			"interrupts are disabled. Is the mutex being locked inside an ISR?"
 		);
-		// TODO detect double locks by same thread
+		let thread = Thread::current_ptr()
+			.expect("a mutex cannot be locked outside a thread")
+			.as_ptr();
 		loop {
-			match self
-				.lock
-				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
-			{
+			match self.lock.compare_exchange(
+				ptr::null_mut(),
+				thread,
+				Ordering::Acquire,
+				Ordering::Relaxed,
+			) {
 				Ok(_) => return Guard { lock: self },
-				Err(_) => Thread::yield_current(),
+				Err(cur) => {
+					assert_ne!(thread, cur, "deadlock: same thread acquired lock twice");
+					Thread::yield_current();
+				}
 			}
 		}
 	}
@@ -76,11 +86,11 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
-		debug_assert_ne!(
+		debug_assert_eq!(
 			self.lock.lock.load(Ordering::Relaxed),
-			0,
-			"lock was released"
+			Thread::current_ptr().unwrap().as_ptr(),
+			"lock is not held by this thread"
 		);
-		self.lock.lock.store(0, Ordering::Release);
+		self.lock.lock.store(ptr::null_mut(), Ordering::Release);
 	}
 }

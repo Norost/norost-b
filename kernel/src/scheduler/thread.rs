@@ -329,6 +329,11 @@ impl Thread {
 		arch::amd64::current_thread_weak()
 	}
 
+	#[inline(always)]
+	pub fn current_ptr() -> Option<NonNull<Self>> {
+		arch::amd64::current_thread_ptr()
+	}
+
 	/// Whether this thread has been destroyed.
 	pub fn destroyed(&self) -> bool {
 		self.destroyed.get()
