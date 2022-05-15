@@ -33,7 +33,7 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
-	pub fn new() -> Result<Self, crate::memory::frame::AllocateContiguousError> {
+	pub fn new() -> Result<Self, crate::memory::frame::AllocateError> {
 		Ok(Self {
 			mmu_address_space: r#virtual::AddressSpace::new()?,
 			objects: Default::default(),

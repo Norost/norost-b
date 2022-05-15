@@ -15,9 +15,9 @@ pub struct AddressSpace {
 static mut DEFAULT_ADDRESS_SPACE: MaybeUninit<AddressSpace> = MaybeUninit::uninit();
 
 impl AddressSpace {
-	pub fn new() -> Result<Self, frame::AllocateContiguousError> {
+	pub fn new() -> Result<Self, frame::AllocateError> {
 		let mut ppn = None;
-		frame::allocate(1, |f| ppn = Some(f), 0 as _, 0).unwrap();
+		frame::allocate(1, |f| ppn = Some(f), 0 as _, 0)?;
 		let ppn = ppn.unwrap();
 		unsafe {
 			ppn.as_ptr().cast::<Page>().write_bytes(0, 1);
