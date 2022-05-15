@@ -151,8 +151,6 @@ pub unsafe fn init() {
 
 		// Setup IDT
 		// https://wiki.osdev.org/Exceptions
-		// FIXME we need to ensure interrupts don't happen during exceptions. It's a flag
-		// somewhere in the IDT apparently...
 		IDT.set(
 			TIMER_IRQ.into(),
 			wrap_idt!(noreturn savethread handle_timer),
