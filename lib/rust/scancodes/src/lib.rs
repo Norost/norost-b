@@ -180,7 +180,7 @@ impl ScanCode {
 			Self::N0 | Self::KeypadN0 => '0',
 			Self::N1 | Self::KeypadN1 => '1',
 			Self::N2 | Self::KeypadN2 => '2',
-			Self::N3 | Self::KeypadN4 => '3',
+			Self::N3 | Self::KeypadN3 => '3',
 			Self::N4 | Self::KeypadN4 => '4',
 			Self::N5 | Self::KeypadN5 => '5',
 			Self::N6 | Self::KeypadN6 => '6',
