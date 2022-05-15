@@ -78,7 +78,11 @@ mod default {
 				unsafe {
 					let new_ptr = self.alloc(new_layout);
 					if new_ptr != ptr::null_mut() {
-						new_ptr.copy_from_nonoverlapping(ptr, old_layout.size());
+						// SAFETY: we're only copying the minimum amount of bytes necessary,
+						// which is guaranteed to fit and won't break our mind when it overflows
+						// into pages it shouldn't.
+						let count = new_layout.size().min(old_layout.size());
+						new_ptr.copy_from_nonoverlapping(ptr, count);
 						self.dealloc(ptr, old_layout);
 					}
 					new_ptr
