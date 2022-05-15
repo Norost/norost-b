@@ -28,9 +28,9 @@ _start:
 	mov		ebp, dword ptr [esp +  4]	# Load entry point (high)
 	mov		esp, dword ptr [esp +  0]	# Load entry point (low)
 
-	# Enable PAE
+	# Enable PAE & PGE
 	mov		ecx, cr4
-	or		ecx, 0x20
+	or		ecx, (1 << 5) | (1 << 4)
 	mov		cr4, ecx
 
 	# Set PML4
@@ -96,7 +96,6 @@ realm64:
 
 	# Jump to kernel entry
 	jmp		rsp
-	ud2
 
 _gdt_ptr64:
 	.word	8 * 3 - 1

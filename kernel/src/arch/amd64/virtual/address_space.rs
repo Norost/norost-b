@@ -73,6 +73,7 @@ impl AddressSpace {
 			loop {
 				match common::get_entry_mut(tbl, address.wrapping_add(i) as u64, 0, 3) {
 					Ok(e) => {
+						debug_assert!(!e.is_present(), "page already set");
 						e.set_page(ppn.as_phys() as u64, user, rwx.w()).unwrap();
 						break;
 					}
@@ -93,6 +94,11 @@ impl AddressSpace {
 		address: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
+		debug_assert_eq!(
+			address.as_ptr() as usize & 0xffff_8000_0000_0000,
+			0,
+			"attempt to unmap non-user page as user page"
+		);
 		unsafe { Self::unmap_common(self.table_mut(), address, count) }
 	}
 
@@ -100,6 +106,11 @@ impl AddressSpace {
 		address: NonNull<Page>,
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
+		debug_assert_eq!(
+			address.as_ptr() as usize & 0xffff_8000_0000_0000,
+			0xffff_8000_0000_0000,
+			"attempt to unmap non-kernel page as kernel page"
+		);
 		unsafe { Self::unmap_common(Self::current(), address, count) }
 	}
 
@@ -109,14 +120,12 @@ impl AddressSpace {
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
 		for i in 0..count.get() {
-			let e = common::get_entry_mut(tbl, address.as_ptr().wrapping_add(i) as u64, 0, 3)
+			let addr = NonNull::new(address.as_ptr().wrapping_add(i)).unwrap();
+			let e = common::get_entry_mut(tbl, addr.as_ptr() as u64, 0, 3)
 				.map_err(|_| UnmapError::Unset)?;
 			e.clear().ok_or(UnmapError::Unset)?;
-		}
-		// Flush the unmapped addresses from the TLB.
-		// TODO avoid flushing the entire TLB.
-		unsafe {
-			asm!("mov {0}, cr3", "mov cr3, {0}", out(reg) _);
+			// Flush the unmapped addresses from the TLB.
+			common::invalidate_page(addr);
 		}
 		Ok(())
 	}
@@ -172,6 +181,7 @@ impl Drop for AddressSpace {
 		// FIXME this is technically unsafe since cr3 may still be loaded with this
 		// address space.
 		unsafe {
+			debug_assert_ne!(self.cr3, current_cr3(), "address space is still in use");
 			// Recursively look for tables & deallocate them
 			dealloc(&self.table()[..256]);
 

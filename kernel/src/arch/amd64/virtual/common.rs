@@ -1,5 +1,9 @@
 use crate::memory::{frame, Page};
-use core::{arch::asm, fmt, ptr};
+use core::{
+	arch::asm,
+	fmt,
+	ptr::{self, NonNull},
+};
 
 // Don't implement copy to avoid accidentally updating stack values instead of
 // entries in a table.
@@ -19,7 +23,6 @@ impl Entry {
 	#[allow(dead_code)]
 	const ACCESSED: u64 = 1 << 5;
 	const PAGE_SIZE: u64 = 1 << 7;
-	#[allow(dead_code)]
 	const GLOBAL: u64 = 1 << 8;
 	#[allow(dead_code)]
 	const AVAILABLE: u64 = 7 << 9;
@@ -42,6 +45,10 @@ impl Entry {
 
 	pub fn is_writeable(&self) -> bool {
 		self.is_present() && self.0 & Self::READ_WRITE > 0
+	}
+
+	pub fn is_global(&self) -> bool {
+		self.is_present() && self.0 & Self::GLOBAL > 0
 	}
 
 	pub fn page(&self) -> Option<u64> {
@@ -86,7 +93,8 @@ impl Entry {
 		// SAFETY: a fully zeroed Entry is valid.
 		unsafe { ptr::write_bytes(tbl, 0, 1) };
 		self.0 = frame | Self::PRESENT;
-		self.0 |= Self::USER * u64::from(u8::from(user));
+		self.0 |= Self::USER * u64::from(user);
+		self.0 |= Self::GLOBAL * u64::from(!user);
 		self.0 |= Self::READ_WRITE;
 		// SAFETY: the table is properly initialized.
 		unsafe { &mut *tbl }
@@ -104,8 +112,9 @@ impl Entry {
 			Err(SetPageError::IsMapped)
 		} else {
 			self.0 = frame | Self::PAGE_SIZE | Self::PRESENT;
-			self.0 |= Self::USER * u64::from(u8::from(user));
-			self.0 |= Self::READ_WRITE * u64::from(u8::from(writeable));
+			self.0 |= Self::USER * u64::from(user);
+			self.0 |= Self::GLOBAL * u64::from(!user);
+			self.0 |= Self::READ_WRITE * u64::from(writeable);
 			Ok(())
 		}
 	}
@@ -133,10 +142,11 @@ impl fmt::Debug for Entry {
 		if self.is_present() {
 			write!(
 				f,
-				"present - 0x{:x}, {}, {}",
+				"present - 0x{:x}, {}, {}, {}",
 				self.0 & !0xfff,
 				self.is_leaf().then(|| "leaf").unwrap_or("table"),
 				self.is_user().then(|| "user").unwrap_or("supervisor"),
+				self.is_global().then(|| "global").unwrap_or("not global"),
 			)
 		} else {
 			write!(f, "not present - 0x{:x}", self.0)
@@ -220,4 +230,11 @@ pub unsafe fn virt_to_phys(virt: *const u8) -> u64 {
 pub unsafe fn phys_to_virt(phys: u64) -> *mut u8 {
 	debug_assert!(phys < 1 << 46, "phys out of range");
 	unsafe { IDENTITY_MAP_ADDRESS.add(usize::try_from(phys).unwrap()) }
+}
+
+pub fn invalidate_page(address: NonNull<Page>) {
+	// SAFETY: invlpg is always safe to use.
+	unsafe {
+		asm!("invlpg [{}]", in(reg) address.as_ptr(), options(nostack, preserves_flags));
+	}
 }

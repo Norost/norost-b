@@ -240,20 +240,24 @@ impl PML4 {
 	}
 }
 
+const PRESENT: u64 = 1 << 0;
+const READ_WRITE: u64 = 1 << 1;
+const GLOBAL: u64 = 1 << 8;
+
 impl PML4Entry {
 	const fn new() -> Self {
 		Self(0)
 	}
 
 	fn present(&self) -> bool {
-		self.0 & 1 > 0
+		self.0 & PRESENT > 0
 	}
 
 	/// # Safety
 	///
 	/// `pdp` must be properly initialized.
 	unsafe fn set(&mut self, pdp: *mut DirectoryPointers) {
-		self.0 = pdp as u64 | 1;
+		self.0 = pdp as u64 | PRESENT;
 	}
 
 	fn get(&mut self) -> Option<&mut DirectoryPointers> {
@@ -264,21 +268,21 @@ impl PML4Entry {
 
 impl DirectoryPointersEntry {
 	fn present(&self) -> bool {
-		self.0 & 1 > 0
+		self.0 & PRESENT > 0
 	}
 
 	/// # Safety
 	///
 	/// `pd` must be properly initialized.
 	unsafe fn set(&mut self, pd: *mut Directory) {
-		self.0 = pd as u64 | 1;
+		self.0 = pd as u64 | PRESENT;
 	}
 
 	fn set_giga(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
 		(page & ((1 << 21) - 1) == 0)
 			.then(|| ())
 			.ok_or(SetError::BadAlignment)?;
-		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | 1;
+		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | GLOBAL | PRESENT;
 		Ok(())
 	}
 
@@ -294,21 +298,21 @@ impl DirectoryPointersEntry {
 
 impl DirectoryEntry {
 	fn present(&self) -> bool {
-		self.0 & 1 > 0
+		self.0 & PRESENT > 0
 	}
 
 	/// # Safety
 	///
 	/// `pd` must be properly initialized.
 	unsafe fn set(&mut self, pt: *mut Table) {
-		self.0 = pt as u64 | 1;
+		self.0 = pt as u64 | PRESENT;
 	}
 
 	fn set_mega(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
 		(page & ((1 << 21) - 1) == 0)
 			.then(|| ())
 			.ok_or(SetError::BadAlignment)?;
-		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | 1;
+		self.0 = page | (1 << 7) | rwx_flags(r, w, x)? | GLOBAL | PRESENT;
 		Ok(())
 	}
 
@@ -324,14 +328,14 @@ impl DirectoryEntry {
 
 impl TableEntry {
 	fn present(&self) -> bool {
-		self.0 & 1 > 0
+		self.0 & PRESENT > 0
 	}
 
 	fn set(&mut self, page: u64, r: bool, w: bool, x: bool) -> Result<(), SetError> {
 		(page & ((1 << 12) - 1) == 0)
 			.then(|| ())
 			.ok_or(SetError::BadAlignment)?;
-		self.0 = page | rwx_flags(r, w, x)? | 1;
+		self.0 = page | rwx_flags(r, w, x)? | GLOBAL | PRESENT;
 		Ok(())
 	}
 
@@ -385,11 +389,11 @@ struct BadRWXFlags;
 
 fn rwx_flags(r: bool, w: bool, x: bool) -> Result<u64, BadRWXFlags> {
 	match (r, w, x) {
-		(true, true, true) => Ok(1 << 1),
+		(true, true, true) => Ok(READ_WRITE),
 		(false, true, true) => Err(BadRWXFlags),
 		(true, false, true) => Ok(0),
 		(false, false, true) => Ok(0),
-		(true, true, false) => Ok(1 << 1),
+		(true, true, false) => Ok(READ_WRITE),
 		(false, true, false) => Err(BadRWXFlags),
 		(true, false, false) => Ok(0),
 		(false, false, false) => Err(BadRWXFlags),
