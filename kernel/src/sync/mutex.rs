@@ -24,11 +24,6 @@ impl<T> Mutex<T> {
 			crate::arch::interrupts_enabled(),
 			"interrupts are disabled. Is the mutex being locked inside an ISR?"
 		);
-		self.lock_unchecked()
-	}
-
-	#[track_caller]
-	pub fn lock_unchecked(&self) -> Guard<T> {
 		// TODO detect double locks by same thread
 		loop {
 			match self
@@ -81,6 +76,11 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
+		debug_assert_ne!(
+			self.lock.lock.load(Ordering::Relaxed),
+			0,
+			"lock was released"
+		);
 		self.lock.lock.store(0, Ordering::Release);
 	}
 }

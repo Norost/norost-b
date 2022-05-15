@@ -75,6 +75,8 @@ impl AddressSpace {
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
 	) -> Result<NonNull<Page>, MapError> {
+		// FIXME this will deadlock because there is now a circular dependency
+		// on the heap allocator
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
 
 		let (range, frames, index) = Self::map_object_common(
@@ -145,10 +147,12 @@ impl AddressSpace {
 		count: NonZeroUsize,
 	) -> Result<(), UnmapError> {
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
-		unsafe {
-			Self::unmap_object_common(&mut objects, base, count)?;
+		let obj = unsafe {
 			r#virtual::AddressSpace::kernel_unmap(base, count).unwrap();
-		}
+			Self::unmap_object_common(&mut objects, base, count)?
+		};
+		drop(objects); // Release now to avoid deadlock
+		drop(obj);
 		Ok(())
 	}
 
@@ -156,9 +160,9 @@ impl AddressSpace {
 		objects: &mut Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>,
 		base: NonNull<Page>,
 		count: NonZeroUsize,
-	) -> Result<(), UnmapError> {
+	) -> Result<Option<Arc<dyn MemoryObject>>, UnmapError> {
 		let i = objects.iter().position(|e| e.0.contains(&base)).unwrap();
-		let (range, _obj) = &objects[i];
+		let (range, _) = &objects[i];
 		let end = base
 			.as_ptr()
 			.wrapping_add(count.get())
@@ -167,11 +171,10 @@ impl AddressSpace {
 			.cast();
 		let unmap_range = base..=NonNull::new(end).unwrap();
 		if &unmap_range == range {
-			objects.remove(i);
+			Ok(Some(objects.remove(i).1))
 		} else {
 			todo!("partial unmap");
 		}
-		Ok(())
 	}
 
 	/// Map a virtual address to a physical address.

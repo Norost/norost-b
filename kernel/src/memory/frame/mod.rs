@@ -203,7 +203,6 @@ where
 }
 
 /// Allocate a physically contiguous range of pages.
-#[track_caller]
 pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
 	dumb_stack::STACK
 		.auto_lock()

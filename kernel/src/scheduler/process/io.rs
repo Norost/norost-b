@@ -111,8 +111,8 @@ impl super::Process {
 			.find(|q| q.user_ptr == base)
 			.ok_or(ProcessQueueError::InvalidAddress)?;
 
-		let mut objects = self.objects.lock();
 		let mut queries = self.queries.lock();
+		let mut objects = self.objects.lock();
 
 		// Poll tickets first as it may shrink the ticket Vec.
 		poll_tickets(queue, &mut objects, &mut queries);
@@ -382,9 +382,13 @@ impl super::Process {
 				break;
 			}
 
-			let polls = poll_tickets(queue, &mut self.objects.lock(), &mut self.queries.lock());
-			if polls > 0 {
-				break;
+			{
+				let mut queries = self.queries.lock();
+				let mut objects = self.objects.auto_lock();
+				let polls = poll_tickets(queue, &mut objects, &mut queries);
+				if polls > 0 {
+					break;
+				}
 			}
 
 			// Prevent blocking other threads.

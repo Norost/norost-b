@@ -102,8 +102,8 @@ impl super::Process {
 			core::slice::from_raw_parts(data[0].as_ptr().cast::<u8>(), Page::SIZE * data.len())
 		};
 
-		let slf = Self::new()?;
-		*slf.objects.lock_unchecked() = objects;
+		let slf = Self::new().map_err(ElfError::AllocateError)?;
+		*slf.objects.auto_lock() = objects;
 
 		(data.len() >= 16)
 			.then(|| ())

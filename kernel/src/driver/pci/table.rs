@@ -52,7 +52,7 @@ impl Object for PciTable {
 		Ticket::new_complete(
 			path_to_bdf(path)
 				.and_then(|(bus, dev, func)| {
-					let pci = super::PCI.lock();
+					let pci = super::PCI.auto_lock();
 					pci.as_ref()
 						.unwrap()
 						.get(bus, dev, func)
@@ -99,7 +99,7 @@ impl Iterator for QueryTags {
 	type Item = Ticket<QueryResult>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let pci = super::PCI.lock();
+		let pci = super::PCI.auto_lock();
 		let pci = pci.as_ref().unwrap();
 		while self.index < 0x100 << 8 {
 			let (bus, dev, func) = n_to_bdf(self.index.into()).unwrap();

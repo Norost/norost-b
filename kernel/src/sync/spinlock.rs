@@ -140,6 +140,11 @@ impl<T> DerefMut for Guard<'_, T> {
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
 		ensure_interrupts_off();
+		debug_assert_ne!(
+			self.lock.lock.load(Ordering::Relaxed),
+			0,
+			"lock was released"
+		);
 		self.lock.lock.store(0, Ordering::Release);
 		crate::arch::enable_interrupts();
 	}
@@ -162,6 +167,11 @@ impl<T> DerefMut for IsrGuard<'_, T> {
 impl<T> Drop for IsrGuard<'_, T> {
 	fn drop(&mut self) {
 		ensure_interrupts_off();
+		debug_assert_ne!(
+			self.lock.lock.load(Ordering::Relaxed),
+			0,
+			"lock was released"
+		);
 		self.lock.lock.store(0, Ordering::Release);
 	}
 }

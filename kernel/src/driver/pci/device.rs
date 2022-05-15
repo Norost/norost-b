@@ -59,7 +59,7 @@ impl Object for PciDevice {
 		}
 
 		let index = usize::try_from(offset - 1).ok()?;
-		let pci = PCI.lock();
+		let pci = PCI.auto_lock();
 		let pci = pci.as_ref().unwrap();
 		let header = pci.get(self.bus, self.device, 0).unwrap();
 		let bar = header.base_addresses().get(index)?;

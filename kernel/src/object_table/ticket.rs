@@ -73,7 +73,7 @@ impl<T> Future for Ticket<T> {
 	type Output = Result<T, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		let mut t = self.inner.lock();
+		let mut t = self.inner.auto_lock();
 		if let Some(s) = t.status.take() {
 			return Poll::Ready(s);
 		}

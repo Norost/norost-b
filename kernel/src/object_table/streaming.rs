@@ -34,7 +34,7 @@ impl StreamingTable {
 		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
 
 		loop {
-			let j = self.job_handlers.lock().pop();
+			let j = self.job_handlers.auto_lock().pop();
 			if let Some(w) = j {
 				if let Ok(mut w) = w.lock() {
 					self.tickets
@@ -44,7 +44,7 @@ impl StreamingTable {
 					break;
 				}
 			} else {
-				let mut l = self.jobs.lock();
+				let mut l = self.jobs.auto_lock();
 				l.push((StreamJob { job_id, job }, Some(ticket_waker.into()), prefix));
 				break;
 			}
@@ -76,20 +76,20 @@ impl StreamingTable {
 
 impl Table for StreamingTable {
 	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
-		let job = self.jobs.lock().pop().map(|(job, tkt, prefix)| {
+		let job = self.jobs.auto_lock().pop().map(|(job, tkt, prefix)| {
 			tkt.map(|tkt| self.tickets.auto_lock().push((job.job_id, tkt, prefix)));
 			(job.job_id, job.job)
 		});
 		let s = Arc::downgrade(&self);
 		let (job, waker) = JobTask::new(s, job);
-		self.job_handlers.lock().push(waker);
+		self.job_handlers.auto_lock().push(waker);
 		job
 	}
 
 	fn finish_job(self: Arc<Self>, job: Result<JobResult, Error>, job_id: JobId) -> Result<(), ()> {
 		let (tw, mut prefix);
 		{
-			let mut c = self.tickets.lock();
+			let mut c = self.tickets.auto_lock();
 			let mut c = c.drain_filter(|e| e.0 == job_id);
 			(_, tw, prefix) = c.next().ok_or(())?;
 			assert!(c.next().is_none());

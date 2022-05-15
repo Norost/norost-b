@@ -29,7 +29,7 @@ impl Object for ScancodeReader {
 	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		if length == 0 {
 			Ticket::new_complete(Ok([].into()))
-		} else if let Some(s) = super::EVENTS.lock().pop() {
+		} else if let Some(s) = super::EVENTS.auto_lock().pop() {
 			Ticket::new_complete(Ok(<[u8; 4]>::from(s).into()))
 		} else {
 			let (ticket, waker) = Ticket::new();

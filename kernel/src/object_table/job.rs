@@ -71,7 +71,7 @@ impl JobTask {
 
 impl Drop for JobTask {
 	fn drop(&mut self) {
-		match mem::replace(&mut *self.shared.lock(), JobInner::Cancelled) {
+		match mem::replace(&mut *self.shared.auto_lock(), JobInner::Cancelled) {
 			JobInner::Active { job, table, .. } => {
 				job.map(|job| Weak::upgrade(&table).map(|t| t.cancel_job(job.0)));
 			}
@@ -84,7 +84,7 @@ impl Future for JobTask {
 	type Output = Result<(JobId, JobRequest), Cancelled>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		match &mut *self.shared.lock() {
+		match &mut *self.shared.auto_lock() {
 			JobInner::Active { waker, job, .. } => {
 				if let Some(s) = job.take() {
 					Poll::Ready(Ok(s))

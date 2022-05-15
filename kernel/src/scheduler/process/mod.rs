@@ -22,7 +22,7 @@ pub struct Process {
 	address_space: SpinLock<AddressSpace>,
 	hint_color: u8,
 	threads: SpinLock<Arena<Arc<Thread>, u8>>,
-	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
+	objects: SpinLock<Arena<Arc<dyn Object>, u8>>,
 	queries: Mutex<Arena<Box<dyn Query>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
 }
@@ -52,7 +52,7 @@ impl From<JobTask> for TicketOrJob {
 }
 
 impl Process {
-	fn new() -> Result<Self, frame::AllocateContiguousError> {
+	fn new() -> Result<Self, frame::AllocateError> {
 		Ok(Self {
 			address_space: SpinLock::new(AddressSpace::new()?),
 			hint_color: 0,

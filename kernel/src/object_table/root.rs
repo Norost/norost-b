@@ -1,5 +1,5 @@
 use super::{Error, Object, Query, QueryResult, StreamingTable, Ticket};
-use crate::sync::Mutex;
+use crate::sync::SpinLock;
 use alloc::{
 	boxed::Box,
 	collections::BTreeMap,
@@ -22,20 +22,20 @@ use alloc::{
 /// process/
 /// ```
 pub struct Root {
-	objects: Mutex<BTreeMap<Box<[u8]>, Weak<dyn Object>>>,
+	objects: SpinLock<BTreeMap<Box<[u8]>, Weak<dyn Object>>>,
 }
 
 impl Root {
 	/// Create a new root
 	pub fn new() -> Self {
 		Self {
-			objects: Mutex::new(BTreeMap::new()),
+			objects: SpinLock::new(BTreeMap::new()),
 		}
 	}
 
 	/// Add a new object to the root.
 	pub fn add(&self, name: impl Into<Box<[u8]>>, object: Weak<dyn Object>) {
-		self.objects.lock_unchecked().insert(name.into(), object);
+		self.objects.auto_lock().insert(name.into(), object);
 	}
 
 	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], &'a [u8])> {
@@ -43,7 +43,7 @@ impl Root {
 			.iter()
 			.position(|c| *c == b'/')
 			.map_or((path, &b""[..]), |i| (&path[..i], &path[i + 1..]));
-		let mut objects = self.objects.lock();
+		let mut objects = self.objects.auto_lock();
 		if let Some(obj) = objects.get(object) {
 			if let Some(obj) = Weak::upgrade(&obj) {
 				Some((obj, object, rest))
@@ -70,7 +70,7 @@ impl Object for Root {
 			impl<I: Iterator<Item = Ticket<QueryResult>>> Query for Q<I> {}
 
 			// Filter any dead objects before querying.
-			let mut objects = self.objects.lock();
+			let mut objects = self.objects.auto_lock();
 			objects.retain(|_, v| v.strong_count() > 0);
 			Ticket::new_complete(Ok(Box::new(Q(objects
 				.keys()
@@ -104,7 +104,7 @@ impl Object for Root {
 				Ticket::new_complete(if path.contains(&b'/') {
 					Err(Error::DoesNotExist)
 				} else {
-					let mut objects = self.objects.lock();
+					let mut objects = self.objects.auto_lock();
 					let tbl = StreamingTable::new() as Arc<dyn Object>;
 					let r = objects.insert(path.into(), Arc::downgrade(&tbl));
 					assert!(r.is_none());
