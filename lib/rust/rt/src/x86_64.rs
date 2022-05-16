@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, mem};
 
 pub unsafe fn set_tls(tls: *mut ()) {
 	unsafe {
@@ -152,49 +152,41 @@ unsafe extern "C" fn memset(dest: *mut u8, c: u8, n: usize) -> *mut u8 {
 // See lib.rs
 #[linkage = "weak"]
 #[export_name = "memcmp"]
-#[naked]
 unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
 	unsafe {
-		// rep cmpsb is very slow, so implement something manually
-		//  - benchmark on 2G data: 65ms manual version vs 810ms rep cmpsb
-		asm!(
-			"mov r8, rdx",
-			"and r8, ~0x7",
-			"add r8, rdi",
-			"add rdx, rdi",
-			// make equal so if n == 0 then eax - ecx == 0 too
-			"mov eax, ecx",
-			// Compare in chunks of 8 bytes
-			"jmp 3f",
-			"2:",
-			"mov rax, QWORD PTR [rdi]",
-			// if non-zero, one of the bytes differs
-			// don't increase rdi/rsi & rescan with byte loads
-			"cmp rax, QWORD PTR [rsi]",
-			"jne 4f",
-			// see above
-			"add rdi, 8",
-			"add rsi, 8",
-			"3:",
-			"cmp rdi, r8",
-			"jnz 2b",
-			"4:",
-			// Compare individual bytes
-			"jmp 3f",
-			"2:",
-			"movsx eax, BYTE PTR [rdi]",
-			"movsx ecx, BYTE PTR [rsi]",
-			"cmp eax, ecx",
-			"jne 4f",
-			"inc rdi",
-			"inc rsi",
-			"3:",
-			"cmp rdi, rdx",
-			"jnz 2b",
-			"4:",
-			"sub eax, ecx",
-			"ret",
-			options(noreturn),
-		);
+		#[inline]
+		unsafe fn cmp<T, U, F>(mut a: *const T, mut b: *const T, n: usize, f: F) -> i32
+		where
+			T: Clone + Copy + Eq,
+			U: Clone + Copy + Eq,
+			F: FnOnce(*const U, *const U, usize) -> i32,
+		{
+			for _ in 0..n / mem::size_of::<T>() {
+				unsafe {
+					if a.read_unaligned() != b.read_unaligned() {
+						return f(a.cast(), b.cast(), mem::size_of::<T>());
+					}
+					a = a.add(1);
+					b = b.add(1);
+				}
+			}
+			f(a.cast(), b.cast(), n % mem::size_of::<T>())
+		}
+		let c1 = |mut a: *const u8, mut b: *const u8, n| {
+			for _ in 0..n {
+				if a.read() != b.read() {
+					return i32::from(a.read()) - i32::from(b.read());
+				}
+				a = a.add(1);
+				b = b.add(1);
+			}
+			0
+		};
+		let c2 = |a: *const u16, b, n| cmp(a, b, n, c1);
+		let c4 = |a: *const u32, b, n| cmp(a, b, n, c2);
+		let c8 = |a: *const u64, b, n| cmp(a, b, n, c4);
+		let c16 = |a: *const u128, b, n| cmp(a, b, n, c8);
+		let c32 = |a: *const [u128; 2], b, n| cmp(a, b, n, c16);
+		c32(a.cast(), b.cast(), n)
 	}
 }
