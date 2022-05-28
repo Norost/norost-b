@@ -1,0 +1,259 @@
+From da2d61820465a0c390356866d42bdab30b229c16 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Wed, 23 Feb 2022 01:36:10 +0100
+Subject: [PATCH 02/41] Add targets for bootloader & kernel, use proper
+ syscalls
+
+---
+ .../spec/i686_unknown_none_norostbkernel.rs   | 19 ++++++++++
+ compiler/rustc_target/src/spec/mod.rs         |  3 ++
+ .../rustc_target/src/spec/norostb_base.rs     | 11 +++---
+ .../src/spec/norostb_kernel_base.rs           | 16 ++++++++
+ .../spec/x86_64_unknown_none_norostbkernel.rs | 19 ++++++++++
+ .../src/spec/x86_64_unknown_norostb.rs        | 24 +++++-------
+ library/std/src/sys/norostb/common.rs         |  7 +---
+ library/std/src/sys/norostb/stdio.rs          | 38 ++++++++++++++-----
+ 8 files changed, 102 insertions(+), 35 deletions(-)
+ create mode 100644 compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
+ create mode 100644 compiler/rustc_target/src/spec/norostb_kernel_base.rs
+ create mode 100644 compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+
+diff --git a/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
+new file mode 100644
+index 00000000000..7d5e1b48d81
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
+@@ -0,0 +1,19 @@
++use crate::spec::{Target, TargetOptions};
++
++pub fn target() -> Target {
++    Target {
++        llvm_target: "i686-unknown-none".into(),
++        pointer_width: 32,
++        data_layout:
++            "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-f64:32:64-f80:32-n8:16:32-S128".into(),
++        arch: "x86".into(),
++        options: TargetOptions {
++            cpu: "i686".into(),
++            max_atomic_width: Some(32),
++            features:
++                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
++                    .into(),
++            ..super::norostb_kernel_base::opts()
++        },
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index b0adaf97549..e08104b4741 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -74,6 +74,7 @@
+ mod msvc_base;
+ mod netbsd_base;
+ mod norostb_base;
++mod norostb_kernel_base;
+ mod openbsd_base;
+ mod redox_base;
+ mod solaris_base;
+@@ -1035,6 +1036,8 @@ fn $module() {
+     ("mips64-openwrt-linux-musl", mips64_openwrt_linux_musl),
+ 
+     ("x86_64-unknown-norostb", x86_64_unknown_norostb),
++    ("i686-unknown-none-norostbkernel", i686_unknown_none_norostbkernel),
++    ("x86_64-unknown-none-norostbkernel", x86_64_unknown_none_norostbkernel),
+ }
+ 
+ /// Cow-Vec-Str: Cow<'static, [Cow<'static, str>]>
+diff --git a/compiler/rustc_target/src/spec/norostb_base.rs b/compiler/rustc_target/src/spec/norostb_base.rs
+index 4e97c0c270a..351dc2443c6 100644
+--- a/compiler/rustc_target/src/spec/norostb_base.rs
++++ b/compiler/rustc_target/src/spec/norostb_base.rs
+@@ -1,8 +1,9 @@
+-use crate::spec::{LinkerFlavor, LldFlavor, TargetOptions, LinkArgs, PanicStrategy};
++use crate::spec::{LinkArgs, LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
+ 
+ pub fn opts() -> TargetOptions {
+-	let mut pre_link_args = LinkArgs::new();
+-	pre_link_args.insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
++    let mut pre_link_args = LinkArgs::new();
++    pre_link_args
++        .insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
+     TargetOptions {
+         os: "norostb".into(),
+         executables: true,
+@@ -11,8 +12,8 @@ pub fn opts() -> TargetOptions {
+         //linker: Some("rust-lld".into()),
+         linker: Some("ld.lld".into()),
+         linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
+-		pre_link_args,
+-		panic_strategy: PanicStrategy::Abort,
++        pre_link_args,
++        panic_strategy: PanicStrategy::Abort,
+         ..Default::default()
+     }
+ }
+diff --git a/compiler/rustc_target/src/spec/norostb_kernel_base.rs b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
+new file mode 100644
+index 00000000000..f1daa1c5e8f
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
+@@ -0,0 +1,16 @@
++use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
++
++pub fn opts() -> TargetOptions {
++    TargetOptions {
++        executables: true,
++        static_position_independent_executables: true,
++        disable_redzone: true,
++        // TODO figure out why rust-lld is missing from stage2 folder and/or
++        // why the one in $PATH isn't used.
++        //linker: Some("rust-lld".into()),
++        linker: Some("ld.lld".into()),
++        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
++        panic_strategy: PanicStrategy::Abort,
++        ..Default::default()
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+new file mode 100644
+index 00000000000..2e71cc9d9a6
+--- /dev/null
++++ b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+@@ -0,0 +1,19 @@
++use crate::spec::{Target, TargetOptions};
++
++pub fn target() -> Target {
++    Target {
++        llvm_target: "x86_64-unknown-none".into(),
++        pointer_width: 64,
++        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
++            .into(),
++        arch: "x86_64".into(),
++        options: TargetOptions {
++            cpu: "x86-64".to_string(),
++            max_atomic_width: Some(64),
++            features:
++                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
++                    .into(),
++            ..super::norostb_kernel_base::opts()
++        },
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
+index e3ba4d9bbb5..4bed0d09bb3 100644
+--- a/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
++++ b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
+@@ -1,22 +1,18 @@
+-use crate::spec::Target;
++use crate::spec::{Target, TargetOptions};
+ 
+ pub fn target() -> Target {
+-	// TODO copied from kernel config. Relax when kernel starts handling certain
+-	// features properly.
+-
+-	let mut base = super::norostb_base::opts();
+-    base.cpu = "x86-64".into();
+-	base.disable_redzone = true;
+-	base.features = "-mmx,-sse,+soft-float".into();
+-    base.max_atomic_width = Some(64);
+-
+     Target {
+         llvm_target: "x86_64-unknown-none".into(),
+         pointer_width: 64,
+-		data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128".into(),
+-		// Causes ICE because it doesn't match LLVM's layout.
+-        //data_layout: "e-m:e-i64:64-f80:128-n8:16:32:64-S128".into(),
++        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
++            .into(),
+         arch: "x86_64".into(),
+-        options: base,
++        options: TargetOptions {
++            cpu: "x86-64".into(),
++            disable_redzone: true,
++            features: "-mmx,-sse,+soft-float".into(),
++            max_atomic_width: Some(64),
++            ..super::norostb_base::opts()
++        },
+     }
+ }
+diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
+index 781757e0e04..2f3ea6d2a99 100644
+--- a/library/std/src/sys/norostb/common.rs
++++ b/library/std/src/sys/norostb/common.rs
+@@ -33,12 +33,7 @@ pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
+ 
+ pub fn abort_internal() -> ! {
+     unsafe {
+-        crate::arch::asm!("
+-			syscall
+-		",
+-		in("eax") 60,
+-		in("edi") 101,
+-		options(noreturn));
++        crate::arch::asm!("hlt; hlt; hlt; ud2", options(noreturn));
+     }
+ }
+ 
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index b2298d3e263..94e7be2a1fe 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -24,13 +24,22 @@ pub const fn new() -> Stdout {
+ 
+ impl io::Write for Stdout {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        let len;
++        let status @ len: usize;
+         unsafe {
+-            crate::arch::asm!("
+-				syscall
+-			", in("eax") 1, in("edi") 1, in("rsi") buf.as_ptr(), in("rdx") buf.len(), lateout("rax") len);
++            crate::arch::asm!(
++                "syscall",
++                in("eax") 0,
++                in("rdi") buf.as_ptr(),
++                in("rsi") buf.len(),
++                lateout("rax") status,
++                lateout("rdx") len,
++                lateout("rcx") _,
++                lateout("r11") _,
++            );
+         }
+-        Ok(len)
++        (status == 0)
++            .then(|| len)
++            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -46,13 +55,22 @@ pub const fn new() -> Stderr {
+ 
+ impl io::Write for Stderr {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        let len;
++        let status @ len: usize;
+         unsafe {
+-            crate::arch::asm!("
+-				syscall
+-			", in("eax") 1, in("edi") 2, in("rsi") buf.as_ptr(), in("rdx") buf.len(), lateout("rax") len);
++            crate::arch::asm!(
++                "syscall",
++                in("eax") 0,
++                in("rdi") buf.as_ptr(),
++                in("rsi") buf.len(),
++                lateout("rax") status,
++                lateout("rdx") len,
++                lateout("rcx") _,
++                lateout("r11") _,
++            );
+         }
+-        Ok(len)
++        (status == 0)
++            .then(|| len)
++            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+-- 
+2.30.2
+

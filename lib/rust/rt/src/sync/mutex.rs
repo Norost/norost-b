@@ -1,12 +1,10 @@
+use super::RawMutex;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicU32, Ordering};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Mutex<T> {
-	// We use an u32 because some platforms such as RISC-V don't have native
-	// u8 or u16 atomic instructions. While it can be emulated it is quite a bit less efficient.
-	lock: AtomicU32,
+	lock: RawMutex,
 	value: UnsafeCell<T>,
 }
 
@@ -16,31 +14,21 @@ pub struct MutexGuard<'a, T>(&'a Mutex<T>);
 #[derive(Debug)]
 pub struct Locked;
 
-const UNLOCKED: u32 = 0;
-const LOCKED: u32 = 1;
-
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
-			lock: AtomicU32::new(UNLOCKED),
+			lock: RawMutex::new(),
 			value: UnsafeCell::new(value),
 		}
 	}
 
 	pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, Locked> {
-		self.lock
-			.compare_exchange(UNLOCKED, LOCKED, Ordering::Acquire, Ordering::Relaxed)
-			.map(|_| MutexGuard(self))
-			.map_err(|_| Locked)
+		self.lock.try_lock().then(|| MutexGuard(self)).ok_or(Locked)
 	}
 
 	pub fn lock(&self) -> MutexGuard<'_, T> {
-		loop {
-			match self.try_lock() {
-				Ok(guard) => break guard,
-				Err(Locked) => {}
-			}
-		}
+		self.lock.lock();
+		MutexGuard(self)
 	}
 }
 
@@ -65,6 +53,6 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
 	fn drop(&mut self) {
-		self.0.lock.store(UNLOCKED, Ordering::Release);
+		self.0.lock.unlock();
 	}
 }

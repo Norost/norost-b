@@ -1,0 +1,69 @@
+From 87cab1f7b98d13a248c1bc31ac98fd1d4eab309e Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Fri, 22 Apr 2022 18:22:34 +0200
+Subject: [PATCH 27/41] Close files on drop
+
+---
+ library/std/src/os/norostb/io.rs  | 4 ++--
+ library/std/src/sys/norostb/fs.rs | 6 ++++++
+ library/std/src/sys/norostb/io.rs | 7 +++++++
+ 3 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
+index dee3f41c70d..9f56dbc6f25 100644
+--- a/library/std/src/os/norostb/io.rs
++++ b/library/std/src/os/norostb/io.rs
+@@ -1,5 +1,5 @@
+ use crate::sys_common::{AsInner, FromInner, IntoInner};
+-use crate::{fs, sys};
++use crate::{fs, mem::ManuallyDrop, sys};
+ 
+ pub type Handle = u32;
+ 
+@@ -23,7 +23,7 @@ fn as_handle(&self) -> Handle {
+ 
+ impl IntoHandle for fs::File {
+     fn into_handle(self) -> Handle {
+-        self.into_inner().handle
++        ManuallyDrop::new(self.into_inner()).handle
+     }
+ }
+ 
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 37c1c28c0dc..87def158b98 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -318,6 +318,12 @@ pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
+     }
+ }
+ 
++impl Drop for File {
++    fn drop(&mut self) {
++        super::io::close(self.handle);
++    }
++}
++
+ impl DirBuilder {
+     pub fn new() -> DirBuilder {
+         DirBuilder {}
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+index 9f8be8bd45c..eabc9ef11ca 100644
+--- a/library/std/src/sys/norostb/io.rs
++++ b/library/std/src/sys/norostb/io.rs
+@@ -232,6 +232,13 @@ pub fn poll(handle: syscall::Handle) -> io::Result<usize> {
+     }
+ }
+ 
++/// Blocking close
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn close(handle: syscall::Handle) {
++    enqueue(Request::close(0, handle));
++}
++
+ /// Create an iterator over all tables.
+ #[unstable(feature = "norostb", issue = "none")]
+ #[inline]
+-- 
+2.30.2
+

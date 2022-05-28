@@ -1,0 +1,26 @@
+From 3dc191aea674fb79c97dd96286205d6e08941c8f Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Fri, 29 Apr 2022 23:50:15 +0200
+Subject: [PATCH 36/41] More specific I/O errors
+
+---
+ library/std/src/sys/norostb/mod.rs | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
+index 098eab958e7..5f58cbcdb05 100644
+--- a/library/std/src/sys/norostb/mod.rs
++++ b/library/std/src/sys/norostb/mod.rs
+@@ -65,5 +65,9 @@ fn cvt_err(err: norostb_rt::Error) -> crate::io::Error {
+     use norostb_rt::Error;
+     match err {
+         Error::Unknown => const_io_error!(ErrorKind::Uncategorized, "uncategorized error"),
++        Error::InvalidOperation => const_io_error!(ErrorKind::Unsupported, "invalid operation"),
++        Error::DoesNotExist => const_io_error!(ErrorKind::NotFound, "does not exist"),
++        Error::AlreadyExists => const_io_error!(ErrorKind::AlreadyExists, "already exists"),
++        Error::Cancelled => const_io_error!(ErrorKind::Uncategorized, "cancelled"),
+     }
+ }
+-- 
+2.30.2
+

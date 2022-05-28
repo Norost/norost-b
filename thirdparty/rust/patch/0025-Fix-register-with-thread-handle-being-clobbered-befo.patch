@@ -1,0 +1,47 @@
+From 9d1bab68deb9e44e6adbda2762fc3075a82fbd30 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Fri, 22 Apr 2022 04:14:28 +0200
+Subject: [PATCH 25/41] Fix register with thread handle being clobbered before
+ syscall::kill_thread
+
+---
+ library/std/src/sys/norostb/thread.rs | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
+index 806b093cbd7..637b716dff0 100644
+--- a/library/std/src/sys/norostb/thread.rs
++++ b/library/std/src/sys/norostb/thread.rs
+@@ -67,16 +67,16 @@ pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
+                     "syscall",
+                     // Kill current thread
+                     "mov eax, {kill_thread}",
+-                    "mov rdi, {handle}",
++                    "mov rdi, r12",
+                     "syscall",
+                     kill_thread = const syscall::ID_KILL_THREAD,
+-                    // "formatting may not be suitable for sub-register argument" ???
+-                    // Hence cast to usize
+-                    handle = in(reg) handle as usize,
+                     in("eax") syscall::ID_DEALLOC,
+                     in("rdi") stack_base,
+                     in("rsi") stack_size,
+                     in("rdx") 0,
++                    // Rust is retarded and doesn't let us specify clobbers with out
++                    // so we have to avoid rax, rdx, rcx and r11 manually *sigh*
++                    in("r12") handle,
+                     options(noreturn, nostack),
+                 );
+             }
+@@ -90,7 +90,7 @@ pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
+ 					mov rsi, [rsp - 8 * 2]
+ 					mov rdx, [rsp - 8 * 3]
+ 					mov rcx, [rsp - 8 * 4]
+-					mov r8d, eax
++					mov r8, rax
+ 					jmp {main}
+ 					",
+                     main = sym main,
+-- 
+2.30.2
+

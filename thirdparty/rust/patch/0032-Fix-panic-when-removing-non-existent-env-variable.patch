@@ -1,0 +1,32 @@
+From 9d6ba56024641b59690fda0368258ece379fd1c2 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Sun, 24 Apr 2022 18:45:17 +0200
+Subject: [PATCH 32/41] Fix panic when removing non-existent env variable.
+
+---
+ library/std/src/sys/norostb/args.rs | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
+index b7e4c274ff3..f14cfc6ae08 100644
+--- a/library/std/src/sys/norostb/args.rs
++++ b/library/std/src/sys/norostb/args.rs
+@@ -129,12 +129,9 @@ pub fn setenv(key: &OsStr, value: &OsStr) -> io::Result<()> {
+ }
+ 
+ pub fn unsetenv(key: &OsStr) -> io::Result<()> {
+-    get_env()
+-        .lock()
+-        .expect("failed to lock environment map")
+-        .remove(key)
+-        .map(|_| ())
+-        .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "environment variable not set"))
++    // Removing non-existent env variables is valid apparently...
++    get_env().lock().expect("failed to lock environment map").remove(key);
++    Ok(())
+ }
+ 
+ /// # Safety
+-- 
+2.30.2
+

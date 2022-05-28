@@ -1,7 +1,7 @@
 mod keyboard;
 
 use crate::{arch::amd64::asm::io, object_table::Root};
-use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTable, AcpiTables};
+use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use core::ptr;
 
 const DATA: u16 = 0x60;
@@ -15,6 +15,7 @@ const CTRL_CFG_PORT_1_INTERRUPT_ENABLED: u8 = 1 << 0;
 const CTRL_CFG_PORT_2_INTERRUPT_ENABLED: u8 = 1 << 1;
 #[allow(dead_code)]
 const CTRL_CFG_SYSTEM_FLAG: u8 = 1 << 2;
+#[allow(dead_code)]
 const CTRL_CFG_PORT_1_CLOCK_DISABLED: u8 = 1 << 4;
 const CTRL_CFG_PORT_2_CLOCK_DISABLED: u8 = 1 << 5;
 const CTRL_CFG_PORT_1_TRANSLATION: u8 = 1 << 6;
@@ -74,6 +75,7 @@ enum Command {
 #[derive(Clone, Copy)]
 enum Port {
 	P1,
+	#[allow(dead_code)]
 	P2,
 }
 

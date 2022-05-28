@@ -1,0 +1,77 @@
+From a6e8ff5e6e691267b42afae2be8c5baf6908c575 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Wed, 20 Apr 2022 18:54:57 +0200
+Subject: [PATCH 23/41] Fix stack of new thread being freed while thread is
+ alive
+
+---
+ library/std/src/sys/norostb/thread.rs         | 24 +++++++------------
+ .../std/src/sys/norostb/thread_local_key.rs   |  3 ++-
+ 2 files changed, 10 insertions(+), 17 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
+index 3a902baabef..50c3963d31d 100644
+--- a/library/std/src/sys/norostb/thread.rs
++++ b/library/std/src/sys/norostb/thread.rs
+@@ -5,7 +5,7 @@
+ use crate::num::NonZeroUsize;
+ use crate::ptr;
+ use crate::time::Duration;
+-use norostb_rt::kernel::syscall;
++use norostb_rt::kernel::syscall::{self, RWX};
+ 
+ pub struct Thread {
+     handle: usize,
+@@ -16,28 +16,20 @@ pub struct Thread {
+ impl Thread {
+     // unsafe: see thread::Builder::spawn_unchecked for safety requirements
+     pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Thread> {
+-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+-        #[repr(align(16))]
+-        struct E([u8; 16]);
+-        #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+-        compile_error!("unknown stack alignment requirements");
+-
+         // Allocate stack
+-        let stack = (stack + mem::size_of::<E>() - 1) / mem::size_of::<E>();
+-        // FIXME we need to allocate new pages so we can use stack guards. Allocating from
+-        // the global allocator puts us at risk of overflowing into other buffers and corrupting
+-        // those.
+-        let mut stack = Box::<[E]>::try_new_uninit_slice(stack)
+-            .map_err(|e| io::Error::new(io::ErrorKind::OutOfMemory, e))?;
++        let (stack, stack_size) = syscall::alloc(None, stack, RWX::RW).map_err(|_| {
++            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to allocate stack space")
++        })?;
++        let stack = stack.cast::<u8>();
+ 
+         // Push closure on the stack of the new thread
+         let (ptr, meta) = Box::into_raw(p).to_raw_parts();
+-        let stack_top = stack.as_mut_ptr().wrapping_add(stack.len()).cast::<usize>();
++        let stack_top = stack.as_ptr().wrapping_add(stack_size.get()).cast::<usize>();
+         let mut stack_ptr = stack_top;
+         let mut push = |v: usize| {
+             stack_ptr = stack_ptr.wrapping_sub(1);
+-            // SAFETY: we will hit a guard page and crash without UB if we go out of bounds
+-            // (we actually don't, see FIXME above)
++            // SAFETY: we will only push two usizes, which should fit well within a single
++            // page.
+             unsafe {
+                 stack_ptr.write(v);
+             }
+diff --git a/library/std/src/sys/norostb/thread_local_key.rs b/library/std/src/sys/norostb/thread_local_key.rs
+index cd369f2aade..0513f6c5bd4 100644
+--- a/library/std/src/sys/norostb/thread_local_key.rs
++++ b/library/std/src/sys/norostb/thread_local_key.rs
+@@ -14,7 +14,8 @@ pub(super) unsafe fn init_thread() {
+         tls::init_thread::<_, ()>(|s| {
+             Ok(NonNull::new(Box::into_raw(Box::<[u8]>::new_uninit_slice(s)) as *mut *mut ())
+                 .unwrap())
+-        }).unwrap_or_else(|_| crate::intrinsics::abort())
++        })
++        .unwrap_or_else(|_| crate::intrinsics::abort())
+     }
+ }
+ 
+-- 
+2.30.2
+

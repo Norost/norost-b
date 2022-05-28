@@ -83,7 +83,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 						pending.try_as_mmio().expect("mmio bar") + u64::from(pending_offset);
 
 					use crate::memory::frame::PPN;
-					use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
+					use crate::memory::r#virtual::AddressSpace;
 
 					let ppn = PPN::try_from_usize((table & !0xfff).try_into().unwrap()).unwrap();
 					AddressSpace::identity_map(ppn, 4096).unwrap();

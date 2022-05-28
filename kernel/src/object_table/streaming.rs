@@ -1,5 +1,5 @@
 use super::*;
-use crate::sync::{Mutex, SpinLock};
+use crate::sync::SpinLock;
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},

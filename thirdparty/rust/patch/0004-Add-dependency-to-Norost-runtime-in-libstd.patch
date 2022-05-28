@@ -1,0 +1,195 @@
+From 59745187771cfddc89eaf089ece1fd014a951a70 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Wed, 23 Feb 2022 17:20:21 +0100
+Subject: [PATCH 04/41] Add dependency to Norost runtime in libstd
+
+---
+ Cargo.lock                                    | 23 ++++++++
+ Cargo.toml                                    |  3 ++
+ .../rustc_target/src/spec/norostb_base.rs     |  6 +--
+ library/std/Cargo.toml                        |  3 ++
+ library/std/src/sys/norostb/stdio.rs          | 53 +++++++------------
+ 5 files changed, 50 insertions(+), 38 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 7154061f4b8..5407223384c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -516,6 +516,10 @@ name = "cfg-if"
+ version = "1.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
++dependencies = [
++ "compiler_builtins",
++ "rustc-std-workspace-core",
++]
+ 
+ [[package]]
+ name = "chalk-derive"
+@@ -2440,6 +2444,24 @@ version = "0.3.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
+ 
++[[package]]
++name = "norostb_kernel"
++version = "0.1.0"
++dependencies = [
++ "compiler_builtins",
++ "rustc-std-workspace-core",
++]
++
++[[package]]
++name = "norostb_rt"
++version = "0.1.0"
++dependencies = [
++ "cfg-if 1.0.0",
++ "compiler_builtins",
++ "norostb_kernel",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "ntapi"
+ version = "0.3.6"
+@@ -4926,6 +4948,7 @@ dependencies = [
+  "hermit-abi 0.2.0",
+  "libc",
+  "miniz_oxide",
++ "norostb_rt",
+  "object 0.26.2",
+  "panic_abort",
+  "panic_unwind",
+diff --git a/Cargo.toml b/Cargo.toml
+index 4e783996064..7e0ea2765bd 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -132,5 +132,8 @@ rustc-std-workspace-core = { path = 'library/rustc-std-workspace-core' }
+ rustc-std-workspace-alloc = { path = 'library/rustc-std-workspace-alloc' }
+ rustc-std-workspace-std = { path = 'library/rustc-std-workspace-std' }
+ 
++# No norostb packages are published to crates.io
++norostb_rt = { path = "../../norost/b/lib/rust/rt" }
++
+ [patch."https://github.com/rust-lang/rust-clippy"]
+ clippy_lints = { path = "src/tools/clippy/clippy_lints" }
+diff --git a/compiler/rustc_target/src/spec/norostb_base.rs b/compiler/rustc_target/src/spec/norostb_base.rs
+index 351dc2443c6..381bf54beed 100644
+--- a/compiler/rustc_target/src/spec/norostb_base.rs
++++ b/compiler/rustc_target/src/spec/norostb_base.rs
+@@ -1,9 +1,6 @@
+-use crate::spec::{LinkArgs, LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
++use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
+ 
+ pub fn opts() -> TargetOptions {
+-    let mut pre_link_args = LinkArgs::new();
+-    pre_link_args
+-        .insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
+     TargetOptions {
+         os: "norostb".into(),
+         executables: true,
+@@ -12,7 +9,6 @@ pub fn opts() -> TargetOptions {
+         //linker: Some("rust-lld".into()),
+         linker: Some("ld.lld".into()),
+         linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
+-        pre_link_args,
+         panic_strategy: PanicStrategy::Abort,
+         ..Default::default()
+     }
+diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
+index 95506fc1eb9..dec2844a08c 100644
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -47,6 +47,9 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
+ [target.wasm32-wasi.dependencies]
+ wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features = false }
+ 
++[target.'cfg(target_os = "norostb")'.dependencies]
++norostb_rt = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
++
+ [features]
+ backtrace = [
+   "gimli-symbolize",
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index 94e7be2a1fe..3b5d76e665b 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -1,4 +1,5 @@
+ use crate::io;
++use norostb_rt::kernel::syscall;
+ 
+ pub struct Stdin;
+ pub struct Stdout;
+@@ -24,22 +25,9 @@ pub const fn new() -> Stdout {
+ 
+ impl io::Write for Stdout {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        let status @ len: usize;
+-        unsafe {
+-            crate::arch::asm!(
+-                "syscall",
+-                in("eax") 0,
+-                in("rdi") buf.as_ptr(),
+-                in("rsi") buf.len(),
+-                lateout("rax") status,
+-                lateout("rdx") len,
+-                lateout("rcx") _,
+-                lateout("r11") _,
+-            );
+-        }
+-        (status == 0)
+-            .then(|| len)
+-            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++        syscall::syslog(buf).map_err(|_| {
++            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
++        })
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -55,22 +43,9 @@ pub const fn new() -> Stderr {
+ 
+ impl io::Write for Stderr {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        let status @ len: usize;
+-        unsafe {
+-            crate::arch::asm!(
+-                "syscall",
+-                in("eax") 0,
+-                in("rdi") buf.as_ptr(),
+-                in("rsi") buf.len(),
+-                lateout("rax") status,
+-                lateout("rdx") len,
+-                lateout("rcx") _,
+-                lateout("r11") _,
+-            );
+-        }
+-        (status == 0)
+-            .then(|| len)
+-            .ok_or(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog"))
++        syscall::syslog(buf).map_err(|_| {
++            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
++        })
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -85,5 +60,17 @@ pub fn is_ebadf(_err: &io::Error) -> bool {
+ }
+ 
+ pub fn panic_output() -> Option<impl io::Write> {
+-    Some(Stderr::new())
++    Some(syscall::SysLog::default())
++}
++
++#[unstable(feature = "norostb", issue = "none")]
++impl io::Write for syscall::SysLog {
++    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
++        self.write_raw(buf);
++        Ok(buf.len())
++    }
++
++    fn flush(&mut self) -> io::Result<()> {
++        Ok(self.flush())
++    }
+ }
+-- 
+2.30.2
+

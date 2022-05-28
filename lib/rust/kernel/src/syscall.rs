@@ -18,7 +18,7 @@ pub const ID_CREATE_IO_QUEUE: usize = 20;
 pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
-use crate::Page;
+use crate::{error, Page};
 use core::arch::asm;
 use core::fmt;
 use core::mem;
@@ -102,9 +102,9 @@ pub fn alloc(
 	base: Option<NonNull<Page>>,
 	size: usize,
 	rwx: RWX,
-) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
+) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
 	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
-	ret2(syscall!(ID_ALLOC(base, size, rwx as usize))).map(|(status, value)| {
+	ret(syscall!(ID_ALLOC(base, size, rwx as usize))).map(|(status, value)| {
 		(
 			NonNull::new(value as *mut _).unwrap(),
 			NonZeroUsize::new(status).unwrap(),
@@ -118,7 +118,7 @@ pub unsafe fn dealloc(
 	size: usize,
 	dealloc_partial_start: bool,
 	dealloc_partial_end: bool,
-) -> Result<(), (NonZeroUsize, usize)> {
+) -> error::Result<()> {
 	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
 	ret(syscall!(ID_DEALLOC(base.as_ptr(), size, flags))).map(|_| ())
 }
@@ -127,8 +127,8 @@ pub unsafe fn dealloc(
 pub fn alloc_dma(
 	base: Option<NonNull<Page>>,
 	size: usize,
-) -> Result<(NonNull<Page>, NonZeroUsize), (NonZeroUsize, usize)> {
-	ret2(syscall!(ID_ALLOC_DMA(
+) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
+	ret(syscall!(ID_ALLOC_DMA(
 		base.map_or_else(ptr::null_mut, NonNull::as_ptr),
 		size
 	)))
@@ -141,8 +141,8 @@ pub fn alloc_dma(
 }
 
 #[inline]
-pub fn physical_address(base: NonNull<Page>) -> Result<usize, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr())))
+pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
+	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr()))).map(|(_, v)| v)
 }
 
 #[inline]
@@ -151,10 +151,10 @@ pub fn map_object(
 	base: Option<NonNull<Page>>,
 	offset: u64,
 	length: usize,
-) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
+) -> error::Result<NonNull<Page>> {
 	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
 	ret(syscall!(ID_MAP_OBJECT(handle, base, offset, length)))
-		.map(|v| NonNull::new(v as *mut _).unwrap())
+		.map(|(_, v)| NonNull::new(v as *mut _).unwrap())
 }
 
 #[inline]
@@ -169,18 +169,18 @@ pub fn sleep(duration: Duration) {
 pub unsafe fn spawn_thread(
 	start: unsafe extern "C" fn() -> !,
 	stack: *const (),
-) -> Result<Handle, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_SPAWN_THREAD(start, stack))).map(|h| h as Handle)
+) -> error::Result<Handle> {
+	ret(syscall!(ID_SPAWN_THREAD(start, stack))).map(|(_, h)| h as Handle)
 }
 
 #[inline]
-pub fn create_root() -> Result<Handle, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_CREATE_ROOT())).map(|v| v as u32)
+pub fn create_root() -> error::Result<Handle> {
+	ret(syscall!(ID_CREATE_ROOT())).map(|(_, v)| v as u32)
 }
 
 #[inline]
-pub fn duplicate_handle(handle: Handle) -> Result<Handle, (NonZeroUsize, usize)> {
-	ret(syscall!(ID_DUPLICATE_HANDLE(handle))).map(|v| v as u32)
+pub fn duplicate_handle(handle: Handle) -> error::Result<Handle> {
+	ret(syscall!(ID_DUPLICATE_HANDLE(handle))).map(|(_, v)| v as u32)
 }
 
 #[inline]
@@ -188,7 +188,7 @@ pub fn create_io_queue(
 	base: Option<NonNull<Page>>,
 	request_p2size: u8,
 	response_p2size: u8,
-) -> Result<NonNull<Page>, (NonZeroUsize, usize)> {
+) -> error::Result<NonNull<Page>> {
 	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
 	let request_p2size = u32::from(request_p2size);
 	let response_p2size = u32::from(response_p2size);
@@ -197,35 +197,37 @@ pub fn create_io_queue(
 		request_p2size,
 		response_p2size
 	)))
-	.map(|v| NonNull::new(v as *mut _).unwrap())
+	.map(|(_, v)| NonNull::new(v as *mut _).unwrap())
 }
 
 #[inline]
-pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> Result<(), (NonZeroUsize, usize)> {
+pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> error::Result<()> {
 	ret(syscall!(ID_DESTROY_IO_QUEUE(base.as_ptr()))).map(|_| ())
 }
 
 #[inline]
-pub fn process_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<usize> {
 	ret(syscall!(ID_PROCESS_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
+	.map(|(_, v)| v)
 }
 
 #[inline]
-pub fn wait_io_queue(base: Option<NonNull<Page>>) -> Result<usize, (NonZeroUsize, usize)> {
+pub fn wait_io_queue(base: Option<NonNull<Page>>) -> error::Result<usize> {
 	ret(syscall!(ID_WAIT_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
+	.map(|(_, v)| v)
 }
 
 #[inline]
-pub fn kill_thread(handle: Handle) -> Result<(), (NonZeroUsize, usize)> {
+pub fn kill_thread(handle: Handle) -> error::Result<()> {
 	ret(syscall!(ID_KILL_THREAD(handle))).map(|_| ())
 }
 
 #[inline]
-pub fn wait_thread(handle: Handle) -> Result<(), (NonZeroUsize, usize)> {
+pub fn wait_thread(handle: Handle) -> error::Result<()> {
 	ret(syscall!(ID_WAIT_THREAD(handle))).map(|_| ())
 }
 
@@ -241,19 +243,8 @@ pub fn exit(code: i32) -> ! {
 	}
 }
 
-fn ret((status, value): (usize, usize)) -> Result<usize, (NonZeroUsize, usize)> {
-	match NonZeroUsize::new(status) {
-		None => Ok(value),
-		Some(status) => Err((status, value)),
-	}
-}
-
-fn ret2((status, value): (usize, usize)) -> Result<(usize, usize), (NonZeroUsize, usize)> {
-	if (status as isize) < 0 {
-		Err((NonZeroUsize::new(status).unwrap(), value))
-	} else {
-		Ok((status, value))
-	}
+fn ret((status, value): (usize, usize)) -> error::Result<(usize, usize)> {
+	error::result(status as isize).map(|status| (status as usize, value))
 }
 
 fn duration_to_micros(t: Duration) -> (usize, Option<usize>) {

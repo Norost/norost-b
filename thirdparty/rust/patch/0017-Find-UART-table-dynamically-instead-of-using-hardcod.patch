@@ -1,0 +1,86 @@
+From 5e1028cd1d623e4e6ef82bbcc13fd39c70327a4c Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Sat, 16 Apr 2022 12:14:57 +0200
+Subject: [PATCH 17/41] Find UART table dynamically instead of using hardcoded
+ table 0
+
+---
+ library/std/src/sys/norostb/io.rs    | 28 +++++++++++++++++++++++++++-
+ library/std/src/sys/norostb/stdio.rs | 17 ++++++++++++++---
+ 2 files changed, 41 insertions(+), 4 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+index 046c84e6975..e454e70d1b1 100644
+--- a/library/std/src/sys/norostb/io.rs
++++ b/library/std/src/sys/norostb/io.rs
+@@ -3,7 +3,7 @@
+ use crate::mem::{self, MaybeUninit};
+ use norostb_rt::kernel::{
+     io::{Job, ObjectInfo, Queue, Request, Response, SeekFrom},
+-    syscall,
++    syscall::{self, TableId, TableInfo},
+ };
+ 
+ #[derive(Copy, Clone)]
+@@ -223,3 +223,29 @@ pub fn seek(handle: syscall::Handle, from: io::SeekFrom) -> io::Result<u64> {
+         Ok(offset)
+     }
+ }
++
++/// Create an iterator over all tables.
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn tables() -> TableIter {
++    TableIter { state: Some(None) }
++}
++
++/// An iterator over all tables.
++#[derive(Clone, Debug)]
++#[unstable(feature = "norostb", issue = "none")]
++pub struct TableIter {
++    state: Option<Option<TableId>>,
++}
++
++impl Iterator for TableIter {
++    type Item = (TableId, TableInfo);
++
++    #[inline]
++    fn next(&mut self) -> Option<Self::Item> {
++        self.state.take().and_then(|id| syscall::next_table(id)).map(|(id, info)| {
++            self.state = Some(Some(id));
++            (id, info)
++        })
++    }
++}
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index f50c6d22965..dc00fcdef64 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -67,10 +67,21 @@ pub fn panic_output() -> Option<impl io::Write> {
+ ///
+ /// Must be called only once during runtime initialization.
+ pub(super) unsafe fn init() {
+-    let stdin = super::io::open(0, b"0").unwrap();
++    // Find the UART table
++    let mut tbl = None;
++    for (id, info) in super::io::tables() {
++        if info.name() == b"uart" {
++            tbl = Some(id);
++            break;
++        }
++    }
++    // If we couldn't find the table, there is absolutely nothing we can do, so just abort.
++    let tbl = tbl.unwrap_or_else(|| core::intrinsics::abort());
++
++    let stdin = super::io::open(tbl, b"0").unwrap();
+     assert_eq!(stdin, STDIN);
+-    let stdout = super::io::open(0, b"0").unwrap();
++    let stdout = super::io::open(tbl, b"0").unwrap();
+     assert_eq!(stdout, STDOUT);
+-    let stderr = super::io::open(0, b"0").unwrap();
++    let stderr = super::io::open(tbl, b"0").unwrap();
+     assert_eq!(stderr, STDERR);
+ }
+-- 
+2.30.2
+

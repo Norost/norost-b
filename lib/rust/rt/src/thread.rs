@@ -140,3 +140,7 @@ impl Thread {
 pub fn sleep(duration: Duration) {
 	syscall::sleep(duration)
 }
+
+pub fn yield_now() {
+	sleep(Duration::ZERO)
+}

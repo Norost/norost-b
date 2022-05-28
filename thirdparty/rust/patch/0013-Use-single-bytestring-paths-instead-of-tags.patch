@@ -1,0 +1,105 @@
+From 653ee394f18aa245768fa8fc8c74c1e84a85ed86 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Wed, 13 Apr 2022 15:29:15 +0200
+Subject: [PATCH 13/41] Use single bytestring paths instead of tags
+
+---
+ library/std/src/os/norostb/mod.rs |  4 ++--
+ library/std/src/sys/norostb/fs.rs | 22 ++++------------------
+ library/std/src/sys/norostb/io.rs |  9 ++++-----
+ 3 files changed, 10 insertions(+), 25 deletions(-)
+
+diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
+index 341a7b02806..2af8960bedd 100644
+--- a/library/std/src/os/norostb/mod.rs
++++ b/library/std/src/os/norostb/mod.rs
+@@ -1,4 +1,4 @@
+ #![unstable(feature = "norostb", issue = "none")]
+ 
+-pub use crate::sys::io::{read, write, open, create, query, query_next, take_job, finish_job};
+-pub use norostb_rt::kernel::syscall::{ObjectInfo, Job};
++pub use crate::sys::io::{create, finish_job, open, query, query_next, read, take_job, write};
++pub use norostb_rt::kernel::syscall::{Job, ObjectInfo};
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 74a4afced30..6c432cd4515 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -30,7 +30,6 @@ pub struct File {
+ }
+ 
+ const TABLE_OBJECT_SEPARATOR: u8 = b'/';
+-const TAG_SEPARATOR: u8 = b',';
+ 
+ #[derive(Clone, Debug)]
+ pub enum FileAttr {
+@@ -135,7 +134,6 @@ impl Iterator for ReadDir {
+     type Item = io::Result<DirEntry>;
+ 
+     fn next(&mut self) -> Option<io::Result<DirEntry>> {
+-        let mut buf = [0; 4096];
+         match mem::replace(self, Self::None) {
+             Self::None => None,
+             Self::Tables(tbl) => syscall::next_table(tbl).map(|(id, info)| {
+@@ -143,24 +141,12 @@ fn next(&mut self) -> Option<io::Result<DirEntry>> {
+                 Ok(DirEntry::Table { id, info })
+             }),
+             Self::Objects { table_id, table_info, query } => {
+-                let mut info = ObjectInfo::new(&mut buf);
++                let mut inner = Vec::with_capacity(4096);
++                inner.resize(4096, 0);
++                let mut info = ObjectInfo::new(&mut inner);
+                 match super::io::query_next(query, &mut info) {
+                     Ok(true) => {
+-                        let inner = if info.tags_count() == 0 {
+-                            Vec::new()
+-                        } else {
+-                            let len =
+-                                (0..info.tags_count()).map(|i| info.tag(i).len()).sum::<usize>()
+-                                    + info.tags_count()
+-                                    - 1;
+-                            let mut inner = Vec::with_capacity(len);
+-                            inner.extend(info.tag(0));
+-                            for t in (1..info.tags_count()).map(|i| info.tag(i)) {
+-                                inner.push(TAG_SEPARATOR);
+-                                inner.extend(t);
+-                            }
+-                            inner
+-                        };
++                        inner.resize(info.path_len, 0);
+                         let name = OsString::from_inner(Buf { inner }).into();
+                         *self = Self::Objects { table_id, table_info: table_info.clone(), query };
+                         Some(Ok(DirEntry::Object { table_id, table_info, name, id: info.id }))
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+index 869373f8381..8d6c4abbe04 100644
+--- a/library/std/src/sys/norostb/io.rs
++++ b/library/std/src/sys/norostb/io.rs
+@@ -71,11 +71,13 @@ fn enqueue(request: Request) -> Response {
+     QUEUE.with(|queue| unsafe {
+         let mut queue = queue.borrow_mut();
+         queue.enqueue_request(request).unwrap();
+-        syscall::process_io_queue(queue.base.as_ptr().cast()).unwrap();
++        let base = queue.base.as_ptr().cast();
++        syscall::process_io_queue(base).unwrap();
+         loop {
+             if let Ok(e) = queue.dequeue_response() {
+                 break e;
+             }
++            syscall::wait_io_queue(base).unwrap();
+         }
+     })
+ }
+@@ -171,10 +173,7 @@ pub fn query(table: syscall::TableId, tags: &[u8]) -> io::Result<syscall::QueryH
+ /// Blocking query_next
+ #[unstable(feature = "norostb", issue = "none")]
+ #[inline]
+-pub fn query_next(
+-    query: syscall::QueryHandle,
+-    info: &mut syscall::ObjectInfo<'_>,
+-) -> io::Result<bool> {
++pub fn query_next(query: syscall::QueryHandle, info: &mut syscall::ObjectInfo) -> io::Result<bool> {
+     let e = enqueue(Request::query_next(0, query, info));
+     if e.value < 0 {
+         Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
+-- 
+2.30.2
+

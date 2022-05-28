@@ -1,0 +1,409 @@
+From 96806a60c0c42a4ae1b93979a3816557618f3ac3 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Sat, 28 May 2022 02:52:19 +0200
+Subject: [PATCH 41/41] Rebase with master branch
+
+---
+ .../spec/x86_64_unknown_none_norostbkernel.rs |  2 +-
+ library/std/src/lib.rs                        | 28 --------
+ library/std/src/sys/norostb/common.rs         | 16 -----
+ .../src/sys/norostb/{ => locks}/condvar.rs    |  2 +-
+ library/std/src/sys/norostb/locks/mod.rs      |  6 ++
+ library/std/src/sys/norostb/locks/mutex.rs    | 32 +++++++++
+ library/std/src/sys/norostb/locks/rwlock.rs   | 46 +++++++++++++
+ library/std/src/sys/norostb/mod.rs            |  4 +-
+ library/std/src/sys/norostb/mutex.rs          | 61 -----------------
+ library/std/src/sys/norostb/rwlock.rs         | 68 -------------------
+ 10 files changed, 87 insertions(+), 178 deletions(-)
+ rename library/std/src/sys/norostb/{ => locks}/condvar.rs (95%)
+ create mode 100644 library/std/src/sys/norostb/locks/mod.rs
+ create mode 100644 library/std/src/sys/norostb/locks/mutex.rs
+ create mode 100644 library/std/src/sys/norostb/locks/rwlock.rs
+ delete mode 100644 library/std/src/sys/norostb/mutex.rs
+ delete mode 100644 library/std/src/sys/norostb/rwlock.rs
+
+diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+index 2e71cc9d9a6..a1ab329068f 100644
+--- a/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
++++ b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
+@@ -8,7 +8,7 @@ pub fn target() -> Target {
+             .into(),
+         arch: "x86_64".into(),
+         options: TargetOptions {
+-            cpu: "x86-64".to_string(),
++            cpu: "x86-64".into(),
+             max_atomic_width: Some(64),
+             features:
+                 "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
+diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
+index 7bb1e444957..6dc3fd98584 100644
+--- a/library/std/src/lib.rs
++++ b/library/std/src/lib.rs
+@@ -224,31 +224,10 @@
+ #![feature(allocator_internals)]
+ #![feature(allow_internal_unsafe)]
+ #![feature(allow_internal_unstable)]
+-#![feature(arbitrary_self_types)]
+-#![feature(array_error_internals)]
+-#![feature(asm_const)]
+-#![feature(asm_sym)]
+-#![feature(assert_matches)]
+-#![feature(associated_type_bounds)]
+-#![feature(async_iterator)]
+-#![feature(atomic_mut_ptr)]
+-#![feature(auto_traits)]
+-#![feature(bench_black_box)]
+-#![feature(bool_to_option)]
+ #![feature(box_syntax)]
+ #![feature(c_unwind)]
+ #![feature(cfg_target_thread_local)]
+ #![feature(concat_idents)]
+-#![feature(const_btree_new)]
+-#![feature(const_fn_floating_point_arithmetic)]
+-#![feature(const_fn_fn_ptr_basics)]
+-#![feature(const_fn_trait_bound)]
+-#![feature(const_format_args)]
+-#![feature(const_io_structs)]
+-#![feature(const_ip)]
+-#![feature(const_ipv4)]
+-#![feature(const_ipv6)]
+-#![feature(const_option)]
+ #![feature(const_mut_refs)]
+ #![feature(const_trait_impl)]
+ #![feature(decl_macro)]
+@@ -265,7 +244,6 @@
+ #![feature(linkage)]
+ #![feature(min_specialization)]
+ #![feature(must_not_suspend)]
+-#![feature(naked_functions)]
+ #![feature(needs_panic_runtime)]
+ #![feature(negative_impls)]
+ #![feature(never_type)]
+@@ -306,12 +284,6 @@
+ #![feature(prelude_2024)]
+ #![feature(ptr_as_uninit)]
+ #![feature(raw_os_nonzero)]
+-#![feature(ptr_internals)]
+-#![feature(ptr_metadata)]
+-#![feature(rustc_attrs)]
+-#![feature(rustc_private)]
+-#![feature(saturating_int_impl)]
+-#![feature(slice_concat_ext)]
+ #![feature(slice_internals)]
+ #![feature(slice_ptr_get)]
+ #![feature(std_internals)]
+diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
+index 78eaf61d8b4..189966b666d 100644
+--- a/library/std/src/sys/norostb/common.rs
++++ b/library/std/src/sys/norostb/common.rs
+@@ -4,10 +4,6 @@ pub mod memchr {
+     pub use core::slice::memchr::{memchr, memrchr};
+ }
+ 
+-// This is not necessarily correct. May want to consider making it part of the
+-// spec definition?
+-use crate::os::raw::c_char;
+-
+ pub fn unsupported<T>() -> std_io::Result<T> {
+     Err(unsupported_err())
+ }
+@@ -30,15 +26,3 @@ pub fn abort_internal() -> ! {
+ pub fn hashmap_random_keys() -> (u64, u64) {
+     (1, 2)
+ }
+-
+-pub unsafe fn strlen(mut s: *const c_char) -> usize {
+-    // SAFETY: The caller must guarantee `s` points to a valid 0-terminated string.
+-    unsafe {
+-        let mut n = 0;
+-        while *s != 0 {
+-            n += 1;
+-            s = s.offset(1);
+-        }
+-        n
+-    }
+-}
+diff --git a/library/std/src/sys/norostb/condvar.rs b/library/std/src/sys/norostb/locks/condvar.rs
+similarity index 95%
+rename from library/std/src/sys/norostb/condvar.rs
+rename to library/std/src/sys/norostb/locks/condvar.rs
+index 35d12a69c8a..8dbe03bad9b 100644
+--- a/library/std/src/sys/norostb/condvar.rs
++++ b/library/std/src/sys/norostb/locks/condvar.rs
+@@ -1,4 +1,4 @@
+-use crate::sys::mutex::Mutex;
++use crate::sys::locks::Mutex;
+ use crate::time::Duration;
+ 
+ pub struct Condvar {}
+diff --git a/library/std/src/sys/norostb/locks/mod.rs b/library/std/src/sys/norostb/locks/mod.rs
+new file mode 100644
+index 00000000000..d412ff152a0
+--- /dev/null
++++ b/library/std/src/sys/norostb/locks/mod.rs
+@@ -0,0 +1,6 @@
++mod condvar;
++mod mutex;
++mod rwlock;
++pub use condvar::{Condvar, MovableCondvar};
++pub use mutex::{MovableMutex, Mutex};
++pub use rwlock::{MovableRwLock, RwLock};
+diff --git a/library/std/src/sys/norostb/locks/mutex.rs b/library/std/src/sys/norostb/locks/mutex.rs
+new file mode 100644
+index 00000000000..fa4bed52aa8
+--- /dev/null
++++ b/library/std/src/sys/norostb/locks/mutex.rs
+@@ -0,0 +1,32 @@
++use norostb_rt::sync::RawMutex;
++
++pub struct Mutex(RawMutex);
++
++pub type MovableMutex = Mutex;
++
++impl Mutex {
++    pub const fn new() -> Mutex {
++        Mutex(RawMutex::new())
++    }
++
++    #[inline]
++    pub unsafe fn init(&mut self) {}
++
++    #[inline]
++    pub unsafe fn lock(&self) {
++        self.0.lock();
++    }
++
++    #[inline]
++    pub unsafe fn unlock(&self) {
++        self.0.unlock()
++    }
++
++    #[inline]
++    pub unsafe fn try_lock(&self) -> bool {
++        self.0.try_lock()
++    }
++
++    #[inline]
++    pub unsafe fn destroy(&self) {}
++}
+diff --git a/library/std/src/sys/norostb/locks/rwlock.rs b/library/std/src/sys/norostb/locks/rwlock.rs
+new file mode 100644
+index 00000000000..410ec269a63
+--- /dev/null
++++ b/library/std/src/sys/norostb/locks/rwlock.rs
+@@ -0,0 +1,46 @@
++use norostb_rt::sync::RawRwLock;
++
++pub struct RwLock(RawRwLock);
++
++pub type MovableRwLock = RwLock;
++
++unsafe impl Sync for RwLock {} // no threads on this platform
++
++impl RwLock {
++    pub const fn new() -> RwLock {
++        RwLock(RawRwLock::new())
++    }
++
++    #[inline]
++    pub unsafe fn read(&self) {
++        self.0.read()
++    }
++
++    #[inline]
++    pub unsafe fn try_read(&self) -> bool {
++        self.0.try_read()
++    }
++
++    #[inline]
++    pub unsafe fn write(&self) {
++        self.0.write()
++    }
++
++    #[inline]
++    pub unsafe fn try_write(&self) -> bool {
++        self.0.try_write()
++    }
++
++    #[inline]
++    pub unsafe fn read_unlock(&self) {
++        self.0.read_unlock()
++    }
++
++    #[inline]
++    pub unsafe fn write_unlock(&self) {
++        self.0.write_unlock()
++    }
++
++    #[inline]
++    pub unsafe fn destroy(&self) {}
++}
+diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
+index 6d692d70ba2..2c60fc8ffc7 100644
+--- a/library/std/src/sys/norostb/mod.rs
++++ b/library/std/src/sys/norostb/mod.rs
+@@ -4,11 +4,10 @@
+ pub mod args;
+ #[path = "../unix/cmath.rs"]
+ pub mod cmath;
+-pub mod condvar;
+ pub mod env;
+ pub mod fs;
+ pub mod io;
+-pub mod mutex;
++pub mod locks;
+ pub mod net;
+ pub mod os;
+ #[path = "../unix/os_str.rs"]
+@@ -17,7 +16,6 @@
+ pub mod path;
+ pub mod pipe;
+ pub mod process;
+-pub mod rwlock;
+ pub mod stdio;
+ pub mod thread;
+ #[cfg(target_thread_local)]
+diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
+deleted file mode 100644
+index b3203c16c50..00000000000
+--- a/library/std/src/sys/norostb/mutex.rs
++++ /dev/null
+@@ -1,61 +0,0 @@
+-use crate::cell::Cell;
+-
+-pub struct Mutex {
+-    // This platform has no threads, so we can use a Cell here.
+-    locked: Cell<bool>,
+-}
+-
+-pub type MovableMutex = Mutex;
+-
+-unsafe impl Send for Mutex {}
+-unsafe impl Sync for Mutex {} // no threads on this platform
+-
+-impl Mutex {
+-    pub const fn new() -> Mutex {
+-        Mutex { locked: Cell::new(false) }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn init(&mut self) {}
+-
+-    #[inline]
+-    pub unsafe fn lock(&self) {
+-        assert_eq!(self.locked.replace(true), false, "cannot recursively acquire mutex");
+-    }
+-
+-    #[inline]
+-    pub unsafe fn unlock(&self) {
+-        self.locked.set(false);
+-    }
+-
+-    #[inline]
+-    pub unsafe fn try_lock(&self) -> bool {
+-        self.locked.replace(true) == false
+-    }
+-
+-    #[inline]
+-    pub unsafe fn destroy(&self) {}
+-}
+-
+-// All empty stubs because this platform does not yet support threads, so lock
+-// acquisition always succeeds.
+-pub struct ReentrantMutex {}
+-
+-impl ReentrantMutex {
+-    pub const unsafe fn uninitialized() -> ReentrantMutex {
+-        ReentrantMutex {}
+-    }
+-
+-    pub unsafe fn init(&self) {}
+-
+-    pub unsafe fn lock(&self) {}
+-
+-    #[inline]
+-    pub unsafe fn try_lock(&self) -> bool {
+-        true
+-    }
+-
+-    pub unsafe fn unlock(&self) {}
+-
+-    pub unsafe fn destroy(&self) {}
+-}
+diff --git a/library/std/src/sys/norostb/rwlock.rs b/library/std/src/sys/norostb/rwlock.rs
+deleted file mode 100644
+index 8438adeb5b5..00000000000
+--- a/library/std/src/sys/norostb/rwlock.rs
++++ /dev/null
+@@ -1,68 +0,0 @@
+-use crate::cell::Cell;
+-
+-pub struct RWLock {
+-    // This platform has no threads, so we can use a Cell here.
+-    mode: Cell<isize>,
+-}
+-
+-pub type MovableRWLock = RWLock;
+-
+-unsafe impl Send for RWLock {}
+-unsafe impl Sync for RWLock {} // no threads on this platform
+-
+-impl RWLock {
+-    pub const fn new() -> RWLock {
+-        RWLock { mode: Cell::new(0) }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn read(&self) {
+-        let m = self.mode.get();
+-        if m >= 0 {
+-            self.mode.set(m + 1);
+-        } else {
+-            rtabort!("rwlock locked for writing");
+-        }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn try_read(&self) -> bool {
+-        let m = self.mode.get();
+-        if m >= 0 {
+-            self.mode.set(m + 1);
+-            true
+-        } else {
+-            false
+-        }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn write(&self) {
+-        if self.mode.replace(-1) != 0 {
+-            rtabort!("rwlock locked for reading")
+-        }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn try_write(&self) -> bool {
+-        if self.mode.get() == 0 {
+-            self.mode.set(-1);
+-            true
+-        } else {
+-            false
+-        }
+-    }
+-
+-    #[inline]
+-    pub unsafe fn read_unlock(&self) {
+-        self.mode.set(self.mode.get() - 1);
+-    }
+-
+-    #[inline]
+-    pub unsafe fn write_unlock(&self) {
+-        assert_eq!(self.mode.replace(0), -1);
+-    }
+-
+-    #[inline]
+-    pub unsafe fn destroy(&self) {}
+-}
+-- 
+2.30.2
+

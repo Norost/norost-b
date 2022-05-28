@@ -1,0 +1,464 @@
+From 2d14b8036f318635d60632e32ae47458de82fb0b Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Fri, 11 Mar 2022 18:01:27 +0100
+Subject: [PATCH 12/41] Use async I/O queue
+
+---
+ library/std/src/os/mod.rs            |   2 +
+ library/std/src/os/norostb/mod.rs    |   4 +
+ library/std/src/sys/norostb/fs.rs    |  75 ++++--------
+ library/std/src/sys/norostb/io.rs    | 163 ++++++++++++++++++++++++++-
+ library/std/src/sys/norostb/stdio.rs |  36 ++----
+ 5 files changed, 199 insertions(+), 81 deletions(-)
+ create mode 100644 library/std/src/os/norostb/mod.rs
+
+diff --git a/library/std/src/os/mod.rs b/library/std/src/os/mod.rs
+index 029f131c40b..dbbae77cb48 100644
+--- a/library/std/src/os/mod.rs
++++ b/library/std/src/os/mod.rs
+@@ -133,6 +133,8 @@ pub mod windows {}
+ pub mod macos;
+ #[cfg(target_os = "netbsd")]
+ pub mod netbsd;
++#[cfg(target_os = "norostb")]
++pub mod norostb;
+ #[cfg(target_os = "openbsd")]
+ pub mod openbsd;
+ #[cfg(target_os = "redox")]
+diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
+new file mode 100644
+index 00000000000..341a7b02806
+--- /dev/null
++++ b/library/std/src/os/norostb/mod.rs
+@@ -0,0 +1,4 @@
++#![unstable(feature = "norostb", issue = "none")]
++
++pub use crate::sys::io::{read, write, open, create, query, query_next, take_job, finish_job};
++pub use norostb_rt::kernel::syscall::{ObjectInfo, Job};
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 407cc0b5207..74a4afced30 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -144,8 +144,8 @@ fn next(&mut self) -> Option<io::Result<DirEntry>> {
+             }),
+             Self::Objects { table_id, table_info, query } => {
+                 let mut info = ObjectInfo::new(&mut buf);
+-                match syscall::query_next(query, &mut info) {
+-                    Ok(()) => {
++                match super::io::query_next(query, &mut info) {
++                    Ok(true) => {
+                         let inner = if info.tags_count() == 0 {
+                             Vec::new()
+                         } else {
+@@ -165,8 +165,7 @@ fn next(&mut self) -> Option<io::Result<DirEntry>> {
+                         *self = Self::Objects { table_id, table_info: table_info.clone(), query };
+                         Some(Ok(DirEntry::Object { table_id, table_info, name, id: info.id }))
+                     }
+-                    // TODO don't hardcode error code
+-                    Err((e, 0)) if e.get() == 1 => None,
++                    Ok(false) => None,
+                     Err(_) => unreachable!("kernel returned unknown error code"),
+                 }
+             }
+@@ -203,7 +202,7 @@ pub fn file_name(&self) -> OsString {
+                 OsString::from_inner(Buf { inner }).into()
+             }
+             Self::Object { id, .. } => {
+-                OsString::from_inner(Buf { inner: id.0.to_string().into() }).into()
++                OsString::from_inner(Buf { inner: id.to_string().into() }).into()
+             }
+         }
+     }
+@@ -252,15 +251,11 @@ pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
+                 return Err(io::const_io_error!(io::ErrorKind::Other, "expected full path"));
+             };
+             let table = find_table(table)?.0;
+-            syscall::create(table, tags, crate::time::Duration::MAX)
+-                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "failed to open object"))
+-                .map(|handle| File { handle })
++            super::io::create(table, tags).map(|handle| File { handle })
+         } else {
+             // Find a unique ID
+             let (table_id, id) = find_unique_object_with_path(path)?;
+-            syscall::open(table_id, id)
+-                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "failed to open object"))
+-                .map(|handle| File { handle })
++            super::io::open(table_id, id).map(|handle| File { handle })
+         }
+     }
+ 
+@@ -283,8 +278,7 @@ pub fn truncate(&self, _size: u64) -> io::Result<()> {
+     }
+ 
+     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+-        syscall::read(self.handle, buf)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "TODO failed read"))
++        super::io::read(self.handle, buf)
+     }
+ 
+     pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+@@ -296,10 +290,9 @@ pub fn is_read_vectored(&self) -> bool {
+     }
+ 
+     pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+-        // SAFETY: we don't deinitialize any part of the buffer/
++        // SAFETY: we don't deinitialize any part of the buffer
+         let s = unsafe { buf.unfilled_mut() };
+-        let len = syscall::read_uninit(self.handle, s)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "TODO failed read"))?;
++        let len = super::io::read_uninit(self.handle, s)?;
+         // SAFETY: the kernel has initialized `len` bytes.
+         unsafe {
+             buf.assume_init(buf.filled().len() + len);
+@@ -309,8 +302,7 @@ pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+     }
+ 
+     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
+-        syscall::write(self.handle, buf)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "TODO failed write"))
++        super::io::write(self.handle, buf)
+     }
+ 
+     pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+@@ -357,19 +349,15 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
+         SplitPath::None => Ok(ReadDir::Tables(None)),
+         SplitPath::Table { table } => {
+             let (table_id, table_info) = find_table(table)?;
+-            let query = syscall::query_table(table_id, &[])
+-                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
++            let query = super::io::query(table_id, &[])?;
+             Ok(ReadDir::Objects { table_id, table_info, query })
+         }
+         SplitPath::Tags { table, tags } => {
+-            let mut t = [Default::default(); 256];
+-            let tags = split_tags(tags, &mut t)?;
+             let (table_id, table_info) = find_table(table)?;
+-            let query = syscall::query_table(table_id, tags)
+-                .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
++            let query = super::io::query(table_id, tags)?;
+             Ok(ReadDir::Objects { table_id, table_info, query })
+         }
+-        SplitPath::Id { table, tags, id } => todo!("{:?}/{:?}/{}", table, tags, id.0),
++        SplitPath::Id { table, tags, id } => todo!("{:?}/{:?}/{}", table, tags, id),
+     }
+ }
+ 
+@@ -488,17 +476,14 @@ fn path_inner(path: &Path) -> &[u8] {
+ 
+ /// Convert an ASCII string to an [`Id`].
+ fn ascii_to_id(s: &[u8]) -> io::Result<Id> {
+-    s.iter()
+-        .try_fold(0, |v, &d| match d {
+-            b'0'..=b'9' => Ok(v + u64::from(d - b'0')),
+-            _ => Err(io::const_io_error!(io::ErrorKind::InvalidInput, "invalid ID digit")),
+-        })
+-        .map(Id)
++    s.iter().try_fold(0, |v, &d| match d {
++        b'0'..=b'9' => Ok(v + u64::from(d - b'0')),
++        _ => Err(io::const_io_error!(io::ErrorKind::InvalidInput, "invalid ID digit")),
++    })
+ }
+ 
+ /// Convert an [`Id`] to an ASCII string.
+-fn id_to_ascii(id: Id, buf: &mut [u8; 20]) -> &[u8] {
+-    let mut id = id.0;
++fn id_to_ascii(mut id: Id, buf: &mut [u8; 20]) -> &[u8] {
+     let mut len = 0;
+     for c in buf.iter_mut().rev() {
+         *c = (id % 10) as u8 + b'0';
+@@ -517,14 +502,10 @@ fn ascii_to_id(s: &[u8]) -> io::Result<Id> {
+ ///
+ /// There are no or multiple objects matching the tags.
+ fn find_unique_object(table_id: TableId, tags: &[u8]) -> io::Result<Id> {
+-    let mut t = [Default::default(); 256];
+-    let tags = split_tags(tags, &mut t)?;
+-    let query = syscall::query_table(table_id, tags)
+-        .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
++    let query = super::io::query(table_id, tags)?;
+     let mut info = ObjectInfo::default();
+-    syscall::query_next(query, &mut info)
+-        .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "no object with tags"))?;
+-    if syscall::query_next(query, &mut ObjectInfo::default()).is_ok() {
++    super::io::query_next(query, &mut info)?;
++    if super::io::query_next(query, &mut ObjectInfo::default()).is_ok() {
+         return Err(io::const_io_error!(io::ErrorKind::Other, "multiple objects with tags"));
+     }
+     return Ok(info.id);
+@@ -548,17 +529,3 @@ fn find_unique_object_with_path(path: &Path) -> io::Result<(TableId, Id)> {
+         }
+     }
+ }
+-
+-/// Split a string of tags separated by commas (`','`).
+-fn split_tags<'a, 'b>(
+-    tags: &'a [u8],
+-    buf: &'b mut [syscall::Slice<'a, u8>; 256],
+-) -> io::Result<&'b [syscall::Slice<'a, u8>]> {
+-    let mut i = 0;
+-    for t in tags.split(|c| *c == TAG_SEPARATOR) {
+-        let e = io::const_io_error!(io::ErrorKind::InvalidInput, "too many tags");
+-        *buf.get_mut(i).ok_or(e)? = t.into();
+-        i += 1;
+-    }
+-    Ok(&buf[..i])
+-}
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+index d5f475b4310..869373f8381 100644
+--- a/library/std/src/sys/norostb/io.rs
++++ b/library/std/src/sys/norostb/io.rs
+@@ -1,4 +1,10 @@
+-use crate::mem;
++use crate::cell::RefCell;
++use crate::io;
++use crate::mem::{self, MaybeUninit};
++use norostb_rt::kernel::{
++    io::{Queue, Request, Response},
++    syscall,
++};
+ 
+ #[derive(Copy, Clone)]
+ pub struct IoSlice<'a>(&'a [u8]);
+@@ -45,3 +51,158 @@ pub fn as_mut_slice(&mut self) -> &mut [u8] {
+         self.0
+     }
+ }
++
++thread_local! {
++    static QUEUE: RefCell<Queue> = RefCell::new({
++        use crate::sync::atomic::*;
++        static ADDR: AtomicUsize = AtomicUsize::new(0x9_8765_0000);
++        let base = ADDR.fetch_add(0x1000, Ordering::Relaxed);
++        let base = syscall::create_io_queue(base as *mut _, 0, 0).unwrap();
++        let base = crate::ptr::NonNull::new(base).unwrap().cast();
++        Queue {
++            base,
++            requests_mask: 0,
++            responses_mask: 0,
++        }
++    });
++}
++
++fn enqueue(request: Request) -> Response {
++    QUEUE.with(|queue| unsafe {
++        let mut queue = queue.borrow_mut();
++        queue.enqueue_request(request).unwrap();
++        syscall::process_io_queue(queue.base.as_ptr().cast()).unwrap();
++        loop {
++            if let Ok(e) = queue.dequeue_response() {
++                break e;
++            }
++        }
++    })
++}
++
++/// Blocking read
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn read(handle: syscall::Handle, data: &mut [u8]) -> io::Result<usize> {
++    unsafe { read_uninit(handle, mem::transmute(data)) }
++}
++
++/// Blocking read
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn read_uninit(handle: syscall::Handle, data: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
++    let e = enqueue(Request::read_uninit(0, handle, data));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to read"))
++    } else {
++        Ok(e.value as usize)
++    }
++}
++
++/// Blocking write
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn write(handle: syscall::Handle, data: &[u8]) -> io::Result<usize> {
++    let e = enqueue(Request::write(0, handle, data));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
++    } else {
++        Ok(e.value as usize)
++    }
++}
++
++/// Blocking open
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn open(table: syscall::TableId, object: syscall::Id) -> io::Result<syscall::Handle> {
++    let e = enqueue(Request::open(0, table, object));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to open"))
++    } else {
++        // This error pops up despite stdlib already using 2021 edition?!?
++        /*
++            = help: items from traits can only be used if the trait is in scope
++            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
++        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
++                */
++        use crate::convert::TryInto;
++        Ok(e.value.try_into().unwrap())
++    }
++}
++
++/// Blocking create
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn create(table: syscall::TableId, tags: &[u8]) -> io::Result<syscall::Handle> {
++    let e = enqueue(Request::create(0, table, tags));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to create"))
++    } else {
++        // This error pops up despite stdlib already using 2021 edition?!?
++        /*
++            = help: items from traits can only be used if the trait is in scope
++            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
++        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
++                */
++        use crate::convert::TryInto;
++        Ok(e.value.try_into().unwrap())
++    }
++}
++
++/// Blocking query
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn query(table: syscall::TableId, tags: &[u8]) -> io::Result<syscall::QueryHandle> {
++    let e = enqueue(Request::query(0, table, tags));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to query"))
++    } else {
++        // This error pops up despite stdlib already using 2021 edition?!?
++        /*
++            = help: items from traits can only be used if the trait is in scope
++            = note: 'core::convert::TryInto' is included in the prelude starting in Edition 2021
++        help: the following trait is implemented but not in scope; perhaps add a `use` for it:
++                */
++        use crate::convert::TryInto;
++        Ok(e.value.try_into().unwrap())
++    }
++}
++
++/// Blocking query_next
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn query_next(
++    query: syscall::QueryHandle,
++    info: &mut syscall::ObjectInfo<'_>,
++) -> io::Result<bool> {
++    let e = enqueue(Request::query_next(0, query, info));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
++    } else {
++        Ok(e.value > 0)
++    }
++}
++
++/// Blocking take_job
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn take_job(table: syscall::Handle, job: &mut syscall::Job) -> io::Result<()> {
++    let e = enqueue(Request::take_job(0, table, job));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to take job"))
++    } else {
++        Ok(())
++    }
++}
++
++/// Blocking finish_job
++#[unstable(feature = "norostb", issue = "none")]
++#[inline]
++pub fn finish_job(table: syscall::Handle, job: &syscall::Job) -> io::Result<()> {
++    let e = enqueue(Request::finish_job(0, table, &job));
++    if e.value < 0 {
++        Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to finish job"))
++    } else {
++        Ok(())
++    }
++}
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index 4fc917cf4e1..751102bfe90 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -1,9 +1,9 @@
+ use crate::io;
+ use norostb_rt::kernel::syscall;
+ 
+-static STDIN: syscall::Handle = syscall::Handle(0);
+-static STDOUT: syscall::Handle = syscall::Handle(1);
+-static STDERR: syscall::Handle = syscall::Handle(2);
++static STDIN: syscall::Handle = 0;
++static STDOUT: syscall::Handle = 1;
++static STDERR: syscall::Handle = 2;
+ 
+ pub struct Stdin;
+ pub struct Stdout;
+@@ -19,8 +19,7 @@ pub const fn new() -> Stdin {
+ 
+ impl io::Read for Stdin {
+     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+-        syscall::read(STDIN, buf)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to read"))
++        super::io::read(STDIN, buf)
+     }
+ }
+ 
+@@ -32,8 +31,7 @@ pub const fn new() -> Stdout {
+ 
+ impl io::Write for Stdout {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        syscall::write(STDOUT, buf)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
++        super::io::write(STDOUT, buf)
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -49,8 +47,7 @@ pub const fn new() -> Stderr {
+ 
+ impl io::Write for Stderr {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        syscall::write(STDERR, buf)
+-            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
++        super::io::write(STDERR, buf)
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -63,30 +60,17 @@ pub fn is_ebadf(_err: &io::Error) -> bool {
+ }
+ 
+ pub fn panic_output() -> Option<impl io::Write> {
+-    Some(syscall::SysLog::default())
+-}
+-
+-#[unstable(feature = "norostb", issue = "none")]
+-impl io::Write for syscall::SysLog {
+-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        self.write_raw(buf);
+-        Ok(buf.len())
+-    }
+-
+-    fn flush(&mut self) -> io::Result<()> {
+-        Ok(self.flush())
+-    }
++    Some(Stderr)
+ }
+ 
+ /// # Safety
+ ///
+ /// Must be called only once during runtime initialization.
+ pub(super) unsafe fn init() {
+-    use syscall::{Id, TableId};
+-    let stdin = syscall::open(TableId(0), Id(0)).unwrap();
++    let stdin = super::io::open(0, 0).unwrap();
+     assert_eq!(stdin, STDIN);
+-    let stdout = syscall::open(TableId(0), Id(0)).unwrap();
++    let stdout = super::io::open(0, 0).unwrap();
+     assert_eq!(stdout, STDOUT);
+-    let stderr = syscall::open(TableId(0), Id(0)).unwrap();
++    let stderr = super::io::open(0, 0).unwrap();
+     assert_eq!(stderr, STDERR);
+ }
+-- 
+2.30.2
+

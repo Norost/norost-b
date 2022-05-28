@@ -1,0 +1,43 @@
+From 0f7a86cd5630d8fc3f3c781bb266d5ad9dcdf340 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Tue, 8 Mar 2022 15:57:54 +0100
+Subject: [PATCH 11/41] Remove object name argument from table queries.
+
+---
+ library/std/src/sys/norostb/fs.rs | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 0a849a630a4..407cc0b5207 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -357,7 +357,7 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
+         SplitPath::None => Ok(ReadDir::Tables(None)),
+         SplitPath::Table { table } => {
+             let (table_id, table_info) = find_table(table)?;
+-            let query = syscall::query_table(table_id, None, &[])
++            let query = syscall::query_table(table_id, &[])
+                 .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
+             Ok(ReadDir::Objects { table_id, table_info, query })
+         }
+@@ -365,7 +365,7 @@ pub fn readdir(path: &Path) -> io::Result<ReadDir> {
+             let mut t = [Default::default(); 256];
+             let tags = split_tags(tags, &mut t)?;
+             let (table_id, table_info) = find_table(table)?;
+-            let query = syscall::query_table(table_id, None, tags)
++            let query = syscall::query_table(table_id, tags)
+                 .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
+             Ok(ReadDir::Objects { table_id, table_info, query })
+         }
+@@ -519,7 +519,7 @@ fn ascii_to_id(s: &[u8]) -> io::Result<Id> {
+ fn find_unique_object(table_id: TableId, tags: &[u8]) -> io::Result<Id> {
+     let mut t = [Default::default(); 256];
+     let tags = split_tags(tags, &mut t)?;
+-    let query = syscall::query_table(table_id, None, tags)
++    let query = syscall::query_table(table_id, tags)
+         .map_err(|_| io::const_io_error!(io::ErrorKind::Other, "error querying table"))?;
+     let mut info = ObjectInfo::default();
+     syscall::query_next(query, &mut info)
+-- 
+2.30.2
+

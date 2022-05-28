@@ -1,0 +1,135 @@
+From 5cb246678cf61d3c710e8cee1f231f93ae206ca1 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Wed, 27 Apr 2022 23:46:40 +0200
+Subject: [PATCH 34/41] Make File a wrapper around norostb_rt::Object
+
+---
+ library/std/src/os/norostb/io.rs  |  8 ++++----
+ library/std/src/sys/norostb/fs.rs | 26 +++++++++-----------------
+ 2 files changed, 13 insertions(+), 21 deletions(-)
+
+diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
+index 9f56dbc6f25..26f5309308e 100644
+--- a/library/std/src/os/norostb/io.rs
++++ b/library/std/src/os/norostb/io.rs
+@@ -1,5 +1,5 @@
+ use crate::sys_common::{AsInner, FromInner, IntoInner};
+-use crate::{fs, mem::ManuallyDrop, sys};
++use crate::{fs, sys};
+ 
+ pub type Handle = u32;
+ 
+@@ -17,18 +17,18 @@ pub trait FromHandle {
+ 
+ impl AsHandle for fs::File {
+     fn as_handle(&self) -> Handle {
+-        self.as_inner().handle
++        self.as_inner().0.as_raw()
+     }
+ }
+ 
+ impl IntoHandle for fs::File {
+     fn into_handle(self) -> Handle {
+-        ManuallyDrop::new(self.into_inner()).handle
++        self.into_inner().0.into_raw()
+     }
+ }
+ 
+ impl FromHandle for fs::File {
+     unsafe fn from_handle(handle: Handle) -> Self {
+-        Self::from_inner(sys::fs::File { handle })
++        Self::from_inner(sys::fs::File(norostb_rt::table::Object::from_raw(handle)))
+     }
+ }
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 90da716d010..463930f15a0 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -25,14 +25,12 @@
+ use crate::sys_common::{AsInner, FromInner};
+ use norostb_rt::{
+     io as rt_io,
+-    table::{ObjectInfo, TableId, TableInfo, TableIter},
++    table::{Object, ObjectInfo, TableId, TableInfo, TableIter},
+     Handle,
+ };
+ 
+ #[derive(Debug)]
+-pub struct File {
+-    pub(crate) handle: Handle,
+-}
++pub struct File(pub(crate) Object);
+ 
+ const TABLE_OBJECT_SEPARATOR: u8 = b'/';
+ 
+@@ -238,11 +236,11 @@ pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
+                 return Err(io::const_io_error!(io::ErrorKind::Other, "expected full path"));
+             };
+             let table = find_table(table)?.0;
+-            rt_io::create(table, path).map(|handle| File { handle }).map_err(cvt_err)
++            Object::create(table, path).map(File).map_err(cvt_err)
+         } else {
+             // Find a unique ID
+             let (table_id, path) = split_into_table_and_path(path)?;
+-            rt_io::open(table_id, path).map(|handle| File { handle }).map_err(cvt_err)
++            Object::open(table_id, path).map(File).map_err(cvt_err)
+         }
+     }
+ 
+@@ -265,7 +263,7 @@ pub fn truncate(&self, _size: u64) -> io::Result<()> {
+     }
+ 
+     pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
+-        rt_io::read(self.handle, buf).map_err(cvt_err)
++        self.0.read(buf).map_err(cvt_err)
+     }
+ 
+     pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+@@ -279,7 +277,7 @@ pub fn is_read_vectored(&self) -> bool {
+     pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+         // SAFETY: we don't deinitialize any part of the buffer
+         let s = unsafe { buf.unfilled_mut() };
+-        let len = rt_io::read_uninit(self.handle, s).map_err(cvt_err)?;
++        let len = self.0.read_uninit(s).map_err(cvt_err)?;
+         // SAFETY: the kernel has initialized `len` bytes.
+         unsafe {
+             buf.assume_init(buf.filled().len() + len);
+@@ -289,7 +287,7 @@ pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+     }
+ 
+     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
+-        rt_io::write(self.handle, buf).map_err(cvt_err)
++        self.0.write(buf).map_err(cvt_err)
+     }
+ 
+     pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+@@ -311,11 +309,11 @@ pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
+             SeekFrom::Current(n) => rt_io::SeekFrom::Current(n),
+             SeekFrom::End(n) => rt_io::SeekFrom::End(n),
+         };
+-        rt_io::seek(self.handle, pos).map_err(cvt_err)
++        self.0.seek(pos).map_err(cvt_err)
+     }
+ 
+     pub fn duplicate(&self) -> io::Result<File> {
+-        rt_io::duplicate(self.handle).map_err(cvt_err).map(|handle| Self { handle })
++        self.0.duplicate().map_err(cvt_err).map(Self)
+     }
+ 
+     pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
+@@ -323,12 +321,6 @@ pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
+     }
+ }
+ 
+-impl Drop for File {
+-    fn drop(&mut self) {
+-        rt_io::close(self.handle);
+-    }
+-}
+-
+ impl DirBuilder {
+     pub fn new() -> DirBuilder {
+         DirBuilder {}
+-- 
+2.30.2
+

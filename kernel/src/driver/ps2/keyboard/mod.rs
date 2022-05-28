@@ -10,11 +10,13 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::mem;
 use scancodes::{
 	scanset::ps2::{scanset2_decode, DecodeError},
-	Event, ScanCode,
+	Event,
 };
 
 enum KeyboardCommand {
+	#[allow(dead_code)]
 	SetLed = 0xed,
+	#[allow(dead_code)]
 	Echo = 0xee,
 	GetSetScanCodeSet = 0xf0,
 }

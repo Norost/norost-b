@@ -1,6 +1,5 @@
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, QueryResult, Ticket};
-use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
-use core::{mem, str};
+use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, Ticket};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 pub(super) struct KeyboardTable;
 

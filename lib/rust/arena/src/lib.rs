@@ -1,7 +1,7 @@
 //! # Typed arena with optional generational identifiers.
 
 #![no_std]
-#![feature(const_default_impls, const_fn_trait_bound, const_trait_impl)]
+#![feature(const_default_impls, const_trait_impl)]
 
 extern crate alloc;
 

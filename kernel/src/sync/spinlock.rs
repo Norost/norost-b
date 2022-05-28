@@ -47,6 +47,7 @@ impl<T> SpinLock<T> {
 			{
 				Ok(_) => return Guard { lock: self },
 				Err(_) => unreachable!("deadlock on single-core system"),
+				#[allow(unreachable_patterns)]
 				Err(_) => core::hint::spin_loop(),
 			}
 		}
@@ -83,6 +84,7 @@ impl<T> SpinLock<T> {
 			{
 				Ok(_) => return IsrGuard { lock: self },
 				Err(_) => unreachable!("deadlock on single-core system"),
+				#[allow(unreachable_patterns)]
 				Err(_) => core::hint::spin_loop(),
 			}
 		}

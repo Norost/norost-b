@@ -8,8 +8,6 @@ pub use pml4::*;
 
 use crate::memory::frame::{PageFrameIter, PPN};
 use crate::memory::r#virtual::RWX;
-use crate::memory::Page;
-use core::ptr::NonNull;
 
 #[derive(Debug)]
 pub enum IdentityMapError {

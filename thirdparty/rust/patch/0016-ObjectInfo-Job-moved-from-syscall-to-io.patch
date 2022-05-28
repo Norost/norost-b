@@ -1,0 +1,80 @@
+From 99e8b57bace178941d3fdb0a709261adfd33a352 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Fri, 15 Apr 2022 22:52:53 +0200
+Subject: [PATCH 16/41] ObjectInfo & Job moved from syscall to io
+
+---
+ library/std/src/os/norostb/mod.rs | 2 +-
+ library/std/src/sys/norostb/fs.rs | 5 ++++-
+ library/std/src/sys/norostb/io.rs | 8 ++++----
+ 3 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
+index 5adf797f4b4..ab7f3a69c68 100644
+--- a/library/std/src/os/norostb/mod.rs
++++ b/library/std/src/os/norostb/mod.rs
+@@ -3,4 +3,4 @@
+ pub mod ffi;
+ 
+ pub use crate::sys::io::{create, finish_job, open, query, query_next, read, take_job, write};
+-pub use norostb_rt::kernel::syscall::{Job, ObjectInfo};
++pub use norostb_rt::kernel::io::{Job, ObjectInfo};
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index 04142ea34ec..e4115c1ef4b 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -22,7 +22,10 @@
+ use crate::sys::time::SystemTime;
+ use crate::sys::unsupported;
+ use crate::sys_common::{AsInner, FromInner};
+-use norostb_rt::kernel::syscall::{self, Handle, ObjectInfo, QueryHandle, TableId, TableInfo};
++use norostb_rt::kernel::{
++    io::{Handle, ObjectInfo},
++    syscall::{self, QueryHandle, TableId, TableInfo},
++};
+ 
+ #[derive(Debug)]
+ pub struct File {
+diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
+index 4115cb54604..046c84e6975 100644
+--- a/library/std/src/sys/norostb/io.rs
++++ b/library/std/src/sys/norostb/io.rs
+@@ -2,7 +2,7 @@
+ use crate::io;
+ use crate::mem::{self, MaybeUninit};
+ use norostb_rt::kernel::{
+-    io::{Queue, Request, Response, SeekFrom},
++    io::{Job, ObjectInfo, Queue, Request, Response, SeekFrom},
+     syscall,
+ };
+ 
+@@ -173,7 +173,7 @@ pub fn query(table: syscall::TableId, path: &[u8]) -> io::Result<syscall::QueryH
+ /// Blocking query_next
+ #[unstable(feature = "norostb", issue = "none")]
+ #[inline]
+-pub fn query_next(query: syscall::QueryHandle, info: &mut syscall::ObjectInfo) -> io::Result<bool> {
++pub fn query_next(query: syscall::QueryHandle, info: &mut ObjectInfo) -> io::Result<bool> {
+     let e = enqueue(Request::query_next(0, query, info));
+     if e.value < 0 {
+         Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
+@@ -185,7 +185,7 @@ pub fn query_next(query: syscall::QueryHandle, info: &mut syscall::ObjectInfo) -
+ /// Blocking take_job
+ #[unstable(feature = "norostb", issue = "none")]
+ #[inline]
+-pub fn take_job(table: syscall::Handle, job: &mut syscall::Job) -> io::Result<()> {
++pub fn take_job(table: syscall::Handle, job: &mut Job) -> io::Result<()> {
+     let e = enqueue(Request::take_job(0, table, job));
+     if e.value < 0 {
+         Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to take job"))
+@@ -197,7 +197,7 @@ pub fn take_job(table: syscall::Handle, job: &mut syscall::Job) -> io::Result<()
+ /// Blocking finish_job
+ #[unstable(feature = "norostb", issue = "none")]
+ #[inline]
+-pub fn finish_job(table: syscall::Handle, job: &syscall::Job) -> io::Result<()> {
++pub fn finish_job(table: syscall::Handle, job: &Job) -> io::Result<()> {
+     let e = enqueue(Request::finish_job(0, table, &job));
+     if e.value < 0 {
+         Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to finish job"))
+-- 
+2.30.2
+

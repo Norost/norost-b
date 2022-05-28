@@ -243,6 +243,7 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 	}
 }
 
+#[allow(dead_code)]
 pub fn free_memory() -> usize {
 	dumb_stack::STACK.lock().count() * 4096
 }

@@ -1,0 +1,37 @@
+From a928337146c12b37d5a862e64a3d780b987ccecb Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Thu, 5 May 2022 17:47:28 +0200
+Subject: [PATCH 39/41] Process::new API changed, remove stray int3
+
+---
+ library/std/src/sys/norostb/process.rs | 1 +
+ library/std/src/sys/norostb/stdio.rs   | 1 -
+ 2 files changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
+index a086a1a3084..1af6994d09c 100644
+--- a/library/std/src/sys/norostb/process.rs
++++ b/library/std/src/sys/norostb/process.rs
+@@ -94,6 +94,7 @@ pub fn spawn(
+         _needs_stdin: bool,
+     ) -> io::Result<(Process, StdioPipes)> {
+         rt::Process::new(
++            &*rt::io::process_root().ok_or(super::ERR_UNSET)?,
+             &rt::io::file_root()
+                 .ok_or(super::ERR_UNSET)?
+                 .open(self.program.as_bytes())
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index 189daacc6c4..855ddc4330e 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -27,7 +27,6 @@ pub const fn new() -> Stdout {
+ 
+ impl io::Write for Stdout {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        unsafe { core::arch::asm!("int3") }
+         rt::io::stdout().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
+     }
+ 
+-- 
+2.30.2
+

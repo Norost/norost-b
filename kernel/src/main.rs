@@ -3,9 +3,13 @@
 #![forbid(unused_must_use)]
 #![feature(alloc_error_handler)]
 #![feature(asm_const, asm_sym)]
-#![feature(const_btree_new, const_fn_trait_bound, const_trait_impl, inline_const)]
+#![feature(
+	const_btree_new,
+	const_maybe_uninit_uninit_array,
+	const_trait_impl,
+	inline_const
+)]
 #![feature(decl_macro)]
-#![feature(derive_default_enum)]
 #![feature(drain_filter)]
 #![feature(let_else)]
 #![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
@@ -29,7 +33,6 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, Ordering};
 
 #[macro_use]
 mod log;

@@ -1,143 +1,93 @@
-diff --git a/Cargo.lock b/Cargo.lock
-index 152689953b8..9af4681c4a6 100644
---- a/Cargo.lock
-+++ b/Cargo.lock
-@@ -520,6 +520,10 @@ name = "cfg-if"
- version = "1.0.0"
- source = "registry+https://github.com/rust-lang/crates.io-index"
- checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-+dependencies = [
-+ "compiler_builtins",
-+ "rustc-std-workspace-core",
-+]
- 
- [[package]]
- name = "chalk-derive"
-@@ -2371,6 +2375,35 @@ dependencies = [
-  "version_check",
- ]
- 
-+[[package]]
-+name = "norostb_kernel"
-+version = "0.1.0"
-+dependencies = [
-+ "compiler_builtins",
-+ "rustc-std-workspace-core",
-+]
-+
-+[[package]]
-+name = "norostb_rt"
-+version = "0.1.0"
-+dependencies = [
-+ "cfg-if 1.0.0",
-+ "compiler_builtins",
-+ "norostb_kernel",
-+ "rustc-std-workspace-alloc",
-+ "rustc-std-workspace-core",
-+]
-+
-+[[package]]
-+name = "norostb_rt_alloc"
-+version = "0.1.0"
-+dependencies = [
-+ "compiler_builtins",
-+ "norostb_kernel",
-+ "rustc-std-workspace-alloc",
-+ "rustc-std-workspace-core",
-+]
-+
- [[package]]
- name = "ntapi"
- version = "0.3.6"
-@@ -4794,6 +4827,8 @@ dependencies = [
-  "hermit-abi 0.2.0",
-  "libc",
-  "miniz_oxide",
-+ "norostb_rt",
-+ "norostb_rt_alloc",
-  "object 0.26.2",
-  "panic_abort",
-  "panic_unwind",
-diff --git a/Cargo.toml b/Cargo.toml
-index cae48d79517..ff16e9b9ee6 100644
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -124,6 +124,7 @@ rustfmt-nightly = { path = "src/tools/rustfmt" }
- # See comments in `src/tools/rustc-workspace-hack/README.md` for what's going on
- # here
- rustc-workspace-hack = { path = 'src/tools/rustc-workspace-hack' }
-+#slabmalloc = { git = "https://git.sr.ht/~demindiro/rust-slabmalloc", branch = "norost" }
- 
- # See comments in `library/rustc-std-workspace-core/README.md` for what's going on
- # here
-@@ -131,5 +132,9 @@ rustc-std-workspace-core = { path = 'library/rustc-std-workspace-core' }
- rustc-std-workspace-alloc = { path = 'library/rustc-std-workspace-alloc' }
- rustc-std-workspace-std = { path = 'library/rustc-std-workspace-std' }
- 
-+# No norostb packages are published to crates.io
-+norostb_rt = { path = "../../norost/b/lib/rust/rt" }
-+norostb_rt_alloc = { path = "../../norost/b/lib/rust/rt_alloc" }
-+
- [patch."https://github.com/rust-lang/rust-clippy"]
- clippy_lints = { path = "src/tools/clippy/clippy_lints" }
-diff --git a/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
-new file mode 100644
-index 00000000000..7d5e1b48d81
---- /dev/null
-+++ b/compiler/rustc_target/src/spec/i686_unknown_none_norostbkernel.rs
-@@ -0,0 +1,19 @@
-+use crate::spec::{Target, TargetOptions};
-+
-+pub fn target() -> Target {
-+    Target {
-+        llvm_target: "i686-unknown-none".into(),
-+        pointer_width: 32,
-+        data_layout:
-+            "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-f64:32:64-f80:32-n8:16:32-S128".into(),
-+        arch: "x86".into(),
-+        options: TargetOptions {
-+            cpu: "i686".into(),
-+            max_atomic_width: Some(32),
-+            features:
-+                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
-+                    .into(),
-+            ..super::norostb_kernel_base::opts()
-+        },
-+    }
-+}
+From add9be2f79e60188a83909dcd7a1e643230686fb Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Tue, 22 Feb 2022 03:57:09 +0100
+Subject: [PATCH 01/41] library/std: port to norostb
+
+---
+ compiler/rustc_target/src/spec/mod.rs         |   3 +
+ .../rustc_target/src/spec/norostb_base.rs     |  18 +
+ .../src/spec/x86_64_unknown_norostb.rs        |  22 ++
+ library/panic_abort/src/lib.rs                |   1 +
+ library/panic_unwind/src/lib.rs               |   3 +
+ library/panic_unwind/src/norostb.rs           |  23 ++
+ library/std/build.rs                          |   1 +
+ library/std/src/sys/mod.rs                    |   3 +
+ library/std/src/sys/norostb/alloc.rs          |  34 ++
+ library/std/src/sys/norostb/args.rs           |  36 ++
+ library/std/src/sys/norostb/common.rs         |  59 +++
+ library/std/src/sys/norostb/condvar.rs        |  32 ++
+ library/std/src/sys/norostb/env.rs            |   9 +
+ library/std/src/sys/norostb/fs.rs             | 312 +++++++++++++++
+ library/std/src/sys/norostb/io.rs             |  47 +++
+ library/std/src/sys/norostb/mod.rs            |  38 ++
+ library/std/src/sys/norostb/mutex.rs          |  61 +++
+ library/std/src/sys/norostb/net.rs            | 369 ++++++++++++++++++
+ library/std/src/sys/norostb/os.rs             | 105 +++++
+ library/std/src/sys/norostb/pipe.rs           |  37 ++
+ library/std/src/sys/norostb/process.rs        | 211 ++++++++++
+ library/std/src/sys/norostb/rwlock.rs         |  68 ++++
+ library/std/src/sys/norostb/stdio.rs          |  71 ++++
+ library/std/src/sys/norostb/thread.rs         |  46 +++
+ .../std/src/sys/norostb/thread_local_dtor.rs  |   9 +
+ .../std/src/sys/norostb/thread_local_key.rs   |  50 +++
+ library/std/src/sys/norostb/time.rs           |  45 +++
+ library/std/src/sys_common/mod.rs             |   1 +
+ 28 files changed, 1714 insertions(+)
+ create mode 100644 compiler/rustc_target/src/spec/norostb_base.rs
+ create mode 100644 compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
+ create mode 100644 library/panic_unwind/src/norostb.rs
+ create mode 100644 library/std/src/sys/norostb/alloc.rs
+ create mode 100644 library/std/src/sys/norostb/args.rs
+ create mode 100644 library/std/src/sys/norostb/common.rs
+ create mode 100644 library/std/src/sys/norostb/condvar.rs
+ create mode 100644 library/std/src/sys/norostb/env.rs
+ create mode 100644 library/std/src/sys/norostb/fs.rs
+ create mode 100644 library/std/src/sys/norostb/io.rs
+ create mode 100644 library/std/src/sys/norostb/mod.rs
+ create mode 100644 library/std/src/sys/norostb/mutex.rs
+ create mode 100644 library/std/src/sys/norostb/net.rs
+ create mode 100644 library/std/src/sys/norostb/os.rs
+ create mode 100644 library/std/src/sys/norostb/pipe.rs
+ create mode 100644 library/std/src/sys/norostb/process.rs
+ create mode 100644 library/std/src/sys/norostb/rwlock.rs
+ create mode 100644 library/std/src/sys/norostb/stdio.rs
+ create mode 100644 library/std/src/sys/norostb/thread.rs
+ create mode 100644 library/std/src/sys/norostb/thread_local_dtor.rs
+ create mode 100644 library/std/src/sys/norostb/thread_local_key.rs
+ create mode 100644 library/std/src/sys/norostb/time.rs
+
 diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
-index 92678aed5b1..15c65df16c8 100644
+index 6dd245b047c..b0adaf97549 100644
 --- a/compiler/rustc_target/src/spec/mod.rs
 +++ b/compiler/rustc_target/src/spec/mod.rs
-@@ -73,6 +73,8 @@
+@@ -73,6 +73,7 @@
  mod linux_uclibc_base;
  mod msvc_base;
  mod netbsd_base;
 +mod norostb_base;
-+mod norostb_kernel_base;
  mod openbsd_base;
  mod redox_base;
  mod solaris_base;
-@@ -1023,6 +1025,10 @@ fn $module() {
+@@ -1032,6 +1033,8 @@ fn $module() {
      ("x86_64-unknown-none", x86_64_unknown_none),
  
      ("mips64-openwrt-linux-musl", mips64_openwrt_linux_musl),
 +
 +    ("x86_64-unknown-norostb", x86_64_unknown_norostb),
-+    ("i686-unknown-none-norostbkernel", i686_unknown_none_norostbkernel),
-+    ("x86_64-unknown-none-norostbkernel", x86_64_unknown_none_norostbkernel),
  }
  
- /// Warnings encountered when parsing the target `json`.
+ /// Cow-Vec-Str: Cow<'static, [Cow<'static, str>]>
 diff --git a/compiler/rustc_target/src/spec/norostb_base.rs b/compiler/rustc_target/src/spec/norostb_base.rs
 new file mode 100644
-index 00000000000..381bf54beed
+index 00000000000..4e97c0c270a
 --- /dev/null
 +++ b/compiler/rustc_target/src/spec/norostb_base.rs
-@@ -0,0 +1,15 @@
-+use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
+@@ -0,0 +1,18 @@
++use crate::spec::{LinkerFlavor, LldFlavor, TargetOptions, LinkArgs, PanicStrategy};
 +
 +pub fn opts() -> TargetOptions {
++	let mut pre_link_args = LinkArgs::new();
++	pre_link_args.insert(LinkerFlavor::Lld(LldFlavor::Ld), Vec::from(["/tmp/hello_std/rtbegin.o".into()]));
 +    TargetOptions {
 +        os: "norostb".into(),
 +        executables: true,
@@ -146,83 +96,41 @@ index 00000000000..381bf54beed
 +        //linker: Some("rust-lld".into()),
 +        linker: Some("ld.lld".into()),
 +        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
-+        panic_strategy: PanicStrategy::Abort,
++		pre_link_args,
++		panic_strategy: PanicStrategy::Abort,
 +        ..Default::default()
-+    }
-+}
-diff --git a/compiler/rustc_target/src/spec/norostb_kernel_base.rs b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
-new file mode 100644
-index 00000000000..f1daa1c5e8f
---- /dev/null
-+++ b/compiler/rustc_target/src/spec/norostb_kernel_base.rs
-@@ -0,0 +1,16 @@
-+use crate::spec::{LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
-+
-+pub fn opts() -> TargetOptions {
-+    TargetOptions {
-+        executables: true,
-+        static_position_independent_executables: true,
-+        disable_redzone: true,
-+        // TODO figure out why rust-lld is missing from stage2 folder and/or
-+        // why the one in $PATH isn't used.
-+        //linker: Some("rust-lld".into()),
-+        linker: Some("ld.lld".into()),
-+        linker_flavor: LinkerFlavor::Lld(LldFlavor::Ld),
-+        panic_strategy: PanicStrategy::Abort,
-+        ..Default::default()
-+    }
-+}
-diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
-new file mode 100644
-index 00000000000..2e71cc9d9a6
---- /dev/null
-+++ b/compiler/rustc_target/src/spec/x86_64_unknown_none_norostbkernel.rs
-@@ -0,0 +1,19 @@
-+use crate::spec::{Target, TargetOptions};
-+
-+pub fn target() -> Target {
-+    Target {
-+        llvm_target: "x86_64-unknown-none".into(),
-+        pointer_width: 64,
-+        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-+            .into(),
-+        arch: "x86_64".into(),
-+        options: TargetOptions {
-+            cpu: "x86-64".to_string(),
-+            max_atomic_width: Some(64),
-+            features:
-+                "-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2,-3dnow,-3dnowa,-avx,-avx2,+soft-float"
-+                    .into(),
-+            ..super::norostb_kernel_base::opts()
-+        },
 +    }
 +}
 diff --git a/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
 new file mode 100644
-index 00000000000..4bed0d09bb3
+index 00000000000..e3ba4d9bbb5
 --- /dev/null
 +++ b/compiler/rustc_target/src/spec/x86_64_unknown_norostb.rs
-@@ -0,0 +1,18 @@
-+use crate::spec::{Target, TargetOptions};
+@@ -0,0 +1,22 @@
++use crate::spec::Target;
 +
 +pub fn target() -> Target {
++	// TODO copied from kernel config. Relax when kernel starts handling certain
++	// features properly.
++
++	let mut base = super::norostb_base::opts();
++    base.cpu = "x86-64".into();
++	base.disable_redzone = true;
++	base.features = "-mmx,-sse,+soft-float".into();
++    base.max_atomic_width = Some(64);
++
 +    Target {
 +        llvm_target: "x86_64-unknown-none".into(),
 +        pointer_width: 64,
-+        data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-+            .into(),
++		data_layout: "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128".into(),
++		// Causes ICE because it doesn't match LLVM's layout.
++        //data_layout: "e-m:e-i64:64-f80:128-n8:16:32:64-S128".into(),
 +        arch: "x86_64".into(),
-+        options: TargetOptions {
-+            cpu: "x86-64".into(),
-+            disable_redzone: true,
-+            features: "-mmx,-sse,+soft-float".into(),
-+            max_atomic_width: Some(64),
-+            ..super::norostb_base::opts()
-+        },
++        options: base,
 +    }
 +}
 diff --git a/library/panic_abort/src/lib.rs b/library/panic_abort/src/lib.rs
-index 5c5632a9d01..26939b2b401 100644
+index 0a1aa7bb3c8..4afab19c19e 100644
 --- a/library/panic_abort/src/lib.rs
 +++ b/library/panic_abort/src/lib.rs
 @@ -44,6 +44,7 @@ unsafe fn abort() -> ! {
@@ -234,14 +142,14 @@ index 5c5632a9d01..26939b2b401 100644
          ))] {
              unsafe fn abort() -> ! {
 diff --git a/library/panic_unwind/src/lib.rs b/library/panic_unwind/src/lib.rs
-index 7f05c82ac28..0ccf6a783c1 100644
+index 4ae5f8ae446..aa597d0cd93 100644
 --- a/library/panic_unwind/src/lib.rs
 +++ b/library/panic_unwind/src/lib.rs
 @@ -43,6 +43,9 @@
          // L4Re is unix family but does not yet support unwinding.
          #[path = "dummy.rs"]
          mod real_imp;
-+    } else if #[cfg(target_os = "norostb")] {
++	} else if #[cfg(target_os = "norostb")] {
 +        #[path = "norostb.rs"]
 +        mod real_imp;
      } else if #[cfg(target_env = "msvc")] {
@@ -249,10 +157,10 @@ index 7f05c82ac28..0ccf6a783c1 100644
          mod real_imp;
 diff --git a/library/panic_unwind/src/norostb.rs b/library/panic_unwind/src/norostb.rs
 new file mode 100644
-index 00000000000..1213919ab9a
+index 00000000000..f3baba5a81b
 --- /dev/null
 +++ b/library/panic_unwind/src/norostb.rs
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,23 @@
 +//! Unwinding for *norostb* target.
 +//!
 +//! Right now we don't support this, so this is just stubs.
@@ -268,26 +176,14 @@ index 00000000000..1213919ab9a
 +}
 +
 +pub unsafe fn panic(_data: Box<dyn Any + Send>) -> u32 {
++	u32::MAX
++	/*
 +    extern "C" {
 +        pub fn __rust_abort() -> !;
 +    }
 +    __rust_abort();
++	*/
 +}
-diff --git a/library/std/Cargo.toml b/library/std/Cargo.toml
-index dd9b035e86d..097ef09a241 100644
---- a/library/std/Cargo.toml
-+++ b/library/std/Cargo.toml
-@@ -47,6 +47,10 @@ hermit-abi = { version = "0.2.0", features = ['rustc-dep-of-std'] }
- [target.wasm32-wasi.dependencies]
- wasi = { version = "0.11.0", features = ['rustc-dep-of-std'], default-features = false }
- 
-+[target.'cfg(target_os = "norostb")'.dependencies]
-+norostb_rt = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
-+norostb_rt_alloc = { version = "*", default-features = false, features =["rustc-dep-of-std"] }
-+
- [features]
- backtrace = [
-   "gimli-symbolize",
 diff --git a/library/std/build.rs b/library/std/build.rs
 index 43168e77296..830bfb78c43 100644
 --- a/library/std/build.rs
@@ -300,125 +196,6 @@ index 43168e77296..830bfb78c43 100644
      {
          // These platforms don't have any special requirements.
      } else {
-diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
-index 2628afd4237..9c4a22bc6f2 100644
---- a/library/std/src/lib.rs
-+++ b/library/std/src/lib.rs
-@@ -231,6 +231,8 @@
- #![feature(allow_internal_unstable)]
- #![feature(arbitrary_self_types)]
- #![feature(array_error_internals)]
-+#![feature(asm_const)]
-+#![feature(asm_sym)]
- #![feature(assert_matches)]
- #![feature(associated_type_bounds)]
- #![feature(async_iterator)]
-@@ -249,6 +251,7 @@
- #![feature(char_internals)]
- #![feature(concat_bytes)]
- #![feature(concat_idents)]
-+#![feature(const_btree_new)]
- #![feature(const_fn_floating_point_arithmetic)]
- #![feature(const_fn_fn_ptr_basics)]
- #![feature(const_fn_trait_bound)]
-@@ -300,6 +303,7 @@
- #![feature(min_specialization)]
- #![feature(mixed_integer_ops)]
- #![feature(must_not_suspend)]
-+#![feature(naked_functions)]
- #![feature(needs_panic_runtime)]
- #![feature(negative_impls)]
- #![feature(never_type)]
-@@ -316,6 +320,7 @@
- #![feature(prelude_import)]
- #![feature(ptr_as_uninit)]
- #![feature(ptr_internals)]
-+#![feature(ptr_metadata)]
- #![feature(rustc_attrs)]
- #![feature(rustc_private)]
- #![feature(saturating_int_impl)]
-diff --git a/library/std/src/os/mod.rs b/library/std/src/os/mod.rs
-index 90c30313dbb..1051aee1636 100644
---- a/library/std/src/os/mod.rs
-+++ b/library/std/src/os/mod.rs
-@@ -131,6 +131,8 @@ pub mod windows {}
- pub mod macos;
- #[cfg(target_os = "netbsd")]
- pub mod netbsd;
-+#[cfg(target_os = "norostb")]
-+pub mod norostb;
- #[cfg(target_os = "openbsd")]
- pub mod openbsd;
- #[cfg(target_os = "redox")]
-diff --git a/library/std/src/os/norostb/ffi.rs b/library/std/src/os/norostb/ffi.rs
-new file mode 100644
-index 00000000000..17243a4af12
---- /dev/null
-+++ b/library/std/src/os/norostb/ffi.rs
-@@ -0,0 +1,7 @@
-+#![unstable(feature = "norostb", issue = "none")]
-+
-+#[path = "../unix/ffi/os_str.rs"]
-+mod os_str;
-+
-+#[unstable(feature = "norostb", issue = "none")]
-+pub use self::os_str::{OsStrExt, OsStringExt};
-diff --git a/library/std/src/os/norostb/io.rs b/library/std/src/os/norostb/io.rs
-new file mode 100644
-index 00000000000..26f5309308e
---- /dev/null
-+++ b/library/std/src/os/norostb/io.rs
-@@ -0,0 +1,34 @@
-+use crate::sys_common::{AsInner, FromInner, IntoInner};
-+use crate::{fs, sys};
-+
-+pub type Handle = u32;
-+
-+pub trait AsHandle {
-+    fn as_handle(&self) -> Handle;
-+}
-+
-+pub trait IntoHandle {
-+    fn into_handle(self) -> Handle;
-+}
-+
-+pub trait FromHandle {
-+    unsafe fn from_handle(handle: Handle) -> Self;
-+}
-+
-+impl AsHandle for fs::File {
-+    fn as_handle(&self) -> Handle {
-+        self.as_inner().0.as_raw()
-+    }
-+}
-+
-+impl IntoHandle for fs::File {
-+    fn into_handle(self) -> Handle {
-+        self.into_inner().0.into_raw()
-+    }
-+}
-+
-+impl FromHandle for fs::File {
-+    unsafe fn from_handle(handle: Handle) -> Self {
-+        Self::from_inner(sys::fs::File(norostb_rt::table::Object::from_raw(handle)))
-+    }
-+}
-diff --git a/library/std/src/os/norostb/mod.rs b/library/std/src/os/norostb/mod.rs
-new file mode 100644
-index 00000000000..a06c561b91c
---- /dev/null
-+++ b/library/std/src/os/norostb/mod.rs
-@@ -0,0 +1,10 @@
-+#![unstable(feature = "norostb", issue = "none")]
-+
-+pub mod ffi;
-+pub mod io;
-+
-+pub mod prelude {
-+    use super::*;
-+    pub use ffi::{OsStrExt, OsStringExt};
-+    pub use io::{AsHandle, FromHandle, Handle, IntoHandle};
-+}
 diff --git a/library/std/src/sys/mod.rs b/library/std/src/sys/mod.rs
 index 167c918c94c..dbfba32bd66 100644
 --- a/library/std/src/sys/mod.rs
@@ -435,108 +212,92 @@ index 167c918c94c..dbfba32bd66 100644
          pub use self::unsupported::*;
 diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
 new file mode 100644
-index 00000000000..70a82ee098f
+index 00000000000..6126fc75e15
 --- /dev/null
 +++ b/library/std/src/sys/norostb/alloc.rs
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,34 @@
 +use crate::alloc::{GlobalAlloc, Layout, System};
 +
-+macro_rules! imp {
-+    ($fn:ident($($args:ident : $ty:ty),*) -> $ret:ty) => {
-+        #[inline]
-+        unsafe fn $fn(&self, $($args:$ty),*) -> $ret {
-+            unsafe {
-+                norostb_rt_alloc::Allocator.$fn($($args),*)
-+            }
-+        }
-+    };
-+}
++#[repr(align(16))]
++#[derive(Clone, Copy)]
++struct E([u8; 16]);
++static mut HEAP: [E; 4096] = [E([0; 16]); 4096];
++static mut HEAP_I: usize = 0;
 +
 +#[stable(feature = "alloc_system_type", since = "1.28.0")]
 +unsafe impl GlobalAlloc for System {
-+    imp!(alloc(layout: Layout) -> *mut u8);
-+    imp!(alloc_zeroed(layout: Layout) -> *mut u8);
-+    imp!(dealloc(ptr: *mut u8, layout: Layout) -> ());
-+    imp!(realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8);
++    #[inline]
++    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
++        unsafe { self.alloc_zeroed(layout) }
++    }
++
++    #[inline]
++    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
++        unsafe {
++            let s = layout.pad_to_align().size();
++            let s = (s + 15) & !15;
++            let p = HEAP.as_ptr().add(HEAP_I);
++            HEAP_I += s / 16;
++            p as *mut u8
++        }
++    }
++
++    #[inline]
++    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
++
++    #[inline]
++    unsafe fn realloc(&self, _ptr: *mut u8, _layout: Layout, _new_size: usize) -> *mut u8 {
++        0 as *mut u8
++    }
 +}
 diff --git a/library/std/src/sys/norostb/args.rs b/library/std/src/sys/norostb/args.rs
 new file mode 100644
-index 00000000000..dc96c9d5fdd
+index 00000000000..a2d75a61976
 --- /dev/null
 +++ b/library/std/src/sys/norostb/args.rs
-@@ -0,0 +1,66 @@
-+use crate::ffi::{OsStr, OsString};
-+use crate::io;
-+use crate::os::norostb::ffi::{OsStrExt, OsStringExt};
+@@ -0,0 +1,36 @@
++use crate::ffi::OsString;
++use crate::fmt;
 +
-+use norostb_rt::args;
++pub struct Args {}
 +
-+#[derive(Debug)]
-+pub struct Args(args::Args);
++pub fn args() -> Args {
++    Args {}
++}
++
++impl fmt::Debug for Args {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_list().finish()
++    }
++}
 +
 +impl Iterator for Args {
 +    type Item = OsString;
-+
-+    fn next(&mut self) -> Option<Self::Item> {
-+        self.0.next().map(OsStr::from_bytes).map(Into::into)
++    fn next(&mut self) -> Option<OsString> {
++        None
++    }
++    fn size_hint(&self) -> (usize, Option<usize>) {
++        (0, Some(0))
 +    }
 +}
 +
 +impl ExactSizeIterator for Args {
 +    fn len(&self) -> usize {
-+        self.0.len()
++        0
 +    }
 +}
 +
 +impl DoubleEndedIterator for Args {
-+    fn next_back(&mut self) -> Option<Self::Item> {
-+        self.0.next_back().map(OsStr::from_bytes).map(Into::into)
++    fn next_back(&mut self) -> Option<OsString> {
++        None
 +    }
-+}
-+
-+#[derive(Debug)]
-+pub struct Env(args::Env);
-+
-+impl Iterator for Env {
-+    type Item = (OsString, OsString);
-+
-+    fn next(&mut self) -> Option<Self::Item> {
-+        self.0.next().map(|(key, val)| {
-+            (OsString::from_vec(key.into_owned()), OsString::from_vec(val.into_owned()))
-+        })
-+    }
-+}
-+
-+pub fn args() -> Args {
-+    Args(args::Args::new())
-+}
-+
-+pub fn env() -> Env {
-+    Env(args::Env::new())
-+}
-+
-+pub fn getenv(key: &OsStr) -> Option<OsString> {
-+    args::Env::get(OsStr::as_bytes(key)).map(|val| OsString::from_vec(val.into_owned()))
-+}
-+
-+pub fn setenv(key: &OsStr, value: &OsStr) -> io::Result<()> {
-+    let f = |v| Vec::from(OsStr::as_bytes(v)).into();
-+    args::Env::try_insert(f(key), f(value))
-+        .map(|_| ())
-+        .map_err(|_| io::const_io_error!(io::ErrorKind::OutOfMemory, "out of memory"))
-+}
-+
-+pub fn unsetenv(key: &OsStr) -> io::Result<()> {
-+    // Removing non-existent env variables is valid in stdlib.
-+    let _ = args::Env::remove(OsStr::as_bytes(key));
-+    Ok(())
 +}
 diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
 new file mode 100644
-index 00000000000..78eaf61d8b4
+index 00000000000..781757e0e04
 --- /dev/null
 +++ b/library/std/src/sys/norostb/common.rs
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,59 @@
 +use crate::io as std_io;
 +
 +pub mod memchr {
@@ -546,6 +307,14 @@ index 00000000000..78eaf61d8b4
 +// This is not necessarily correct. May want to consider making it part of the
 +// spec definition?
 +use crate::os::raw::c_char;
++
++// SAFETY: must be called only once during runtime initialization.
++// NOTE: this is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn init(_argc: isize, _argv: *const *const u8) {}
++
++// SAFETY: must be called only once during runtime cleanup.
++// NOTE: this is not guaranteed to run, for example when the program aborts.
++pub unsafe fn cleanup() {}
 +
 +pub fn unsupported<T>() -> std_io::Result<T> {
 +    Err(unsupported_err())
@@ -563,7 +332,14 @@ index 00000000000..78eaf61d8b4
 +}
 +
 +pub fn abort_internal() -> ! {
-+    super::os::exit(i32::MAX)
++    unsafe {
++        crate::arch::asm!("
++			syscall
++		",
++		in("eax") 60,
++		in("edi") 101,
++		options(noreturn));
++    }
 +}
 +
 +pub fn hashmap_random_keys() -> (u64, u64) {
@@ -636,117 +412,143 @@ index 00000000000..d2efec506c5
 +}
 diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
 new file mode 100644
-index 00000000000..3749c8709a9
+index 00000000000..d1d2847cd33
 --- /dev/null
 +++ b/library/std/src/sys/norostb/fs.rs
-@@ -0,0 +1,313 @@
-+use super::cvt_err;
-+/// ## Path format
-+///
-+/// ```
-+/// table/[path]
-+/// ```
-+///
-+/// ### Examples
-+///
-+/// ```
-+/// pci
-+/// pci/
-+/// pci/vendor-id:1234,device-id:1111
-+/// pci/vendor-id:1234,device-id:1111/8
-+/// pci//8
-+/// ```
+@@ -0,0 +1,312 @@
 +use crate::ffi::OsString;
-+use crate::hash::Hash;
++use crate::fmt;
++use crate::hash::{Hash, Hasher};
 +use crate::io::{self, IoSlice, IoSliceMut, ReadBuf, SeekFrom};
-+use crate::os::norostb::prelude::*;
 +use crate::path::{Path, PathBuf};
 +use crate::sys::time::SystemTime;
 +use crate::sys::unsupported;
-+use crate::sys_common::AsInner;
-+use norostb_rt::{io as rt_io, table::Object};
 +
-+#[derive(Debug)]
-+pub struct File(pub(crate) Object);
++pub struct File(!);
 +
-+#[derive(Clone, Debug)]
-+pub enum FileAttr {}
++pub struct FileAttr(!);
 +
-+#[derive(Debug)]
-+pub struct ReadDir(rt_io::Query);
++pub struct ReadDir(!);
++
++pub struct DirEntry(!);
 +
 +#[derive(Clone, Debug)]
-+pub struct DirEntry(OsString);
++pub struct OpenOptions {}
 +
-+#[derive(Clone, Debug)]
-+pub struct OpenOptions {
-+    create: bool,
-+}
++pub struct FilePermissions(!);
 +
-+#[derive(Clone, Debug, PartialEq, Eq)]
-+pub struct FilePermissions(());
-+
-+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-+pub enum FileType {
-+    Object,
-+}
++pub struct FileType(!);
 +
 +#[derive(Debug)]
 +pub struct DirBuilder {}
 +
 +impl FileAttr {
 +    pub fn size(&self) -> u64 {
-+        match self {
-+            _ => unreachable!(),
-+        }
++        self.0
 +    }
 +
 +    pub fn perm(&self) -> FilePermissions {
-+        FilePermissions(())
++        self.0
 +    }
 +
 +    pub fn file_type(&self) -> FileType {
-+        FileType::Object
++        self.0
 +    }
 +
 +    pub fn modified(&self) -> io::Result<SystemTime> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn accessed(&self) -> io::Result<SystemTime> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn created(&self) -> io::Result<SystemTime> {
-+        unsupported()
++        self.0
++    }
++}
++
++impl Clone for FileAttr {
++    fn clone(&self) -> FileAttr {
++        self.0
 +    }
 +}
 +
 +impl FilePermissions {
 +    pub fn readonly(&self) -> bool {
-+        false
++        self.0
 +    }
 +
-+    pub fn set_readonly(&mut self, _readonly: bool) {}
++    pub fn set_readonly(&mut self, _readonly: bool) {
++        self.0
++    }
++}
++
++impl Clone for FilePermissions {
++    fn clone(&self) -> FilePermissions {
++        self.0
++    }
++}
++
++impl PartialEq for FilePermissions {
++    fn eq(&self, _other: &FilePermissions) -> bool {
++        self.0
++    }
++}
++
++impl Eq for FilePermissions {}
++
++impl fmt::Debug for FilePermissions {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
 +}
 +
 +impl FileType {
 +    pub fn is_dir(&self) -> bool {
-+        match self {
-+            Self::Object => false,
-+        }
++        self.0
 +    }
 +
 +    pub fn is_file(&self) -> bool {
-+        match self {
-+            Self::Object => true,
-+        }
++        self.0
 +    }
 +
 +    pub fn is_symlink(&self) -> bool {
-+        match self {
-+            Self::Object => false,
-+        }
++        self.0
++    }
++}
++
++impl Clone for FileType {
++    fn clone(&self) -> FileType {
++        self.0
++    }
++}
++
++impl Copy for FileType {}
++
++impl PartialEq for FileType {
++    fn eq(&self, _other: &FileType) -> bool {
++        self.0
++    }
++}
++
++impl Eq for FileType {}
++
++impl Hash for FileType {
++    fn hash<H: Hasher>(&self, _h: &mut H) {
++        self.0
++    }
++}
++
++impl fmt::Debug for FileType {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++impl fmt::Debug for ReadDir {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
 +    }
 +}
 +
@@ -754,126 +556,104 @@ index 00000000000..3749c8709a9
 +    type Item = io::Result<DirEntry>;
 +
 +    fn next(&mut self) -> Option<io::Result<DirEntry>> {
-+        self.0.next().map(|path| Ok(DirEntry(OsString::from_vec(path))))
++        self.0
 +    }
 +}
 +
 +impl DirEntry {
 +    pub fn path(&self) -> PathBuf {
-+        self.0.clone().into()
++        self.0
 +    }
 +
 +    pub fn file_name(&self) -> OsString {
-+        // TODO this isn't quite accurate.
-+        self.0.clone().into()
++        self.0
 +    }
 +
 +    pub fn metadata(&self) -> io::Result<FileAttr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn file_type(&self) -> io::Result<FileType> {
-+        unsupported()
++        self.0
 +    }
 +}
 +
 +impl OpenOptions {
 +    pub fn new() -> OpenOptions {
-+        OpenOptions { create: false }
++        OpenOptions {}
 +    }
 +
 +    pub fn read(&mut self, _read: bool) {}
 +    pub fn write(&mut self, _write: bool) {}
 +    pub fn append(&mut self, _append: bool) {}
 +    pub fn truncate(&mut self, _truncate: bool) {}
-+    pub fn create(&mut self, create: bool) {
-+        self.create = create;
-+    }
-+    pub fn create_new(&mut self, create_new: bool) {
-+        self.create = create_new;
-+    }
++    pub fn create(&mut self, _create: bool) {}
++    pub fn create_new(&mut self, _create_new: bool) {}
 +}
 +
 +impl File {
-+    pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
-+        let root = rt_io::file_root().ok_or(super::ERR_UNSET)?;
-+        if opts.create { root.create(path_inner(path)) } else { root.open(path_inner(path)) }
-+            .map(File)
-+            .map_err(cvt_err)
++    pub fn open(_path: &Path, _opts: &OpenOptions) -> io::Result<File> {
++        unsupported()
 +    }
 +
 +    pub fn file_attr(&self) -> io::Result<FileAttr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn fsync(&self) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn datasync(&self) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn truncate(&self, _size: u64) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
-+    pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-+        self.0.read(buf).map_err(cvt_err)
++    pub fn read(&self, _buf: &mut [u8]) -> io::Result<usize> {
++        self.0
 +    }
 +
 +    pub fn read_vectored(&self, _bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn is_read_vectored(&self) -> bool {
-+        false
++        self.0
 +    }
 +
-+    pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
-+        // SAFETY: we don't deinitialize any part of the buffer
-+        let s = unsafe { buf.unfilled_mut() };
-+        let len = self.0.read_uninit(s).map_err(cvt_err)?;
-+        // SAFETY: the kernel has initialized `len` bytes.
-+        unsafe {
-+            buf.assume_init(buf.filled().len() + len);
-+        }
-+        buf.add_filled(len);
-+        Ok(())
++    pub fn read_buf(&self, _buf: &mut ReadBuf<'_>) -> io::Result<()> {
++        self.0
 +    }
 +
-+    pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-+        self.0.write(buf).map_err(cvt_err)
++    pub fn write(&self, _buf: &[u8]) -> io::Result<usize> {
++        self.0
 +    }
 +
 +    pub fn write_vectored(&self, _bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn is_write_vectored(&self) -> bool {
-+        false
++        self.0
 +    }
 +
 +    pub fn flush(&self) -> io::Result<()> {
-+        // TODO
-+        Ok(())
++        self.0
 +    }
 +
-+    pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
-+        let pos = match pos {
-+            SeekFrom::Start(n) => rt_io::SeekFrom::Start(n),
-+            SeekFrom::Current(n) => rt_io::SeekFrom::Current(n),
-+            SeekFrom::End(n) => rt_io::SeekFrom::End(n),
-+        };
-+        self.0.seek(pos).map_err(cvt_err)
++    pub fn seek(&self, _pos: SeekFrom) -> io::Result<u64> {
++        self.0
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<File> {
-+        self.0.duplicate().map_err(cvt_err).map(Self)
++        self.0
 +    }
 +
 +    pub fn set_permissions(&self, _perm: FilePermissions) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +}
 +
@@ -887,12 +667,14 @@ index 00000000000..3749c8709a9
 +    }
 +}
 +
-+pub fn readdir(path: &Path) -> io::Result<ReadDir> {
-+    rt_io::file_root()
-+        .ok_or(super::ERR_UNSET)?
-+        .query(path_inner(path))
-+        .map(ReadDir)
-+        .map_err(cvt_err)
++impl fmt::Debug for File {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
++}
++
++pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
++    unsupported()
 +}
 +
 +pub fn unlink(_p: &Path) -> io::Result<()> {
@@ -903,8 +685,8 @@ index 00000000000..3749c8709a9
 +    unsupported()
 +}
 +
-+pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
-+    unsupported()
++pub fn set_perm(_p: &Path, perm: FilePermissions) -> io::Result<()> {
++    match perm.0 {}
 +}
 +
 +pub fn rmdir(_p: &Path) -> io::Result<()> {
@@ -915,14 +697,12 @@ index 00000000000..3749c8709a9
 +    unsupported()
 +}
 +
-+pub fn try_exists(path: &Path) -> io::Result<bool> {
-+    readdir(path).map(|mut q| q.next().is_some())
++pub fn try_exists(_path: &Path) -> io::Result<bool> {
++    unsupported()
 +}
 +
 +pub fn readlink(_p: &Path) -> io::Result<PathBuf> {
-+    // Symlinks are not supported at all
-+    // UNIX returns "InvalidInput" which is rather confusing, so let's not do the same.
-+    Err(io::const_io_error!(io::ErrorKind::Uncategorized, "not a symlnk"))
++    unsupported()
 +}
 +
 +pub fn symlink(_original: &Path, _link: &Path) -> io::Result<()> {
@@ -933,12 +713,12 @@ index 00000000000..3749c8709a9
 +    unsupported()
 +}
 +
-+pub fn stat(_path: &Path) -> io::Result<FileAttr> {
++pub fn stat(_p: &Path) -> io::Result<FileAttr> {
 +    unsupported()
 +}
 +
-+pub fn lstat(path: &Path) -> io::Result<FileAttr> {
-+    stat(path)
++pub fn lstat(_p: &Path) -> io::Result<FileAttr> {
++    unsupported()
 +}
 +
 +pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
@@ -947,11 +727,6 @@ index 00000000000..3749c8709a9
 +
 +pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
 +    unsupported()
-+}
-+
-+/// Get a reference to the underlying `[u8]` of a [`Path`].
-+fn path_inner(path: &Path) -> &[u8] {
-+    &path.as_os_str().as_inner().inner
 +}
 diff --git a/library/std/src/sys/norostb/io.rs b/library/std/src/sys/norostb/io.rs
 new file mode 100644
@@ -1008,10 +783,10 @@ index 00000000000..d5f475b4310
 +}
 diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
 new file mode 100644
-index 00000000000..6d692d70ba2
+index 00000000000..535e7e748ee
 --- /dev/null
 +++ b/library/std/src/sys/norostb/mod.rs
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,38 @@
 +#![deny(unsafe_op_in_unsafe_fn)]
 +
 +pub mod alloc;
@@ -1050,46 +825,6 @@ index 00000000000..6d692d70ba2
 +pub extern "C" fn __rust_abort() {
 +    abort_internal();
 +}
-+
-+/// # Safety
-+///
-+/// Must be called only once during runtime initialization.
-+///
-+/// # Note
-+///
-+/// This is not guaranteed to run, for example when Rust code is called externally.
-+pub unsafe fn init(_: isize, _: *const *const u8) {
-+    // FIXME this is not guaranteed to run.
-+    unsafe {
-+        stdio::init();
-+    }
-+}
-+
-+/// # Safety
-+///
-+/// Must be called only once during runtime cleanup.
-+///
-+/// # Note
-+///
-+/// This is not guaranteed to run, for example when Rust code is called externally.
-+pub unsafe fn cleanup() {}
-+
-+fn cvt_err(err: norostb_rt::Error) -> crate::io::Error {
-+    use crate::io::{const_io_error, ErrorKind};
-+    use norostb_rt::Error;
-+    match err {
-+        Error::Unknown => const_io_error!(ErrorKind::Uncategorized, "uncategorized error"),
-+        Error::InvalidOperation => const_io_error!(ErrorKind::Unsupported, "invalid operation"),
-+        Error::DoesNotExist => const_io_error!(ErrorKind::NotFound, "does not exist"),
-+        Error::AlreadyExists => const_io_error!(ErrorKind::AlreadyExists, "already exists"),
-+        Error::Cancelled => const_io_error!(ErrorKind::Uncategorized, "cancelled"),
-+        Error::CantCreateObject => const_io_error!(ErrorKind::InvalidInput, "can't create object"),
-+        Error::InvalidObject => const_io_error!(ErrorKind::InvalidInput, "invalid object"),
-+    }
-+}
-+
-+const ERR_UNSET: crate::io::Error =
-+    crate::io::const_io_error!(crate::io::ErrorKind::Uncategorized, "handle is not set");
 diff --git a/library/std/src/sys/norostb/mutex.rs b/library/std/src/sys/norostb/mutex.rs
 new file mode 100644
 index 00000000000..b3203c16c50
@@ -1159,221 +894,178 @@ index 00000000000..b3203c16c50
 +}
 diff --git a/library/std/src/sys/norostb/net.rs b/library/std/src/sys/norostb/net.rs
 new file mode 100644
-index 00000000000..879928aca32
+index 00000000000..dbb6ce22c22
 --- /dev/null
 +++ b/library/std/src/sys/norostb/net.rs
-@@ -0,0 +1,413 @@
-+use super::cvt_err;
-+use crate::cell::Cell;
+@@ -0,0 +1,369 @@
 +use crate::convert::TryFrom;
-+use crate::io::{self, IoSlice, IoSliceMut, Write};
++use crate::fmt;
++use crate::io::{self, IoSlice, IoSliceMut};
 +use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 +use crate::sys::unsupported;
 +use crate::time::Duration;
-+use norostb_rt as rt;
 +
-+#[derive(Debug)]
-+pub struct TcpStream {
-+    inner: rt::Object,
-+    read_timeout: Cell<Option<Duration>>,
-+    write_timeout: Cell<Option<Duration>>,
-+}
-+
-+macro netpath($fmt:literal, $addr:ident) {{
-+    let addr = $addr?;
-+    let ip = match addr {
-+        SocketAddr::V4(a) => a.ip().to_ipv6_mapped(),
-+        SocketAddr::V6(a) => *a.ip(),
-+    };
-+    // 128 bytes ought to be plenty.
-+    let mut path = [0; 128];
-+    let mut p = &mut path[..];
-+    write!(p, $fmt, ip, addr.port()).unwrap();
-+    let l = p.len();
-+    (path.len() - l, path)
-+}}
++pub struct TcpStream(!);
 +
 +impl TcpStream {
-+    pub fn connect(address: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
-+        let (l, p) = netpath!("default/tcp/connect/{}/{}", address);
-+        Ok(Self {
-+            inner: rt::io::net_root().ok_or(super::ERR_UNSET)?.create(&p[..l]).map_err(cvt_err)?,
-+            read_timeout: Cell::new(None),
-+            write_timeout: Cell::new(None),
-+        })
-+    }
-+
-+    pub fn connect_timeout(_address: &SocketAddr, _timeout: Duration) -> io::Result<TcpStream> {
++    pub fn connect(_: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
 +        unsupported()
 +    }
 +
-+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-+        self.read_timeout.set(timeout);
-+        Ok(())
++    pub fn connect_timeout(_: &SocketAddr, _: Duration) -> io::Result<TcpStream> {
++        unsupported()
 +    }
 +
-+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-+        self.write_timeout.set(timeout);
-+        Ok(())
++    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
++    }
++
++    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
 +    }
 +
 +    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-+        Ok(self.read_timeout.get())
++        self.0
 +    }
 +
 +    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-+        Ok(self.write_timeout.get())
++        self.0
 +    }
 +
-+    pub fn peek(&self, data: &mut [u8]) -> io::Result<usize> {
-+        self.inner.peek(data).map_err(cvt_err)
++    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
 +    }
 +
-+    pub fn read(&self, data: &mut [u8]) -> io::Result<usize> {
-+        self.inner.read(data).map_err(cvt_err)
++    pub fn read(&self, _: &mut [u8]) -> io::Result<usize> {
++        self.0
 +    }
 +
-+    pub fn read_vectored(&self, _data: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-+        unsupported()
++    pub fn read_vectored(&self, _: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
++        self.0
 +    }
 +
 +    pub fn is_read_vectored(&self) -> bool {
-+        false
++        self.0
 +    }
 +
-+    pub fn write(&self, data: &[u8]) -> io::Result<usize> {
-+        self.inner.write(data).map_err(cvt_err)
++    pub fn write(&self, _: &[u8]) -> io::Result<usize> {
++        self.0
 +    }
 +
-+    pub fn write_vectored(&self, _data: &[IoSlice<'_>]) -> io::Result<usize> {
-+        unsupported()
++    pub fn write_vectored(&self, _: &[IoSlice<'_>]) -> io::Result<usize> {
++        self.0
 +    }
 +
 +    pub fn is_write_vectored(&self) -> bool {
-+        false
++        self.0
 +    }
 +
 +    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn shutdown(&self, _: Shutdown) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<TcpStream> {
-+        self.inner
-+            .duplicate()
-+            .map(|inner| Self {
-+                inner,
-+                read_timeout: self.read_timeout.clone(),
-+                write_timeout: self.write_timeout.clone(),
-+            })
-+            .map_err(cvt_err)
++        self.0
 +    }
 +
 +    pub fn set_linger(&self, _: Option<Duration>) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn linger(&self) -> io::Result<Option<Duration>> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn nodelay(&self) -> io::Result<bool> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn ttl(&self) -> io::Result<u32> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +}
 +
-+#[derive(Debug)]
-+pub struct TcpListener {
-+    inner: rt::Object,
++impl fmt::Debug for TcpStream {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
 +}
 +
++pub struct TcpListener(!);
++
 +impl TcpListener {
-+    pub fn bind(address: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
-+        let (l, p) = netpath!("{}/tcp/listen/{}", address);
-+        Ok(Self {
-+            inner: rt::io::net_root().ok_or(super::ERR_UNSET)?.create(&p[..l]).map_err(cvt_err)?,
-+        })
++    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
++        unsupported()
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-+        self.inner.open(b"accept").map_err(cvt_err).and_then(|inner| {
-+            let peer =
-+                TcpStream { inner, read_timeout: Cell::new(None), write_timeout: Cell::new(None) };
-+            // FIXME
-+            Ok((peer, "0.0.0.0:0".parse().unwrap()))
-+            //peer.socket_addr().map(|addr| (peer, addr))
-+        })
++        self.0
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<TcpListener> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn ttl(&self) -> io::Result<u32> {
-+        unsupported()
++        self.0
 +    }
 +
-+    // The corresponding function still exists in std::net::TcpStream but is deprecated and
-+    // hidden from the docs, so we don't need to support it ever.
 +    pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
-+    // Ditto
 +    pub fn only_v6(&self) -> io::Result<bool> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +}
 +
-+#[derive(Debug)]
-+pub struct UdpSocket {
-+    inner: super::fs::File,
-+    read_timeout: Cell<Option<Duration>>,
-+    write_timeout: Cell<Option<Duration>>,
++impl fmt::Debug for TcpListener {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
++    }
 +}
++
++pub struct UdpSocket(!);
 +
 +impl UdpSocket {
 +    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<UdpSocket> {
@@ -1381,129 +1073,129 @@ index 00000000000..879928aca32
 +    }
 +
 +    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn recv_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn peek_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn send_to(&self, _: &[u8], _: &SocketAddr) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn duplicate(&self) -> io::Result<UdpSocket> {
-+        self.inner.duplicate().map(|inner| Self {
-+            inner,
-+            read_timeout: self.read_timeout.clone(),
-+            write_timeout: self.write_timeout.clone(),
-+        })
++        self.0
 +    }
 +
-+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-+        self.read_timeout.set(timeout);
-+        Ok(())
++    pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
 +    }
 +
-+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-+        self.write_timeout.set(timeout);
-+        Ok(())
++    pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
++        self.0
 +    }
 +
 +    pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
-+        Ok(self.read_timeout.get())
++        self.0
 +    }
 +
 +    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
-+        Ok(self.write_timeout.get())
++        self.0
 +    }
 +
 +    pub fn set_broadcast(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn broadcast(&self) -> io::Result<bool> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_multicast_loop_v4(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn multicast_loop_v4(&self) -> io::Result<bool> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_multicast_ttl_v4(&self, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn multicast_ttl_v4(&self) -> io::Result<u32> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_multicast_loop_v6(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn multicast_loop_v6(&self) -> io::Result<bool> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_ttl(&self, _: u32) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn ttl(&self) -> io::Result<u32> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn recv(&self, _: &mut [u8]) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn peek(&self, _: &mut [u8]) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn send(&self, _: &[u8]) -> io::Result<usize> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn connect(&self, _: io::Result<&SocketAddr>) -> io::Result<()> {
-+        unsupported()
++        self.0
++    }
++}
++
++impl fmt::Debug for UdpSocket {
++    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        self.0
 +    }
 +}
 +
@@ -1538,7 +1230,6 @@ index 00000000000..879928aca32
 +    }
 +}
 +
-+/// Used by [`std::net::addr`].
 +#[allow(nonstandard_style)]
 +pub mod netc {
 +    pub const AF_INET: u8 = 0;
@@ -1578,10 +1269,10 @@ index 00000000000..879928aca32
 +}
 diff --git a/library/std/src/sys/norostb/os.rs b/library/std/src/sys/norostb/os.rs
 new file mode 100644
-index 00000000000..230ac6d0a77
+index 00000000000..e150ae143ad
 --- /dev/null
 +++ b/library/std/src/sys/norostb/os.rs
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,105 @@
 +use super::unsupported;
 +use crate::error::Error as StdError;
 +use crate::ffi::{OsStr, OsString};
@@ -1589,8 +1280,6 @@ index 00000000000..230ac6d0a77
 +use crate::io;
 +use crate::marker::PhantomData;
 +use crate::path::{self, PathBuf};
-+
-+pub use super::args::{env, getenv, setenv, unsetenv, Env};
 +
 +pub fn errno() -> i32 {
 +    0
@@ -1649,6 +1338,31 @@ index 00000000000..230ac6d0a77
 +    unsupported()
 +}
 +
++pub struct Env(!);
++
++impl Iterator for Env {
++    type Item = (OsString, OsString);
++    fn next(&mut self) -> Option<(OsString, OsString)> {
++        self.0
++    }
++}
++
++pub fn env() -> Env {
++    panic!("not supported on this platform")
++}
++
++pub fn getenv(_: &OsStr) -> Option<OsString> {
++    None
++}
++
++pub fn setenv(_: &OsStr, _: &OsStr) -> io::Result<()> {
++    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot set env vars on this platform"))
++}
++
++pub fn unsetenv(_: &OsStr) -> io::Result<()> {
++    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot unset env vars on this platform"))
++}
++
 +pub fn temp_dir() -> PathBuf {
 +    panic!("no filesystem on this platform")
 +}
@@ -1657,8 +1371,8 @@ index 00000000000..230ac6d0a77
 +    None
 +}
 +
-+pub fn exit(code: i32) -> ! {
-+    norostb_rt::exit(code)
++pub fn exit(_code: i32) -> ! {
++    crate::intrinsics::abort()
 +}
 +
 +pub fn getpid() -> u32 {
@@ -1709,22 +1423,20 @@ index 00000000000..25514c2322f
 +}
 diff --git a/library/std/src/sys/norostb/process.rs b/library/std/src/sys/norostb/process.rs
 new file mode 100644
-index 00000000000..1af6994d09c
+index 00000000000..42a1ff730e3
 --- /dev/null
 +++ b/library/std/src/sys/norostb/process.rs
-@@ -0,0 +1,244 @@
-+use crate::ffi::{OsStr, OsString};
+@@ -0,0 +1,211 @@
++use crate::ffi::OsStr;
 +use crate::fmt;
 +use crate::io;
++use crate::marker::PhantomData;
 +use crate::num::NonZeroI32;
-+use crate::os::norostb::prelude::*;
 +use crate::path::Path;
-+use crate::slice::Iter;
 +use crate::sys::fs::File;
 +use crate::sys::pipe::AnonPipe;
 +use crate::sys::unsupported;
 +use crate::sys_common::process::{CommandEnv, CommandEnvs};
-+use norostb_rt as rt;
 +
 +pub use crate::ffi::OsString as EnvKey;
 +
@@ -1733,10 +1445,7 @@ index 00000000000..1af6994d09c
 +////////////////////////////////////////////////////////////////////////////////
 +
 +pub struct Command {
-+    program: OsString,
 +    env: CommandEnv,
-+    dir: OsString,
-+    args: Vec<OsString>,
 +}
 +
 +// passed back to std::process with the pipes connected to the child, if any
@@ -1754,45 +1463,30 @@ index 00000000000..1af6994d09c
 +}
 +
 +impl Command {
-+    pub fn new(program: &OsStr) -> Self {
-+        Self {
-+            program: program.into(),
-+            env: Default::default(),
-+            dir: Default::default(),
-+            args: Default::default(),
-+        }
++    pub fn new(_program: &OsStr) -> Command {
++        Command { env: Default::default() }
 +    }
 +
-+    pub fn arg(&mut self, arg: &OsStr) {
-+        self.args.push(arg.into());
-+    }
++    pub fn arg(&mut self, _arg: &OsStr) {}
 +
 +    pub fn env_mut(&mut self) -> &mut CommandEnv {
 +        &mut self.env
 +    }
 +
-+    pub fn cwd(&mut self, dir: &OsStr) {
-+        self.dir = dir.into();
-+    }
++    pub fn cwd(&mut self, _dir: &OsStr) {}
 +
-+    pub fn stdin(&mut self, _stdin: Stdio) {
-+        todo!()
-+    }
++    pub fn stdin(&mut self, _stdin: Stdio) {}
 +
-+    pub fn stdout(&mut self, _stdout: Stdio) {
-+        todo!()
-+    }
++    pub fn stdout(&mut self, _stdout: Stdio) {}
 +
-+    pub fn stderr(&mut self, _stderr: Stdio) {
-+        todo!()
-+    }
++    pub fn stderr(&mut self, _stderr: Stdio) {}
 +
 +    pub fn get_program(&self) -> &OsStr {
 +        panic!("unsupported")
 +    }
 +
 +    pub fn get_args(&self) -> CommandArgs<'_> {
-+        CommandArgs(self.args.iter())
++        CommandArgs { _p: PhantomData }
 +    }
 +
 +    pub fn get_envs(&self) -> CommandEnvs<'_> {
@@ -1808,18 +1502,7 @@ index 00000000000..1af6994d09c
 +        _default: Stdio,
 +        _needs_stdin: bool,
 +    ) -> io::Result<(Process, StdioPipes)> {
-+        rt::Process::new(
-+            &*rt::io::process_root().ok_or(super::ERR_UNSET)?,
-+            &rt::io::file_root()
-+                .ok_or(super::ERR_UNSET)?
-+                .open(self.program.as_bytes())
-+                .map_err(super::cvt_err)?,
-+            rt::process::Process::default_handles(),
-+            self.args.iter().map(|s| s.as_bytes()),
-+            self.env.capture().iter().map(|(k, v)| (k.as_bytes(), v.as_bytes())),
-+        )
-+        .map_err(super::cvt_err)
-+        .map(|p| (Process(p), StdioPipes { stdin: None, stdout: None, stderr: None }))
++        unsupported()
 +    }
 +}
 +
@@ -1917,36 +1600,34 @@ index 00000000000..1af6994d09c
 +    }
 +}
 +
-+pub struct Process(rt::Process);
++pub struct Process(!);
 +
 +impl Process {
 +    pub fn id(&self) -> u32 {
-+        self.0.as_object().as_raw()
++        self.0
 +    }
 +
 +    pub fn kill(&mut self) -> io::Result<()> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn wait(&mut self) -> io::Result<ExitStatus> {
-+        unsupported()
++        self.0
 +    }
 +
 +    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-+        unsupported()
++        self.0
 +    }
 +}
 +
-+pub struct CommandArgs<'a>(Iter<'a, OsString>);
++pub struct CommandArgs<'a> {
++    _p: PhantomData<&'a ()>,
++}
 +
 +impl<'a> Iterator for CommandArgs<'a> {
 +    type Item = &'a OsStr;
 +    fn next(&mut self) -> Option<&'a OsStr> {
-+        self.0.next().map(|s| &**s)
-+    }
-+
-+    fn size_hint(&self) -> (usize, Option<usize>) {
-+        self.0.size_hint()
++        None
 +    }
 +}
 +
@@ -2033,18 +1714,15 @@ index 00000000000..8438adeb5b5
 +}
 diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
 new file mode 100644
-index 00000000000..855ddc4330e
+index 00000000000..b2298d3e263
 --- /dev/null
 +++ b/library/std/src/sys/norostb/stdio.rs
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,71 @@
 +use crate::io;
-+use norostb_rt as rt;
 +
 +pub struct Stdin;
 +pub struct Stdout;
 +pub struct Stderr;
-+
-+pub const STDIN_BUF_SIZE: usize = 512;
 +
 +impl Stdin {
 +    pub const fn new() -> Stdin {
@@ -2053,8 +1731,8 @@ index 00000000000..855ddc4330e
 +}
 +
 +impl io::Read for Stdin {
-+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-+        rt::io::stdin().ok_or(super::ERR_UNSET)?.read(buf).map_err(super::cvt_err)
++    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
++        Ok(0)
 +    }
 +}
 +
@@ -2066,7 +1744,13 @@ index 00000000000..855ddc4330e
 +
 +impl io::Write for Stdout {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        rt::io::stdout().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
++        let len;
++        unsafe {
++            crate::arch::asm!("
++				syscall
++			", in("eax") 1, in("edi") 1, in("rsi") buf.as_ptr(), in("rdx") buf.len(), lateout("rax") len);
++        }
++        Ok(len)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2082,7 +1766,13 @@ index 00000000000..855ddc4330e
 +
 +impl io::Write for Stderr {
 +    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-+        rt::io::stderr().ok_or(super::ERR_UNSET)?.write(buf).map_err(super::cvt_err)
++        let len;
++        unsafe {
++            crate::arch::asm!("
++				syscall
++			", in("eax") 1, in("edi") 2, in("rsi") buf.as_ptr(), in("rdx") buf.len(), lateout("rax") len);
++        }
++        Ok(len)
 +    }
 +
 +    fn flush(&mut self) -> io::Result<()> {
@@ -2090,55 +1780,51 @@ index 00000000000..855ddc4330e
 +    }
 +}
 +
++pub const STDIN_BUF_SIZE: usize = 0;
++
 +pub fn is_ebadf(_err: &io::Error) -> bool {
 +    true
 +}
 +
 +pub fn panic_output() -> Option<impl io::Write> {
-+    rt::io::stderr().map(|_| Stderr)
++    Some(Stderr::new())
 +}
-+
-+/// # Safety
-+///
-+/// Must be called only once during runtime initialization.
-+pub(super) unsafe fn init() {}
 diff --git a/library/std/src/sys/norostb/thread.rs b/library/std/src/sys/norostb/thread.rs
 new file mode 100644
-index 00000000000..62c8249dd6d
+index 00000000000..a8db251de20
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread.rs
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,46 @@
 +use super::unsupported;
 +use crate::ffi::CStr;
 +use crate::io;
 +use crate::num::NonZeroUsize;
 +use crate::time::Duration;
-+use norostb_rt as rt;
 +
-+pub struct Thread(rt::thread::Thread);
++pub struct Thread(!);
 +
-+pub const DEFAULT_MIN_STACK_SIZE: usize = 1 << 16;
++pub const DEFAULT_MIN_STACK_SIZE: usize = 4096;
 +
 +impl Thread {
 +    // unsafe: see thread::Builder::spawn_unchecked for safety requirements
-+    pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> io::Result<Self> {
-+        unsafe { rt::thread::Thread::new(stack, p).map_err(super::cvt_err).map(Self) }
++    pub unsafe fn new(_stack: usize, _p: Box<dyn FnOnce()>) -> io::Result<Thread> {
++        unsupported()
 +    }
 +
 +    pub fn yield_now() {
-+        rt::thread::sleep(Duration::ZERO);
++        // do nothing
 +    }
 +
 +    pub fn set_name(_name: &CStr) {
 +        // nope
 +    }
 +
-+    pub fn sleep(dur: Duration) {
-+        rt::thread::sleep(dur);
++    pub fn sleep(_dur: Duration) {
++        panic!("can't sleep");
 +    }
 +
 +    pub fn join(self) {
-+        self.0.wait()
++        self.0
 +    }
 +}
 +
@@ -2172,38 +1858,54 @@ index 00000000000..85d66098302
 +}
 diff --git a/library/std/src/sys/norostb/thread_local_key.rs b/library/std/src/sys/norostb/thread_local_key.rs
 new file mode 100644
-index 00000000000..720c7fe1995
+index 00000000000..a31a3944a06
 --- /dev/null
 +++ b/library/std/src/sys/norostb/thread_local_key.rs
-@@ -0,0 +1,34 @@
-+// TODO move part of this to the runtime crate as other languages will need
-+// to share the same implementation.
-+
-+use norostb_rt::tls;
+@@ -0,0 +1,50 @@
++use crate::ptr;
 +
 +pub type Key = usize;
 +
++// FIXME implement real TLS
++static mut TLS: Vec<(*mut u8, Option<unsafe extern "C" fn(*mut u8)>)> = Vec::new();
++
 +#[inline]
 +pub unsafe fn create(dtor: Option<unsafe extern "C" fn(*mut u8)>) -> Key {
-+    let dtor = unsafe { core::mem::transmute(dtor) };
-+    tls::allocate(dtor).expect("failed to allocate TLS slot").0
++    unsafe {
++        TLS.push((ptr::null_mut(), dtor));
++        TLS.len() - 1
++    }
 +}
 +
 +#[inline]
 +pub unsafe fn set(key: Key, value: *mut u8) {
++    // TODO do we have to call the destructor on the old value?
 +    unsafe {
-+        tls::set(tls::Key(key), value.cast());
++        debug_assert!(key < TLS.len());
++        TLS.get_unchecked_mut(key).0 = value;
 +    }
 +}
 +
 +#[inline]
 +pub unsafe fn get(key: Key) -> *mut u8 {
-+    unsafe { tls::get(tls::Key(key)).cast() }
++    unsafe {
++        debug_assert!(key < TLS.len());
++        TLS.get_unchecked(key).0
++    }
 +}
 +
 +#[inline]
 +pub unsafe fn destroy(key: Key) {
-+    unsafe { tls::free(tls::Key(key)) }
++    unsafe {
++        debug_assert!(key < TLS.len());
++        let p = TLS.get_unchecked(key);
++        if let Some(f) = p.1 {
++            if !p.0.is_null() {
++                f(p.0);
++            }
++        }
++        let _ = p;
++    }
 +}
 +
 +#[inline]
@@ -2273,3 +1975,6 @@ index 804727fbc54..b7fde6e5a4c 100644
                   feature = "restricted-std",
                   all(target_family = "wasm", not(target_os = "emscripten")),
                   all(target_vendor = "fortanix", target_env = "sgx")))] {
+-- 
+2.30.2
+

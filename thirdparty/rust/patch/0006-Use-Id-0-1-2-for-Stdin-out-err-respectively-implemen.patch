@@ -1,0 +1,179 @@
+From 7db7faf9cf81bbb2660d0a63672cac7c8c22e5f7 Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Thu, 24 Feb 2022 12:31:27 +0100
+Subject: [PATCH 06/41] Use Id 0,1,2 for Stdin,out,err respectively, implement
+ Stdin
+
+---
+ library/std/src/sys/norostb/alloc.rs  | 18 ++++++++++++--
+ library/std/src/sys/norostb/common.rs |  8 ------
+ library/std/src/sys/norostb/mod.rs    | 20 +++++++++++++++
+ library/std/src/sys/norostb/stdio.rs  | 36 +++++++++++++++++++--------
+ 4 files changed, 62 insertions(+), 20 deletions(-)
+
+diff --git a/library/std/src/sys/norostb/alloc.rs b/library/std/src/sys/norostb/alloc.rs
+index 6126fc75e15..5a589bd14b4 100644
+--- a/library/std/src/sys/norostb/alloc.rs
++++ b/library/std/src/sys/norostb/alloc.rs
+@@ -1,4 +1,5 @@
+ use crate::alloc::{GlobalAlloc, Layout, System};
++use crate::ptr;
+ 
+ #[repr(align(16))]
+ #[derive(Clone, Copy)]
+@@ -28,7 +29,20 @@ unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+ 
+     #[inline]
+-    unsafe fn realloc(&self, _ptr: *mut u8, _layout: Layout, _new_size: usize) -> *mut u8 {
+-        0 as *mut u8
++    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
++        if layout.size() >= new_size {
++            return ptr;
++        }
++        // SAFETY: the caller has to ensure new_size doesn't overflow
++        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
++        // SAFETY: the caller has to ensure new_size is non-zero
++        let new_ptr = unsafe { self.alloc_zeroed(new_layout) };
++        if !new_ptr.is_null() {
++            // SAFETY: the old and new pointer are both valid and cannot overlap.
++            unsafe {
++                ptr::copy_nonoverlapping(ptr, new_ptr, layout.size().min(new_size));
++            }
++        }
++        new_ptr
+     }
+ }
+diff --git a/library/std/src/sys/norostb/common.rs b/library/std/src/sys/norostb/common.rs
+index 2f3ea6d2a99..1db6a49a522 100644
+--- a/library/std/src/sys/norostb/common.rs
++++ b/library/std/src/sys/norostb/common.rs
+@@ -8,14 +8,6 @@ pub mod memchr {
+ // spec definition?
+ use crate::os::raw::c_char;
+ 
+-// SAFETY: must be called only once during runtime initialization.
+-// NOTE: this is not guaranteed to run, for example when Rust code is called externally.
+-pub unsafe fn init(_argc: isize, _argv: *const *const u8) {}
+-
+-// SAFETY: must be called only once during runtime cleanup.
+-// NOTE: this is not guaranteed to run, for example when the program aborts.
+-pub unsafe fn cleanup() {}
+-
+ pub fn unsupported<T>() -> std_io::Result<T> {
+     Err(unsupported_err())
+ }
+diff --git a/library/std/src/sys/norostb/mod.rs b/library/std/src/sys/norostb/mod.rs
+index 535e7e748ee..1b551f8c087 100644
+--- a/library/std/src/sys/norostb/mod.rs
++++ b/library/std/src/sys/norostb/mod.rs
+@@ -36,3 +36,23 @@
+ pub extern "C" fn __rust_abort() {
+     abort_internal();
+ }
++
++/// # Safety
++///
++/// Must be called only once during runtime initialization.
++///
++/// # Note
++///
++/// This is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
++    unsafe { stdio::init() }
++}
++
++/// # Safety
++///
++/// Must be called only once during runtime cleanup.
++///
++/// # Note
++///
++/// This is not guaranteed to run, for example when Rust code is called externally.
++pub unsafe fn cleanup() {}
+diff --git a/library/std/src/sys/norostb/stdio.rs b/library/std/src/sys/norostb/stdio.rs
+index 3b5d76e665b..4fc917cf4e1 100644
+--- a/library/std/src/sys/norostb/stdio.rs
++++ b/library/std/src/sys/norostb/stdio.rs
+@@ -1,10 +1,16 @@
+ use crate::io;
+ use norostb_rt::kernel::syscall;
+ 
++static STDIN: syscall::Handle = syscall::Handle(0);
++static STDOUT: syscall::Handle = syscall::Handle(1);
++static STDERR: syscall::Handle = syscall::Handle(2);
++
+ pub struct Stdin;
+ pub struct Stdout;
+ pub struct Stderr;
+ 
++pub const STDIN_BUF_SIZE: usize = 512;
++
+ impl Stdin {
+     pub const fn new() -> Stdin {
+         Stdin
+@@ -12,8 +18,9 @@ pub const fn new() -> Stdin {
+ }
+ 
+ impl io::Read for Stdin {
+-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+-        Ok(0)
++    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
++        syscall::read(STDIN, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to read"))
+     }
+ }
+ 
+@@ -25,9 +32,8 @@ pub const fn new() -> Stdout {
+ 
+ impl io::Write for Stdout {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        syscall::syslog(buf).map_err(|_| {
+-            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
+-        })
++        syscall::write(STDOUT, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -43,9 +49,8 @@ pub const fn new() -> Stderr {
+ 
+ impl io::Write for Stderr {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+-        syscall::syslog(buf).map_err(|_| {
+-            io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write to syslog")
+-        })
++        syscall::write(STDERR, buf)
++            .map_err(|_| io::const_io_error!(io::ErrorKind::Uncategorized, "failed to write"))
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+@@ -53,8 +58,6 @@ fn flush(&mut self) -> io::Result<()> {
+     }
+ }
+ 
+-pub const STDIN_BUF_SIZE: usize = 0;
+-
+ pub fn is_ebadf(_err: &io::Error) -> bool {
+     true
+ }
+@@ -74,3 +77,16 @@ fn flush(&mut self) -> io::Result<()> {
+         Ok(self.flush())
+     }
+ }
++
++/// # Safety
++///
++/// Must be called only once during runtime initialization.
++pub(super) unsafe fn init() {
++    use syscall::{Id, TableId};
++    let stdin = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stdin, STDIN);
++    let stdout = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stdout, STDOUT);
++    let stderr = syscall::open(TableId(0), Id(0)).unwrap();
++    assert_eq!(stderr, STDERR);
++}
+-- 
+2.30.2
+
