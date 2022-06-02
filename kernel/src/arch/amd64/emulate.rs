@@ -177,7 +177,7 @@ extern "C" fn decode(rip: &mut *const u8, regs: &mut [u64; 16], rsp: &mut u64) {
 		i if i & 0xd8_ff_ff_f6_ff == 0xd8_ae_0f_40_f3 => dec.fsgs64_write(i, msr::GS_BASE),
 		_ => {
 			fatal!("Invalid opcode!");
-			fatal!("  RIP:     {:p}", rip);
+			fatal!("  RIP:     {:?}", *rip);
 			// TODO notify user thread somehow.
 			loop {
 				super::halt();
