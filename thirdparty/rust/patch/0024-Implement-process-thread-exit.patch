@@ -1,7 +1,7 @@
 From 0b1a940b185d97331ffd2716e15ba72e3372cf76 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 22 Apr 2022 00:50:28 +0200
-Subject: [PATCH 24/41] Implement process & thread exit
+Subject: [PATCH 24/43] Implement process & thread exit
 
 ---
  library/std/src/lib.rs                        |  1 +

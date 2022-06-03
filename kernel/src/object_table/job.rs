@@ -21,8 +21,6 @@ pub enum JobRequest {
 	Read { handle: Handle, amount: usize },
 	Write { handle: Handle, data: Box<[u8]> },
 	Seek { handle: Handle, from: SeekFrom },
-	Query { handle: Handle, filter: Box<[u8]> },
-	QueryNext { handle: Handle },
 	Close { handle: Handle },
 	Peek { handle: Handle, amount: usize },
 }
@@ -35,8 +33,6 @@ pub enum JobResult {
 	Read { data: Box<[u8]> },
 	Write { amount: usize },
 	Seek { position: u64 },
-	Query { handle: Handle },
-	QueryNext { path: Box<[u8]> },
 	Peek { data: Box<[u8]> },
 }
 

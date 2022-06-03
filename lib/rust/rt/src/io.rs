@@ -2,7 +2,7 @@
 extern crate alloc;
 
 use crate::{tls, RefObject};
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
 use core::{
 	mem::{self, MaybeUninit},
 	ptr::NonNull,
@@ -13,7 +13,7 @@ use norostb_kernel::{error::Error, Handle};
 
 pub use norostb_kernel::{
 	error::Result,
-	io::{Job, ObjectInfo, Request, Response, SeekFrom},
+	io::{Job, Request, Response, SeekFrom},
 };
 
 macro_rules! transmute_handle {
@@ -193,25 +193,6 @@ pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
 	result(enqueue(Request::create(0, handle, path)).value).map(|v| v as Handle)
 }
 
-/// Blocking query
-#[inline]
-pub fn query(handle: Handle, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::query(0, handle, path)).value).map(|v| v as Handle)
-}
-
-/// Blocking query_next
-#[inline]
-pub fn query_next(query: Handle, info: &mut ObjectInfo) -> Result<bool> {
-	let e = enqueue(Request::query_next(0, query, info));
-	if e.value < 0 {
-		// FIXME the API for quering is kinda broken right now.
-		//Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
-		Ok(false)
-	} else {
-		Ok(e.value > 0)
-	}
-}
-
 /// Blocking take_job
 #[inline]
 pub fn take_job(table: Handle, job: &mut Job) -> Result<()> {
@@ -258,22 +239,4 @@ pub fn duplicate(handle: Handle) -> Result<Handle> {
 #[inline]
 pub fn create_root() -> Result<Handle> {
 	syscall::create_root().map_err(|_| todo!())
-}
-
-#[derive(Debug)]
-pub struct Query(pub(crate) Handle);
-
-impl Iterator for Query {
-	type Item = Vec<u8>;
-
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		let mut buf = Vec::with_capacity(4096);
-		buf.resize(4096, 0);
-		let mut info = ObjectInfo::new(&mut buf[..]);
-		query_next(self.0, &mut info).unwrap().then(|| {
-			buf.resize(info.path_len, 0);
-			buf
-		})
-	}
 }

@@ -4,10 +4,7 @@ use core::{
 	mem::{self, MaybeUninit},
 };
 
-pub use norostb_kernel::{
-	io::{Job, ObjectInfo},
-	Handle,
-};
+pub use norostb_kernel::{io::Job, Handle};
 
 #[derive(Debug)]
 pub struct Object(Handle);
@@ -21,11 +18,6 @@ impl Object {
 	#[inline]
 	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
 		io::create(self.0, path).map(Self)
-	}
-
-	#[inline]
-	pub fn query(&self, path: &[u8]) -> io::Result<io::Query> {
-		io::query(self.0, path).map(io::Query)
 	}
 
 	#[inline]

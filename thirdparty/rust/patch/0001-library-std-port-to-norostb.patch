@@ -1,7 +1,7 @@
 From add9be2f79e60188a83909dcd7a1e643230686fb Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Tue, 22 Feb 2022 03:57:09 +0100
-Subject: [PATCH 01/41] library/std: port to norostb
+Subject: [PATCH 01/43] library/std: port to norostb
 
 ---
  compiler/rustc_target/src/spec/mod.rs         |   3 +

@@ -1,23 +1,13 @@
 use crate::driver::uart;
 #[cfg(feature = "driver-vga")]
 use crate::driver::vga;
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, Root, Ticket};
+use crate::object_table::{Error, NoneQuery, Object, OneQuery, Root, Ticket};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt::{self, Write};
 
 struct SystemTable;
 
 impl Object for SystemTable {
-	fn query(self: Arc<Self>, mut prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
-		Ticket::new_complete(Ok(match tags {
-			&[] | &[b'l', b'o', b'g'] => Box::new(OneQuery::new({
-				prefix.extend(b"log");
-				prefix
-			})),
-			_ => Box::new(NoneQuery),
-		}))
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		if path == b"log" {
 			Ticket::new_complete(Ok(Arc::new(SystemLogRef)))

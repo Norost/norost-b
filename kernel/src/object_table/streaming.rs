@@ -106,24 +106,6 @@ impl Table for StreamingTable {
 			Ok(JobResult::Read { data }) | Ok(JobResult::Peek { data }) => {
 				tw.into_data().complete(Ok(data))
 			}
-			Ok(JobResult::Query { handle }) => {
-				tw.into_query().complete(Ok(Box::new(StreamQuery {
-					table: Arc::downgrade(&self),
-					handle,
-					prefix,
-				})))
-			}
-			Ok(JobResult::QueryNext { path }) => {
-				tw.into_query_result().complete(if path.len() > 0 {
-					prefix.extend(path.into_vec());
-					Ok(QueryResult {
-						path: prefix.into(),
-					})
-				} else {
-					// FIXME query API sucks
-					Err(Error::InvalidOperation)
-				});
-			}
 			Ok(JobResult::Seek { position }) => {
 				tw.into_u64().complete(Ok(position));
 			}
@@ -134,16 +116,6 @@ impl Table for StreamingTable {
 }
 
 impl Object for StreamingTable {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(
-			JobRequest::Query {
-				handle: Handle::MAX,
-				filter: filter.into(),
-			},
-			prefix.into(),
-		)
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
 			JobRequest::Open {
@@ -202,16 +174,6 @@ impl StreamObject {
 }
 
 impl Object for StreamObject {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(
-			|| JobRequest::Query {
-				handle: self.handle,
-				filter: filter.into(),
-			},
-			prefix.into(),
-		)
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
 			|| JobRequest::Open {
@@ -280,35 +242,6 @@ impl Drop for StreamObject {
 				handle: self.handle,
 			});
 		});
-	}
-}
-
-struct StreamQuery {
-	table: Weak<StreamingTable>,
-	handle: Handle,
-	prefix: Vec<u8>,
-}
-
-impl Iterator for StreamQuery {
-	type Item = Ticket<QueryResult>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		Weak::upgrade(&self.table).map(|table| {
-			table.submit_job(
-				JobRequest::QueryNext {
-					handle: self.handle,
-				},
-				self.prefix.clone(),
-			)
-		})
-	}
-}
-
-impl Query for StreamQuery {}
-
-impl Drop for StreamQuery {
-	fn drop(&mut self) {
-		todo!()
 	}
 }
 

@@ -27,7 +27,7 @@ extern crate alloc;
 
 use crate::memory::frame::{PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, QueryIter, Ticket};
+use crate::object_table::{Error, NoneQuery, Object, OneQuery, QueryIter, Ticket};
 use crate::scheduler::MemoryObject;
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cell::Cell;
@@ -194,29 +194,18 @@ fn drivers() -> &'static BTreeMap<Box<[u8]>, Driver> {
 struct Drivers;
 
 impl Object for Drivers {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, path: &[u8]) -> Ticket<Box<dyn Query>> {
-		Ticket::new_complete(Ok(if path == b"" {
-			let it = unsafe {
-				DRIVERS.keys().map(move |s| {
-					let mut v = prefix.clone();
-					v.extend(&**s);
-					v
-				})
-			};
-			Box::new(QueryIter::new(it))
-		} else if drivers().contains_key(path) {
-			Box::new(OneQuery::new(path.into()))
-		} else {
-			Box::new(NoneQuery)
-		}))
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		Ticket::new_complete(drivers().get(path).map_or(Err(Error::DoesNotExist), |d| {
-			Ok(Arc::new(DriverObject {
-				data: d.0,
-				position: Cell::new(0),
-			}))
-		}))
+		Ticket::new_complete(if path == b"" {
+			Ok(Arc::new(QueryIter::new(
+				drivers().keys().map(|s| s.to_vec()),
+			)))
+		} else {
+			drivers().get(path).map_or(Err(Error::DoesNotExist), |d| {
+				Ok(Arc::new(DriverObject {
+					data: d.0,
+					position: Cell::new(0),
+				}))
+			})
+		})
 	}
 }

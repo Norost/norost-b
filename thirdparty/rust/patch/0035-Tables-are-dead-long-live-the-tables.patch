@@ -1,7 +1,7 @@
 From 8ed06da4122de517a7c0ca4c4ab504a88dfca7fa Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Thu, 28 Apr 2022 21:25:39 +0200
-Subject: [PATCH 35/41] Tables are dead, long live the tables
+Subject: [PATCH 35/43] Tables are dead, long live the tables
 
 ---
  library/std/src/os/norostb/mod.rs    |   2 +-

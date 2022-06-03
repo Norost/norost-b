@@ -1,7 +1,7 @@
 From 2f64ad2e7cbe45d8421b19dfc4bd48c817e493ea Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Tue, 19 Apr 2022 20:58:24 +0200
-Subject: [PATCH 21/41] Let kernel select virtual address for I/O queue
+Subject: [PATCH 21/43] Let kernel select virtual address for I/O queue
 
 ---
  library/std/src/sys/norostb/io.rs | 14 +++++---------

@@ -48,8 +48,6 @@ impl Request {
 	pub const WRITE: u8 = 1;
 	pub const OPEN: u8 = 2;
 	pub const CREATE: u8 = 3;
-	pub const QUERY: u8 = 4;
-	pub const QUERY_NEXT: u8 = 5;
 	pub const TAKE_JOB: u8 = 6;
 	pub const FINISH_JOB: u8 = 7;
 	pub const SEEK: u8 = 8;
@@ -103,26 +101,6 @@ impl Request {
 			ty: Self::CREATE,
 			arguments_32: [handle],
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn query(user_data: u64, handle: Handle, path: &[u8]) -> Self {
-		Self {
-			ty: Self::QUERY,
-			arguments_32: [handle],
-			arguments_64: [path.as_ptr() as u64, path.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn query_next(user_data: u64, handle: Handle, info: &mut ObjectInfo) -> Self {
-		Self {
-			ty: Self::QUERY_NEXT,
-			arguments_32: [handle],
-			arguments_64: [info as *const _ as u64, 0],
 			user_data,
 			..Default::default()
 		}
@@ -586,35 +564,6 @@ impl Job {
 }
 
 pub type JobId = u32;
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct ObjectInfo {
-	// FIXME potentially UB if modified
-	pub path_ptr: *mut u8,
-	pub path_len: usize,
-	pub path_capacity: usize,
-}
-
-impl ObjectInfo {
-	pub fn new<'a>(path_buffer: &'a mut [u8]) -> Self {
-		Self {
-			path_ptr: path_buffer.as_mut_ptr(),
-			path_capacity: path_buffer.len(),
-			..Default::default()
-		}
-	}
-}
-
-impl Default for ObjectInfo {
-	fn default() -> Self {
-		Self {
-			path_ptr: core::ptr::null_mut(),
-			path_len: Default::default(),
-			path_capacity: Default::default(),
-		}
-	}
-}
 
 #[cfg(test)]
 mod test {

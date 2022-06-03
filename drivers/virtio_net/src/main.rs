@@ -34,12 +34,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.ok_or("expected table name")?;
 
 	let dev_handle = {
-		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1000")
-			.unwrap()
-			.next()
-			.unwrap()
-			.unwrap();
-		fs::File::open(dev.path()).unwrap().into_handle()
+		let s = b" 1af4:1000";
+		let mut it = fs::read_dir("pci/info").unwrap().map(Result::unwrap);
+		loop {
+			let dev = it.next().unwrap().path().into_os_string().into_vec();
+			if dev.ends_with(s) {
+				let mut path = Vec::from(*b"pci/");
+				path.extend(&dev[..7]);
+				break fs::File::open(std::ffi::OsString::from_vec(path))
+					.unwrap()
+					.into_handle();
+			}
+		}
 	};
 
 	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();

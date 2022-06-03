@@ -1,5 +1,5 @@
-use super::{Error, Object, Query, QueryResult, StreamingTable, Ticket};
-use crate::sync::SpinLock;
+use super::{Error, Object, StreamingTable, Ticket};
+use crate::{object_table::QueryIter, sync::SpinLock};
 use alloc::{
 	boxed::Box,
 	collections::BTreeMap,
@@ -38,11 +38,11 @@ impl Root {
 		self.objects.auto_lock().insert(name.into(), object);
 	}
 
-	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], &'a [u8])> {
+	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], Option<&'a [u8]>)> {
 		let (object, rest) = path
 			.iter()
 			.position(|c| *c == b'/')
-			.map_or((path, &b""[..]), |i| (&path[..i], &path[i + 1..]));
+			.map_or((path, None), |i| (&path[..i], Some(&path[i + 1..])));
 		let mut objects = self.objects.auto_lock();
 		if let Some(obj) = objects.get(object) {
 			if let Some(obj) = Weak::upgrade(&obj) {
@@ -58,44 +58,23 @@ impl Root {
 }
 
 impl Object for Root {
-	fn query(self: Arc<Self>, mut prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		if filter == b"" || filter == b"/" {
-			struct Q<I: Iterator<Item = Ticket<QueryResult>>>(I);
-			impl<I: Iterator<Item = Ticket<QueryResult>>> Iterator for Q<I> {
-				type Item = Ticket<QueryResult>;
-				fn next(&mut self) -> Option<Self::Item> {
-					self.0.next()
-				}
-			}
-			impl<I: Iterator<Item = Ticket<QueryResult>>> Query for Q<I> {}
-
-			// Filter any dead objects before querying.
-			let mut objects = self.objects.auto_lock();
-			objects.retain(|_, v| v.strong_count() > 0);
-			Ticket::new_complete(Ok(Box::new(Q(objects
-				.keys()
-				.cloned()
-				.collect::<Vec<_>>()
-				.into_iter()
-				.map(|e| Ticket::new_complete(Ok(QueryResult { path: e })))))))
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		if path == b"" {
+			Ticket::new_complete(Ok(Arc::new(QueryIter::new(
+				self.objects
+					.auto_lock()
+					.keys()
+					.map(|s| s.to_vec())
+					.collect::<Vec<_>>()
+					.into_iter(),
+			))))
 		} else {
-			self.find(filter)
-				.map_or_else(not_found, move |(obj, obj_prefix, filter)| {
-					prefix.extend(obj_prefix);
-					prefix.push(b'/');
-					obj.query(prefix, filter)
+			self.find(path)
+				.map_or_else(not_found, |(obj, _, path)| match path {
+					None => Ticket::new_complete(Ok(obj)),
+					Some(path) => obj.open(path),
 				})
 		}
-	}
-
-	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.find(path).map_or_else(not_found, |(obj, _, path)| {
-			if path == b"" {
-				Ticket::new_complete(Ok(obj))
-			} else {
-				obj.open(path)
-			}
-		})
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
@@ -111,12 +90,9 @@ impl Object for Root {
 					Ok(tbl)
 				})
 			},
-			|(obj, _, path)| {
-				if path == b"" {
-					Ticket::new_complete(Err(Error::AlreadyExists))
-				} else {
-					obj.create(path)
-				}
+			|(obj, _, path)| match path {
+				None => Ticket::new_complete(Err(Error::AlreadyExists)),
+				Some(path) => obj.create(path),
 			},
 		)
 	}

@@ -1,7 +1,7 @@
 From 87cab1f7b98d13a248c1bc31ac98fd1d4eab309e Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 22 Apr 2022 18:22:34 +0200
-Subject: [PATCH 27/41] Close files on drop
+Subject: [PATCH 27/43] Close files on drop
 
 ---
  library/std/src/os/norostb/io.rs  | 4 ++--
