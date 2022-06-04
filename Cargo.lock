@@ -92,7 +92,9 @@ name = "driver_scancode_to_char"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "nora_io_queue_rt",
  "norostb_kernel",
+ "norostb_rt",
  "scancodes",
 ]
 
@@ -225,6 +227,21 @@ dependencies = [
  "pci",
  "rsdp",
  "scancodes",
+]
+
+[[package]]
+name = "nora_io_queue"
+version = "0.1.0"
+dependencies = [
+ "norostb_kernel",
+]
+
+[[package]]
+name = "nora_io_queue_rt"
+version = "0.1.0"
+dependencies = [
+ "arena",
+ "nora_io_queue",
 ]
 
 [[package]]

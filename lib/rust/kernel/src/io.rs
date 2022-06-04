@@ -344,6 +344,7 @@ impl ResponseRing {
 	}
 }
 
+#[derive(Debug)]
 pub struct Queue {
 	pub base: NonNull<u8>,
 	pub requests_mask: u32,

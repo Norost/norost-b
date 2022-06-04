@@ -1,0 +1,8 @@
+[package]
+name = "nora_io_queue_rt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arena = { path = "../arena" }
+nora_io_queue = { path = "../io_queue" }

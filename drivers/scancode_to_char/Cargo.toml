@@ -7,3 +7,5 @@ edition = "2021"
 norostb_kernel = { path = "../../lib/rust/kernel" }
 driver_utils = { path = "../../lib/rust/driver_utils" }
 scancodes = { path = "../../lib/rust/scancodes" }
+nora_io_queue_rt = { path = "../../lib/rust/io_queue_rt" }
+norostb_rt = { path = "../../lib/rust/rt" }
