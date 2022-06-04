@@ -1,7 +1,7 @@
 From c82913cc2e6e249a3efba76ae81a2a74c5d57d34 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 3 Jun 2022 03:21:52 +0200
-Subject: [PATCH 42/43] Remove query calls
+Subject: [PATCH 42/44] Remove query calls
 
 ---
  library/std/src/sys/norostb/fs.rs | 14 +++++++++++---

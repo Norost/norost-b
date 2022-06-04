@@ -1,7 +1,7 @@
 From 2d14b8036f318635d60632e32ae47458de82fb0b Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 11 Mar 2022 18:01:27 +0100
-Subject: [PATCH 12/43] Use async I/O queue
+Subject: [PATCH 12/44] Use async I/O queue
 
 ---
  library/std/src/os/mod.rs            |   2 +

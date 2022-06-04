@@ -11,10 +11,10 @@ pub struct PciTable;
 impl Object for PciTable {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(match path {
-			b"" => Ok(Arc::new(Query {
+			b"" | b"/" => Ok(Arc::new(Query {
 				index: AtomicU32::new(0),
 			})),
-			b"info" => Ok(Arc::new(Info {
+			b"info" | b"info/" => Ok(Arc::new(Info {
 				query: Query {
 					index: AtomicU32::new(0),
 				},

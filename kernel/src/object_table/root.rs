@@ -59,7 +59,7 @@ impl Root {
 
 impl Object for Root {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		if path == b"" {
+		if path == b"" || path == b"/" {
 			Ticket::new_complete(Ok(Arc::new(QueryIter::new(
 				self.objects
 					.auto_lock()

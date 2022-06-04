@@ -1,7 +1,7 @@
 From a928337146c12b37d5a862e64a3d780b987ccecb Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Thu, 5 May 2022 17:47:28 +0200
-Subject: [PATCH 39/43] Process::new API changed, remove stray int3
+Subject: [PATCH 39/44] Process::new API changed, remove stray int3
 
 ---
  library/std/src/sys/norostb/process.rs | 1 +
