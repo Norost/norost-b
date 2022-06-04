@@ -38,7 +38,7 @@ impl Object for UartId {
 		}
 	}
 
-	fn write(&self, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		let mut uart = super::get(self.0.into());
 		data.iter().for_each(|&c| uart.send(c));

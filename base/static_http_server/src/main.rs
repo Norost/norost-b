@@ -5,7 +5,7 @@ use std::{
 	time::Duration,
 };
 
-const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request/h1>";
+const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request</h1>";
 const NOT_FOUND: &[u8] = b"<!DOCTYPE html><h1>404 Not Found</h1>";
 const INTERNAL_SERVER_ERROR: &[u8] = b"<!DOCTYPE html><h1>500 Internal Server Error</h1>";
 

@@ -1,7 +1,7 @@
 From da2d61820465a0c390356866d42bdab30b229c16 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 23 Feb 2022 01:36:10 +0100
-Subject: [PATCH 02/44] Add targets for bootloader & kernel, use proper
+Subject: [PATCH 02/45] Add targets for bootloader & kernel, use proper
  syscalls
 
 ---

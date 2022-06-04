@@ -1,9 +1,6 @@
 use crate::object_table::{Error, Object, Ticket};
 use alloc::{boxed::Box, format, string::String, sync::Arc};
-use core::{
-	str,
-	sync::atomic::{AtomicU32, Ordering},
-};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Table with all PCI devices.
 pub struct PciTable;

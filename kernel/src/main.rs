@@ -27,9 +27,9 @@ extern crate alloc;
 
 use crate::memory::frame::{PageFrameIter, PPN};
 use crate::memory::{frame::MemoryRegion, Page};
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, QueryIter, Ticket};
+use crate::object_table::{Error, Object, QueryIter, Ticket};
 use crate::scheduler::MemoryObject;
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
 use core::panic::PanicInfo;

@@ -1,7 +1,7 @@
 From e36b549d0cc9c66f4e851f984f0dbd403d04e260 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 30 Apr 2022 11:42:00 +0200
-Subject: [PATCH 37/44] Partially implement net
+Subject: [PATCH 37/45] Partially implement net
 
 ---
  library/std/src/sys/norostb/net.rs | 236 +++++++++++++++++------------

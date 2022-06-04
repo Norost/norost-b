@@ -1,8 +1,8 @@
 use crate::driver::uart;
 #[cfg(feature = "driver-vga")]
 use crate::driver::vga;
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, Root, Ticket};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use crate::object_table::{Error, Object, Root, Ticket};
+use alloc::sync::Arc;
 use core::fmt::{self, Write};
 
 struct SystemTable;
@@ -20,7 +20,7 @@ impl Object for SystemTable {
 struct SystemLogRef;
 
 impl Object for SystemLogRef {
-	fn write(&self, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		// FIXME avoid panic
 		write!(SystemLog::new(), "{}", crate::util::ByteStr::new(data)).unwrap();

@@ -7,7 +7,7 @@ use crate::arch;
 use crate::memory::frame::{self, AllocateHints};
 use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{AnyTicket, JobTask, Object};
+use crate::object_table::{AnyTicket, Object};
 use crate::sync::{Mutex, SpinLock};
 use crate::util::{erase_handle, unerase_handle};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -30,24 +30,7 @@ struct PendingTicket {
 	user_data: u64,
 	data_ptr: *mut u8,
 	data_len: usize,
-	ticket: TicketOrJob,
-}
-
-enum TicketOrJob {
-	Ticket(AnyTicket),
-	Job(JobTask),
-}
-
-impl<T: Into<AnyTicket>> From<T> for TicketOrJob {
-	fn from(t: T) -> Self {
-		Self::Ticket(t.into())
-	}
-}
-
-impl From<JobTask> for TicketOrJob {
-	fn from(t: JobTask) -> Self {
-		Self::Job(t)
-	}
+	ticket: AnyTicket,
 }
 
 impl Process {

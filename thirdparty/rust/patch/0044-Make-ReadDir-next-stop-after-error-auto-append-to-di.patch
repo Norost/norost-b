@@ -1,7 +1,7 @@
 From c26ea115aa162b1d8960d05b9cb816b63cd03afb Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 4 Jun 2022 14:49:14 +0200
-Subject: [PATCH 44/44] Make ReadDir::next stop after error, auto-append '/' to
+Subject: [PATCH 44/45] Make ReadDir::next stop after error, auto-append '/' to
  dir path
 
 ---

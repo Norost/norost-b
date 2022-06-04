@@ -193,18 +193,6 @@ pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
 	result(enqueue(Request::create(0, handle, path)).value).map(|v| v as Handle)
 }
 
-/// Blocking take_job
-#[inline]
-pub fn take_job(table: Handle, job: &mut Job) -> Result<()> {
-	result(enqueue(Request::take_job(0, table, job)).value).map(|_| ())
-}
-
-/// Blocking finish_job
-#[inline]
-pub fn finish_job(table: Handle, job: &Job) -> Result<()> {
-	result(enqueue(Request::finish_job(0, table, &job)).value).map(|_| ())
-}
-
 /// Blocking seek
 #[inline]
 pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {

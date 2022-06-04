@@ -1,7 +1,7 @@
 From 59745187771cfddc89eaf089ece1fd014a951a70 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 23 Feb 2022 17:20:21 +0100
-Subject: [PATCH 04/44] Add dependency to Norost runtime in libstd
+Subject: [PATCH 04/45] Add dependency to Norost runtime in libstd
 
 ---
  Cargo.lock                                    | 23 ++++++++

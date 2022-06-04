@@ -1,7 +1,7 @@
 From 3dc191aea674fb79c97dd96286205d6e08941c8f Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 29 Apr 2022 23:50:15 +0200
-Subject: [PATCH 36/44] More specific I/O errors
+Subject: [PATCH 36/45] More specific I/O errors
 
 ---
  library/std/src/sys/norostb/mod.rs | 4 ++++

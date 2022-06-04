@@ -1,4 +1,4 @@
-use super::{Error, MemoryObject, Table, Ticket};
+use super::{Error, MemoryObject, Ticket};
 use alloc::{boxed::Box, sync::Arc};
 
 /// A single object.
@@ -27,7 +27,7 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn write(&self, _data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<usize> {
 		not_implemented()
 	}
 
@@ -41,10 +41,6 @@ pub trait Object {
 
 	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
 		not_implemented()
-	}
-
-	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
-		None
 	}
 }
 

@@ -61,16 +61,6 @@ impl Object {
 	}
 
 	#[inline]
-	pub fn take_job(&self, job: &mut Job) -> io::Result<()> {
-		io::take_job(self.0, job)
-	}
-
-	#[inline]
-	pub fn finish_job(&self, job: &Job) -> io::Result<()> {
-		io::finish_job(self.0, job)
-	}
-
-	#[inline]
 	pub fn create_root() -> io::Result<Self> {
 		io::create_root().map(Self)
 	}

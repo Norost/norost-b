@@ -42,14 +42,10 @@ pub struct Request {
 }
 
 impl Request {
-	// NB for later: reuse READ for take_table_job and WRITE for finish_table_job.
-	// It'll be cleaner & simpler.
 	pub const READ: u8 = 0;
 	pub const WRITE: u8 = 1;
 	pub const OPEN: u8 = 2;
 	pub const CREATE: u8 = 3;
-	pub const TAKE_JOB: u8 = 6;
-	pub const FINISH_JOB: u8 = 7;
 	pub const SEEK: u8 = 8;
 	pub const POLL: u8 = 9;
 	pub const CLOSE: u8 = 10;
@@ -101,26 +97,6 @@ impl Request {
 			ty: Self::CREATE,
 			arguments_32: [handle],
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn take_job(user_data: u64, table: Handle, job: &mut Job) -> Self {
-		Self {
-			ty: Self::TAKE_JOB,
-			arguments_32: [table],
-			arguments_64: [job as *mut _ as u64, 0],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn finish_job(user_data: u64, table: Handle, job: &Job) -> Self {
-		Self {
-			ty: Self::FINISH_JOB,
-			arguments_32: [table],
-			arguments_64: [job as *const _ as u64, 0],
 			user_data,
 			..Default::default()
 		}
@@ -537,30 +513,50 @@ impl SeekFrom {
 	}
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct Job {
 	pub ty: u8,
 	pub from_anchor: u8,
 	pub result: i16,
 	pub job_id: JobId,
-	pub buffer_size: u32,
-	pub operation_size: u32,
+
 	pub handle: Handle,
-	pub buffer: Option<NonNull<u8>>,
-	pub from_offset: u64,
 }
 
 impl Job {
 	pub const OPEN: u8 = 0;
 	pub const READ: u8 = 1;
 	pub const WRITE: u8 = 2;
-	pub const QUERY: u8 = 3;
 	pub const CREATE: u8 = 4;
-	pub const QUERY_NEXT: u8 = 5;
 	pub const SEEK: u8 = 6;
 	pub const CLOSE: u8 = 7;
 	pub const PEEK: u8 = 8;
+
+	#[inline]
+	pub fn deserialize(data: &[u8]) -> Option<(Self, &[u8])> {
+		(mem::size_of::<Self>() <= data.len()).then(|| {
+			// SAFETY: data is large enough
+			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
+			(job, &data[mem::size_of::<Self>()..])
+		})
+	}
+
+	#[inline]
+	pub fn deserialize_mut(data: &mut [u8]) -> Option<(Self, &mut [u8])> {
+		(mem::size_of::<Self>() <= data.len()).then(|| {
+			// SAFETY: data is large enough
+			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
+			(job, &mut data[mem::size_of::<Self>()..])
+		})
+	}
+}
+
+impl AsRef<[u8; mem::size_of::<Self>()]> for Job {
+	fn as_ref(&self) -> &[u8; mem::size_of::<Self>()] {
+		// SAFETY: there are no gaps in Job
+		unsafe { &*(self as *const _ as *const _) }
+	}
 }
 
 pub type JobId = u32;

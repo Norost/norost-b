@@ -1,7 +1,7 @@
 From e68891faa10f5a176f7462ad33feb86aa9f43d04 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Mon, 18 Apr 2022 06:40:52 +0200
-Subject: [PATCH 19/44] Implement {As,Into,From}Handle for fs::File
+Subject: [PATCH 19/45] Implement {As,Into,From}Handle for fs::File
 
 ---
  library/std/src/os/norostb/io.rs  | 34 +++++++++++++++++++++++++++++++

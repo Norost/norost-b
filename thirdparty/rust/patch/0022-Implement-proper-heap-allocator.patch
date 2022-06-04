@@ -1,7 +1,7 @@
 From 9cef00e22d541ace693dbd2b58042d2528cf6255 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 20 Apr 2022 15:25:24 +0200
-Subject: [PATCH 22/44] Implement proper heap allocator
+Subject: [PATCH 22/45] Implement proper heap allocator
 
 ---
  Cargo.toml                                    |  1 +

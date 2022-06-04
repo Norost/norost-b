@@ -2,9 +2,11 @@
 #![feature(seek_stream_len)]
 
 use norostb_rt as rt;
-use std::fs;
-use std::io::{Read, Seek, Write};
-use std::ptr::NonNull;
+use std::{
+	fs,
+	io::{Read, Seek, Write},
+	str,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// TODO get disk from arguments
@@ -28,8 +30,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.create(table_name.as_bytes())
 		.unwrap();
 
-	let mut queries = driver_utils::Arena::new();
-	let mut open_files = driver_utils::Arena::new();
+	let mut objects = driver_utils::Arena::new();
+	enum Object {
+		File(String, u64),
+		Query(Vec<String>, usize),
+	}
 
 	let mut buf = [0; 4096];
 	let buf = &mut buf;
@@ -38,97 +43,126 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		use rt::io::Job;
 
 		// Wait for events from the table
-		let mut job = Job::default();
-		job.buffer = NonNull::new(buf.as_mut_ptr());
-		job.buffer_size = buf.len().try_into().unwrap();
-		job.result = 0;
-		tbl.take_job(&mut job).unwrap();
+		let n = tbl.read(buf).unwrap();
+		let (mut job, data) = Job::deserialize(&buf[..n]).unwrap();
 
-		match job.ty {
+		let len = match job.ty {
 			Job::OPEN => {
-				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
-					.expect("what do?");
-				job.result = match fs.root_dir().open_file(path) {
-					Ok(_) => {
-						job.handle = open_files.insert((path.to_string(), 0u64));
-						0
+				match str::from_utf8(data) {
+					Ok("") => {
+						let entries = fs
+							.root_dir()
+							.iter()
+							.filter_map(|e| e.ok().map(|e| e.file_name()))
+							.collect::<Vec<_>>();
+						job.handle = objects.insert(Object::Query(entries, 0));
 					}
-					Err(e) => {
-						(match e {
-							fatfs::Error::NotFound => rt::Error::DoesNotExist,
-							fatfs::Error::AlreadyExists => rt::Error::AlreadyExists,
-							_ => rt::Error::Unknown,
-						}) as i16
-					}
-				};
+					Ok(path) => match fs.root_dir().open_file(path) {
+						Ok(_) => {
+							job.handle = objects.insert(Object::File(path.to_string(), 0u64));
+						}
+						Err(e) => {
+							job.result = (match e {
+								fatfs::Error::NotFound => rt::Error::DoesNotExist,
+								fatfs::Error::AlreadyExists => rt::Error::AlreadyExists,
+								_ => rt::Error::Unknown,
+							}) as _
+						}
+					},
+					Err(_) => job.result = rt::Error::InvalidData as _,
+				}
+				0
 			}
 			Job::CREATE => {
-				let path = std::str::from_utf8(&buf[..job.operation_size.try_into().unwrap()])
-					.expect("what do?");
-				match fs.root_dir().create_file(path) {
-					Ok(_) => job.handle = open_files.insert((path.to_string(), 0u64)),
-					Err(e) => todo!("{:?}", e),
+				match str::from_utf8(buf) {
+					Ok(path) => match fs.root_dir().create_file(path) {
+						Ok(_) => job.handle = objects.insert(Object::File(path.to_string(), 0u64)),
+						Err(e) => todo!("{:?}", e),
+					},
+					Err(_) => job.result = rt::Error::InvalidData as _,
+				}
+				0
+			}
+			Job::READ | Job::PEEK => {
+				let len = u64::from_ne_bytes(data.try_into().unwrap());
+				let d = &mut buf[job.as_ref().len()..];
+				match &mut objects[job.handle] {
+					Object::File(path, offset) => {
+						let mut file = fs.root_dir().open_file(path).unwrap();
+						file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+						let len = len.min(d.len() as u64) as usize;
+						let l = file.read(&mut d[..len]).unwrap();
+						if job.ty == Job::READ {
+							*offset += u64::try_from(l).unwrap();
+						}
+						l
+					}
+					Object::Query(list, index) => match list.get(*index) {
+						Some(f) => {
+							d[..f.len()].copy_from_slice(f.as_bytes());
+							if job.ty == Job::READ {
+								*index += 1;
+							}
+							f.len()
+						}
+						None => 0,
+					},
 				}
 			}
-			Job::READ => {
-				let (path, offset) = &open_files[job.handle];
-				let mut file = fs.root_dir().open_file(path).unwrap();
-				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-				let max = buf.len().min(job.operation_size.try_into().unwrap());
-				let l = file.read(&mut buf[..max]).unwrap();
-				job.operation_size = l.try_into().unwrap();
-				open_files[job.handle].1 += u64::try_from(l).unwrap();
-			}
-			Job::WRITE => {
-				let (path, offset) = &open_files[job.handle];
-				let mut file = fs.root_dir().open_file(path).unwrap();
-				file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-				let l = file
-					.write(&buf[..job.operation_size.try_into().unwrap()])
-					.unwrap();
-				job.operation_size = l.try_into().unwrap();
-				open_files[job.handle].1 += u64::try_from(l).unwrap();
-			}
-			Job::QUERY => {
-				let entries = fs
-					.root_dir()
-					.iter()
-					.filter_map(|e| e.ok().map(|e| e.file_name()))
-					.collect::<Vec<_>>();
-				job.handle = queries.insert(entries);
-			}
-			Job::QUERY_NEXT => {
-				match queries[job.handle].pop() {
-					Some(f) => {
-						buf[..f.len()].copy_from_slice(f.as_bytes());
-						job.operation_size = f.len().try_into().unwrap();
-					}
-					None => {
-						queries.remove(job.handle);
-						job.operation_size = 0;
-					}
-				};
-			}
+			Job::WRITE => match &mut objects[job.handle] {
+				Object::File(path, offset) => {
+					let mut file = fs.root_dir().open_file(path).unwrap();
+					file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+					let l = file.write(data).unwrap();
+					let l = u64::try_from(l).unwrap();
+					*offset += l;
+					let d = &mut buf[job.as_ref().len()..];
+					d[..8].copy_from_slice(&l.to_ne_bytes());
+					8
+				}
+				Object::Query(_, _) => {
+					job.result = rt::Error::InvalidOperation as _;
+					0
+				}
+			},
 			Job::SEEK => {
 				use rt::io::SeekFrom;
-				match SeekFrom::try_from_raw(job.from_anchor, job.from_offset).unwrap() {
-					SeekFrom::Start(n) => open_files[job.handle].1 = n,
-					SeekFrom::Current(n) => open_files[job.handle].1 += n as u64,
-					SeekFrom::End(n) => {
-						let mut file = fs.root_dir().open_file(&open_files[job.handle].0).unwrap();
-						let l = file.stream_len().unwrap();
-						open_files[job.handle].1 = l.wrapping_add(n as u64);
+				let offt = u64::from_ne_bytes(data.try_into().unwrap());
+				let d = &mut buf[job.as_ref().len()..];
+				match &mut objects[job.handle] {
+					Object::File(path, offset) => {
+						match SeekFrom::try_from_raw(job.from_anchor, offt).unwrap() {
+							SeekFrom::Start(n) => *offset = n,
+							SeekFrom::Current(n) => *offset = offset.wrapping_add(n as u64),
+							SeekFrom::End(n) => {
+								let mut file = fs.root_dir().open_file(path).unwrap();
+								let l = file.stream_len().unwrap();
+								*offset = l.wrapping_add(n as u64);
+							}
+						}
+						d[..8].copy_from_slice(&offset.to_ne_bytes());
+						8
+					}
+					Object::Query(list, index) => {
+						match SeekFrom::try_from_raw(job.from_anchor, offt).unwrap() {
+							SeekFrom::Start(n) => *index = n as usize,
+							SeekFrom::Current(n) => *index = index.wrapping_add(n as usize),
+							SeekFrom::End(n) => *index = list.len().wrapping_sub(n as usize),
+						}
+						d[..8].copy_from_slice(&(*index as u64).to_ne_bytes());
+						8
 					}
 				}
 			}
 			Job::CLOSE => {
-				open_files.remove(job.handle);
+				objects.remove(job.handle);
 				// The kernel does not expect a response.
 				continue;
 			}
 			t => todo!("job type {}", t),
-		}
+		};
 
-		tbl.finish_job(&job).unwrap();
+		buf[..job.as_ref().len()].copy_from_slice(job.as_ref());
+		tbl.write(&buf[..job.as_ref().len() + len]).unwrap();
 	}
 }

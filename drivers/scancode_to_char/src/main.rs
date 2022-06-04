@@ -34,17 +34,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let scancode_buf = &mut scancode_buf;
 	let mut job_buf = [0; 512];
 	let job_buf = &mut job_buf;
-	let mut job = io::Job::default();
-	job.buffer = core::ptr::NonNull::new(job_buf.as_mut_ptr());
-	job.buffer_size = job_buf.len().try_into().unwrap();
-	let job = &mut job;
 
 	unsafe {
 		io_queue
 			.enqueue_request(io::Request::read(READ, input, scancode_buf))
 			.unwrap();
 		io_queue
-			.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
+			.enqueue_request(io::Request::read(TAKE_JOB, table, job_buf))
 			.unwrap();
 		syscall::process_io_queue(Some(io_queue.base.cast())).unwrap();
 		syscall::wait_io_queue(Some(io_queue.base.cast())).unwrap();
@@ -52,7 +48,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let mut char_buf = VecDeque::new();
 
-	let mut queries = driver_utils::Arena::new();
 	let mut readers = driver_utils::Arena::new();
 
 	let mut pending_read = None;
@@ -104,14 +99,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						Event::Release(_) => None,
 					};
 					if let Some(chr) = chr {
-						if let Some(()) = pending_read.take() {
-							job_buf[0] = chr;
-							job.operation_size = 1;
+						if let Some(job_id) = pending_read.take() {
+							let job = io::Job {
+								ty: io::Job::READ,
+								job_id,
+								..Default::default()
+							};
+							job_buf[job.as_ref().len()] = chr;
+							job_buf[..job.as_ref().len()].copy_from_slice(job.as_ref());
+							let b = &job_buf[..job.as_ref().len() + 1];
 							unsafe {
 								io_queue
-									.enqueue_request(io::Request::finish_job(
-										FINISH_JOB, table, job,
-									))
+									.enqueue_request(io::Request::write(FINISH_JOB, table, b))
 									.unwrap();
 							}
 						} else {
@@ -125,22 +124,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					}
 				}
 				TAKE_JOB => {
+					let data = &job_buf[..resp.value as usize];
+					let (mut job, data) = io::Job::deserialize(data).unwrap();
 					assert_eq!(job.result, 0);
-					match job.ty {
+					let len = match job.ty {
 						io::Job::OPEN => {
-							let path = &job_buf[..job.operation_size.try_into().unwrap()];
-							if path == b"stream" {
+							if data == b"stream" {
 								job.handle = readers.insert(());
 							} else {
 								job.result = Error::InvalidObject as i16;
 							}
+							0
 						}
 						io::Job::CLOSE => {
 							readers.remove(job.handle).unwrap();
 							// The kernel does not expect a response
 							unsafe {
 								io_queue
-									.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
+									.enqueue_request(io::Request::read(TAKE_JOB, table, job_buf))
 									.unwrap();
 							}
 							continue;
@@ -148,49 +149,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						io::Job::READ => {
 							// Ensure the handle is valid.
 							readers[job.handle];
-							let max = job_buf.len().min(job.operation_size.try_into().unwrap());
-							job.operation_size = 0;
-							for w in job_buf[..max].iter_mut() {
+							let d = &mut job_buf[job.as_ref().len()..];
+							let mut l = 0;
+							for w in d.iter_mut() {
 								if let Some(r) = char_buf.pop_front() {
 									*w = r;
-									job.operation_size += 1;
+									l += 1;
 								} else {
 									break;
 								}
 							}
-							if job.operation_size == 0 {
+							if l == 0 {
 								// There is currently no data, so delay a response until there is
 								// data. Don't enqueue a new TAKE_JOB either so we have a slot
 								// free for when we can send a reply
-								pending_read = Some(());
+								pending_read = Some(job.job_id);
 								continue;
 							}
+							l
 						}
-						io::Job::QUERY => {
-							job.handle = queries.insert(());
-						}
-						io::Job::QUERY_NEXT => match queries.remove(job.handle) {
-							Some(()) => {
-								job_buf[..6].copy_from_slice(b"stream");
-								job.operation_size = 6;
-							}
-							None => {
-								job.result = Error::InvalidObject as i16;
-							}
-						},
 						_ => {
 							job.result = Error::InvalidOperation as i16;
+							0
 						}
-					}
+					};
+					job_buf[..job.as_ref().len()].copy_from_slice(job.as_ref());
+					let b = &job_buf[..job.as_ref().len() + len];
 					unsafe {
 						io_queue
-							.enqueue_request(io::Request::finish_job(FINISH_JOB, table, job))
+							.enqueue_request(io::Request::write(FINISH_JOB, table, b))
 							.unwrap();
 					}
 				}
 				FINISH_JOB => unsafe {
+					norostb_kernel::error::result(resp.value).expect("error finishing job");
 					io_queue
-						.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
+						.enqueue_request(io::Request::read(TAKE_JOB, table, job_buf))
 						.unwrap();
 				},
 				ud => panic!("invalid user data: {}", ud),

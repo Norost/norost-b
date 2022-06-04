@@ -1,7 +1,7 @@
 From 413e34e287cf381b88cdd3a90f17ac070e12aa93 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 3 Jun 2022 03:22:41 +0200
-Subject: [PATCH 43/44] Always enable red zone on kernel targets
+Subject: [PATCH 43/45] Always enable red zone on kernel targets
 
 ---
  .../rustc_target/src/spec/i686_unknown_none_norostbkernel.rs     | 1 +

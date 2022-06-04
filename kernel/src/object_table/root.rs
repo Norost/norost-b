@@ -1,4 +1,4 @@
-use super::{Error, Object, StreamingTable, Ticket};
+use super::{Error, Object, StreamingTableOwner, Ticket};
 use crate::{object_table::QueryIter, sync::SpinLock};
 use alloc::{
 	boxed::Box,
@@ -84,10 +84,10 @@ impl Object for Root {
 					Err(Error::DoesNotExist)
 				} else {
 					let mut objects = self.objects.auto_lock();
-					let tbl = StreamingTable::new() as Arc<dyn Object>;
-					let r = objects.insert(path.into(), Arc::downgrade(&tbl));
+					let tbl = StreamingTableOwner::new();
+					let r = objects.insert(path.into(), StreamingTableOwner::into_inner_weak(&tbl));
 					assert!(r.is_none());
-					Ok(tbl)
+					Ok(tbl as Arc<dyn Object>)
 				})
 			},
 			|(obj, _, path)| match path {
