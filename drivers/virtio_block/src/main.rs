@@ -99,7 +99,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			//rt::io::poll(dev_handle).unwrap();
 		};
 
-		dbg!(buf[0]);
 		buf = match Job::deserialize(&buf).unwrap() {
 			Job::Open {
 				handle,
@@ -114,6 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 			.unwrap(),
 			Job::Read {
+				peek,
 				handle,
 				job_id,
 				length,
@@ -127,14 +127,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					dev.read(sectors_phys, sector, wait).unwrap();
 				}
 
-				Job::reply_read_clear(buf, job_id, |d| {
+				Job::reply_read_clear(buf, job_id, peek, |d| {
 					let len = (length as usize).min(
 						(Sector::slice_as_u8(sectors).len() - usize::from(offset))
 							.try_into()
 							.unwrap(),
 					);
 
-					data_handles[handle] = u64::from(offset) + u64::try_from(len).unwrap();
+					if !peek {
+						data_handles[handle] = u64::from(offset) + u64::try_from(len).unwrap();
+					}
 
 					let offset = usize::from(offset);
 					d.extend(&Sector::slice_as_u8(&sectors)[offset..][..len]);
@@ -187,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				// The kernel does not expect a response.
 				continue;
 			}
-			Job::Peek { job_id, .. } | Job::Create { job_id, .. } => {
+			Job::Create { job_id, .. } => {
 				Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation).unwrap()
 			}
 		};

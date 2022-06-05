@@ -308,25 +308,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 					Job::reply_create_clear(buf, job_id, handle).unwrap()
 				}
-				ref j @ Job::Read {
-					handle,
-					job_id,
-					length,
-				}
-				| ref j @ Job::Peek {
+				Job::Read {
+					peek,
 					handle,
 					job_id,
 					length,
 				} => {
-					let is_peek = j.is_peek();
 					let len = (length as usize).min(2000);
 					match &mut objects[handle] {
 						Object::Socket(Socket::TcpListener(_)) => todo!(),
 						Object::Socket(Socket::TcpConnection(sock)) => {
-							Job::reply_read_clear(buf, job_id, |data| {
+							Job::reply_read_clear(buf, job_id, peek, |data| {
 								let og_len = data.len();
 								data.resize(og_len + len, 0);
-								let r = if is_peek {
+								let r = if peek {
 									sock.peek(&mut data[og_len..], &mut iface)
 								} else {
 									sock.read(&mut data[og_len..], &mut iface)
@@ -348,41 +343,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						}
 						Object::Query(q) => match q {
 							Some(Query::Root(q @ QueryRoot::Default)) => {
-								*q = QueryRoot::Global;
-								Job::reply_read_clear(buf, job_id, |v| Ok(v.extend(b"default")))
-									.unwrap()
+								if !peek {
+									*q = QueryRoot::Global;
+								}
+								Job::reply_read_clear(buf, job_id, peek, |v| {
+									Ok(v.extend(b"default"))
+								})
+								.unwrap()
 							}
 							Some(Query::Root(q @ QueryRoot::Global)) => {
-								*q = QueryRoot::IpAddr(0);
-								Job::reply_read_clear(buf, job_id, |v| Ok(v.extend(b"::"))).unwrap()
+								if !peek {
+									*q = QueryRoot::IpAddr(0);
+								}
+								Job::reply_read_clear(buf, job_id, peek, |v| Ok(v.extend(b"::")))
+									.unwrap()
 							}
 							Some(Query::Root(QueryRoot::IpAddr(i))) => {
 								let ip = into_ip6(iface.ip_addrs()[*i].address());
-								*i += 1;
-								if *i >= iface.ip_addrs().len() {
-									*q = None;
+								if !peek {
+									*i += 1;
+									if *i >= iface.ip_addrs().len() {
+										*q = None;
+									}
 								}
-								Job::reply_read_clear(buf, job_id, |v| {
+								Job::reply_read_clear(buf, job_id, peek, |v| {
 									write!(v, "{}", ip).map_err(|_| ())
 								})
 								.unwrap()
 							}
 							Some(Query::SourceAddr(addr, p @ Protocol::Tcp)) => {
-								*p = Protocol::Udp;
-								Job::reply_read_clear(buf, job_id, |v| {
+								if !peek {
+									*p = Protocol::Udp;
+								}
+								Job::reply_read_clear(buf, job_id, peek, |v| {
 									write!(v, "{}/tcp", addr).map_err(|_| ())
 								})
 								.unwrap()
 							}
 							Some(Query::SourceAddr(addr, Protocol::Udp)) => {
-								let r = Job::reply_read_clear(buf, job_id, |v| {
+								let r = Job::reply_read_clear(buf, job_id, peek, |v| {
 									write!(v, "{}/udp", addr).map_err(|_| ())
 								})
 								.unwrap();
-								*q = None;
+								if !peek {
+									*q = None;
+								}
 								r
 							}
-							None => Job::reply_read_clear(buf, job_id, |_| Ok(())).unwrap(),
+							None => Job::reply_read_clear(buf, job_id, peek, |_| Ok(())).unwrap(),
 						},
 					}
 				}

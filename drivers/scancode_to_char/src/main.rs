@@ -81,7 +81,7 @@ fn main() {
 		if let Some(chr) = chr {
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
-				Job::reply_read(&mut buf, job_id, |v| Ok(v.push(chr))).unwrap();
+				Job::reply_read(&mut buf, job_id, false, |v| Ok(v.push(chr))).unwrap();
 				io_queue.submit_write(table, buf).unwrap().await.unwrap();
 				return true;
 			} else {
@@ -118,36 +118,38 @@ fn main() {
 				return true;
 			}
 			Job::Read {
+				peek,
 				job_id,
 				handle: _,
 				length,
 			} => {
 				data.clear();
-				let mut char_buf = char_buf.borrow_mut();
-				if char_buf.is_empty() {
-					// There is currently no data, so delay a response until there is
-					// data. Don't enqueue a new TAKE_JOB either so we have a slot
-					// free for when we can send a reply
-					pending_read.set(Some(job_id));
-					return false;
+				if peek {
+					Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
 				} else {
-					Job::reply_read(&mut data, job_id, |v| {
-						for _ in 0..length {
-							if let Some(c) = char_buf.pop_front() {
-								v.push(c);
-							} else {
-								break;
+					let mut char_buf = char_buf.borrow_mut();
+					if char_buf.is_empty() {
+						// There is currently no data, so delay a response until there is
+						// data. Don't enqueue a new TAKE_JOB either so we have a slot
+						// free for when we can send a reply
+						pending_read.set(Some(job_id));
+						return false;
+					} else {
+						Job::reply_read(&mut data, job_id, false, |v| {
+							for _ in 0..length {
+								if let Some(c) = char_buf.pop_front() {
+									v.push(c);
+								} else {
+									break;
+								}
 							}
-						}
-						Ok(())
-					})
-					.unwrap();
+							Ok(())
+						})
+						.unwrap();
+					}
 				}
 			}
-			Job::Peek { job_id, .. }
-			| Job::Write { job_id, .. }
-			| Job::Create { job_id, .. }
-			| Job::Seek { job_id, .. } => {
+			Job::Write { job_id, .. } | Job::Create { job_id, .. } | Job::Seek { job_id, .. } => {
 				data.clear();
 				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
 			}
