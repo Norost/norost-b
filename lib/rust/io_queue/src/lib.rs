@@ -37,6 +37,10 @@ macro_rules! pow2size {
 					$(Self::$v => ($m as u32).count_ones() as u8,)*
 				}
 			}
+
+			pub fn size(self) -> usize {
+				(self.into_mask() + 1).try_into().unwrap()
+			}
 		}
 	};
 }

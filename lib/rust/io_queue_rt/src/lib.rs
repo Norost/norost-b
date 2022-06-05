@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use arena::Arena;
 use core::{
 	cell::{Cell, RefCell},
+	fmt,
 	future::Future,
 	mem::{self, MaybeUninit},
 	pin::Pin,
@@ -21,6 +22,15 @@ use nora_io_queue::{self as q, Request};
 pub struct Queue {
 	inner: RefCell<q::Queue>,
 	inflight_buffers: RefCell<Arena<(Vec<u8>, BufferFutureState), ()>>,
+}
+
+impl fmt::Debug for Queue {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct(stringify!(Queue))
+			.field("inner", &self.inner)
+			// Don't print the potentially huge inflight_buffers list.
+			.finish_non_exhaustive()
+	}
 }
 
 impl Queue {
@@ -197,6 +207,7 @@ unsafe fn extend_lifetime_mut<'a, T: ?Sized>(t: &'a mut T) -> &'static mut T {
 	unsafe { mem::transmute(t) }
 }
 
+#[derive(Debug)]
 enum BufferFutureState {
 	Inflight,
 	InflightWithWaker(Waker),

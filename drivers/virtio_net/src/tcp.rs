@@ -66,12 +66,25 @@ impl TcpConnection {
 		sock.may_send() || sock.may_recv()
 	}
 
+	pub fn active(&self, iface: &mut Interface<impl for<'d> Device<'d>>) -> bool {
+		let sock = iface.get_socket::<TcpSocket>(self.handle);
+		sock.is_active()
+	}
+
 	pub fn read(
 		&mut self,
 		data: &mut [u8],
 		iface: &mut Interface<impl for<'d> Device<'d>>,
 	) -> smoltcp::Result<usize> {
 		iface.get_socket::<TcpSocket>(self.handle).recv_slice(data)
+	}
+
+	pub fn peek(
+		&mut self,
+		data: &mut [u8],
+		iface: &mut Interface<impl for<'d> Device<'d>>,
+	) -> smoltcp::Result<usize> {
+		iface.get_socket::<TcpSocket>(self.handle).peek_slice(data)
 	}
 
 	pub fn write(

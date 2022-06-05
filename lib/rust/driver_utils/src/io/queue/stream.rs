@@ -41,7 +41,17 @@ pub enum Job<'a> {
 }
 
 macro_rules! with {
-	(handle $fn:ident = $ty:ident, $f:ident) => {
+	(@clear $fn:ident -> $fnc:ident ($a:ident : $t:ty)) => {
+		#[doc = concat!("Same as ", stringify!($fn), " but clears the buffer first")]
+		pub fn $fnc(mut buf: Vec<u8>, job_id: u32, $a: $t) -> Result<Vec<u8>, (Vec<u8>, ())> {
+			buf.clear();
+			match Self::$fn(&mut buf, job_id, $a) {
+				Ok(()) => Ok(buf),
+				Err(e) => Err((buf, e)),
+			}
+		}
+	};
+	(handle $fn:ident $fnc:ident = $ty:ident) => {
 		pub fn $fn(buf: &mut Vec<u8>, job_id: u32, handle: Handle) -> Result<(), ()> {
 			buf.extend_from_slice(
 				io::Job {
@@ -54,9 +64,10 @@ macro_rules! with {
 			);
 			Ok(())
 		}
+		with!(@clear $fn -> $fnc(handle: Handle));
 	};
-	(buf $fn:ident = $ty:ident, $f:ident) => {
-		pub fn $fn<F>(buf: &mut Vec<u8>, job_id: u32, $f: F) -> Result<(), ()>
+	(buf $fn:ident $fnc:ident = $ty:ident) => {
+		pub fn $fn<F>(buf: &mut Vec<u8>, job_id: u32, data: F) -> Result<(), ()>
 		where
 			F: FnOnce(&mut Vec<u8>) -> Result<(), ()>,
 		{
@@ -68,10 +79,21 @@ macro_rules! with {
 				}
 				.as_ref(),
 			);
-			$f(buf)
+			data(buf)
+		}
+		#[doc = concat!("Same as ", stringify!($fn), " but clears the buffer first")]
+		pub fn $fnc<F>(mut buf: Vec<u8>, job_id: u32, data: F) -> Result<Vec<u8>, (Vec<u8>, ())>
+		where
+			F: FnOnce(&mut Vec<u8>) -> Result<(), ()>,
+		{
+			buf.clear();
+			match Self::$fn(&mut buf, job_id, data) {
+				Ok(()) => Ok(buf),
+				Err(e) => Err((buf, e)),
+			}
 		}
 	};
-	(u64 $fn:ident = $ty:ident, $f:ident) => {
+	(u64 $fn:ident $fnc:ident = $ty:ident, $f:ident) => {
 		pub fn $fn(buf: &mut Vec<u8>, job_id: u32, $f: u64) -> Result<(), ()> {
 			buf.extend_from_slice(
 				io::Job {
@@ -83,6 +105,18 @@ macro_rules! with {
 			);
 			buf.extend_from_slice(&$f.to_ne_bytes());
 			Ok(())
+		}
+		with!(@clear $fn -> $fnc($f: u64));
+	};
+}
+
+macro_rules! is {
+	($f:ident = $v:ident) => {
+		pub fn $f(&self) -> bool {
+			match self {
+				Self::$v { .. } => true,
+				_ => false,
+			}
 		}
 	};
 }
@@ -130,12 +164,12 @@ impl<'a> Job<'a> {
 		})
 	}
 
-	with!(buf reply_read = READ, data);
-	with!(buf reply_peek = PEEK, data);
-	with!(handle reply_open = OPEN, path);
-	with!(handle reply_create = CREATE, path);
-	with!(u64 reply_write = WRITE, amount);
-	with!(u64 reply_seek = SEEK, position);
+	with!(buf reply_read reply_read_clear = READ);
+	with!(buf reply_peek reply_peek_clear = PEEK);
+	with!(handle reply_open reply_open_clear = OPEN);
+	with!(handle reply_create reply_create_clear = CREATE);
+	with!(u64 reply_write reply_write_clear = WRITE, amount);
+	with!(u64 reply_seek reply_seek_clear = SEEK, position);
 
 	pub fn reply_error(buf: &mut Vec<u8>, job_id: u32, error: Error) -> Result<(), ()> {
 		buf.extend(
@@ -148,4 +182,25 @@ impl<'a> Job<'a> {
 		);
 		Ok(())
 	}
+
+	/// Same as [`Self::reply_error`] but clears the buffer first.
+	pub fn reply_error_clear(
+		mut buf: Vec<u8>,
+		job_id: u32,
+		error: Error,
+	) -> Result<Vec<u8>, (Vec<u8>, ())> {
+		buf.clear();
+		match Self::reply_error(&mut buf, job_id, error) {
+			Ok(()) => Ok(buf),
+			Err(e) => Err((buf, e)),
+		}
+	}
+
+	is!(is_read = Read);
+	is!(is_peek = Peek);
+	is!(is_write = Write);
+	is!(is_open = Open);
+	is!(is_create = Create);
+	is!(is_close = Close);
+	is!(is_seek = Seek);
 }
