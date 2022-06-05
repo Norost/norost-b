@@ -1,6 +1,7 @@
 #![feature(norostb)]
 
-use norostb_kernel::{io::Job, syscall};
+use driver_utils::io::queue::stream::Job;
+use norostb_kernel::syscall;
 use norostb_rt as rt;
 use std::fs;
 use std::os::norostb::prelude::*;
@@ -75,13 +76,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	let mut data_handles = driver_utils::Arena::new();
 
-	let mut buf = [0; 4096];
-	let buf = &mut buf;
+	let mut buf = Vec::new();
 
 	loop {
 		// Wait for events from the table
-		let n = tbl.read(buf).unwrap();
-		let (mut job, data) = Job::deserialize(&buf[..n]).unwrap();
+		buf.resize(4096, 0);
+		let n = tbl.read(&mut buf).unwrap();
+		buf.resize(n, 0);
 
 		let wait = || {
 			// FIXME this API is fundamentally broken as it's subject to race conditions.
@@ -98,15 +99,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			//rt::io::poll(dev_handle).unwrap();
 		};
 
-		let len = match job.ty {
-			Job::OPEN => {
-				job.handle = data_handles.insert(0);
-				0
+		dbg!(buf[0]);
+		buf = match Job::deserialize(&buf).unwrap() {
+			Job::Open {
+				handle,
+				job_id,
+				path,
+			} => match (handle, path) {
+				(Handle::MAX, b"data") => {
+					Job::reply_open_clear(buf, job_id, data_handles.insert(0))
+				}
+				(Handle::MAX, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidData),
+				(_, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation),
 			}
-			Job::READ => {
-				let len = u64::from_ne_bytes(data.try_into().unwrap());
-
-				let offset = data_handles[job.handle];
+			.unwrap(),
+			Job::Read {
+				handle,
+				job_id,
+				length,
+			} => {
+				let offset = data_handles[handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -114,22 +126,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				unsafe {
 					dev.read(sectors_phys, sector, wait).unwrap();
 				}
-				let d = &mut buf[job.as_ref().len()..];
 
-				let len = (len.min(d.len() as u64) as usize).min(
-					(Sector::slice_as_u8(sectors).len() - usize::from(offset))
-						.try_into()
-						.unwrap(),
-				);
+				Job::reply_read_clear(buf, job_id, |d| {
+					let len = (length as usize).min(
+						(Sector::slice_as_u8(sectors).len() - usize::from(offset))
+							.try_into()
+							.unwrap(),
+					);
 
-				data_handles[job.handle] = u64::from(offset) + u64::try_from(len).unwrap();
+					data_handles[handle] = u64::from(offset) + u64::try_from(len).unwrap();
 
-				let offset = usize::from(offset);
-				d[..len].copy_from_slice(&Sector::slice_as_u8(&sectors)[offset..][..len]);
-				len
+					let offset = usize::from(offset);
+					d.extend(&Sector::slice_as_u8(&sectors)[offset..][..len]);
+
+					Ok(())
+				})
+				.unwrap()
 			}
-			Job::WRITE => {
-				let offset = data_handles[job.handle];
+			Job::Write {
+				handle,
+				job_id,
+				data,
+			} => {
+				let offset = data_handles[handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -145,34 +164,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					dev.write(sectors_phys, sector, wait).unwrap();
 				}
 
-				data_handles[job.handle] = u64::from(offset) + u64::try_from(data.len()).unwrap();
+				data_handles[handle] = u64::from(offset) + u64::try_from(data.len()).unwrap();
 
 				let l = data.len();
-				buf[job.as_ref().len()..][..8].copy_from_slice(&(l as u64).to_ne_bytes());
-				8
+				Job::reply_write_clear(buf, job_id, l.try_into().unwrap()).unwrap()
 			}
-			Job::SEEK => {
+			Job::Seek {
+				handle,
+				job_id,
+				from,
+			} => {
 				use norostb_kernel::io::SeekFrom;
-				let offt = u64::from_ne_bytes(data.try_into().unwrap());
-				let from = SeekFrom::try_from_raw(job.from_anchor, offt).unwrap();
 				let offset = match from {
 					SeekFrom::Start(n) => n,
 					_ => todo!(),
 				};
-				data_handles[job.handle] = offset;
-
-				buf[job.as_ref().len()..][..8].copy_from_slice(&offset.to_ne_bytes());
-				8
+				data_handles[handle] = offset;
+				Job::reply_seek_clear(buf, job_id, offset).unwrap()
 			}
-			Job::CLOSE => {
-				data_handles.remove(job.handle);
+			Job::Close { handle } => {
+				data_handles.remove(handle);
 				// The kernel does not expect a response.
 				continue;
 			}
-			t => todo!("job type {}", t),
+			Job::Peek { job_id, .. } | Job::Create { job_id, .. } => {
+				Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation).unwrap()
+			}
 		};
 
-		buf[..job.as_ref().len()].copy_from_slice(job.as_ref());
-		tbl.write(&buf[..job.as_ref().len() + len]).unwrap();
+		tbl.write(&buf).unwrap();
 	}
 }
