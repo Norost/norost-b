@@ -103,6 +103,7 @@ name = "driver_utils"
 version = "0.1.0"
 dependencies = [
  "arena",
+ "norostb_rt",
 ]
 
 [[package]]

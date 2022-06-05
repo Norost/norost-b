@@ -8,8 +8,9 @@ use core::{
 	future::Future,
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
+use driver_utils::io::queue::stream::Job;
 use nora_io_queue_rt::{Pow2Size, Queue};
-use norostb_kernel::{error::Error, io};
+use norostb_kernel::error::Error;
 use norostb_rt as rt;
 
 fn main() {
@@ -80,13 +81,7 @@ fn main() {
 		if let Some(chr) = chr {
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
-				let job = io::Job {
-					ty: io::Job::READ,
-					job_id,
-					..Default::default()
-				};
-				buf.extend_from_slice(job.as_ref());
-				buf.push(chr);
+				Job::reply_read(&mut buf, job_id, |v| Ok(v.push(chr))).unwrap();
 				io_queue.submit_write(table, buf).unwrap().await.unwrap();
 				return true;
 			} else {
@@ -102,49 +97,59 @@ fn main() {
 			.unwrap()
 			.await
 			.unwrap();
-		let (mut job, d) = io::Job::deserialize(&data).unwrap();
-		assert_eq!(job.result, 0);
-		match job.ty {
-			io::Job::OPEN => {
-				if job.handle == rt::Handle::MAX && d == b"stream" {
-					job.handle = readers.borrow_mut().insert(());
+		match Job::deserialize(&data).unwrap() {
+			Job::Open {
+				job_id,
+				handle,
+				path,
+			} => {
+				if handle == rt::Handle::MAX && path == b"stream" {
+					data.clear();
+					Job::reply_open(&mut data, job_id, readers.borrow_mut().insert(()))
 				} else {
-					job.result = Error::InvalidObject as i16;
+					data.clear();
+					Job::reply_error(&mut data, job_id, Error::InvalidObject)
 				}
-				data.clear();
-				data.extend_from_slice(job.as_ref());
+				.unwrap();
 			}
-			io::Job::CLOSE => {
-				readers.borrow_mut().remove(job.handle).unwrap();
+			Job::Close { handle } => {
+				readers.borrow_mut().remove(handle).unwrap();
 				// The kernel does not expect a response
 				return true;
 			}
-			io::Job::READ => {
-				// Ensure the handle is valid.
-				readers.borrow_mut()[job.handle];
+			Job::Read {
+				job_id,
+				handle: _,
+				length,
+			} => {
 				data.clear();
-				data.extend_from_slice(job.as_ref());
-				let mut l = 0;
-				for _ in 0..data.spare_capacity_mut().len() {
-					if let Some(r) = char_buf.borrow_mut().pop_front() {
-						data.push(r);
-						l += 1;
-					} else {
-						break;
-					}
-				}
-				if l == 0 {
+				let mut char_buf = char_buf.borrow_mut();
+				if char_buf.is_empty() {
 					// There is currently no data, so delay a response until there is
 					// data. Don't enqueue a new TAKE_JOB either so we have a slot
 					// free for when we can send a reply
-					pending_read.set(Some(job.job_id));
+					pending_read.set(Some(job_id));
 					return false;
+				} else {
+					Job::reply_read(&mut data, job_id, |v| {
+						for _ in 0..length {
+							if let Some(c) = char_buf.pop_front() {
+								v.push(c);
+							} else {
+								break;
+							}
+						}
+						Ok(())
+					})
+					.unwrap();
 				}
 			}
-			_ => {
-				job.result = Error::InvalidOperation as i16;
+			Job::Peek { job_id, .. }
+			| Job::Write { job_id, .. }
+			| Job::Create { job_id, .. }
+			| Job::Seek { job_id, .. } => {
 				data.clear();
-				data.extend_from_slice(job.as_ref());
+				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
 			}
 		};
 		io_queue.submit_write(table, data).unwrap().await.unwrap();
