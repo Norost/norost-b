@@ -6,7 +6,7 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-pub use nora_io_queue::{error, Handle, Pow2Size, SeekFrom};
+pub use nora_io_queue::{error, Full, Handle, Pow2Size, SeekFrom};
 
 use alloc::vec::Vec;
 use arena::Arena;
@@ -49,7 +49,7 @@ impl Queue {
 		handle: Handle,
 		n: usize,
 		wrap: F,
-	) -> Result<BufferFuture<'_>, ()>
+	) -> Result<BufferFuture<'_>, Full>
 	where
 		F: FnOnce(&'static mut [MaybeUninit<u8>]) -> Request,
 	{
@@ -66,8 +66,7 @@ impl Queue {
 		let buffer = unsafe { extend_lifetime_mut(buffer) };
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
-			.unwrap_or_else(|e| todo!("{:?}", e));
+			.submit(i.into_raw().0 as u64, handle, wrap(buffer))?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
@@ -80,7 +79,7 @@ impl Queue {
 		buf: Vec<u8>,
 		handle: Handle,
 		wrap: F,
-	) -> Result<BufferFuture<'_>, ()>
+	) -> Result<BufferFuture<'_>, Full>
 	where
 		F: FnOnce(&'static [u8]) -> Request,
 	{
@@ -95,8 +94,7 @@ impl Queue {
 		let buffer = unsafe { extend_lifetime(buffer) };
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
-			.unwrap_or_else(|e| todo!("{:?}", e));
+			.submit(i.into_raw().0 as u64, handle, wrap(buffer))?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
@@ -106,50 +104,49 @@ impl Queue {
 	/// Submit a request not involving a byte buffer.
 	///
 	/// While a `BufferFuture` is returned the `Vec` is a dummy.
-	fn submit_no_buffer(&self, handle: Handle, request: Request) -> Result<BufferFuture<'_>, ()> {
+	fn submit_no_buffer(&self, handle: Handle, request: Request) -> Result<BufferFuture<'_>, Full> {
 		let mut inflight = self.inflight_buffers.borrow_mut();
 		let i = inflight.insert((Vec::new(), BufferFutureState::Inflight));
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, request)
-			.unwrap_or_else(|e| todo!("{:?}", e));
+			.submit(i.into_raw().0 as u64, handle, request)?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
 		})
 	}
 
-	pub fn submit_read(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Read<'_>, ()> {
+	pub fn submit_read(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Read<'_>, Full> {
 		self.submit_read_buffer(buf, handle, n, |buffer| Request::Read { buffer })
 			.map(|fut| Read { fut })
 	}
 
-	pub fn submit_write(&self, handle: Handle, data: Vec<u8>) -> Result<Write<'_>, ()> {
+	pub fn submit_write(&self, handle: Handle, data: Vec<u8>) -> Result<Write<'_>, Full> {
 		self.submit_write_buffer(data, handle, |buffer| Request::Write { buffer })
 			.map(|fut| Write { fut })
 	}
 
-	pub fn submit_open(&self, handle: Handle, path: Vec<u8>) -> Result<Open<'_>, ()> {
+	pub fn submit_open(&self, handle: Handle, path: Vec<u8>) -> Result<Open<'_>, Full> {
 		self.submit_write_buffer(path, handle, |path| Request::Open { path })
 			.map(|fut| Open { fut })
 	}
 
-	pub fn submit_create(&self, handle: Handle, path: Vec<u8>) -> Result<Create<'_>, ()> {
+	pub fn submit_create(&self, handle: Handle, path: Vec<u8>) -> Result<Create<'_>, Full> {
 		self.submit_write_buffer(path, handle, |path| Request::Create { path })
 			.map(|fut| Create { fut })
 	}
 
-	pub fn submit_seek(&self, handle: Handle, from: SeekFrom) -> Result<Seek<'_>, ()> {
+	pub fn submit_seek(&self, handle: Handle, from: SeekFrom) -> Result<Seek<'_>, Full> {
 		self.submit_no_buffer(handle, Request::Seek { from })
 			.map(|fut| Seek { fut })
 	}
 
-	pub fn submit_poll(&self, handle: Handle) -> Result<Poll<'_>, ()> {
+	pub fn submit_poll(&self, handle: Handle) -> Result<Poll<'_>, Full> {
 		self.submit_no_buffer(handle, Request::Poll)
 			.map(|fut| Poll { fut })
 	}
 
-	pub fn submit_close(&self, handle: Handle) -> Result<(), ()> {
+	pub fn submit_close(&self, handle: Handle) -> Result<(), Full> {
 		self.inner
 			.borrow_mut()
 			.submit(u64::MAX, handle, Request::Close)
@@ -157,12 +154,12 @@ impl Queue {
 			.map_err(|_| todo!())
 	}
 
-	pub fn submit_peek(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Peek<'_>, ()> {
+	pub fn submit_peek(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Peek<'_>, Full> {
 		self.submit_read_buffer(buf, handle, n, |buffer| Request::Peek { buffer })
 			.map(|fut| Peek { fut })
 	}
 
-	pub fn submit_share(&self, handle: Handle, share: Handle) -> Result<Share<'_>, ()> {
+	pub fn submit_share(&self, handle: Handle, share: Handle) -> Result<Share<'_>, Full> {
 		self.submit_no_buffer(handle, Request::Share { share })
 			.map(|fut| Share { fut })
 	}
