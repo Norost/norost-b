@@ -40,9 +40,17 @@ strip = "symbols"
 [profile.dev.package.noraboot]
 opt-level = 'z'
 
+[profile.dev.package.init]
+opt-level = 's'
+
 [profile.release.package.noraboot]
 codegen-units = 1
 opt-level = 'z'
+strip = "symbols"
+
+[profile.release.package.init]
+codegen-units = 1
+opt-level = 's'
 strip = "symbols"
 
 [patch.crates-io]
