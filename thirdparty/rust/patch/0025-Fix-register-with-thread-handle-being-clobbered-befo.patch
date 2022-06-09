@@ -1,7 +1,7 @@
 From 9d1bab68deb9e44e6adbda2762fc3075a82fbd30 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 22 Apr 2022 04:14:28 +0200
-Subject: [PATCH 25/41] Fix register with thread handle being clobbered before
+Subject: [PATCH 25/47] Fix register with thread handle being clobbered before
  syscall::kill_thread
 
 ---

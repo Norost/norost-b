@@ -121,8 +121,9 @@ impl Default for RawRwLock {
 }
 
 /// Ensure the counter didn't overflow. If it did, abort immediately.
+#[inline]
 fn check_read_overflow(v: usize) {
-	if v & WRITE_LOCK_BIT == 0 {
+	if v & WRITE_LOCK_BIT != 0 {
 		intrinsics::abort()
 	}
 }

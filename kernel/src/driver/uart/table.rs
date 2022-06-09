@@ -1,5 +1,5 @@
 use super::Uart;
-use crate::object_table::{Error, NoneQuery, Object, OneQuery, Query, Ticket, TicketWaker};
+use crate::object_table::{Error, Object, Ticket, TicketWaker};
 use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
@@ -9,16 +9,6 @@ pub struct UartTable;
 static PENDING_READS: [SpinLock<Vec<TicketWaker<Box<[u8]>>>>; 1] = [SpinLock::new(Vec::new())];
 
 impl Object for UartTable {
-	fn query(self: Arc<Self>, mut prefix: Vec<u8>, tags: &[u8]) -> Ticket<Box<dyn Query>> {
-		Ticket::new_complete(Ok(match tags {
-			&[] => Box::new(OneQuery::new({
-				prefix.push(b'0');
-				prefix
-			})),
-			_ => Box::new(NoneQuery),
-		}))
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		if path == b"0" {
 			Ticket::new_complete(Ok(Arc::new(UartId(0))))
@@ -48,7 +38,7 @@ impl Object for UartId {
 		}
 	}
 
-	fn write(&self, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
 		// TODO make write non-blocking.
 		let mut uart = super::get(self.0.into());
 		data.iter().for_each(|&c| uart.send(c));

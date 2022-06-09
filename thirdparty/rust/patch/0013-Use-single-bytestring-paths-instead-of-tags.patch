@@ -1,7 +1,7 @@
 From 653ee394f18aa245768fa8fc8c74c1e84a85ed86 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 13 Apr 2022 15:29:15 +0200
-Subject: [PATCH 13/41] Use single bytestring paths instead of tags
+Subject: [PATCH 13/47] Use single bytestring paths instead of tags
 
 ---
  library/std/src/os/norostb/mod.rs |  4 ++--

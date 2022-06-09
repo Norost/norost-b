@@ -1,0 +1,100 @@
+From 628739a8cdc6c77eef01e4e948d009d1822bde1a Mon Sep 17 00:00:00 2001
+From: David Hoppenbrouwers <david@salt-inc.org>
+Date: Thu, 9 Jun 2022 09:09:37 +0200
+Subject: [PATCH 47/47] Update nora_io_queue rt to version with owned buffers
+
+---
+ Cargo.lock                        | 31 +++++++++++++++++++++++++++++++
+ library/std/src/sys/norostb/fs.rs | 13 ++++---------
+ 2 files changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 698e7d129c3..e604a887a41 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -91,6 +91,15 @@ version = "1.0.51"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8b26702f315f53b6071259e15dd9d64528213b44d61de1ec926eca7715d62203"
+ 
++[[package]]
++name = "arena"
++version = "0.1.0"
++dependencies = [
++ "compiler_builtins",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "array_tool"
+ version = "1.0.3"
+@@ -2438,6 +2447,27 @@ dependencies = [
+  "version_check",
+ ]
+ 
++[[package]]
++name = "nora_io_queue"
++version = "0.1.0"
++dependencies = [
++ "compiler_builtins",
++ "norostb_kernel",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
++[[package]]
++name = "nora_io_queue_rt"
++version = "0.1.0"
++dependencies = [
++ "arena",
++ "compiler_builtins",
++ "nora_io_queue",
++ "rustc-std-workspace-alloc",
++ "rustc-std-workspace-core",
++]
++
+ [[package]]
+ name = "normalize-line-endings"
+ version = "0.3.0"
+@@ -2458,6 +2488,7 @@ version = "0.1.0"
+ dependencies = [
+  "cfg-if 1.0.0",
+  "compiler_builtins",
++ "nora_io_queue_rt",
+  "norostb_kernel",
+  "rustc-std-workspace-alloc",
+  "rustc-std-workspace-core",
+diff --git a/library/std/src/sys/norostb/fs.rs b/library/std/src/sys/norostb/fs.rs
+index f9f7ad8de80..a1e136d1a47 100644
+--- a/library/std/src/sys/norostb/fs.rs
++++ b/library/std/src/sys/norostb/fs.rs
+@@ -112,14 +112,9 @@ impl Iterator for ReadDir {
+     type Item = io::Result<DirEntry>;
+ 
+     fn next(&mut self) -> Option<io::Result<DirEntry>> {
+-        let mut path = Vec::with_capacity(4096);
+-        match self.0.as_mut()?.read_uninit(path.spare_capacity_mut()) {
+-            Ok(0) => None,
+-            Ok(l) => {
+-                // SAFETY: read_uninit has initialized at least l bytes.
+-                unsafe { path.set_len(l) }
+-                Some(Ok(DirEntry(OsString::from_vec(path))))
+-            }
++        match self.0.as_mut()?.read_vec(4096) {
++            Ok(v) if v.is_empty() => None,
++            Ok(v) => Some(Ok(DirEntry(OsString::from_vec(v)))),
+             Err(e) => {
+                 self.0 = None;
+                 Some(Err(cvt_err(e)))
+@@ -203,7 +198,7 @@ pub fn is_read_vectored(&self) -> bool {
+     pub fn read_buf(&self, buf: &mut ReadBuf<'_>) -> io::Result<()> {
+         // SAFETY: we don't deinitialize any part of the buffer
+         let s = unsafe { buf.unfilled_mut() };
+-        let len = self.0.read_uninit(s).map_err(cvt_err)?;
++        let len = self.0.read_uninit(s).map_err(cvt_err)?.0.len();
+         // SAFETY: the kernel has initialized `len` bytes.
+         unsafe {
+             buf.assume_init(buf.filled().len() + len);
+-- 
+2.30.2
+

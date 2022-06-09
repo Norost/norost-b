@@ -1,7 +1,7 @@
 From a3c57e5408a5d18a5d876cebdf0ddcdc93ad672e Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 23 Feb 2022 02:25:11 +0100
-Subject: [PATCH 03/41] Run ./x.py fmt
+Subject: [PATCH 03/47] Run ./x.py fmt
 
 ---
  library/panic_unwind/src/lib.rs     | 2 +-

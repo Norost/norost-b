@@ -5,5 +5,11 @@ edition = "2021"
 
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
-driver_utils = { path = "../../lib/rust/driver_utils" }
 scancodes = { path = "../../lib/rust/scancodes" }
+rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
+rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
+
+[dependencies.driver_utils]
+path = "../../lib/rust/driver_utils"
+default-features = false
+features = ["alloc"]

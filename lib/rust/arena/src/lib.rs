@@ -3,12 +3,15 @@
 #![no_std]
 #![feature(const_default_impls, const_trait_impl)]
 
+#[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
 use alloc::vec;
-use core::iter;
-use core::mem;
-use core::ops::{Index, IndexMut};
+use core::{
+	fmt, iter, mem,
+	ops::{Index, IndexMut},
+	slice,
+};
 
 /// A typed arena. A generation type can be specified which is used to prevent the ABA problem.
 pub struct Arena<V, G: Generation> {
@@ -18,15 +21,40 @@ pub struct Arena<V, G: Generation> {
 	count: usize,
 }
 
+impl<V, G: Generation> fmt::Debug for Arena<V, G>
+where
+	V: fmt::Debug,
+	G: fmt::Debug,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_map().entries(self.iter()).finish()
+	}
+}
+
 enum Entry<V, G: Generation> {
 	Free { next: usize },
 	Occupied { value: V, generation: G },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Handle<G: Generation> {
 	index: usize,
 	generation: G,
+}
+
+impl<G: Generation> fmt::Debug for Handle<G>
+where
+	G: fmt::Debug,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if mem::size_of::<G>() == 0 {
+			self.index.fmt(f)
+		} else {
+			self.index.fmt(f)?;
+			"@".fmt(f)?;
+			self.generation.fmt(f)
+		}
+	}
 }
 
 impl<G: Generation> Handle<G> {
@@ -131,6 +159,18 @@ impl<V, G: Generation> Arena<V, G> {
 		}
 	}
 
+	pub fn iter(&self) -> Iter<'_, V, G> {
+		Iter {
+			inner: self.storage.iter().enumerate(),
+		}
+	}
+
+	pub fn iter_mut(&mut self) -> IterMut<'_, V, G> {
+		IterMut {
+			inner: self.storage.iter_mut().enumerate(),
+		}
+	}
+
 	pub fn drain(&mut self) -> Drain<'_, V, G> {
 		self.free = usize::MAX;
 		self.count = 0;
@@ -187,22 +227,31 @@ impl<V, G: Generation + ~const Default> const Default for Arena<V, G> {
 	}
 }
 
-pub struct Drain<'a, V, G: Generation> {
-	inner: iter::Enumerate<vec::Drain<'a, Entry<V, G>>>,
-}
+macro_rules! iter {
+	($name:ident, $it:ident, $ty:ty) => {
+		pub struct $name<'a, V, G: Generation> {
+			inner: iter::Enumerate<$it::$name<'a, Entry<V, G>>>,
+		}
 
-impl<'a, V, G: Generation> Iterator for Drain<'a, V, G> {
-	type Item = (Handle<G>, V);
+		impl<'a, V, G: Generation> Iterator for $name<'a, V, G> {
+			type Item = (Handle<G>, $ty);
 
-	fn next(&mut self) -> Option<Self::Item> {
-		while let Some((index, value)) = self.inner.next() {
-			match value {
-				Entry::Occupied { value, generation } => {
-					return Some((Handle { index, generation }, value));
+			fn next(&mut self) -> Option<Self::Item> {
+				while let Some((index, value)) = self.inner.next() {
+					match value {
+						Entry::Occupied { value, generation } => {
+							let generation = generation.clone();
+							return Some((Handle { index, generation }, value));
+						}
+						Entry::Free { .. } => {}
+					}
 				}
-				Entry::Free { .. } => {}
+				None
 			}
 		}
-		None
-	}
+	};
 }
+
+iter!(Iter, slice, &'a V);
+iter!(IterMut, slice, &'a mut V);
+iter!(Drain, vec, V);

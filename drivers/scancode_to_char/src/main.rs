@@ -1,202 +1,212 @@
-#![feature(norostb)]
+#![no_std]
+#![feature(alloc_error_handler)]
+#![feature(start)]
 
-use norostb_kernel::{error::Error, io, syscall};
-use std::collections::VecDeque;
-use std::os::norostb::prelude::*;
+extern crate alloc;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let mut args = std::env::args_os().skip(1);
-	let table = args.next().ok_or("expected table path")?;
-	let input = args.next().ok_or("expected input object path")?;
+use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
+use core::{
+	cell::{Cell, RefCell},
+	future::Future,
+	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+};
+use driver_utils::io::queue::stream::Job;
+use norostb_kernel::error::Error;
 
-	// Create I/O queue with two entries: one for a job and one for reading
-	let request_p2size = 1;
-	let response_p2size = 1;
-	let io_queue = syscall::create_io_queue(None, request_p2size, response_p2size).unwrap();
-	let mut io_queue = io::Queue {
-		requests_mask: (1 << request_p2size) - 1,
-		responses_mask: (1 << response_p2size) - 1,
-		base: io_queue.cast(),
-	};
+#[global_allocator]
+static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
+
+#[alloc_error_handler]
+fn alloc_error(_: core::alloc::Layout) -> ! {
+	// FIXME the runtime allocates memory by default to write things, so... crap
+	// We can run in similar trouble with the I/O queue. Some way to submit I/O requests
+	// without going through an queue may be useful.
+	rt::exit(129)
+}
+
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+	let _ = rt::io::stderr().map(|o| writeln!(o, "{:?}", info));
+	rt::exit(128)
+}
+
+#[start]
+fn main(_: isize, _: *const *const u8) -> isize {
+	let mut args = rt::args::Args::new().skip(1);
+	let table = args.next().expect("expected table path");
+	let input = args.next().expect("expected input object path");
 
 	// Create a table
-	let table = std::fs::File::create(table)?.into_handle();
+	let root = rt::io::file_root().unwrap();
+	let table = rt::Object::create(&root, table).unwrap().into_raw();
 
 	// Open input
-	let input = std::fs::File::open(input)?.into_handle();
+	let input = rt::Object::open(&root, input).unwrap().into_raw();
 
-	// Enqueue initial requests
-	const READ: u64 = 0;
-	const TAKE_JOB: u64 = 1;
-	const FINISH_JOB: u64 = 2;
+	let char_buf = RefCell::new(VecDeque::new());
+	let readers = RefCell::new(driver_utils::Arena::new());
+	let pending_read = Cell::new(None);
+	let shifts = Cell::new(0);
 
-	let mut scancode_buf = [0; 4];
-	let scancode_buf = &mut scancode_buf;
-	let mut job_buf = [0; 512];
-	let job_buf = &mut job_buf;
-	let mut job = io::Job::default();
-	job.buffer = core::ptr::NonNull::new(job_buf.as_mut_ptr());
-	job.buffer_size = job_buf.len().try_into().unwrap();
-	let job = &mut job;
-
-	unsafe {
-		io_queue
-			.enqueue_request(io::Request::read(READ, input, scancode_buf))
-			.unwrap();
-		io_queue
-			.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
-			.unwrap();
-		syscall::process_io_queue(Some(io_queue.base.cast())).unwrap();
-		syscall::wait_io_queue(Some(io_queue.base.cast())).unwrap();
-	}
-
-	let mut char_buf = VecDeque::new();
-
-	let mut queries = driver_utils::Arena::new();
-	let mut readers = driver_utils::Arena::new();
-
-	let mut pending_read = None;
-
-	let mut shifts = 0;
-
-	loop {
-		while let Ok(resp) = unsafe { io_queue.dequeue_response() } {
-			match resp.user_data {
-				READ => {
-					use scancodes::{Event, ScanCode};
-					assert_eq!(resp.value, 4, "incomplete scancode");
-					let chr = match Event::try_from(*scancode_buf).unwrap() {
-						Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
-							shifts += 1;
-							None
-						}
-						Event::Release(ScanCode::LeftShift)
-						| Event::Release(ScanCode::RightShift) => {
-							shifts -= 1;
-							None
-						}
-						Event::Press(s) => match s {
-							ScanCode::Backspace => Some(0x7f), // DEL
-							ScanCode::Enter => Some(b'\n'),
-							ScanCode::ForwardSlash => Some(b'/'),
-							ScanCode::BackSlash => Some(b'\\'),
-							ScanCode::Colon => Some(b':'),
-							ScanCode::Semicolon => Some(b';'),
-							ScanCode::Comma => Some(b','),
-							ScanCode::Dot => Some(b'.'),
-							ScanCode::SingleQuote => Some(b'\''),
-							ScanCode::DoubleQuote => Some(b'"'),
-							ScanCode::Space => Some(b' '),
-							ScanCode::Minus if shifts == 0 => Some(b'-'),
-							ScanCode::Minus if shifts > 0 => Some(b'_'),
-							s => s
-								.alphabet_to_char()
-								.or_else(|| s.bracket_to_char())
-								.or_else(|| s.number_to_char())
-								.map(|c| {
-									if shifts > 0 {
-										c.to_ascii_uppercase() as u8
-									} else {
-										c as u8
-									}
-								}),
-						},
-						Event::Release(_) => None,
-					};
-					if let Some(chr) = chr {
-						if let Some(()) = pending_read.take() {
-							job_buf[0] = chr;
-							job.operation_size = 1;
-							unsafe {
-								io_queue
-									.enqueue_request(io::Request::finish_job(
-										FINISH_JOB, table, job,
-									))
-									.unwrap();
-							}
+	let do_read = || async {
+		use scancodes::{Event, ScanCode};
+		let mut buf = rt::io::read(input, Vec::new(), 4).await.unwrap();
+		assert_eq!(buf.len(), 4, "incomplete scancode");
+		let chr = match Event::try_from(<[u8; 4]>::try_from(&buf[..]).unwrap()).unwrap() {
+			Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
+				shifts.set(shifts.get() + 1);
+				None
+			}
+			Event::Release(ScanCode::LeftShift) | Event::Release(ScanCode::RightShift) => {
+				shifts.set(shifts.get() - 1);
+				None
+			}
+			Event::Press(s) => match s {
+				ScanCode::Backspace => Some(0x7f), // DEL
+				ScanCode::Enter => Some(b'\n'),
+				ScanCode::ForwardSlash => Some(b'/'),
+				ScanCode::BackSlash => Some(b'\\'),
+				ScanCode::Colon => Some(b':'),
+				ScanCode::Semicolon => Some(b';'),
+				ScanCode::Comma => Some(b','),
+				ScanCode::Dot => Some(b'.'),
+				ScanCode::SingleQuote => Some(b'\''),
+				ScanCode::DoubleQuote => Some(b'"'),
+				ScanCode::Space => Some(b' '),
+				ScanCode::Minus if shifts.get() == 0 => Some(b'-'),
+				ScanCode::Minus if shifts.get() > 0 => Some(b'_'),
+				s => s
+					.alphabet_to_char()
+					.or_else(|| s.bracket_to_char())
+					.or_else(|| s.number_to_char())
+					.map(|c| {
+						if shifts.get() > 0 {
+							c.to_ascii_uppercase() as u8
 						} else {
-							char_buf.push_back(chr);
+							c as u8
 						}
-					}
-					unsafe {
-						io_queue
-							.enqueue_request(io::Request::read(READ, input, scancode_buf))
-							.unwrap();
-					}
+					}),
+			},
+			Event::Release(_) => None,
+		};
+		if let Some(chr) = chr {
+			if let Some(job_id) = pending_read.take() {
+				buf.clear();
+				Job::reply_read(&mut buf, job_id, false, |v| Ok(v.push(chr))).unwrap();
+				rt::io::write(table, buf, 0).await.unwrap();
+				return true;
+			} else {
+				char_buf.borrow_mut().push_back(chr);
+			}
+		}
+		false
+	};
+
+	let do_job = || async {
+		let mut data = rt::io::read(table, Vec::new(), 512).await.unwrap();
+		match Job::deserialize(&data).unwrap() {
+			Job::Open {
+				job_id,
+				handle,
+				path,
+			} => {
+				if handle == rt::Handle::MAX && path == b"stream" {
+					data.clear();
+					Job::reply_open(&mut data, job_id, readers.borrow_mut().insert(()))
+				} else {
+					data.clear();
+					Job::reply_error(&mut data, job_id, Error::InvalidObject)
 				}
-				TAKE_JOB => {
-					assert_eq!(job.result, 0);
-					match job.ty {
-						io::Job::OPEN => {
-							let path = &job_buf[..job.operation_size.try_into().unwrap()];
-							if path == b"stream" {
-								job.handle = readers.insert(());
-							} else {
-								job.result = Error::InvalidObject as i16;
-							}
-						}
-						io::Job::CLOSE => {
-							readers.remove(job.handle).unwrap();
-							// The kernel does not expect a response
-							unsafe {
-								io_queue
-									.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
-									.unwrap();
-							}
-							continue;
-						}
-						io::Job::READ => {
-							// Ensure the handle is valid.
-							readers[job.handle];
-							let max = job_buf.len().min(job.operation_size.try_into().unwrap());
-							job.operation_size = 0;
-							for w in job_buf[..max].iter_mut() {
-								if let Some(r) = char_buf.pop_front() {
-									*w = r;
-									job.operation_size += 1;
+				.unwrap();
+			}
+			Job::Close { handle } => {
+				readers.borrow_mut().remove(handle).unwrap();
+				// The kernel does not expect a response
+				return true;
+			}
+			Job::Read {
+				peek,
+				job_id,
+				handle: _,
+				length,
+			} => {
+				data.clear();
+				if peek {
+					Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
+				} else {
+					let mut char_buf = char_buf.borrow_mut();
+					if char_buf.is_empty() {
+						// There is currently no data, so delay a response until there is
+						// data. Don't enqueue a new TAKE_JOB either so we have a slot
+						// free for when we can send a reply
+						pending_read.set(Some(job_id));
+						return false;
+					} else {
+						Job::reply_read(&mut data, job_id, false, |v| {
+							for _ in 0..length {
+								if let Some(c) = char_buf.pop_front() {
+									v.push(c);
 								} else {
 									break;
 								}
 							}
-							if job.operation_size == 0 {
-								// There is currently no data, so delay a response until there is
-								// data. Don't enqueue a new TAKE_JOB either so we have a slot
-								// free for when we can send a reply
-								pending_read = Some(());
-								continue;
-							}
-						}
-						io::Job::QUERY => {
-							job.handle = queries.insert(());
-						}
-						io::Job::QUERY_NEXT => match queries.remove(job.handle) {
-							Some(()) => {
-								job_buf[..6].copy_from_slice(b"stream");
-								job.operation_size = 6;
-							}
-							None => {
-								job.result = Error::InvalidObject as i16;
-							}
-						},
-						_ => {
-							job.result = Error::InvalidOperation as i16;
-						}
-					}
-					unsafe {
-						io_queue
-							.enqueue_request(io::Request::finish_job(FINISH_JOB, table, job))
-							.unwrap();
+							Ok(())
+						})
+						.unwrap();
 					}
 				}
-				FINISH_JOB => unsafe {
-					io_queue
-						.enqueue_request(io::Request::take_job(TAKE_JOB, table, job))
-						.unwrap();
-				},
-				ud => panic!("invalid user data: {}", ud),
+			}
+			Job::Write { job_id, .. } | Job::Create { job_id, .. } | Job::Seek { job_id, .. } => {
+				data.clear();
+				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
+			}
+		};
+		rt::io::write(table, data, 0).await.unwrap();
+		true
+	};
+
+	unsafe fn clone(p: *const ()) -> RawWaker {
+		RawWaker::new(p, &VTBL)
+	}
+	unsafe fn wake(p: *const ()) {
+		(&*(p as *const Cell<bool>)).set(true);
+	}
+	static VTBL: RawWakerVTable = RawWakerVTable::new(clone, wake, wake, |_| ());
+
+	macro_rules! w {
+		($n:ident, $c:ident, $t:ident = $f:ident) => {
+			let $n = Cell::new(true);
+			let $c = RawWaker::new(&$n as *const _ as _, &VTBL);
+			let $c = unsafe { Waker::from_raw($c) };
+			let mut $c = Context::from_waker(&$c);
+			let mut $t = Box::pin($f());
+		};
+	}
+
+	w!(read_notif, read_cx, read_task = do_read);
+	w!(job_notif, job_cx, job_task = do_job);
+
+	loop {
+		while read_notif.get() || job_notif.get() {
+			if read_notif.take() {
+				if let Poll::Ready(new_job) = read_task.as_mut().poll(&mut read_cx) {
+					read_task = Box::pin(do_read());
+					read_notif.set(true);
+					if new_job {
+						job_notif.set(true);
+						job_task = Box::pin(do_job());
+					}
+				}
+			}
+			if job_notif.take() {
+				if let Poll::Ready(new_job) = job_task.as_mut().poll(&mut job_cx) {
+					if new_job {
+						job_notif.set(true);
+						job_task = Box::pin(do_job());
+					}
+				}
 			}
 		}
-		syscall::process_io_queue(Some(io_queue.base.cast())).unwrap();
-		syscall::wait_io_queue(Some(io_queue.base.cast())).unwrap();
+		rt::io::poll_queue_and_wait();
 	}
 }

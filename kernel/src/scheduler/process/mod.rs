@@ -7,7 +7,7 @@ use crate::arch;
 use crate::memory::frame::{self, AllocateHints};
 use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{AnyTicket, JobTask, Object, Query};
+use crate::object_table::{AnyTicket, Object};
 use crate::sync::{Mutex, SpinLock};
 use crate::util::{erase_handle, unerase_handle};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -23,7 +23,6 @@ pub struct Process {
 	hint_color: u8,
 	threads: SpinLock<Arena<Arc<Thread>, u8>>,
 	objects: SpinLock<Arena<Arc<dyn Object>, u8>>,
-	queries: Mutex<Arena<Box<dyn Query>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
 }
 
@@ -31,24 +30,7 @@ struct PendingTicket {
 	user_data: u64,
 	data_ptr: *mut u8,
 	data_len: usize,
-	ticket: TicketOrJob,
-}
-
-enum TicketOrJob {
-	Ticket(AnyTicket),
-	Job(JobTask),
-}
-
-impl<T: Into<AnyTicket>> From<T> for TicketOrJob {
-	fn from(t: T) -> Self {
-		Self::Ticket(t.into())
-	}
-}
-
-impl From<JobTask> for TicketOrJob {
-	fn from(t: JobTask) -> Self {
-		Self::Job(t)
-	}
+	ticket: AnyTicket,
 }
 
 impl Process {
@@ -58,7 +40,6 @@ impl Process {
 			hint_color: 0,
 			threads: Default::default(),
 			objects: Default::default(),
-			queries: Default::default(),
 			io_queues: Default::default(),
 		})
 	}

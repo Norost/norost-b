@@ -1,4 +1,5 @@
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
 	Unknown = -1,
 	DoesNotExist = -2,
@@ -7,6 +8,16 @@ pub enum Error {
 	Cancelled = -5,
 	CantCreateObject = -6,
 	InvalidObject = -7,
+	InvalidData = -8,
+}
+
+impl<T: raw::RawError> From<T> for Error {
+	fn from(t: T) -> Error {
+		match result(t) {
+			Ok(_) => Error::Unknown,
+			Err(e) => e,
+		}
+	}
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

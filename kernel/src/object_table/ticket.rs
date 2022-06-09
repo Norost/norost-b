@@ -1,4 +1,4 @@
-use super::{Error, Object, Query, QueryResult};
+use super::{Error, Object};
 use crate::sync::SpinLock;
 use alloc::{boxed::Box, sync::Arc};
 use core::{
@@ -88,8 +88,6 @@ pub enum AnyTicket {
 	Usize(Ticket<usize>),
 	U64(Ticket<u64>),
 	Data(Ticket<Box<[u8]>>),
-	Query(Ticket<Box<dyn Query>>),
-	QueryResult(Ticket<QueryResult>),
 }
 
 /// An enum that can hold the common ticket waker types.
@@ -98,8 +96,6 @@ pub enum AnyTicketWaker {
 	Usize(TicketWaker<usize>),
 	U64(TicketWaker<u64>),
 	Data(TicketWaker<Box<[u8]>>),
-	Query(TicketWaker<Box<dyn Query>>),
-	QueryResult(TicketWaker<QueryResult>),
 }
 
 /// An enum that can hold the common ticket result types.
@@ -108,8 +104,6 @@ pub enum AnyTicketValue {
 	Usize(usize),
 	U64(u64),
 	Data(Box<[u8]>),
-	Query(Box<dyn Query>),
-	QueryResult(QueryResult),
 }
 
 macro_rules! any_ticket {
@@ -147,8 +141,6 @@ any_ticket!(Arc<dyn Object> => Object, into_object);
 any_ticket!(usize => Usize, into_usize);
 any_ticket!(u64 => U64, into_u64);
 any_ticket!(Box<[u8]> => Data, into_data);
-any_ticket!(Box<dyn Query> => Query, into_query);
-any_ticket!(QueryResult => QueryResult, into_query_result);
 
 impl AnyTicketWaker {
 	pub fn complete_err(self, err: Error) {
@@ -157,8 +149,6 @@ impl AnyTicketWaker {
 			Self::Usize(t) => t.complete(Err(err)),
 			Self::U64(t) => t.complete(Err(err)),
 			Self::Data(t) => t.complete(Err(err)),
-			Self::Query(t) => t.complete(Err(err)),
-			Self::QueryResult(t) => t.complete(Err(err)),
 		}
 	}
 }
@@ -172,8 +162,6 @@ impl Future for AnyTicket {
 			Self::Usize(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 			Self::U64(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 			Self::Data(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
-			Self::Query(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
-			Self::QueryResult(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 		}
 	}
 }

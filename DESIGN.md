@@ -25,6 +25,34 @@ needed. Since this type of I/O likely doesn't need to be very performant it is
 implemented on top of the existing asynchronous interface.
 
 
+### Readiness vs completion
+
+There are two common ways to handle asynchronous I/O. One is based on readiness, where
+the server sends a message that an operation can be performed, and the other is based
+on completion, where the server sends a message when an operation is done.
+
+The obvious disadvantage of the former is that it requires up to two calls per operation:
+one to check if an operation can be performed and one to actually perform the operation.
+In contrast, the completion-based model only requires one call since an operation starts
+the moment a request is sent. Since reducing latency is a great concern the I/O queue uses
+the latter model.
+
+
+#### Owned buffers
+
+A subtle disadvantage of the latter model is that cancellation is not implicit: with
+a readiness-based model an operation can be "cancelled" by simply ignoring the ready
+message. This is not an option with completion-based models since the server may read
+from / write to a buffer at any time, so cancellation has to be explicit and a buffer
+must remain valid as long as an operation has not been finished or is cancelled.
+
+One way to ensure that buffers live long enough is to let the queue manage the buffers
+directly: a client moves data into a buffer and then moves this buffer to the queue. This
+buffer will then remain inaccessible to the client until the queue is done with it. To
+avoid redundant allocations & deallocations the queue returns the buffer to the client
+when it is done with it.
+
+
 ## Object-oriented interface
 
 A minimal but powerful OO interface makes it easy to isolate & scale processes.

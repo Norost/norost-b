@@ -5,167 +5,161 @@ use alloc::{
 	sync::{Arc, Weak},
 	vec::Vec,
 };
-use core::sync::atomic::{AtomicU32, Ordering};
-use norostb_kernel::{io::SeekFrom, syscall::Handle};
+use core::{
+	mem,
+	sync::atomic::{AtomicU32, Ordering},
+};
+use norostb_kernel::{
+	io::{Job, SeekFrom},
+	syscall::Handle,
+};
 
 pub struct StreamingTable {
 	job_id_counter: AtomicU32,
-	jobs: SpinLock<Vec<(StreamJob, Option<AnyTicketWaker>, Vec<u8>)>>,
-	tickets: SpinLock<Vec<(JobId, AnyTicketWaker, Vec<u8>)>>,
-	job_handlers: SpinLock<Vec<JobWaker>>,
+	jobs: SpinLock<Vec<(Box<[u8]>, Option<AnyTicketWaker>)>>,
+	tickets: SpinLock<Vec<(JobId, AnyTicketWaker)>>,
+	job_handlers: SpinLock<Vec<(TicketWaker<Box<[u8]>>, usize)>>,
 }
 
-impl StreamingTable {
+/// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
+#[repr(transparent)]
+pub struct StreamingTableOwner(StreamingTable);
+
+impl StreamingTableOwner {
 	pub fn new() -> Arc<Self> {
-		Arc::new(Self {
+		Arc::new(Self(StreamingTable {
 			job_id_counter: Default::default(),
 			jobs: Default::default(),
 			tickets: Default::default(),
 			job_handlers: Default::default(),
-		})
+		}))
 	}
 
-	fn submit_job<T>(&self, job: JobRequest, prefix: Vec<u8>) -> Ticket<T>
+	pub fn into_inner_weak(slf: &Arc<Self>) -> Weak<StreamingTable> {
+		// SAFETY: StreamingTableOwner is a transparent wrapper around
+		// StreamingTable
+		unsafe { Weak::from_raw(Weak::into_raw(Arc::downgrade(slf)).cast::<StreamingTable>()) }
+	}
+}
+
+impl StreamingTable {
+	fn submit_job<T>(&self, mut job: Job, data: &[u8]) -> Ticket<T>
 	where
 		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
 
-		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+		job.job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+		let job_id = job.job_id;
+		let job = job.as_ref().iter().chain(data).copied().collect::<Box<_>>();
 
-		loop {
-			let j = self.job_handlers.auto_lock().pop();
-			if let Some(w) = j {
-				if let Ok(mut w) = w.lock() {
-					self.tickets
-						.auto_lock()
-						.push((job_id, ticket_waker.into(), prefix));
-					w.complete((job_id, job));
-					break;
-				}
-			} else {
-				let mut l = self.jobs.auto_lock();
-				l.push((StreamJob { job_id, job }, Some(ticket_waker.into()), prefix));
-				break;
-			}
+		if let Some(w) = self.job_handlers.auto_lock().pop() {
+			self.tickets.auto_lock().push((job_id, ticket_waker.into()));
+			w.0.complete(Ok(job));
+		} else {
+			self.jobs.auto_lock().push((job, Some(ticket_waker.into())));
 		}
 
 		ticket.into()
 	}
 
 	/// Submit a job for which no response is expected, i.e. `finish_job` should *not* be called.
-	fn submit_oneway_job(&self, job: JobRequest) {
+	fn submit_oneway_job(&self, mut job: Job) {
 		// Perhaps not strictly necessary, but let's try to prevent potential confusion.
-		let job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+		job.job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
+		let job = (*job.as_ref()).into();
 
-		loop {
-			let j = self.job_handlers.auto_lock().pop();
-			if let Some(w) = j {
-				if let Ok(mut w) = w.lock() {
-					w.complete((job_id, job));
-					break;
-				}
-			} else {
-				let mut l = self.jobs.auto_lock();
-				l.push((StreamJob { job_id, job }, None, Vec::new()));
-				break;
-			}
+		if let Some(w) = self.job_handlers.auto_lock().pop() {
+			w.0.complete(Ok(job));
+		} else {
+			self.jobs.auto_lock().push((job, None));
 		}
 	}
 }
 
-impl Table for StreamingTable {
-	fn take_job(self: Arc<Self>, _timeout: Duration) -> JobTask {
-		let job = self.jobs.auto_lock().pop().map(|(job, tkt, prefix)| {
-			tkt.map(|tkt| self.tickets.auto_lock().push((job.job_id, tkt, prefix)));
-			(job.job_id, job.job)
-		});
-		let s = Arc::downgrade(&self);
-		let (job, waker) = JobTask::new(s, job);
-		self.job_handlers.auto_lock().push(waker);
-		job
+impl Object for StreamingTableOwner {
+	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+		if length < mem::size_of::<Job>() + 8 {
+			return Ticket::new_complete(Err(Error::InvalidData));
+		}
+		match self.0.jobs.auto_lock().pop() {
+			Some((job, waker)) => {
+				if let Some(w) = waker {
+					let id = Job::deserialize(&job).unwrap().0.job_id;
+					self.0.tickets.auto_lock().push((id, w));
+				}
+				Ticket::new_complete(Ok(job))
+			}
+			None => {
+				let (ticket, waker) = Ticket::new();
+				self.0
+					.job_handlers
+					.auto_lock()
+					.push((waker, length - mem::size_of::<Job>()));
+				ticket
+			}
+		}
 	}
 
-	fn finish_job(self: Arc<Self>, job: Result<JobResult, Error>, job_id: JobId) -> Result<(), ()> {
-		let (tw, mut prefix);
-		{
-			let mut c = self.tickets.auto_lock();
-			let mut c = c.drain_filter(|e| e.0 == job_id);
-			(_, tw, prefix) = c.next().ok_or(())?;
-			assert!(c.next().is_none());
-		}
-		match job {
-			Ok(JobResult::Open { handle }) | Ok(JobResult::Create { handle }) => {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+		let Some((job, data)) = Job::deserialize(data) else {
+			return Ticket::new_complete(Err(Error::InvalidData));
+		};
+		let mut c = self.0.tickets.auto_lock();
+		let mut c = c.drain_filter(|e| e.0 == job.job_id);
+		let Some((_, tw)) = c.next() else {
+			return Ticket::new_complete(Err(Error::InvalidObject));
+		};
+		assert!(c.next().is_none());
+		match job.ty {
+			_ if job.result != 0 => tw.complete_err(Error::from(job.result)),
+			Job::OPEN | Job::CREATE => {
 				let obj = Arc::new(StreamObject {
-					handle,
-					table: Arc::downgrade(&self),
+					handle: job.handle,
+					table: Self::into_inner_weak(&self),
 				});
 				tw.into_object().complete(Ok(obj))
 			}
-			Ok(JobResult::Write { amount }) => tw.into_usize().complete(Ok(amount)),
-			Ok(JobResult::Read { data }) | Ok(JobResult::Peek { data }) => {
-				tw.into_data().complete(Ok(data))
+			Job::WRITE => {
+				let Ok(len) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {
+					return Ticket::new_complete(Err(Error::InvalidData));
+				};
+				tw.into_usize().complete(Ok(len as usize))
 			}
-			Ok(JobResult::Query { handle }) => {
-				tw.into_query().complete(Ok(Box::new(StreamQuery {
-					table: Arc::downgrade(&self),
-					handle,
-					prefix,
-				})))
+			Job::READ | Job::PEEK => tw.into_data().complete(Ok(data.into())),
+			Job::SEEK => {
+				let Ok(offset) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {
+					return Ticket::new_complete(Err(Error::InvalidData));
+				};
+				tw.into_u64().complete(Ok(offset))
 			}
-			Ok(JobResult::QueryNext { path }) => {
-				tw.into_query_result().complete(if path.len() > 0 {
-					prefix.extend(path.into_vec());
-					Ok(QueryResult {
-						path: prefix.into(),
-					})
-				} else {
-					// FIXME query API sucks
-					Err(Error::InvalidOperation)
-				});
-			}
-			Ok(JobResult::Seek { position }) => {
-				tw.into_u64().complete(Ok(position));
-			}
-			Err(e) => tw.complete_err(e),
+			_ => return Ticket::new_complete(Err(Error::InvalidOperation)),
 		}
-		Ok(())
+		Ticket::new_complete(Ok(data.len()))
 	}
 }
 
 impl Object for StreamingTable {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(
-			JobRequest::Query {
-				handle: Handle::MAX,
-				filter: filter.into(),
-			},
-			prefix.into(),
-		)
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
-			JobRequest::Open {
+			Job {
+				ty: Job::OPEN,
 				handle: Handle::MAX,
-				path: path.into(),
+				..Default::default()
 			},
-			Default::default(),
+			path,
 		)
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
-			JobRequest::Create {
+			Job {
+				ty: Job::CREATE,
 				handle: Handle::MAX,
-				path: path.into(),
+				..Default::default()
 			},
-			Default::default(),
+			path,
 		)
-	}
-
-	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
-		Some(self)
 	}
 }
 
@@ -190,85 +184,83 @@ struct StreamObject {
 }
 
 impl StreamObject {
-	fn submit_job<T>(&self, job: impl FnOnce() -> JobRequest, prefix: Vec<u8>) -> Ticket<T>
+	fn submit_job<T>(&self, job: Job, data: &[u8]) -> Ticket<T>
 	where
 		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		self.table.upgrade().map_or_else(
 			|| Ticket::new_complete(Err(Error::Cancelled)),
-			|tbl| tbl.submit_job(job(), prefix.into()),
+			|tbl| tbl.submit_job(job, data),
 		)
 	}
 }
 
 impl Object for StreamObject {
-	fn query(self: Arc<Self>, prefix: Vec<u8>, filter: &[u8]) -> Ticket<Box<dyn Query>> {
-		self.submit_job(
-			|| JobRequest::Query {
-				handle: self.handle,
-				filter: filter.into(),
-			},
-			prefix.into(),
-		)
-	}
-
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
-			|| JobRequest::Open {
+			Job {
+				ty: Job::OPEN,
 				handle: self.handle,
-				path: path.into(),
+				..Default::default()
 			},
-			Default::default(),
+			path,
 		)
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.submit_job(
-			|| JobRequest::Create {
+			Job {
+				ty: Job::CREATE,
 				handle: self.handle,
-				path: path.into(),
+				..Default::default()
 			},
-			Default::default(),
+			path,
 		)
 	}
 
 	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		self.submit_job(
-			|| JobRequest::Read {
+			Job {
+				ty: Job::READ,
 				handle: self.handle,
-				amount: length,
+				..Default::default()
 			},
-			Default::default(),
+			&(length as u64).to_ne_bytes(),
 		)
 	}
 
 	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
 		self.submit_job(
-			|| JobRequest::Peek {
+			Job {
+				ty: Job::PEEK,
 				handle: self.handle,
-				amount: length,
+				..Default::default()
 			},
-			Default::default(),
+			&(length as u64).to_ne_bytes(),
 		)
 	}
 
-	fn write(&self, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
 		self.submit_job(
-			|| JobRequest::Write {
+			Job {
+				ty: Job::WRITE,
 				handle: self.handle,
-				data: data.into(),
+				..Default::default()
 			},
-			Default::default(),
+			data,
 		)
 	}
 
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
+		let (from_anchor, from_offset) = from.into_raw();
 		self.submit_job(
-			|| JobRequest::Seek {
+			Job {
+				ty: Job::SEEK,
 				handle: self.handle,
-				from,
+				from_anchor,
+				..Default::default()
 			},
-			Default::default(),
+			&from_offset.to_ne_bytes(),
 		)
 	}
 }
@@ -276,43 +268,11 @@ impl Object for StreamObject {
 impl Drop for StreamObject {
 	fn drop(&mut self) {
 		Weak::upgrade(&self.table).map(|table| {
-			table.submit_oneway_job(JobRequest::Close {
+			table.submit_oneway_job(Job {
+				ty: Job::CLOSE,
 				handle: self.handle,
+				..Default::default()
 			});
 		});
 	}
-}
-
-struct StreamQuery {
-	table: Weak<StreamingTable>,
-	handle: Handle,
-	prefix: Vec<u8>,
-}
-
-impl Iterator for StreamQuery {
-	type Item = Ticket<QueryResult>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		Weak::upgrade(&self.table).map(|table| {
-			table.submit_job(
-				JobRequest::QueryNext {
-					handle: self.handle,
-				},
-				self.prefix.clone(),
-			)
-		})
-	}
-}
-
-impl Query for StreamQuery {}
-
-impl Drop for StreamQuery {
-	fn drop(&mut self) {
-		todo!()
-	}
-}
-
-struct StreamJob {
-	job_id: JobId,
-	job: JobRequest,
 }

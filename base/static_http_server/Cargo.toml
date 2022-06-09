@@ -9,3 +9,5 @@ default-target = "x86_64-unknown-norostb"
 
 [dependencies]
 mhttp = "0.1"
+rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
+futures = "0.3"

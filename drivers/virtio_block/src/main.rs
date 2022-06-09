@@ -1,7 +1,7 @@
 #![feature(norostb)]
 
-use core::ptr::NonNull;
-use norostb_kernel::{io::Job, syscall};
+use driver_utils::io::queue::stream::Job;
+use norostb_kernel::syscall;
 use norostb_rt as rt;
 use std::fs;
 use std::os::norostb::prelude::*;
@@ -14,12 +14,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.ok_or("expected table name")?;
 
 	let dev_handle = {
-		let dev = fs::read_dir("pci/vendor-id:1af4&device-id:1001")
-			.unwrap()
-			.next()
-			.unwrap()
-			.unwrap();
-		fs::File::open(dev.path()).unwrap().into_handle()
+		let s = b" 1af4:1001";
+		let mut it = fs::read_dir("pci/info").unwrap().map(Result::unwrap);
+		loop {
+			let dev = it.next().unwrap().path().into_os_string().into_vec();
+			if dev.ends_with(s) {
+				let mut path = Vec::from(*b"pci/");
+				path.extend(&dev[..7]);
+				break fs::File::open(std::ffi::OsString::from_vec(path))
+					.unwrap()
+					.into_handle();
+			}
+		}
 	};
 	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
@@ -68,23 +74,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		core::slice::from_raw_parts_mut(sectors.cast::<Sector>().as_ptr(), 4096 / Sector::SIZE)
 	};
 
-	let mut queries = driver_utils::Arena::new();
 	let mut data_handles = driver_utils::Arena::new();
 
-	let mut buf = [0; 4096];
-	let buf = &mut buf;
-
-	enum QueryState {
-		Data,
-		Info,
-	}
+	let mut buf = Vec::new();
 
 	loop {
 		// Wait for events from the table
-		let mut job = rt::io::Job::default();
-		job.buffer = NonNull::new(buf.as_mut_ptr());
-		job.buffer_size = buf.len().try_into().unwrap();
-		tbl.take_job(&mut job).unwrap();
+		buf.resize(4096, 0);
+		let n = tbl.read(&mut buf).unwrap();
+		buf.resize(n, 0);
 
 		let wait = || {
 			// FIXME this API is fundamentally broken as it's subject to race conditions.
@@ -101,12 +99,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			//rt::io::poll(dev_handle).unwrap();
 		};
 
-		match job.ty {
-			Job::OPEN => {
-				job.handle = data_handles.insert(0);
+		buf = match Job::deserialize(&buf).unwrap() {
+			Job::Open {
+				handle,
+				job_id,
+				path,
+			} => match (handle, path) {
+				(Handle::MAX, b"data") => {
+					Job::reply_open_clear(buf, job_id, data_handles.insert(0))
+				}
+				(Handle::MAX, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidData),
+				(_, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation),
 			}
-			Job::READ => {
-				let offset = data_handles[job.handle];
+			.unwrap(),
+			Job::Read {
+				peek,
+				handle,
+				job_id,
+				length,
+			} => {
+				let offset = data_handles[handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -115,21 +127,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					dev.read(sectors_phys, sector, wait).unwrap();
 				}
 
-				let size = job.operation_size.min(
-					(Sector::slice_as_u8(sectors).len() - usize::from(offset))
-						.try_into()
-						.unwrap(),
-				);
+				Job::reply_read_clear(buf, job_id, peek, |d| {
+					let len = (length as usize).min(
+						(Sector::slice_as_u8(sectors).len() - usize::from(offset))
+							.try_into()
+							.unwrap(),
+					);
 
-				job.operation_size = size;
-				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
+					if !peek {
+						data_handles[handle] = u64::from(offset) + u64::try_from(len).unwrap();
+					}
 
-				let size = usize::try_from(size).unwrap();
-				let offset = usize::from(offset);
-				buf[..size].copy_from_slice(&Sector::slice_as_u8(&sectors)[offset..][..size]);
+					let offset = usize::from(offset);
+					d.extend(&Sector::slice_as_u8(&sectors)[offset..][..len]);
+
+					Ok(())
+				})
+				.unwrap()
 			}
-			Job::WRITE => {
-				let offset = data_handles[job.handle];
+			Job::Write {
+				handle,
+				job_id,
+				data,
+			} => {
+				let offset = data_handles[handle];
 				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
 				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
 				let offset = u16::try_from(offset).unwrap();
@@ -138,7 +159,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					dev.read(sectors_phys, sector, wait).unwrap();
 				}
 
-				let data = &buf[..job.operation_size as usize];
 				Sector::slice_as_u8_mut(sectors)[offset.into()..][..data.len()]
 					.copy_from_slice(data);
 
@@ -146,46 +166,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					dev.write(sectors_phys, sector, wait).unwrap();
 				}
 
-				data_handles[job.handle] = u64::from(offset) + u64::from(job.operation_size);
+				data_handles[handle] = u64::from(offset) + u64::try_from(data.len()).unwrap();
+
+				let l = data.len();
+				Job::reply_write_clear(buf, job_id, l.try_into().unwrap()).unwrap()
 			}
-			Job::QUERY => {
-				job.handle = queries.insert(Some(QueryState::Data));
-			}
-			Job::QUERY_NEXT => {
-				match queries[job.handle] {
-					Some(QueryState::Data) => {
-						buf[..4].copy_from_slice(b"data");
-						job.operation_size = 4;
-						queries[job.handle] = Some(QueryState::Info);
-					}
-					Some(QueryState::Info) => {
-						buf[..4].copy_from_slice(b"info");
-						job.operation_size = 4;
-						queries[job.handle] = None;
-					}
-					None => {
-						queries.remove(job.handle);
-						job.operation_size = 0;
-					}
-				};
-			}
-			Job::SEEK => {
+			Job::Seek {
+				handle,
+				job_id,
+				from,
+			} => {
 				use norostb_kernel::io::SeekFrom;
-				let from = SeekFrom::try_from_raw(job.from_anchor, job.from_offset).unwrap();
 				let offset = match from {
 					SeekFrom::Start(n) => n,
 					_ => todo!(),
 				};
-				data_handles[job.handle] = offset;
+				data_handles[handle] = offset;
+				Job::reply_seek_clear(buf, job_id, offset).unwrap()
 			}
-			Job::CLOSE => {
-				data_handles.remove(job.handle);
+			Job::Close { handle } => {
+				data_handles.remove(handle);
 				// The kernel does not expect a response.
 				continue;
 			}
-			t => todo!("job type {}", t),
-		}
+			Job::Create { job_id, .. } => {
+				Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation).unwrap()
+			}
+		};
 
-		tbl.finish_job(&job).unwrap();
+		tbl.write(&buf).unwrap();
 	}
 }

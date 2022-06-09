@@ -4,17 +4,19 @@ extern crate alloc;
 use crate::{tls, RefObject};
 use alloc::{boxed::Box, vec::Vec};
 use core::{
-	mem::{self, MaybeUninit},
+	future::Future,
+	mem,
+	pin::Pin,
 	ptr::NonNull,
 	sync::atomic::Ordering,
+	task::{Context, Poll as PollF, RawWaker, RawWakerVTable, Waker},
 };
-use norostb_kernel::{error::result, io::Queue, syscall};
-use norostb_kernel::{error::Error, Handle};
-
-pub use norostb_kernel::{
-	error::Result,
-	io::{Job, ObjectInfo, Request, Response, SeekFrom},
+use nora_io_queue_rt::Full;
+pub use nora_io_queue_rt::{
+	error::Result, Create, Handle, Open, Peek, Poll, Pow2Size, Queue, Read, Seek, SeekFrom, Share,
+	Write,
 };
+use norostb_kernel::syscall;
 
 macro_rules! transmute_handle {
 	($fn:ident, $set_fn:ident -> $handle:ident) => {
@@ -96,8 +98,7 @@ impl<'a> IoSliceMut<'a> {
 const QUEUE_KEY: tls::Key = tls::Key(0);
 pub(crate) unsafe extern "C" fn queue_dtor(ptr: *mut ()) {
 	unsafe {
-		let queue = Box::from_raw(ptr.cast::<Queue>());
-		syscall::destroy_io_queue(queue.base.cast()).unwrap_or_else(|_| core::intrinsics::abort());
+		Box::from_raw(ptr.cast::<Queue>());
 	}
 }
 
@@ -124,156 +125,132 @@ pub(crate) unsafe fn init(_arguments: Option<NonNull<u8>>) {
 /// Create & initialize I/O for a new thread.
 #[must_use = "the values must be put in TLS storage"]
 pub(crate) fn create_for_thread() -> Result<impl Iterator<Item = (tls::Key, *mut ())>> {
-	syscall::create_io_queue(None, 0, 0)
-		.map_err(|_| Error::Unknown)
-		.map(|base| {
-			[Box::new(Queue {
-				base: base.cast(),
-				requests_mask: 0,
-				responses_mask: 0,
-			})]
-			.into_iter()
-			.map(|b| (QUEUE_KEY, Box::into_raw(b).cast()))
-		})
+	// 2^6 = 64, 32 * 64 + 16 * 64 = 3072, which fits in a single page.
+	Queue::new(Pow2Size::P6, Pow2Size::P6)
+		.map(|q| [(QUEUE_KEY, Box::into_raw(q.into()).cast())].into_iter())
 }
 
-fn enqueue(request: Request) -> Response {
-	unsafe {
-		let queue = &mut *crate::tls::get(QUEUE_KEY).cast::<Queue>();
-		queue.enqueue_request(request).unwrap();
-		syscall::process_io_queue(Some(queue.base.cast())).unwrap();
-		loop {
-			if let Ok(e) = queue.dequeue_response() {
-				break e;
+fn queue() -> &'static Queue {
+	// SAFETY: only safe if the queue has already been initialized, which it should be.
+	unsafe { &*crate::tls::get(QUEUE_KEY).cast::<Queue>() }
+}
+
+// Blocking has been chosen since the alternative requires storing requests somewhere
+// else temporarily. This storage has to have an unbounded size and is likely a worse
+// alternative than blocking and/or increasing the size of the queue.
+macro_rules! impl_io {
+	(None $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
+		#[doc = concat!(
+			"An asynchronous ",
+			stringify!($fn),
+			" request. This may block if the queue is full.",
+		)]
+		pub fn $fn(handle: Handle $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
+			let q = queue();
+			loop {
+				match q.$qfn(handle, $($arg,)*) {
+					Ok(r) => return r,
+					Err(Full(_)) => {
+						q.poll();
+						q.wait();
+						q.process();
+					}
+				}
 			}
-			syscall::wait_io_queue(Some(queue.base.cast())).unwrap();
 		}
-	}
+	};
+	($buf:ident $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
+		#[doc = concat!(
+			"An asynchronous ",
+			stringify!($fn),
+			" request. This may block if the queue is full.",
+		)]
+		pub fn $fn(handle: Handle, mut $buf: Vec<u8> $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
+			let q = queue();
+			loop {
+				$buf = match q.$qfn(handle, $buf, $($arg,)*) {
+					Ok(r) => return r,
+					Err(Full(b)) => {
+						q.poll();
+						q.wait();
+						q.process();
+						b
+					}
+				}
+			}
+		}
+	};
 }
 
-/// Blocking read
-#[inline]
-pub fn read(handle: Handle, data: &mut [u8]) -> Result<usize> {
-	result(enqueue(Request::read(0, handle, data)).value).map(|v| v as usize)
-}
+impl_io!(buf read(amount: usize) -> Read, submit_read);
+impl_io!(buf peek(amount: usize) -> Peek, submit_peek);
+impl_io!(data write(offset: usize) -> Write, submit_write);
+impl_io!(path open(offset: usize) -> Open, submit_open);
+impl_io!(path create(offset: usize) -> Create, submit_create);
+impl_io!(None seek(from: SeekFrom) -> Seek, submit_seek);
+impl_io!(None poll() -> Poll, submit_poll);
+impl_io!(None share(share: Handle) -> Share, submit_share);
 
-/// Blocking read
-#[inline]
-pub fn read_uninit(handle: Handle, data: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	result(enqueue(Request::read_uninit(0, handle, data)).value).map(|v| v as usize)
-}
-
-/// Blocking peek
-#[inline]
-pub fn peek(handle: Handle, data: &mut [u8]) -> Result<usize> {
-	result(enqueue(Request::peek(0, handle, data)).value).map(|v| v as usize)
-}
-
-/// Blocking peek
-#[inline]
-pub fn peek_uninit(handle: Handle, data: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	result(enqueue(Request::peek_uninit(0, handle, data)).value).map(|v| v as usize)
-}
-
-/// Blocking write
-#[inline]
-pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
-	result(enqueue(Request::write(0, handle, data)).value).map(|v| v as usize)
-}
-
-/// Blocking open
-#[inline]
-pub fn open(handle: Handle, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::open(0, handle, path)).value).map(|v| v as Handle)
-}
-
-/// Blocking create
-#[inline]
-pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::create(0, handle, path)).value).map(|v| v as Handle)
-}
-
-/// Blocking query
-#[inline]
-pub fn query(handle: Handle, path: &[u8]) -> Result<Handle> {
-	result(enqueue(Request::query(0, handle, path)).value).map(|v| v as Handle)
-}
-
-/// Blocking query_next
-#[inline]
-pub fn query_next(query: Handle, info: &mut ObjectInfo) -> Result<bool> {
-	let e = enqueue(Request::query_next(0, query, info));
-	if e.value < 0 {
-		// FIXME the API for quering is kinda broken right now.
-		//Err(io::const_io_error!(io::ErrorKind::Uncategorized, "failed to advance query"))
-		Ok(false)
-	} else {
-		Ok(e.value > 0)
-	}
-}
-
-/// Blocking take_job
-#[inline]
-pub fn take_job(table: Handle, job: &mut Job) -> Result<()> {
-	result(enqueue(Request::take_job(0, table, job)).value).map(|_| ())
-}
-
-/// Blocking finish_job
-#[inline]
-pub fn finish_job(table: Handle, job: &Job) -> Result<()> {
-	result(enqueue(Request::finish_job(0, table, &job)).value).map(|_| ())
-}
-
-/// Blocking seek
-#[inline]
-pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
-	result(enqueue(Request::seek(0, handle, from)).value).map(|v| v as u64)
-}
-
-/// Blocking poll
-#[inline]
-pub fn poll(handle: Handle) -> Result<usize> {
-	result(enqueue(Request::poll(0, handle)).value).map(|v| v as usize)
-}
-
-/// Blocking close
 #[inline]
 pub fn close(handle: Handle) {
-	enqueue(Request::close(0, handle));
+	let q = queue();
+	while q.submit_close(handle).is_err() {
+		q.poll();
+		q.wait();
+		q.process();
+	}
 }
 
-/// Blocking share
-#[inline]
-pub fn share(handle: Handle, share: Handle) -> Result<u64> {
-	result(enqueue(Request::share(0, handle, share)).value).map(|v| v as u64)
-}
-
-/// Blocking duplicate
 #[inline]
 pub fn duplicate(handle: Handle) -> Result<Handle> {
-	syscall::duplicate_handle(handle).map_err(|_| todo!())
+	syscall::duplicate_handle(handle)
 }
 
-/// Blocking create root
 #[inline]
 pub fn create_root() -> Result<Handle> {
-	syscall::create_root().map_err(|_| todo!())
+	syscall::create_root()
 }
 
-#[derive(Debug)]
-pub struct Query(pub(crate) Handle);
+/// Poll & process the I/O queue once.
+pub fn poll_queue() {
+	let q = queue();
+	q.poll();
+	q.process();
+}
 
-impl Iterator for Query {
-	type Item = Vec<u8>;
+/// Poll & process the I/O queue once, waiting until any responses are available.
+pub fn poll_queue_and_wait() {
+	let q = queue();
+	q.poll();
+	q.wait();
+	q.process();
+}
 
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		let mut buf = Vec::with_capacity(4096);
-		buf.resize(4096, 0);
-		let mut info = ObjectInfo::new(&mut buf[..]);
-		query_next(self.0, &mut info).unwrap().then(|| {
-			buf.resize(info.path_len, 0);
-			buf
-		})
+/// Block on an asynchronous I/O task until it is finished.
+pub fn block_on<T, R>(fut: T) -> R
+where
+	T: Future<Output = R>,
+{
+	static DUMMY: RawWakerVTable =
+		RawWakerVTable::new(|_| RawWaker::new(0 as _, &DUMMY), |_| (), |_| (), |_| ());
+
+	let waker = unsafe { Waker::from_raw(RawWaker::new(0 as _, &DUMMY)) };
+	let mut cx = Context::from_waker(&waker);
+
+	// We don't use pin_utils because it doesn't have rustc-dep-of-std
+	let mut fut = fut;
+	// SAFETY: we shadow the original Future and hence can't move it.
+	let mut fut = unsafe { Pin::new_unchecked(&mut fut) };
+	if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
+		return res;
+	}
+	let q = queue();
+	loop {
+		q.poll();
+		q.wait();
+		q.process();
+		if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
+			return res;
+		}
 	}
 }

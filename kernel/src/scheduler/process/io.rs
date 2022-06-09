@@ -1,17 +1,14 @@
 //! # I/O with user processes
 
-use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket, TicketOrJob};
+use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket};
 use crate::memory::frame::OwnedPageFrames;
 use crate::memory::r#virtual::{MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{
-	AnyTicketValue, Error, Handle, JobRequest, JobResult, Object, Query, QueryResult,
-};
+use crate::object_table::{AnyTicketValue, Error, Handle, Object};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::ptr::{self, NonNull};
 use core::task::Poll;
-use core::time::Duration;
-use norostb_kernel::io::{self as k_io, Job, ObjectInfo, Request, Response, SeekFrom};
+use norostb_kernel::io::{self as k_io, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
 	TooLarge,
@@ -111,11 +108,10 @@ impl super::Process {
 			.find(|q| q.user_ptr == base)
 			.ok_or(ProcessQueueError::InvalidAddress)?;
 
-		let mut queries = self.queries.lock();
 		let mut objects = self.objects.lock();
 
 		// Poll tickets first as it may shrink the ticket Vec.
-		poll_tickets(queue, &mut objects, &mut queries);
+		poll_tickets(queue, &mut objects);
 
 		let k_io_queue = queue.kernel_io_queue();
 		let tickets = &mut queue.pending;
@@ -171,7 +167,7 @@ impl super::Process {
 					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
-					let mut ticket = object.write(data);
+					let mut ticket = object.clone().write(data);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(b.try_into().unwrap()),
@@ -211,98 +207,6 @@ impl super::Process {
 						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
-				Request::QUERY => {
-					let handle = unerase_handle(e.arguments_32[0]);
-					let path_ptr = e.arguments_64[0] as *const u8;
-					let path_len = e.arguments_64[1] as usize;
-					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len).into() };
-					let object = objects.get(handle).unwrap();
-					let mut ticket = object.clone().query(Vec::new(), path);
-					match poll(&mut ticket) {
-						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-						Poll::Ready(Ok(q)) => {
-							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
-						}
-						Poll::Ready(Err(e)) => push_resp(e as i64),
-					}
-				}
-				Request::QUERY_NEXT => {
-					let info = e.arguments_64[0] as *mut ObjectInfo;
-					let handle = unerase_handle(e.arguments_32[0]);
-					let query = &mut queries[handle];
-					match query.next() {
-						None => push_resp(0),
-						Some(mut ticket) => match poll(&mut ticket) {
-							Poll::Pending => push_pending(info.cast(), 0, ticket.into()),
-							Poll::Ready(Ok(o)) => push_resp(copy_object_info(info, o)),
-							Poll::Ready(Err(e)) => push_resp(e as i64),
-						},
-					}
-				}
-				Request::TAKE_JOB => {
-					let handle = unerase_handle(e.arguments_32[0]);
-					let job = e.arguments_64[0] as *mut Job;
-					match objects.get(handle).and_then(|o| o.clone().as_table()) {
-						Some(tbl) => {
-							let mut ticket = tbl.take_job(Duration::MAX);
-							match poll(&mut ticket) {
-								Poll::Pending => push_pending(job.cast(), 0, ticket.into()),
-								Poll::Ready(Ok(info)) => push_resp(take_job(job, info)),
-								Poll::Ready(Err(_e)) => todo!(), //push_resp(e as i64),
-							}
-						}
-						None => push_resp(Error::InvalidObject as i64),
-					}
-				}
-				Request::FINISH_JOB => {
-					let handle = unerase_handle(e.arguments_32[0]);
-					let job = e.arguments_64[0] as *mut Job;
-
-					let tbl = objects[handle].clone().as_table().unwrap();
-					let job = unsafe { job.read() };
-
-					let get_buf = || unsafe {
-						let ptr = job.buffer.unwrap_or(NonNull::dangling());
-						core::slice::from_raw_parts(
-							ptr.as_ptr(),
-							job.buffer_size.try_into().unwrap(),
-						)
-					};
-
-					let job_id = job.job_id;
-					let job = if let Err(e) = norostb_kernel::error::result(job.result) {
-						Err(e)
-					} else {
-						Ok(match job.ty {
-							Job::OPEN => JobResult::Open { handle: job.handle },
-							Job::CREATE => JobResult::Create { handle: job.handle },
-							Job::READ => JobResult::Read {
-								data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-							},
-							Job::PEEK => JobResult::Peek {
-								data: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-							},
-							Job::WRITE => JobResult::Write {
-								amount: job.operation_size.try_into().unwrap(),
-							},
-							Job::SEEK => JobResult::Seek {
-								position: job.from_offset,
-							},
-							Job::QUERY => JobResult::Query { handle: job.handle },
-							Job::QUERY_NEXT => JobResult::QueryNext {
-								path: get_buf()[..job.operation_size.try_into().unwrap()].into(),
-							},
-							_ => {
-								push_resp(-1);
-								continue;
-							}
-						})
-					};
-
-					tbl.finish_job(job, job_id).unwrap();
-
-					push_resp(0);
-				}
 				Request::SEEK => {
 					let handle = unerase_handle(e.arguments_32[0]);
 					let direction = e.arguments_8[0];
@@ -341,11 +245,8 @@ impl super::Process {
 				}
 				Request::CLOSE => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					push_resp(
-						objects
-							.remove(handle)
-							.map_or(Error::InvalidObject as i64, |_| 0),
-					);
+					// We are not supposed to return a response under any circumstances.
+					let _ = objects.remove(handle);
 				}
 				Request::SHARE => {
 					let handle = unerase_handle(e.arguments_32[0]);
@@ -383,9 +284,8 @@ impl super::Process {
 			}
 
 			{
-				let mut queries = self.queries.lock();
 				let mut objects = self.objects.auto_lock();
-				let polls = poll_tickets(queue, &mut objects, &mut queries);
+				let polls = poll_tickets(queue, &mut objects);
 				if polls > 0 {
 					break;
 				}
@@ -402,56 +302,31 @@ impl super::Process {
 	}
 }
 
-fn poll_tickets(
-	queue: &mut Queue,
-	objects: &mut arena::Arena<Arc<dyn Object>, u8>,
-	queries: &mut arena::Arena<Box<dyn Query>, u8>,
-) -> usize {
+fn poll_tickets(queue: &mut Queue, objects: &mut arena::Arena<Arc<dyn Object>, u8>) -> usize {
 	let mut polls = 0;
 	for i in (0..queue.pending.len()).rev() {
-		match &mut queue.pending[i].ticket {
-			TicketOrJob::Ticket(ticket) => match poll(ticket) {
-				Poll::Pending => {}
-				Poll::Ready(r) => {
-					polls += 1;
-					let tk = queue.pending.swap_remove(i);
-					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
-					match r {
-						Ok(AnyTicketValue::Object(o)) => {
-							push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
-						}
-						Ok(AnyTicketValue::Usize(n)) => push_resp(n as i64),
-						Ok(AnyTicketValue::U64(n)) => push_resp(n as i64),
-						Ok(AnyTicketValue::Data(b)) => {
-							let data = unsafe {
-								core::slice::from_raw_parts_mut(tk.data_ptr, tk.data_len)
-							};
-							let len = b.len().min(data.len());
-							data[..len].copy_from_slice(&b[..len]);
-							push_resp(len.try_into().unwrap())
-						}
-						Ok(AnyTicketValue::Query(q)) => {
-							push_resp(erase_handle(queries.insert(q)).try_into().unwrap())
-						}
-						Ok(AnyTicketValue::QueryResult(o)) => {
-							push_resp(copy_object_info(tk.data_ptr.cast(), o))
-						}
-						Err(e) => push_resp(e as i64),
+		match poll(&mut queue.pending[i].ticket) {
+			Poll::Pending => {}
+			Poll::Ready(r) => {
+				polls += 1;
+				let tk = queue.pending.swap_remove(i);
+				let mut push_resp = |value| push_resp(queue, tk.user_data, value);
+				match r {
+					Ok(AnyTicketValue::Object(o)) => {
+						push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
 					}
-				}
-			},
-			TicketOrJob::Job(job) => match poll(job) {
-				Poll::Pending => {}
-				Poll::Ready(r) => {
-					polls += 1;
-					let tk = queue.pending.swap_remove(i);
-					let mut push_resp = |value| push_resp(queue, tk.user_data, value);
-					match r {
-						Ok(info) => push_resp(take_job(tk.data_ptr.cast(), info)),
-						Err(_) => push_resp(-1),
+					Ok(AnyTicketValue::Usize(n)) => push_resp(n as i64),
+					Ok(AnyTicketValue::U64(n)) => push_resp(n as i64),
+					Ok(AnyTicketValue::Data(b)) => {
+						let data =
+							unsafe { core::slice::from_raw_parts_mut(tk.data_ptr, tk.data_len) };
+						let len = b.len().min(data.len());
+						data[..len].copy_from_slice(&b[..len]);
+						push_resp(len.try_into().unwrap())
 					}
+					Err(e) => push_resp(e as i64),
 				}
-			},
+			}
 		}
 	}
 	polls
@@ -472,74 +347,6 @@ fn copy_data_to(to_ptr: *mut u8, to_len: usize, from: Box<[u8]>) -> i64 {
 	let len = from.len().min(data.len());
 	data[..len].copy_from_slice(&from[..len]);
 	len.try_into().unwrap()
-}
-
-fn copy_object_info(info: *mut ObjectInfo, obj: QueryResult) -> i64 {
-	let info = unsafe { &mut *info };
-	let path_buffer = unsafe { core::slice::from_raw_parts_mut(info.path_ptr, info.path_capacity) };
-	let len = obj.path.len().min(path_buffer.len());
-	info.path_len = len;
-	path_buffer[..len].copy_from_slice(&obj.path[..len]);
-	1
-}
-
-fn take_job(job: *mut Job, info: (u32, JobRequest)) -> i64 {
-	let job = unsafe { &mut *job };
-
-	job.job_id = info.0;
-	job.result = 0;
-
-	let mut copy_buf = |p: &[u8]| unsafe {
-		let ptr = job.buffer.expect("no buffer ptr");
-		let buf =
-			core::slice::from_raw_parts_mut(ptr.as_ptr(), job.buffer_size.try_into().unwrap());
-		buf[..p.len()].copy_from_slice(p);
-		job.operation_size = p.len().try_into().unwrap();
-	};
-
-	match info.1 {
-		JobRequest::Open { handle, path } => {
-			job.ty = Job::OPEN;
-			job.handle = handle;
-			copy_buf(&path);
-		}
-		JobRequest::Create { handle, path } => {
-			job.ty = Job::CREATE;
-			job.handle = handle;
-			copy_buf(&path);
-		}
-		JobRequest::Read { handle, amount } | JobRequest::Peek { handle, amount } => {
-			job.ty = Job::READ;
-			job.handle = handle;
-			job.operation_size = amount.try_into().unwrap();
-		}
-		JobRequest::Write { handle, data } => {
-			job.ty = Job::WRITE;
-			job.handle = handle;
-			let len = data.len().min(job.buffer_size.try_into().unwrap());
-			copy_buf(&data[..len]);
-		}
-		JobRequest::Seek { handle, from } => {
-			job.ty = Job::SEEK;
-			job.handle = handle;
-			(job.from_anchor, job.from_offset) = from.into_raw();
-		}
-		JobRequest::Query { handle, filter } => {
-			job.ty = Job::QUERY;
-			job.handle = handle;
-			copy_buf(&filter);
-		}
-		JobRequest::QueryNext { handle } => {
-			job.ty = Job::QUERY_NEXT;
-			job.handle = handle;
-		}
-		JobRequest::Close { handle } => {
-			job.ty = Job::CLOSE;
-			job.handle = handle;
-		}
-	}
-
-	0
 }
 
 pub enum RemoveQueueError {

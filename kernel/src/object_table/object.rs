@@ -1,5 +1,5 @@
-use super::{Error, MemoryObject, Query, Table, Ticket};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use super::{Error, MemoryObject, Ticket};
+use alloc::{boxed::Box, sync::Arc};
 
 /// A single object.
 pub trait Object {
@@ -7,11 +7,6 @@ pub trait Object {
 	/// be accessed directly through memory operations.
 	fn memory_object(self: Arc<Self>, _offset: u64) -> Option<Arc<dyn MemoryObject>> {
 		None
-	}
-
-	/// Search for objects based on a name and/or tags.
-	fn query(self: Arc<Self>, _prefix: Vec<u8>, _path: &[u8]) -> Ticket<Box<dyn Query>> {
-		not_implemented()
 	}
 
 	/// Open a single object based on path.
@@ -32,7 +27,7 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn write(&self, _data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<usize> {
 		not_implemented()
 	}
 
@@ -46,10 +41,6 @@ pub trait Object {
 
 	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
 		not_implemented()
-	}
-
-	fn as_table(self: Arc<Self>) -> Option<Arc<dyn Table>> {
-		None
 	}
 }
 
