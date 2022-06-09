@@ -1,7 +1,7 @@
 From 3df187f25aa382de502ccdc87212a8d7c8cb136c Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 23 Apr 2022 14:49:40 +0200
-Subject: [PATCH 28/45] Temporary workaround for broken syscall::queue_next
+Subject: [PATCH 28/47] Temporary workaround for broken syscall::queue_next
 
 ---
  library/std/src/sys/norostb/io.rs | 4 +++-

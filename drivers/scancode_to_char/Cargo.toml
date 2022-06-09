@@ -7,7 +7,8 @@ edition = "2021"
 norostb_kernel = { path = "../../lib/rust/kernel" }
 scancodes = { path = "../../lib/rust/scancodes" }
 nora_io_queue_rt = { path = "../../lib/rust/io_queue_rt" }
-norostb_rt = { path = "../../lib/rust/rt" }
+rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
+rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"

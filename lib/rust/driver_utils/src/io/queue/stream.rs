@@ -2,7 +2,7 @@ extern crate alloc;
 
 use crate::Handle;
 use alloc::vec::Vec;
-use norostb_rt::{io, Error};
+use norostb_kernel::{error::Error, io};
 
 pub enum Job<'a> {
 	Read {

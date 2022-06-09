@@ -1,7 +1,7 @@
 From 9e0110250bb676aa266f8dae7728064a0a42eb3b Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 7 May 2022 02:56:46 +0200
-Subject: [PATCH 40/45] Increase default stack size to 64 KiB
+Subject: [PATCH 40/47] Increase default stack size to 64 KiB
 
 ---
  library/std/src/sys/norostb/thread.rs | 2 +-

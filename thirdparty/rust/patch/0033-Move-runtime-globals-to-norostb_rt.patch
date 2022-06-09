@@ -1,7 +1,7 @@
 From 459dc917ec6c8cc5131ff77f013c78fa769dadcb Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 27 Apr 2022 22:27:12 +0200
-Subject: [PATCH 33/45] Move runtime globals to norostb_rt
+Subject: [PATCH 33/47] Move runtime globals to norostb_rt
 
 This is necessary so interop with other languages will work properly
 ---

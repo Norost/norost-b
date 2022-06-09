@@ -17,6 +17,7 @@
 #![feature(inline_const)]
 #![feature(linkage)]
 #![feature(let_else)]
+#![feature(maybe_uninit_slice, maybe_uninit_write_slice)]
 #![feature(naked_functions)]
 #![feature(new_uninit)]
 #![feature(ptr_metadata)]

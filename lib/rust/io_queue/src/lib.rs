@@ -137,7 +137,7 @@ impl Queue {
 					Request::Poll => io::Request::poll(user_data, handle),
 					Request::Close => {
 						expect_response = false;
-						io::Request::poll(user_data, handle)
+						io::Request::close(user_data, handle)
 					}
 					Request::Peek { buffer } => io::Request::peek_uninit(user_data, handle, buffer),
 					Request::Share { share } => io::Request::share(user_data, handle, share),

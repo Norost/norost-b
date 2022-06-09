@@ -5,3 +5,16 @@ edition = "2021"
 
 [dependencies]
 norostb_kernel = { path = "../kernel" }
+
+# When built as part of libstd
+alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
+core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
+compiler_builtins = { version = "0.1", optional = true }
+
+[features]
+rustc-dep-of-std = [
+	"alloc",
+	"core",
+	"compiler_builtins",
+	"norostb_kernel/rustc-dep-of-std",
+]

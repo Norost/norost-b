@@ -3,6 +3,7 @@
 #![no_std]
 #![feature(const_default_impls, const_trait_impl)]
 
+#[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
 use alloc::vec;
@@ -25,7 +26,7 @@ where
 	V: fmt::Debug,
 	G: fmt::Debug,
 {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_map().entries(self.iter()).finish()
 	}
 }
@@ -45,7 +46,7 @@ impl<G: Generation> fmt::Debug for Handle<G>
 where
 	G: fmt::Debug,
 {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if mem::size_of::<G>() == 0 {
 			self.index.fmt(f)
 		} else {

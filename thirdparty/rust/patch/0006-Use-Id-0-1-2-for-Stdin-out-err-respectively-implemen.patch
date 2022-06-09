@@ -1,7 +1,7 @@
 From 7db7faf9cf81bbb2660d0a63672cac7c8c22e5f7 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Thu, 24 Feb 2022 12:31:27 +0100
-Subject: [PATCH 06/45] Use Id 0,1,2 for Stdin,out,err respectively, implement
+Subject: [PATCH 06/47] Use Id 0,1,2 for Stdin,out,err respectively, implement
  Stdin
 
 ---

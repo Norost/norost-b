@@ -1,4 +1,6 @@
 #![no_std]
+#![feature(alloc_error_handler)]
+#![feature(start)]
 
 extern crate alloc;
 
@@ -11,9 +13,26 @@ use core::{
 use driver_utils::io::queue::stream::Job;
 use nora_io_queue_rt::{Pow2Size, Queue};
 use norostb_kernel::error::Error;
-use norostb_rt as rt;
 
-fn main() {
+#[global_allocator]
+static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
+
+#[alloc_error_handler]
+fn alloc_error(_: core::alloc::Layout) -> ! {
+	// FIXME the runtime allocates memory by default to write things, so... crap
+	// We can run in similar trouble with the I/O queue. Some way to submit I/O requests
+	// without going through an queue may be useful.
+	rt::exit(129)
+}
+
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+	let _ = rt::io::stderr().map(|o| writeln!(o, "{:?}", info));
+	rt::exit(128)
+}
+
+#[start]
+fn main(_: isize, _: *const *const u8) -> isize {
 	let mut args = rt::args::Args::new().skip(1);
 	let table = args.next().expect("expected table path");
 	let input = args.next().expect("expected input object path");

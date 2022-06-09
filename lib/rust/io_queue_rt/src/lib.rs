@@ -1,8 +1,9 @@
 //! # Async I/O queue with runtime.
 
-//#![no_std]
+#![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+#[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
 pub use nora_io_queue::{error, Handle, Pow2Size, SeekFrom};
@@ -398,11 +399,11 @@ pub struct Poll<'a> {
 }
 
 impl Future for Poll<'_> {
-	type Output = Result<(), error::Error>;
+	type Output = Result<u64, error::Error>;
 
 	/// Check if the poll request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r.map(|_| ()))
+		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
 	}
 }
 
@@ -435,10 +436,10 @@ pub struct Share<'a> {
 }
 
 impl Future for Share<'_> {
-	type Output = Result<(), error::Error>;
+	type Output = Result<u64, error::Error>;
 
 	/// Check if the share request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r.map(|_| ()))
+		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
 	}
 }

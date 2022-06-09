@@ -1,5 +1,10 @@
+#[cfg(not(feature = "rustc-dep-of-std"))]
+extern crate alloc;
+
 use super::io;
+use alloc::vec::Vec;
 use core::{
+	fmt,
 	marker::PhantomData,
 	mem::{self, MaybeUninit},
 };
@@ -12,47 +17,86 @@ pub struct Object(Handle);
 impl Object {
 	#[inline]
 	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
-		io::open(self.0, path).map(Self)
+		io::block_on(io::open(self.0, path.into()))
+			.map(|(_, h)| Self(h))
+			.map_err(|(_, e)| e)
 	}
 
 	#[inline]
 	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
-		io::create(self.0, path).map(Self)
+		io::block_on(io::create(self.0, path.into()))
+			.map(|(_, h)| Self(h))
+			.map_err(|(_, e)| e)
+	}
+
+	#[inline]
+	pub fn read_vec(&self, amount: usize) -> io::Result<Vec<u8>> {
+		io::block_on(io::read(self.0, Vec::new(), amount)).map_err(|(_, e)| e)
 	}
 
 	#[inline]
 	pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-		io::read(self.0, buf)
+		self.read_vec(buf.len()).map(|b| {
+			buf[..b.len()].copy_from_slice(&b);
+			b.len()
+		})
 	}
 
 	#[inline]
-	pub fn read_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
-		io::read_uninit(self.0, buf)
+	pub fn read_uninit<'a>(
+		&self,
+		buf: &'a mut [MaybeUninit<u8>],
+	) -> io::Result<(&'a mut [u8], &'a mut [MaybeUninit<u8>])> {
+		self.read_vec(buf.len()).map(|b| {
+			let (i, u) = buf.split_at_mut(b.len());
+			(MaybeUninit::write_slice(i, &b), u)
+		})
+	}
+
+	#[inline]
+	pub fn peek_vec(&self, amount: usize) -> io::Result<Vec<u8>> {
+		io::block_on(io::peek(self.0, Vec::new(), amount)).map_err(|(_, e)| e)
 	}
 
 	#[inline]
 	pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-		io::peek(self.0, buf)
+		self.peek_vec(buf.len()).map(|b| {
+			buf[..b.len()].copy_from_slice(&b);
+			b.len()
+		})
 	}
 
 	#[inline]
-	pub fn peek_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
-		io::peek_uninit(self.0, buf)
+	pub fn peek_uninit<'a>(
+		&self,
+		buf: &'a mut [MaybeUninit<u8>],
+	) -> io::Result<(&'a mut [u8], &'a mut [MaybeUninit<u8>])> {
+		self.peek_vec(buf.len()).map(|b| {
+			let (i, u) = buf.split_at_mut(b.len());
+			(MaybeUninit::write_slice(i, &b), u)
+		})
 	}
 
 	#[inline]
-	pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
-		io::write(self.0, buf)
+	pub fn write_vec(&self, data: Vec<u8>) -> io::Result<usize> {
+		io::block_on(io::write(self.0, data))
+			.map(|(_, l)| l)
+			.map_err(|(_, e)| e)
+	}
+
+	#[inline]
+	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
+		self.write_vec(data.into())
 	}
 
 	#[inline]
 	pub fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
-		io::seek(self.0, pos)
+		io::block_on(io::seek(self.0, pos))
 	}
 
 	#[inline]
 	pub fn share(&self, share: &Object) -> io::Result<u64> {
-		io::share(self.0, share.0)
+		io::block_on(io::share(self.0, share.0))
 	}
 
 	#[inline]
@@ -88,6 +132,37 @@ impl Object {
 	#[inline]
 	pub const fn from_raw(handle: Handle) -> Self {
 		Self(handle)
+	}
+
+	/// Convienence method for use with `write!()` et al.
+	pub fn write_fmt(&self, args: fmt::Arguments<'_>) -> io::Result<()> {
+		struct Fmt {
+			buf: Vec<u8>,
+			obj: Handle,
+			res: io::Result<()>,
+		}
+		impl fmt::Write for Fmt {
+			fn write_str(&mut self, s: &str) -> fmt::Result {
+				self.buf.clear();
+				self.buf.extend_from_slice(s.as_bytes());
+				// FIXME we need some kind of write_all
+				match io::block_on(io::write(self.obj, mem::take(&mut self.buf))) {
+					Ok((buf, _len)) => Ok(self.buf = buf),
+					Err((buf, e)) => {
+						self.buf = buf;
+						self.res = Err(e);
+						Err(fmt::Error)
+					}
+				}
+			}
+		}
+		let mut f = Fmt {
+			buf: Vec::new(),
+			obj: self.0,
+			res: Ok(()),
+		};
+		let _ = fmt::write(&mut f, args);
+		f.res
 	}
 }
 

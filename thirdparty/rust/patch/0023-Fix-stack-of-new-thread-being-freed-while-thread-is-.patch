@@ -1,7 +1,7 @@
 From a6e8ff5e6e691267b42afae2be8c5baf6908c575 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 20 Apr 2022 18:54:57 +0200
-Subject: [PATCH 23/45] Fix stack of new thread being freed while thread is
+Subject: [PATCH 23/47] Fix stack of new thread being freed while thread is
  alive
 
 ---

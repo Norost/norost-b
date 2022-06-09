@@ -1,7 +1,7 @@
 From e1e73c1dfc9e219e6694eacb3cb0d57284fa7787 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 26 Feb 2022 15:48:08 +0100
-Subject: [PATCH 08/45] norostb: Partially implement std::fs
+Subject: [PATCH 08/47] norostb: Partially implement std::fs
 
 - Implemented listing tables & objects in tables
 - Implemented opening, reading & writing objects

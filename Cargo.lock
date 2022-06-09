@@ -16,6 +16,11 @@ dependencies = [
 [[package]]
 name = "arena"
 version = "0.1.0"
+dependencies = [
+ "compiler_builtins",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
+]
 
 [[package]]
 name = "autocfg"
@@ -95,6 +100,7 @@ dependencies = [
  "nora_io_queue_rt",
  "norostb_kernel",
  "norostb_rt",
+ "norostb_rt_alloc",
  "scancodes",
 ]
 
@@ -103,7 +109,7 @@ name = "driver_utils"
 version = "0.1.0"
 dependencies = [
  "arena",
- "norostb_rt",
+ "norostb_kernel",
 ]
 
 [[package]]
@@ -331,7 +337,10 @@ dependencies = [
 name = "nora_io_queue"
 version = "0.1.0"
 dependencies = [
+ "compiler_builtins",
  "norostb_kernel",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
 ]
 
 [[package]]
@@ -339,7 +348,10 @@ name = "nora_io_queue_rt"
 version = "0.1.0"
 dependencies = [
  "arena",
+ "compiler_builtins",
  "nora_io_queue",
+ "rustc-std-workspace-alloc",
+ "rustc-std-workspace-core",
 ]
 
 [[package]]
@@ -363,6 +375,7 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
+ "nora_io_queue_rt",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -506,6 +519,7 @@ name = "static_http_server"
 version = "0.1.0"
 dependencies = [
  "mhttp",
+ "norostb_rt",
 ]
 
 [[package]]

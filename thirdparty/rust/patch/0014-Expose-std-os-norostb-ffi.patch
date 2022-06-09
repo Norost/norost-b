@@ -1,7 +1,7 @@
 From f6b2119a69e0a87dc1210ea3be6c4eac135051e2 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 13 Apr 2022 20:52:26 +0200
-Subject: [PATCH 14/45] Expose std::os::norostb::ffi
+Subject: [PATCH 14/47] Expose std::os::norostb::ffi
 
 ---
  library/std/src/os/norostb/ffi.rs | 7 +++++++

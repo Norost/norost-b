@@ -1,7 +1,7 @@
 From 96806a60c0c42a4ae1b93979a3816557618f3ac3 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 28 May 2022 02:52:19 +0200
-Subject: [PATCH 41/45] Rebase with master branch
+Subject: [PATCH 41/47] Rebase with master branch
 
 ---
  .../spec/x86_64_unknown_none_norostbkernel.rs |  2 +-
