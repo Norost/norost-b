@@ -245,11 +245,8 @@ impl super::Process {
 				}
 				Request::CLOSE => {
 					let handle = unerase_handle(e.arguments_32[0]);
-					push_resp(
-						objects
-							.remove(handle)
-							.map_or(Error::InvalidObject as i64, |_| 0),
-					);
+					// We are not supposed to return a response under any circumstances.
+					let _ = objects.remove(handle);
 				}
 				Request::SHARE => {
 					let handle = unerase_handle(e.arguments_32[0]);
