@@ -53,8 +53,8 @@ impl Queue {
 	where
 		F: FnOnce(&'static mut [MaybeUninit<u8>]) -> Request,
 	{
-		buf.clear();
-		buf.reserve(n);
+		let l = buf.len();
+		buf.reserve(l + n);
 		let mut inflight = self.inflight_buffers.borrow_mut();
 		let i = inflight.insert((buf, BufferFutureState::Inflight));
 		let buffer = &mut inflight[i].0.spare_capacity_mut()[..n];
@@ -78,9 +78,16 @@ impl Queue {
 	}
 
 	/// Submit a request involving writing from byte buffers.
+	///
+	/// Only data from `buf[offset..]` is written from start to end. Not all data may be written.
+	///
+	/// # Panics
+	///
+	/// If `offset` is larger than the length of `buf`.
 	fn submit_write_buffer<F>(
 		&self,
 		buf: Vec<u8>,
+		offset: usize,
 		handle: Handle,
 		wrap: F,
 	) -> Result<BufferFuture<'_>, Full>
@@ -89,7 +96,7 @@ impl Queue {
 	{
 		let mut inflight = self.inflight_buffers.borrow_mut();
 		let i = inflight.insert((buf, BufferFutureState::Inflight));
-		let buffer = &inflight[i].0[..];
+		let buffer = &inflight[i].0[offset..];
 		// SAFETY:
 		// - The buffer will live at least as long as this queue due to us putting
 		//   it in inflight_buffers. inflight_buffers can only be deallocated through dropping.
@@ -125,23 +132,62 @@ impl Queue {
 		})
 	}
 
+	/// Read data from an object, advancing the seek head.
+	///
+	/// The data is appended to the buffer.
 	pub fn submit_read(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Read<'_>, Full> {
 		self.submit_read_buffer(buf, handle, n, |buffer| Request::Read { buffer })
 			.map(|fut| Read { fut })
 	}
 
-	pub fn submit_write(&self, handle: Handle, data: Vec<u8>) -> Result<Write<'_>, Full> {
-		self.submit_write_buffer(data, handle, |buffer| Request::Write { buffer })
+	/// Write data to an object.
+	///
+	/// Only data from `data[offset..]` is written from start to end. Not all data may be written.
+	///
+	/// # Panics
+	///
+	/// If `offset` is larger than the length of `data`.
+	pub fn submit_write(
+		&self,
+		handle: Handle,
+		data: Vec<u8>,
+		offset: usize,
+	) -> Result<Write<'_>, Full> {
+		self.submit_write_buffer(data, offset, handle, |buffer| Request::Write { buffer })
 			.map(|fut| Write { fut })
 	}
 
-	pub fn submit_open(&self, handle: Handle, path: Vec<u8>) -> Result<Open<'_>, Full> {
-		self.submit_write_buffer(path, handle, |path| Request::Open { path })
+	/// Open an object.
+	///
+	/// Only the bytes in `path[offset..]` are interpreted.
+	///
+	/// # Panics
+	///
+	/// If `offset` is larger than the length of `path`.
+	pub fn submit_open(
+		&self,
+		handle: Handle,
+		path: Vec<u8>,
+		offset: usize,
+	) -> Result<Open<'_>, Full> {
+		self.submit_write_buffer(path, offset, handle, |path| Request::Open { path })
 			.map(|fut| Open { fut })
 	}
 
-	pub fn submit_create(&self, handle: Handle, path: Vec<u8>) -> Result<Create<'_>, Full> {
-		self.submit_write_buffer(path, handle, |path| Request::Create { path })
+	/// Create an object.
+	///
+	/// Only the bytes in `path[offset..]` are interpreted.
+	///
+	/// # Panics
+	///
+	/// If `offset` is larger than the length of `path`.
+	pub fn submit_create(
+		&self,
+		handle: Handle,
+		path: Vec<u8>,
+		offset: usize,
+	) -> Result<Create<'_>, Full> {
+		self.submit_write_buffer(path, offset, handle, |path| Request::Create { path })
 			.map(|fut| Create { fut })
 	}
 
@@ -163,6 +209,9 @@ impl Queue {
 			.map_err(|_| todo!())
 	}
 
+	/// Read data from an object without advancing the seek head.
+	///
+	/// The data is appended to the buffer.
 	pub fn submit_peek(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Peek<'_>, Full> {
 		self.submit_read_buffer(buf, handle, n, |buffer| Request::Peek { buffer })
 			.map(|fut| Peek { fut })

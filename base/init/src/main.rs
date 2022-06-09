@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Try to share stdin/out/err handles as it reduces the real amount of handles used by the
 	// kernel and the servers.
 	let open = |p: &str| {
-		let t = rt::io::open(root.as_raw(), p.as_bytes().into());
+		let t = rt::io::open(root.as_raw(), p.as_bytes().into(), 0);
 		rt::RefObject::from_raw(rt::io::block_on(t).unwrap().1)
 	};
 	let stdin = open(&stdin_path);

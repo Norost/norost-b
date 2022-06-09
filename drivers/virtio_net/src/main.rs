@@ -109,7 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
 	let job_queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
 
-	let new_job = |v| job_queue.submit_read(tbl.as_raw(), v, 2048).unwrap();
+	let new_job = |mut v: Vec<u8>| {
+		v.clear();
+		job_queue.submit_read(tbl.as_raw(), v, 2048).unwrap()
+	};
 	let mut jobs = (0..Pow2Size::P6.size())
 		.map(|_| new_job(Vec::new()))
 		.collect::<FuturesUnordered<_>>();

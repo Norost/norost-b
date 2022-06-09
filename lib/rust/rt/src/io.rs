@@ -184,9 +184,9 @@ macro_rules! impl_io {
 
 impl_io!(buf read(amount: usize) -> Read, submit_read);
 impl_io!(buf peek(amount: usize) -> Peek, submit_peek);
-impl_io!(data write() -> Write, submit_write);
-impl_io!(path open() -> Open, submit_open);
-impl_io!(path create() -> Create, submit_create);
+impl_io!(data write(offset: usize) -> Write, submit_write);
+impl_io!(path open(offset: usize) -> Open, submit_open);
+impl_io!(path create(offset: usize) -> Create, submit_create);
 impl_io!(None seek(from: SeekFrom) -> Seek, submit_seek);
 impl_io!(None poll() -> Poll, submit_poll);
 impl_io!(None share(share: Handle) -> Share, submit_share);

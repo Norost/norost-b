@@ -17,14 +17,14 @@ pub struct Object(Handle);
 impl Object {
 	#[inline]
 	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::open(self.0, path.into()))
+		io::block_on(io::open(self.0, path.into(), 0))
 			.map(|(_, h)| Self(h))
 			.map_err(|(_, e)| e)
 	}
 
 	#[inline]
 	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::create(self.0, path.into()))
+		io::block_on(io::create(self.0, path.into(), 0))
 			.map(|(_, h)| Self(h))
 			.map_err(|(_, e)| e)
 	}
@@ -78,15 +78,15 @@ impl Object {
 	}
 
 	#[inline]
-	pub fn write_vec(&self, data: Vec<u8>) -> io::Result<usize> {
-		io::block_on(io::write(self.0, data))
+	pub fn write_vec(&self, data: Vec<u8>, offset: usize) -> io::Result<usize> {
+		io::block_on(io::write(self.0, data, offset))
 			.map(|(_, l)| l)
 			.map_err(|(_, e)| e)
 	}
 
 	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
-		self.write_vec(data.into())
+		self.write_vec(data.into(), 0)
 	}
 
 	#[inline]
@@ -146,7 +146,7 @@ impl Object {
 				self.buf.clear();
 				self.buf.extend_from_slice(s.as_bytes());
 				// FIXME we need some kind of write_all
-				match io::block_on(io::write(self.obj, mem::take(&mut self.buf))) {
+				match io::block_on(io::write(self.obj, mem::take(&mut self.buf), 0)) {
 					Ok((buf, _len)) => Ok(self.buf = buf),
 					Err((buf, e)) => {
 						self.buf = buf;

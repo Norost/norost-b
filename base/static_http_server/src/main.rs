@@ -18,7 +18,7 @@ fn main() {
 		.unwrap();
 	eprintln!("accepting incoming connections");
 
-	let do_accept = move |s| rt::io::open(listener.as_raw(), s);
+	let do_accept = move |s| rt::io::open(listener.as_raw(), s, 0);
 	let mut accept = do_accept(Vec::from(*b"accept"));
 
 	let mut bufs = Vec::new();
@@ -34,14 +34,14 @@ fn main() {
 				},
 				Err(_) => bad_request(buf2, false),
 			};
-			while let Ok((r, n)) = rt::io::write(c.as_raw(), resp).await {
+			let mut total = 0;
+			while let Ok((r, n)) = rt::io::write(c.as_raw(), resp, total).await {
 				resp = r;
 				if n == 0 {
 					return; // Client closed the connection prematurely
 				}
-				resp.copy_within(n.., 0);
-				resp.resize(resp.len() - n, 0);
-				if resp.is_empty() {
+				total += n;
+				if total == resp.len() {
 					break; // We wrote all data
 				}
 			}

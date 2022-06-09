@@ -93,7 +93,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
 				Job::reply_read(&mut buf, job_id, false, |v| Ok(v.push(chr))).unwrap();
-				rt::io::write(table, buf).await.unwrap();
+				rt::io::write(table, buf, 0).await.unwrap();
 				return true;
 			} else {
 				char_buf.borrow_mut().push_back(chr);
@@ -161,7 +161,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
 			}
 		};
-		rt::io::write(table, data).await.unwrap();
+		rt::io::write(table, data, 0).await.unwrap();
 		true
 	};
 
