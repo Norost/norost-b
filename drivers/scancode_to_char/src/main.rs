@@ -11,7 +11,6 @@ use core::{
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
 use driver_utils::io::queue::stream::Job;
-use nora_io_queue_rt::{Pow2Size, Queue};
 use norostb_kernel::error::Error;
 
 #[global_allocator]
@@ -37,9 +36,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let table = args.next().expect("expected table path");
 	let input = args.next().expect("expected input object path");
 
-	// Create I/O queue with two entries: one for a job and one for reading
-	let io_queue = Queue::new(Pow2Size::P1, Pow2Size::P1).unwrap();
-
 	// Create a table
 	let root = rt::io::file_root().unwrap();
 	let table = rt::Object::create(&root, table).unwrap().into_raw();
@@ -54,11 +50,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let do_read = || async {
 		use scancodes::{Event, ScanCode};
-		let mut buf = io_queue
-			.submit_read(input, Vec::new(), 4)
-			.unwrap()
-			.await
-			.unwrap();
+		let mut buf = rt::io::read(input, Vec::new(), 4).await.unwrap();
 		assert_eq!(buf.len(), 4, "incomplete scancode");
 		let chr = match Event::try_from(<[u8; 4]>::try_from(&buf[..]).unwrap()).unwrap() {
 			Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
@@ -101,7 +93,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
 				Job::reply_read(&mut buf, job_id, false, |v| Ok(v.push(chr))).unwrap();
-				io_queue.submit_write(table, buf).unwrap().await.unwrap();
+				rt::io::write(table, buf).await.unwrap();
 				return true;
 			} else {
 				char_buf.borrow_mut().push_back(chr);
@@ -111,11 +103,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	let do_job = || async {
-		let mut data = io_queue
-			.submit_read(table, Vec::new(), 512)
-			.unwrap()
-			.await
-			.unwrap();
+		let mut data = rt::io::read(table, Vec::new(), 512).await.unwrap();
 		match Job::deserialize(&data).unwrap() {
 			Job::Open {
 				job_id,
@@ -173,7 +161,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
 			}
 		};
-		io_queue.submit_write(table, data).unwrap().await.unwrap();
+		rt::io::write(table, data).await.unwrap();
 		true
 	};
 
@@ -219,8 +207,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 		}
-		io_queue.poll();
-		io_queue.wait();
-		io_queue.process();
+		rt::io::poll_queue_and_wait();
 	}
 }
