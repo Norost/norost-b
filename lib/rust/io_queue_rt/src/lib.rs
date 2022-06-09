@@ -6,7 +6,7 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-pub use nora_io_queue::{error, Full, Handle, Pow2Size, SeekFrom};
+pub use nora_io_queue::{error, Handle, Pow2Size, SeekFrom};
 
 use alloc::vec::Vec;
 use arena::Arena;
@@ -66,7 +66,11 @@ impl Queue {
 		let buffer = unsafe { extend_lifetime_mut(buffer) };
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))?;
+			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
+			.map_err(|_| {
+				// The buffer is safe to remove since the request did not actually get submitted.
+				Full(inflight.remove(i).unwrap().0)
+			})?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
@@ -94,7 +98,11 @@ impl Queue {
 		let buffer = unsafe { extend_lifetime(buffer) };
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))?;
+			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
+			.map_err(|_| {
+				// The buffer is safe to remove since the request did not actually get submitted.
+				Full(inflight.remove(i).unwrap().0)
+			})?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
@@ -109,7 +117,8 @@ impl Queue {
 		let i = inflight.insert((Vec::new(), BufferFutureState::Inflight));
 		self.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, request)?;
+			.submit(i.into_raw().0 as u64, handle, request)
+			.map_err(|_| Full(Vec::new()))?;
 		Ok(BufferFuture {
 			queue: Some(self).into(),
 			inflight_index: i,
@@ -205,6 +214,17 @@ unsafe fn extend_lifetime<'a, T: ?Sized>(t: &'a T) -> &'static T {
 /// The object must exist for at least as long as the static lifetime reference is used.
 unsafe fn extend_lifetime_mut<'a, T: ?Sized>(t: &'a mut T) -> &'static mut T {
 	unsafe { mem::transmute(t) }
+}
+
+/// Structure returned if the queue is full. It contains the [`Vec`] that was passed as argument.
+/// If the request did not take a [`Vec`] this structure contains an empty [`Vec`].
+pub struct Full(pub Vec<u8>);
+
+/// Custom debug impl since there is no need to print the inner [`Vec`].
+impl fmt::Debug for Full {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		"Full".fmt(f)
+	}
 }
 
 #[derive(Debug)]

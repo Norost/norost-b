@@ -11,6 +11,7 @@ use core::{
 	sync::atomic::Ordering,
 	task::{Context, Poll as PollF, RawWaker, RawWakerVTable, Waker},
 };
+use nora_io_queue_rt::Full;
 pub use nora_io_queue_rt::{
 	error::Result, Create, Handle, Open, Peek, Poll, Pow2Size, Queue, Read, Seek, SeekFrom, Share,
 	Write,
@@ -134,73 +135,95 @@ fn queue() -> &'static Queue {
 	unsafe { &*crate::tls::get(QUEUE_KEY).cast::<Queue>() }
 }
 
-#[inline]
-pub fn read(handle: Handle, buf: Vec<u8>, amount: usize) -> Read<'static> {
-	queue()
-		.submit_read(handle, buf, amount)
-		.unwrap_or_else(|_| todo!())
+// Blocking has been chosen since the alternative requires storing requests somewhere
+// else temporarily. This storage has to have an unbounded size and is likely a worse
+// alternative than blocking and/or increasing the size of the queue.
+macro_rules! impl_io {
+	(None $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
+		#[doc = concat!(
+			"An asynchronous ",
+			stringify!($fn),
+			" request. This may block if the queue is full.",
+		)]
+		pub fn $fn(handle: Handle $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
+			let q = queue();
+			loop {
+				match q.$qfn(handle, $($arg,)*) {
+					Ok(r) => return r,
+					Err(Full(_)) => {
+						q.poll();
+						q.wait();
+						q.process();
+					}
+				}
+			}
+		}
+	};
+	($buf:ident $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
+		#[doc = concat!(
+			"An asynchronous ",
+			stringify!($fn),
+			" request. This may block if the queue is full.",
+		)]
+		pub fn $fn(handle: Handle, mut $buf: Vec<u8> $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
+			let q = queue();
+			loop {
+				$buf = match q.$qfn(handle, $buf, $($arg,)*) {
+					Ok(r) => return r,
+					Err(Full(b)) => {
+						q.poll();
+						q.wait();
+						q.process();
+						b
+					}
+				}
+			}
+		}
+	};
 }
 
-#[inline]
-pub fn peek(handle: Handle, buf: Vec<u8>, amount: usize) -> Peek<'static> {
-	queue()
-		.submit_peek(handle, buf, amount)
-		.unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn write(handle: Handle, data: Vec<u8>) -> Write<'static> {
-	queue()
-		.submit_write(handle, data)
-		.unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn open(handle: Handle, path: Vec<u8>) -> Open<'static> {
-	queue()
-		.submit_open(handle, path)
-		.unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn create(handle: Handle, path: Vec<u8>) -> Create<'static> {
-	queue()
-		.submit_create(handle, path)
-		.unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn seek(handle: Handle, from: SeekFrom) -> Seek<'static> {
-	queue()
-		.submit_seek(handle, from)
-		.unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn poll(handle: Handle) -> Poll<'static> {
-	queue().submit_poll(handle).unwrap_or_else(|_| todo!())
-}
+impl_io!(buf read(amount: usize) -> Read, submit_read);
+impl_io!(buf peek(amount: usize) -> Peek, submit_peek);
+impl_io!(data write() -> Write, submit_write);
+impl_io!(path open() -> Open, submit_open);
+impl_io!(path create() -> Create, submit_create);
+impl_io!(None seek(from: SeekFrom) -> Seek, submit_seek);
+impl_io!(None poll() -> Poll, submit_poll);
+impl_io!(None share(share: Handle) -> Share, submit_share);
 
 #[inline]
 pub fn close(handle: Handle) {
-	queue().submit_close(handle).unwrap_or_else(|_| todo!())
-}
-
-#[inline]
-pub fn share(handle: Handle, share: Handle) -> Share<'static> {
-	queue()
-		.submit_share(handle, share)
-		.unwrap_or_else(|_| todo!())
+	let q = queue();
+	while q.submit_close(handle).is_err() {
+		q.poll();
+		q.wait();
+		q.process();
+	}
 }
 
 #[inline]
 pub fn duplicate(handle: Handle) -> Result<Handle> {
-	syscall::duplicate_handle(handle).map_err(|_| todo!())
+	syscall::duplicate_handle(handle)
 }
 
 #[inline]
 pub fn create_root() -> Result<Handle> {
-	syscall::create_root().map_err(|_| todo!())
+	syscall::create_root()
+}
+
+/// Poll & process the I/O queue once.
+pub fn poll_queue() {
+	let q = queue();
+	q.poll();
+	q.process();
+}
+
+/// Poll & process the I/O queue once, waiting until any responses are available.
+pub fn poll_queue_and_wait() {
+	let q = queue();
+	q.poll();
+	q.wait();
+	q.process();
 }
 
 /// Block on an asynchronous I/O task until it is finished.
@@ -221,11 +244,11 @@ where
 	if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
 		return res;
 	}
-	let queue = queue();
+	let q = queue();
 	loop {
-		queue.poll();
-		queue.wait();
-		queue.process();
+		q.poll();
+		q.wait();
+		q.process();
 		if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
 			return res;
 		}
