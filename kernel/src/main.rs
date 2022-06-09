@@ -20,6 +20,7 @@
 #![feature(slice_index_methods)]
 #![feature(stmt_expr_attributes)]
 #![feature(waker_getters)]
+#![feature(bench_black_box)]
 #![deny(incomplete_features)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

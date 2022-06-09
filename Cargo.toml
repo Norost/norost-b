@@ -55,3 +55,4 @@ strip = "symbols"
 
 [patch.crates-io]
 dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
+compiler_builtins = { path = "../../rust/compiler-builtins" }

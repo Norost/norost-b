@@ -23,6 +23,8 @@
 #![feature(ptr_metadata)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+extern crate compiler_builtins;
+
 pub mod args;
 mod globals;
 pub mod io;
