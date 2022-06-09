@@ -517,6 +517,7 @@ dependencies = [
 name = "static_http_server"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "mhttp",
  "norostb_rt",
 ]
