@@ -172,11 +172,13 @@ impl Queue {
 		while let Some(resp) = inner.receive() {
 			let i = arena::Handle::from_raw(resp.user_data as usize, ());
 			let s = BufferFutureState::Finished(error::result(resp.value).map(|v| v as u64));
-			match mem::replace(&mut inflight[i].1, s) {
-				// Drop the buffer to avoid leaks.
+			let t = &mut inflight[i];
+			match mem::replace(&mut t.1, s) {
 				BufferFutureState::Cancelled => {
+					// Remove the buffer to avoid leaks.
+					// This is safe since the kernel has finished doing whatever operations it
+					// needs to do with it.
 					inflight.remove(i).unwrap();
-					continue;
 				}
 				BufferFutureState::InflightWithWaker(w) => w.wake(),
 				_ => {}
@@ -264,18 +266,7 @@ impl Drop for BufferFuture<'_> {
 		};
 		let i = self.inflight_index;
 		let mut inflight = queue.inflight_buffers.borrow_mut();
-		let t = &mut inflight[i];
-		match mem::replace(&mut t.1, BufferFutureState::Cancelled) {
-			// It is *not* safe to remove the buffer since the kernel may still read from / write
-			// to it.
-			BufferFutureState::Inflight | BufferFutureState::InflightWithWaker(_) => {}
-			// It is safe to remove the buffer now since the kernel won't be reading from /
-			// writing to it.
-			BufferFutureState::Finished(_) => {
-				inflight.remove(i).unwrap();
-			}
-			BufferFutureState::Cancelled => unreachable!(),
-		}
+		inflight[i].1 = BufferFutureState::Cancelled;
 	}
 }
 
