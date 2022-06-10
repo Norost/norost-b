@@ -34,9 +34,7 @@ pub struct Thread {
 	// Especially, we don't need to store the processes anywhere as as long a thread
 	// is alive, the process itself will be alive too.
 	process: Option<Arc<Process>>,
-	sleep_until: Cell<Monotonic>,
-	/// Async deadline set by [`super::waker::sleep`].
-	async_deadline: Cell<Option<Monotonic>>,
+	sleep: SpinLock<Sleep>,
 	/// Architecture-specific data.
 	pub arch_specific: arch::ThreadData,
 	/// Tasks to notify when this thread finishes.
@@ -88,8 +86,7 @@ impl Thread {
 				kernel_stack_base,
 				kernel_stack_top,
 				process: Some(process),
-				sleep_until: Cell::new(Monotonic::ZERO),
-				async_deadline: Cell::new(None),
+				sleep: Default::default(),
 				arch_specific: Default::default(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
@@ -149,8 +146,7 @@ impl Thread {
 				kernel_stack_base,
 				kernel_stack_top,
 				process: None,
-				sleep_until: Cell::new(Monotonic::ZERO),
-				async_deadline: Cell::new(None),
+				sleep: Default::default(),
 				arch_specific: Default::default(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
@@ -252,24 +248,22 @@ impl Thread {
 		}
 	}
 
-	pub fn set_sleep_until(&self, until: Monotonic) {
-		self.sleep_until.set(until)
-	}
-
 	pub fn sleep_until(&self) -> Monotonic {
-		self.sleep_until.get()
+		self.sleep.auto_lock().until
 	}
 
 	/// Sleep until the given duration.
 	///
 	/// The thread may wake earlier if [`wake`] is called or if an asynchronous deadline is set.
 	pub fn sleep(&self, duration: Duration) {
-		let t = self
-			.async_deadline
-			.replace(None)
-			.unwrap_or_else(|| Monotonic::now().saturating_add(duration));
-		// TODO huh? Why Self::current()?
-		Self::current().unwrap().set_sleep_until(t);
+		{
+			let mut s = self.sleep.lock();
+			if core::mem::take(&mut s.waked) {
+				// A task woke us. Poll it before yielding.
+				return;
+			}
+			s.until = Monotonic::now().saturating_add(duration);
+		}
 		Self::yield_current();
 	}
 
@@ -318,7 +312,9 @@ impl Thread {
 
 	/// Cancel sleep
 	pub fn wake(&self) {
-		self.sleep_until.set(Monotonic::ZERO);
+		let mut s = self.sleep.auto_lock();
+		s.until = Monotonic::ZERO;
+		s.waked = true;
 	}
 
 	pub fn current() -> Option<Arc<Self>> {
@@ -350,3 +346,12 @@ impl Drop for Thread {
 
 #[derive(Debug)]
 pub struct Destroyed;
+
+#[derive(Default)]
+struct Sleep {
+	/// How long to wait.
+	until: Monotonic,
+	/// Whether a task has sent a wake-up event to this thread. If set, [`Thread::sleep`] will
+	/// clear this flag and return immediately.
+	waked: bool,
+}

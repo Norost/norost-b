@@ -278,12 +278,7 @@ extern "C" fn sleep(
 	debug!("sleep");
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_micros(time.into());
-
-	Thread::current()
-		.unwrap()
-		.set_sleep_until(Monotonic::now().saturating_add(time));
-	Thread::yield_current();
-
+	Thread::current().unwrap().sleep(time);
 	get_mono_time()
 }
 
