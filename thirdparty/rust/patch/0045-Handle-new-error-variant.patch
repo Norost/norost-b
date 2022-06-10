@@ -1,7 +1,7 @@
 From e204f2e8ca2d68b3214c824f12a1610487fb16bc Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 4 Jun 2022 15:37:14 +0200
-Subject: [PATCH 45/47] Handle new error variant
+Subject: [PATCH 45/48] Handle new error variant
 
 ---
  library/std/src/sys/norostb/mod.rs | 4 +++-

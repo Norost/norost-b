@@ -1,7 +1,7 @@
 From 6a3460829404d2f637344db751508b25f7a99481 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Mon, 18 Apr 2022 14:47:25 +0200
-Subject: [PATCH 20/47] Get rid of QueryHandle
+Subject: [PATCH 20/48] Get rid of QueryHandle
 
 ---
  library/std/src/sys/norostb/fs.rs | 4 ++--

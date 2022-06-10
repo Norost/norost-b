@@ -1,7 +1,7 @@
 From 5cb246678cf61d3c710e8cee1f231f93ae206ca1 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Wed, 27 Apr 2022 23:46:40 +0200
-Subject: [PATCH 34/47] Make File a wrapper around norostb_rt::Object
+Subject: [PATCH 34/48] Make File a wrapper around norostb_rt::Object
 
 ---
  library/std/src/os/norostb/io.rs  |  8 ++++----

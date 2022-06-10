@@ -1,7 +1,7 @@
 From 39a73d736d910e60b43444463c9c100b438610c1 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sun, 17 Apr 2022 19:43:22 +0200
-Subject: [PATCH 18/47] Implement I/O poll
+Subject: [PATCH 18/48] Implement I/O poll
 
 ---
  library/std/src/os/norostb/mod.rs |  4 +++-

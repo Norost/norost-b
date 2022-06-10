@@ -1,7 +1,7 @@
 From 9d6ba56024641b59690fda0368258ece379fd1c2 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sun, 24 Apr 2022 18:45:17 +0200
-Subject: [PATCH 32/47] Fix panic when removing non-existent env variable.
+Subject: [PATCH 32/48] Fix panic when removing non-existent env variable.
 
 ---
  library/std/src/sys/norostb/args.rs | 9 +++------

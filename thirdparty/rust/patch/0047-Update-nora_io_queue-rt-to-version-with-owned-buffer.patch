@@ -1,7 +1,7 @@
 From 628739a8cdc6c77eef01e4e948d009d1822bde1a Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Thu, 9 Jun 2022 09:09:37 +0200
-Subject: [PATCH 47/47] Update nora_io_queue rt to version with owned buffers
+Subject: [PATCH 47/48] Update nora_io_queue rt to version with owned buffers
 
 ---
  Cargo.lock                        | 31 +++++++++++++++++++++++++++++++

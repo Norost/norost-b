@@ -1,7 +1,7 @@
 From 99e8b57bace178941d3fdb0a709261adfd33a352 Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 15 Apr 2022 22:52:53 +0200
-Subject: [PATCH 16/47] ObjectInfo & Job moved from syscall to io
+Subject: [PATCH 16/48] ObjectInfo & Job moved from syscall to io
 
 ---
  library/std/src/os/norostb/mod.rs | 2 +-

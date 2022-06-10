@@ -1,7 +1,7 @@
 From 5e1028cd1d623e4e6ef82bbcc13fd39c70327a4c Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Sat, 16 Apr 2022 12:14:57 +0200
-Subject: [PATCH 17/47] Find UART table dynamically instead of using hardcoded
+Subject: [PATCH 17/48] Find UART table dynamically instead of using hardcoded
  table 0
 
 ---

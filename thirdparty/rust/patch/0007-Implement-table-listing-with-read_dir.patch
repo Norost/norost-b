@@ -1,7 +1,7 @@
 From 4be7481964431b57db727660d5bfb4314115768f Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Fri, 25 Feb 2022 00:05:11 +0100
-Subject: [PATCH 07/47] Implement table listing with read_dir
+Subject: [PATCH 07/48] Implement table listing with read_dir
 
 ---
  library/std/src/sys/norostb/fs.rs | 166 ++++++++++++++----------------

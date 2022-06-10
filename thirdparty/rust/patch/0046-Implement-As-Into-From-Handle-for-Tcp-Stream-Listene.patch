@@ -1,7 +1,7 @@
 From 3bbf39e7d791ed90b172e9cacd354e0704c884fe Mon Sep 17 00:00:00 2001
 From: David Hoppenbrouwers <david@salt-inc.org>
 Date: Mon, 6 Jun 2022 16:27:29 +0200
-Subject: [PATCH 46/47] Implement {As,Into,From}Handle for
+Subject: [PATCH 46/48] Implement {As,Into,From}Handle for
  Tcp{Stream,Listener},UdpSocket
 
 Also remove the local timeout fields since those are probably better set
