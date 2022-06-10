@@ -9,6 +9,7 @@ use core::convert::TryInto;
 use core::fmt;
 use core::mem;
 use core::ptr::NonNull;
+use core::sync::atomic::{self, Ordering};
 use endian::{u16le, u32le, u64le};
 use memoffset::offset_of_tuple;
 use virtio::{pci::CommonConfig, queue, PhysAddr, PhysRegion};
@@ -266,6 +267,7 @@ impl<'a> BlockDevice<'a> {
 	}
 
 	pub fn flush(&self) {
+		atomic::fence(Ordering::Release);
 		self.notify.send(0);
 	}
 
