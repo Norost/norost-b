@@ -1,6 +1,7 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
+use crate::time::Monotonic;
 use alloc::boxed::Box;
 use core::{mem, ptr, time::Duration};
 use norostb_kernel::{error, syscall, Handle};
@@ -137,10 +138,10 @@ impl Thread {
 	}
 }
 
-pub fn sleep(duration: Duration) {
+pub fn sleep(duration: Duration) -> Monotonic {
 	syscall::sleep(duration)
 }
 
-pub fn yield_now() {
+pub fn yield_now() -> Monotonic {
 	sleep(Duration::ZERO)
 }

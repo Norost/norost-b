@@ -104,8 +104,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		Tcp,
 	}
 
-	let mut t = time::Instant::from_secs(0);
-
 	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
 	let job_queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
 
@@ -144,6 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut accepting_tcp_sockets = Vec::new();
 	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
+	let mut t;
 	let mut i = 0u64;
 	loop {
 		if i % (512 * 60) == 0 {
@@ -439,8 +438,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			jobs.push(new_job(reply));
 		}
 
-		iface.poll(t).unwrap();
-
 		let dhcp = iface.get_socket::<socket::Dhcpv4Socket>(dhcp);
 		if let Some(s) = dhcp.poll() {
 			if let socket::Dhcpv4Event::Configured(s) = s {
@@ -449,12 +446,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					iface.routes_mut().add_default_ipv4_route(r).unwrap();
 				}
 			}
-			continue;
 		}
 
 		let d = Duration::from_millis(2);
-		syscall::sleep(d);
-		t += d.into();
+		t = syscall::sleep(d);
+
+		iface
+			.poll(time::Instant::from_micros(t.as_micros() as i64))
+			.unwrap();
 	}
 }
 

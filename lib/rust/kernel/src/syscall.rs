@@ -18,6 +18,7 @@ pub const ID_CREATE_IO_QUEUE: usize = 20;
 pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
+use crate::time::Monotonic;
 use crate::{error, Page};
 use core::arch::asm;
 use core::fmt;
@@ -124,12 +125,8 @@ pub unsafe fn dealloc(
 }
 
 #[inline]
-pub fn monotonic_time() -> u64 {
-	let (_hi, lo) = syscall!(ID_MONOTONIC_TIME());
-	#[cfg(target_pointer_width = "32")]
-	return ((_hi as u64) << 32) | (lo as u64);
-	#[cfg(target_pointer_width = "64")]
-	return lo as u64;
+pub fn monotonic_time() -> Monotonic {
+	sys_to_mono(syscall!(ID_MONOTONIC_TIME()))
 }
 
 #[inline]
@@ -167,11 +164,11 @@ pub fn map_object(
 }
 
 #[inline]
-pub fn sleep(duration: Duration) {
-	match duration_to_micros(duration) {
+pub fn sleep(duration: Duration) -> Monotonic {
+	sys_to_mono(match duration_to_micros(duration) {
 		(l, None) => syscall!(ID_SLEEP(l)),
 		(l, Some(h)) => syscall!(ID_SLEEP(l, h)),
-	};
+	})
 }
 
 #[inline]
@@ -215,19 +212,19 @@ pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> error::Result<()> {
 }
 
 #[inline]
-pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<usize> {
+pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic> {
 	ret(syscall!(ID_PROCESS_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
-	.map(|(_, v)| v)
+	.map(sys_to_mono)
 }
 
 #[inline]
-pub fn wait_io_queue(base: Option<NonNull<Page>>) -> error::Result<usize> {
+pub fn wait_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic> {
 	ret(syscall!(ID_WAIT_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
-	.map(|(_, v)| v)
+	.map(sys_to_mono)
 }
 
 #[inline]
@@ -263,4 +260,11 @@ fn duration_to_micros(t: Duration) -> (usize, Option<usize>) {
 		8 => (micros as usize, None),
 		_ => todo!(),
 	}
+}
+
+fn sys_to_mono((_hi, lo): (usize, usize)) -> Monotonic {
+	#[cfg(target_pointer_width = "32")]
+	return Monotonic::from_nanos(((_hi as u64) << 32) | (lo as u64));
+	#[cfg(target_pointer_width = "64")]
+	return Monotonic::from_nanos(lo as u64);
 }

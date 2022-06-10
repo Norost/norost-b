@@ -32,12 +32,11 @@ pub mod process;
 pub mod sync;
 pub mod table;
 pub mod thread;
-pub mod time;
 pub mod tls;
 
 use core::ptr::NonNull;
 
-pub use norostb_kernel::{error::Error, AtomicHandle, Handle};
+pub use norostb_kernel::{error::Error, time, AtomicHandle, Handle};
 pub use process::Process;
 pub use table::{Object, RefObject};
 

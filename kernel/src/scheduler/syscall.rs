@@ -12,6 +12,7 @@ use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
+use norostb_kernel::error::Error;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -156,17 +157,7 @@ extern "C" fn dealloc(
 }
 
 extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	let now = crate::time::Monotonic::now().as_nanos();
-	#[cfg(target_pointer_width = "32")]
-	return Return {
-		status: (now >> 32) as usize,
-		value: now as usize,
-	};
-	#[cfg(target_pointer_width = "64")]
-	Return {
-		status: 0,
-		value: now as usize,
-	}
+	get_mono_time()
 }
 
 extern "C" fn alloc_dma(
@@ -293,10 +284,7 @@ extern "C" fn sleep(
 		.set_sleep_until(Monotonic::now().saturating_add(time));
 	Thread::yield_current();
 
-	Return {
-		status: 0,
-		value: 0,
-	}
+	get_mono_time()
 }
 
 extern "C" fn spawn_thread(
@@ -385,31 +373,29 @@ extern "C" fn destroy_io_queue(
 
 extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	debug!("submit_io");
-	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return { status: Error::InvalidData as usize, value: 0 }
+	};
 	Process::current().unwrap().process_io_queue(base).map_or(
 		Return {
-			status: 1,
+			status: Error::Unknown as usize,
 			value: 0,
 		},
-		|_| Return {
-			status: 0,
-			value: 0,
-		},
+		|_| get_mono_time(),
 	)
 }
 
 extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	debug!("wait_io");
-	let Some(base) = NonNull::new(base as *mut _) else { return Return { status: 1, value: 0 } };
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return { status: Error::InvalidData as usize, value: 0 }
+	};
 	Process::current().unwrap().wait_io_queue(base).map_or(
 		Return {
-			status: 1,
+			status: Error::Unknown as usize,
 			value: 0,
 		},
-		|_| Return {
-			status: 0,
-			value: 0,
-		},
+		|_| get_mono_time(),
 	)
 }
 
@@ -539,4 +525,18 @@ fn merge_u64(l: usize, h: usize) -> u64 {
 		8 | 16 => l as u64,
 		s => unreachable!("unsupported usize size of {}", s),
 	}
+}
+
+fn get_mono_time() -> Return {
+	let now = Monotonic::now().as_nanos();
+	#[cfg(target_pointer_width = "32")]
+	return Return {
+		status: (now >> 32) as usize,
+		value: now as usize,
+	};
+	#[cfg(target_pointer_width = "64")]
+	return Return {
+		status: 0,
+		value: now as usize,
+	};
 }
