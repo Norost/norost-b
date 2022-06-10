@@ -4,7 +4,13 @@ use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use crate::Error;
+use alloc::{
+	boxed::Box,
+	sync::{Arc, Weak},
+	vec::Vec,
+};
+use core::mem;
 use pci::BaseAddress;
 
 /// A single PCI device.
@@ -13,13 +19,7 @@ pub struct PciDevice {
 	device: u8,
 }
 
-/// List of tasks waiting for an interrupt.
-static IRQ_LISTENERS: SpinLock<Vec<TicketWaker<usize>>> = SpinLock::new(Vec::new());
-
-// FIXME this is a quick hack to work around a race condition if an interrupt is delivered
-// right before poll()
-use core::sync::atomic::*;
-static POLL_RACE_HACK: AtomicBool = AtomicBool::new(false);
+static IRQ_LISTENERS: SpinLock<Vec<Weak<IrqPoll>>> = SpinLock::new(Vec::new());
 
 impl PciDevice {
 	pub(super) fn new(bus: u8, device: u8) -> Self {
@@ -41,16 +41,18 @@ impl MemoryObject for PciDevice {
 }
 
 impl Object for PciDevice {
-	fn poll(&self) -> Ticket<usize> {
-		if POLL_RACE_HACK
-			.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-			.is_ok()
-		{
-			return Ticket::new_complete(Ok(0));
-		}
-		let (ticket, waker) = Ticket::new();
-		IRQ_LISTENERS.lock().push(waker);
-		ticket
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		Ticket::new_complete(if path == b"poll" {
+			let o = IrqPollInner {
+				irq_occurred: false.into(),
+				waiting: Vec::new(),
+			};
+			let o = Arc::new(IrqPoll(SpinLock::new(o)));
+			IRQ_LISTENERS.auto_lock().push(Arc::downgrade(&o));
+			Ok(o)
+		} else {
+			Err(Error::DoesNotExist)
+		})
 	}
 
 	fn memory_object(self: Arc<Self>, offset: u64) -> Option<Arc<dyn MemoryObject>> {
@@ -81,6 +83,29 @@ impl Object for PciDevice {
 	}
 }
 
+struct IrqPollInner {
+	/// `true` if an IRQ occured since the last poll.
+	irq_occurred: bool,
+	/// Tasks waiting for an IRQ to occur.
+	waiting: Vec<TicketWaker<usize>>,
+}
+
+/// An object that keeps track of IRQs atomically.
+pub struct IrqPoll(SpinLock<IrqPollInner>);
+
+impl Object for IrqPoll {
+	fn poll(&self) -> Ticket<usize> {
+		let mut inner = self.0.auto_lock();
+		if mem::take(&mut inner.irq_occurred) {
+			Ticket::new_complete(Ok(0))
+		} else {
+			let (ticket, waker) = Ticket::new();
+			inner.waiting.push(waker);
+			ticket
+		}
+	}
+}
+
 /// A single MMIO region pointer to by a BAR of a PCI device.
 pub struct BarRegion {
 	frames: Box<[PPN]>,
@@ -93,8 +118,24 @@ impl MemoryObject for BarRegion {
 }
 
 pub(super) fn irq_handler() {
-	POLL_RACE_HACK.store(true, Ordering::Relaxed);
-	for e in IRQ_LISTENERS.isr_lock().drain(..) {
-		e.isr_complete(Ok(0));
+	let mut l = IRQ_LISTENERS.isr_lock();
+	// Remove all dead listen objects
+	for i in (0..l.len()).rev() {
+		let Some(poll) = Weak::upgrade(&l[i]) else {
+			l.swap_remove(i);
+			continue;
+		};
+		let mut poll = poll.0.isr_lock();
+		if poll.waiting.is_empty() {
+			// Nothing is waiting, so set a flag to return an event immediately to avoid
+			// missing any.
+			poll.irq_occurred = true;
+		} else {
+			// There are waiters, so there is no need to set the flag as the event won't be
+			// missed.
+			for w in poll.waiting.drain(..) {
+				w.isr_complete(Ok(1));
+			}
+		}
 	}
 }

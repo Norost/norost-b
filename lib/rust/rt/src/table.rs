@@ -100,6 +100,11 @@ impl Object {
 	}
 
 	#[inline]
+	pub fn poll(&self) -> io::Result<u64> {
+		io::block_on(io::poll(self.0))
+	}
+
+	#[inline]
 	pub fn duplicate(&self) -> io::Result<Self> {
 		io::duplicate(self.0).map(Self)
 	}

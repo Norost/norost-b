@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 		}
 	};
+	let poll = rt::RefObject::from_raw(dev_handle).open(b"poll").unwrap();
 	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
@@ -85,18 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		buf.resize(n, 0);
 
 		let wait = || {
-			// FIXME this API is fundamentally broken as it's subject to race conditions.
-			// There are two things missing to make this particular API useable:
-			//
-			// 1) Acknowledgement that the server has received the poll request
-			// 2) Receiving the event itself.
-			//
-			// 1) is required to prevent the race condition. 2) is so we know when to continue.
-			//
-			// Alternatively, some kind of "event" object should be created. The server then
-			// knows to keep track of events which will directly prevent race conditions from
-			// occuring as events are continuously collected.
-			//rt::io::poll(dev_handle).unwrap();
+			poll.poll().unwrap();
 		};
 
 		buf = match Job::deserialize(&buf).unwrap() {
