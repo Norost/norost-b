@@ -7,12 +7,17 @@ use core::{fmt, ptr};
 // No atomic is strictly necessary since we only read from this after boot.
 static mut ADDRESS: *const Hpet = core::ptr::null();
 // Ditto
-static mut MULTIPLIER: u128 = 0;
+static mut FEMTO_PERIOD: u32 = 0;
+const FEMTO_PER_NANO: u32 = 1_000_000;
 
 impl Monotonic {
 	pub fn now() -> Self {
-		let m = unsafe { MULTIPLIER };
-		Self::from_nanoseconds(u128::from(hpet().counter.get()) * m)
+		// SAFETY: no other thread is writing to this variable after boot.
+		let fp = unsafe { FEMTO_PERIOD };
+		// With 128-bit integers there should *never* be an overflow
+		let t = u128::from(hpet().counter.get()) * u128::from(fp) / u128::from(FEMTO_PER_NANO);
+		// The timer will only overflow after >500 years, so just cast
+		Self::from_nanos(t as u64)
 	}
 }
 
@@ -95,7 +100,7 @@ where
 		add_identity_mapping(base, 4096).unwrap();
 		ADDRESS = phys_to_virt(base.try_into().unwrap()).cast();
 		// Period is in femtoseconds.
-		MULTIPLIER = u128::from(hpet().capabilities_id().period()) / 1_000_000;
+		FEMTO_PERIOD = hpet().capabilities_id().period();
 	}
 	hpet().configuration.set(hpet().configuration.get() | 1);
 }

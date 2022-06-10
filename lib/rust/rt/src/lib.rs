@@ -32,6 +32,7 @@ pub mod process;
 pub mod sync;
 pub mod table;
 pub mod thread;
+pub mod time;
 pub mod tls;
 
 use core::ptr::NonNull;

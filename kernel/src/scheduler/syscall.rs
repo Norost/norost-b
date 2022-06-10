@@ -27,7 +27,7 @@ pub const SYSCALLS_LEN: usize = 23;
 static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	alloc,
 	dealloc,
-	undefined,
+	monotonic_time,
 	alloc_dma,
 	physical_address,
 	undefined,
@@ -153,6 +153,20 @@ extern "C" fn dealloc(
 				value: size,
 			},
 		)
+}
+
+extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	let now = crate::time::Monotonic::now().as_nanos();
+	#[cfg(target_pointer_width = "32")]
+	return Return {
+		status: (now >> 32) as usize,
+		value: now as usize,
+	};
+	#[cfg(target_pointer_width = "64")]
+	Return {
+		status: 0,
+		value: now as usize,
+	}
 }
 
 extern "C" fn alloc_dma(

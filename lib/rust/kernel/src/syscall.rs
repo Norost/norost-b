@@ -1,6 +1,6 @@
 pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
-
+pub const ID_MONOTONIC_TIME: usize = 2;
 pub const ID_ALLOC_DMA: usize = 3;
 pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
@@ -121,6 +121,15 @@ pub unsafe fn dealloc(
 ) -> error::Result<()> {
 	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
 	ret(syscall!(ID_DEALLOC(base.as_ptr(), size, flags))).map(|_| ())
+}
+
+#[inline]
+pub fn monotonic_time() -> u64 {
+	let (_hi, lo) = syscall!(ID_MONOTONIC_TIME());
+	#[cfg(target_pointer_width = "32")]
+	return ((_hi as u64) << 32) | (lo as u64);
+	#[cfg(target_pointer_width = "64")]
+	return lo as u64;
 }
 
 #[inline]

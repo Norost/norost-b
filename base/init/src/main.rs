@@ -27,6 +27,15 @@ struct Program {
 	stderr: Option<String>,
 }
 
+macro_rules! log {
+	($fmt:tt $(,)?) => {
+		println!(concat!("[{}] ", $fmt), rt::time::Monotonic::now())
+	};
+	($fmt:tt, $($arg:tt)*) => {
+		println!(concat!("[{}] ", $fmt), rt::time::Monotonic::now(), $($arg)*)
+	};
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
@@ -35,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let process_root = root.open(b"process").unwrap();
 
 	// Read arguments
-	println!("Parsing drivers/init.toml");
+	log!("Parsing drivers/init.toml");
 	let args = drivers.open(b"init.toml").unwrap();
 	let args_len = args.seek(rt::io::SeekFrom::End(0)).unwrap();
 	args.seek(rt::io::SeekFrom::Start(0)).unwrap();
@@ -82,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	programs.retain(|_, p| !p.disabled.unwrap_or(false));
 
 	// Launch programs
-	println!("Launching {} programs", programs.len());
+	log!("Launching {} programs", programs.len());
 	while !programs.is_empty() {
 		programs.retain(|name, program| {
 			for f in program.after.as_ref().iter().flat_map(|i| i.iter()) {
@@ -145,8 +154,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					.map(|(k, v)| (k.as_bytes(), v.as_bytes())),
 			);
 			match r {
-				Ok(_) => println!("Launched {:?}", name),
-				Err(e) => println!("Failed to launch {:?}: {:?}", name, e),
+				Ok(_) => log!("Launched {:?}", name),
+				Err(e) => log!("Failed to launch {:?}: {:?}", name, e),
 			}
 
 			false
@@ -155,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		rt::thread::sleep(std::time::Duration::from_millis(1));
 	}
 
-	println!("Finished init");
+	log!("Finished init");
 
 	Ok(())
 }
