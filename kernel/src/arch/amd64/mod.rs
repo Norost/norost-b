@@ -6,16 +6,18 @@ mod gdt;
 pub mod idt;
 pub mod msr;
 mod multiboot;
+pub mod scheduler;
 mod syscall;
 mod tss;
 pub mod r#virtual;
 
-use crate::{driver::apic, scheduler};
+use crate::driver::apic;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
 pub use gdt::GDT;
 pub use idt::{Handler, IDTEntry};
+pub use scheduler::yield_current_thread;
 pub use syscall::{
 	clear_current_thread, current_process, current_thread, current_thread_ptr, current_thread_weak,
 	set_current_thread, CpuData, ThreadData,
@@ -202,7 +204,7 @@ extern "C" fn handle_timer() -> ! {
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
 	// SAFETY: we just saved the thread's state.
-	unsafe { scheduler::next_thread() }
+	unsafe { crate::scheduler::next_thread() }
 }
 
 extern "C" fn handle_debug(rip: *const ()) {
@@ -367,23 +369,6 @@ pub fn halt() {
 pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 	unsafe {
 		IDT.set(irq, entry);
-	}
-}
-
-pub fn yield_current_thread() {
-	unsafe {
-		debug_assert!(
-			interrupts_enabled(),
-			"can't yield while interrupts are disabled"
-		);
-		// Fake timer interrupt
-		asm!(
-			"cli",
-			"int {}",
-			"sti",
-			const TIMER_IRQ,
-			options(nomem, nostack, preserves_flags)
-		)
 	}
 }
 

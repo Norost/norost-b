@@ -109,7 +109,10 @@ impl Thread {
 	}
 
 	/// Create a new kernel-only thread.
-	pub(super) fn kernel_new(start: extern "C" fn() -> !) -> Result<Self, frame::AllocateError> {
+	pub(super) fn kernel_new(
+		start: extern "C" fn() -> !,
+		enable_interrupts: bool,
+	) -> Result<Self, frame::AllocateError> {
 		// TODO ditto
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
@@ -132,7 +135,8 @@ impl Thread {
 			};
 			push(crate::arch::amd64::GDT::KERNEL_SS.into());
 			push(stack); // rsp
-			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
+			 // rflags: Set reserved bit 1, enable interrupts (IF)
+			push(0x2 | usize::from(enable_interrupts) * 0x200);
 			push(crate::arch::amd64::GDT::KERNEL_CS.into());
 			push(start as usize); // rip
 

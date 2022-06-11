@@ -5,7 +5,6 @@ pub mod syscall;
 mod thread;
 mod waker;
 
-use crate::arch;
 use crate::driver::apic;
 use crate::time::Monotonic;
 use alloc::sync::Arc;
@@ -85,19 +84,10 @@ pub unsafe fn init(root: &crate::object_table::Root) {
 	unsafe {
 		for t in SLEEP_THREADS.iter_mut() {
 			t.write(
-				Thread::kernel_new(halt_forever)
+				Thread::kernel_new(crate::arch::scheduler::halt_forever, false)
 					.expect("failed to create sleep thread")
 					.into(),
 			);
 		}
-	}
-}
-
-/// Halt forever. Used to implement sleep.
-#[optimize(size)]
-extern "C" fn halt_forever() -> ! {
-	loop {
-		arch::halt();
-		arch::yield_current_thread();
 	}
 }
