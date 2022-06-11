@@ -447,9 +447,9 @@ impl Queue {
 	#[inline]
 	pub fn responses_available(&self) -> u32 {
 		let ring = unsafe { self.response_ring() };
-		ring.user_index
+		ring.kernel_index
 			.load(Ordering::Relaxed)
-			.wrapping_sub(ring.kernel_index.load(Ordering::Relaxed))
+			.wrapping_sub(ring.user_index.load(Ordering::Relaxed))
 	}
 }
 
