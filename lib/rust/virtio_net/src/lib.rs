@@ -219,6 +219,14 @@ impl fmt::Display for Mac {
 	}
 }
 
+/// PCI MSI-X configuration.
+pub struct Msix {
+	/// The MSI-X vector to use for receive queue interrupts.
+	pub receive_queue: Option<u16>,
+	/// The MSI-X vector to use for transmit queue interrupts.
+	pub transmit_queue: Option<u16>,
+}
+
 /// A driver for a virtio network (Ethernet) device.
 pub struct Device<'a> {
 	tx_queue: queue::Queue<'a>,
@@ -233,6 +241,7 @@ impl<'a> Device<'a> {
 		pci: &'a pci::Header0,
 		map_bar: impl FnMut(u8) -> NonNull<()>,
 		mut dma_alloc: impl FnMut(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
+		msix: Msix,
 	) -> Result<(Self, Mac), SetupError<DmaError>> {
 		let dev = virtio::pci::Device::new(pci, map_bar).unwrap();
 
@@ -258,7 +267,7 @@ impl<'a> Device<'a> {
 		assert_eq!(
 			u32::from(features),
 			VIRTIO_F_VERSION_1,
-			"Legacy virtio-net is unsupported"
+			"New virtio-net is unsupported"
 		);
 		dev.common.driver_feature_select.set(1.into());
 		dev.common.driver_feature.set(features);
@@ -271,16 +280,17 @@ impl<'a> Device<'a> {
 		// TODO check device status to ensure features were enabled correctly.
 
 		// Set up queues.
-		let rx_queue = queue::Queue::<'a>::new(dev.common, 0, 8, None, &mut dma_alloc).map_err(
-			|e| match e {
-				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
-			},
-		)?;
-		let tx_queue = queue::Queue::<'a>::new(dev.common, 1, 8, None, &mut dma_alloc).map_err(
-			|e| match e {
-				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
-			},
-		)?;
+		let rx_queue =
+			queue::Queue::<'a>::new(dev.common, 0, 8, msix.receive_queue, &mut dma_alloc).map_err(
+				|e| match e {
+					queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
+				},
+			)?;
+		let tx_queue =
+			queue::Queue::<'a>::new(dev.common, 1, 8, msix.transmit_queue, &mut dma_alloc)
+				.map_err(|e| match e {
+					queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
+				})?;
 
 		dev.common.device_status.set(
 			CommonConfig::STATUS_ACKNOWLEDGE

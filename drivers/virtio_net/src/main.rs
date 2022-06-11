@@ -10,7 +10,6 @@ mod udp;
 use core::{future::Future, pin::Pin, str, task::Poll, time::Duration};
 use driver_utils::io::queue::stream::Job;
 use futures::stream::{FuturesUnordered, StreamExt};
-use nora_io_queue_rt::{Pow2Size, Queue};
 use norostb_kernel::syscall;
 use norostb_rt::{self as rt, Error};
 use smoltcp::wire;
@@ -46,6 +45,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 		}
 	};
+	let poll_handle = rt::io::block_on(rt::io::open(dev_handle, (*b"poll").into(), 0))
+		.unwrap()
+		.1;
 
 	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
 
@@ -68,7 +70,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					let a = syscall::physical_address(d).unwrap();
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
-				unsafe { virtio_net::Device::new(h, map_bar, dma_alloc).unwrap() }
+
+				let msix = virtio_net::Msix {
+					receive_queue: Some(0),
+					transmit_queue: Some(1),
+				};
+
+				unsafe { virtio_net::Device::new(h, map_bar, dma_alloc, msix).unwrap() }
 			}
 			_ => unreachable!(),
 		}
@@ -104,16 +112,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		Tcp,
 	}
 
-	// Use a separate queue we busypoll for jobs, as std::os::norostb::take_job blocks forever.
-	let job_queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
-
 	let new_job = |mut v: Vec<u8>| {
 		v.clear();
-		job_queue.submit_read(tbl.as_raw(), v, 2048).unwrap()
+		rt::io::read(tbl.as_raw(), v, 2048)
 	};
-	let mut jobs = (0..Pow2Size::P6.size())
+	let (_, resps_size) = rt::io::queue_size();
+	let mut jobs = (0..resps_size.size() / 2)
 		.map(|_| new_job(Vec::new()))
 		.collect::<FuturesUnordered<_>>();
+	assert!(!jobs.is_empty(), "queue is too small");
 
 	let mut alloc_port = 50_000u16;
 	let mut alloc_port = || {
@@ -142,12 +149,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut accepting_tcp_sockets = Vec::new();
 	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
+	let mut poll_job = rt::io::poll(poll_handle);
+
 	let mut t;
 	let mut i = 0u64;
 	loop {
 		if i % (512 * 60) == 0 {
 			dbg!(connecting_tcp_sockets.len());
-			dbg!(&job_queue);
 		}
 		i += 1;
 		// Advance TCP connection state.
@@ -197,9 +205,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				accepted_tcp_sockets.push((sock, job_id, buf));
 			}
 		}
-
-		job_queue.poll();
-		job_queue.process();
 
 		let w = driver_utils::task::waker::dummy();
 		let mut cx = core::task::Context::from_waker(&w);
@@ -448,8 +453,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 		}
 
-		let d = Duration::from_millis(2);
-		t = syscall::sleep(d);
+		if Pin::new(&mut poll_job).poll(&mut cx).is_ready() {
+			poll_job = rt::io::poll(poll_handle);
+			continue;
+		}
+		t = rt::io::poll_queue();
+		if let Some(delay) = iface.poll_delay(time::Instant::from_micros(t.as_micros() as i64)) {
+			let delay = delay.into();
+			if delay != Duration::ZERO {
+				t = rt::io::poll_queue_and_wait(delay);
+			}
+		}
 
 		iface
 			.poll(time::Instant::from_micros(t.as_micros() as i64))

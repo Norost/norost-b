@@ -66,6 +66,8 @@ where
 unsafe fn allocate_irqs(pci: &mut Pci) {
 	for dev in pci.iter().flat_map(|b| b.iter()) {
 		let h = dev.header();
+		let cmd = h.common().command();
+		h.set_command(cmd | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK);
 		for cap in h.capabilities() {
 			use pci::capability::Capability;
 			match cap.downcast() {

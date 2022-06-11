@@ -257,3 +257,9 @@ where
 		}
 	}
 }
+
+/// Get the size of the request and response part of the I/O queue.
+pub fn queue_size() -> (Pow2Size, Pow2Size) {
+	let q = queue();
+	(q.requests_size(), q.responses_size())
+}
