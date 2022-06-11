@@ -24,6 +24,14 @@ use nora_io_queue::{self as q, Request};
 pub struct Queue {
 	inner: RefCell<q::Queue>,
 	inflight_buffers: RefCell<Arena<(Vec<u8>, BufferFutureState), ()>>,
+	/// A counter of responses that have been popped of but have not yet been consumed
+	/// by the client.
+	///
+	/// This is used to avoid a race condition with [`Queue::wait`], where a request may
+	/// not have finished yet at the moment of a poll but intermediate I/O requests between
+	/// may cause the response for this request to be popped off before `wait()`. To avoid this,
+	/// wait will return immediately if this counter is nonzero.
+	ready_responses: Cell<usize>,
 }
 
 impl fmt::Debug for Queue {
@@ -40,7 +48,16 @@ impl Queue {
 		q::Queue::new(requests_size, responses_size).map(|inner| Self {
 			inner: inner.into(),
 			inflight_buffers: Arena::new().into(),
+			ready_responses: 0.into(),
 		})
+	}
+
+	pub fn requests_size(&self) -> Pow2Size {
+		self.inner.borrow().requests_size()
+	}
+
+	pub fn responses_size(&self) -> Pow2Size {
+		self.inner.borrow().responses_size()
 	}
 
 	/// Submit a request involving reading into byte buffers.
@@ -226,7 +243,9 @@ impl Queue {
 	pub fn process(&self) {
 		let mut inner = self.inner.borrow_mut();
 		let mut inflight = self.inflight_buffers.borrow_mut();
+		let mut n = 0;
 		while let Some(resp) = inner.receive() {
+			n += 1;
 			let i = arena::Handle::from_raw(resp.user_data as usize, ());
 			let s = BufferFutureState::Finished(error::result(resp.value).map(|v| v as u64));
 			let t = &mut inflight[i];
@@ -236,11 +255,13 @@ impl Queue {
 					// This is safe since the kernel has finished doing whatever operations it
 					// needs to do with it.
 					inflight.remove(i).unwrap();
+					n -= 1;
 				}
 				BufferFutureState::InflightWithWaker(w) => w.wake(),
 				_ => {}
 			}
 		}
+		self.ready_responses.set(self.ready_responses.get() + n);
 	}
 
 	pub fn poll(&self) -> Monotonic {
@@ -318,6 +339,7 @@ impl Future for BufferFuture<'_> {
 			}
 			BufferFutureState::Finished(res) => {
 				let (vec, _) = inflight.remove(i).unwrap();
+				queue.ready_responses.set(queue.ready_responses.get() - 1);
 				self.queue.set(None);
 				TPoll::Ready((vec, res))
 			}
