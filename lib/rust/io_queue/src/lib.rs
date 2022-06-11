@@ -1,11 +1,12 @@
 #![no_std]
 
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, time::Duration};
 use norostb_kernel::{io, syscall};
 
 pub use norostb_kernel::{
 	error,
 	io::{Handle, Response, SeekFrom},
+	time::Monotonic,
 };
 
 macro_rules! pow2size {
@@ -159,12 +160,12 @@ impl Queue {
 		r
 	}
 
-	pub fn poll(&mut self) {
-		syscall::process_io_queue(Some(self.inner.base.cast())).expect("failed to poll queue");
+	pub fn poll(&mut self) -> Monotonic {
+		syscall::process_io_queue(Some(self.inner.base.cast())).expect("failed to poll queue")
 	}
 
-	pub fn wait(&mut self) {
-		syscall::wait_io_queue(Some(self.inner.base.cast())).expect("failed to wait queue");
+	pub fn wait(&mut self, timeout: Duration) -> Monotonic {
+		syscall::wait_io_queue(Some(self.inner.base.cast()), timeout).expect("failed to wait queue")
 	}
 }
 
@@ -174,7 +175,7 @@ impl Drop for Queue {
 			// TODO we should add a cancel request so we don't get potentially get stuck
 			// if a response never arrives.
 			self.poll();
-			self.wait();
+			self.wait(Duration::MAX);
 			while self.receive().is_some() {}
 		}
 		let _ = unsafe { syscall::destroy_io_queue(self.inner.base.cast()) };

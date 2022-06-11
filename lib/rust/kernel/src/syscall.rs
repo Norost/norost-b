@@ -22,7 +22,6 @@ use crate::time::Monotonic;
 use crate::{error, Page};
 use core::arch::asm;
 use core::fmt;
-use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::str;
@@ -165,7 +164,7 @@ pub fn map_object(
 
 #[inline]
 pub fn sleep(duration: Duration) -> Monotonic {
-	sys_to_mono(match duration_to_micros(duration) {
+	sys_to_mono(match duration_to_sys(duration) {
 		(l, None) => syscall!(ID_SLEEP(l)),
 		(l, Some(h)) => syscall!(ID_SLEEP(l, h)),
 	})
@@ -220,10 +219,12 @@ pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic>
 }
 
 #[inline]
-pub fn wait_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic> {
-	ret(syscall!(ID_WAIT_IO_QUEUE(
-		base.map_or(ptr::null_mut(), NonNull::as_ptr)
-	)))
+pub fn wait_io_queue(base: Option<NonNull<Page>>, timeout: Duration) -> error::Result<Monotonic> {
+	let base = base.map_or(ptr::null_mut(), NonNull::as_ptr);
+	ret(match duration_to_sys(timeout) {
+		(l, None) => syscall!(ID_WAIT_IO_QUEUE(base, l)),
+		(l, Some(h)) => syscall!(ID_WAIT_IO_QUEUE(base, l, h)),
+	})
 	.map(sys_to_mono)
 }
 
@@ -253,13 +254,12 @@ fn ret((status, value): (usize, usize)) -> error::Result<(usize, usize)> {
 	error::result(status as isize).map(|status| (status as usize, value))
 }
 
-fn duration_to_micros(t: Duration) -> (usize, Option<usize>) {
-	let micros = u64::try_from(t.as_micros()).unwrap_or(u64::MAX);
-	match mem::size_of::<usize>() {
-		4 => (micros as usize, Some((micros >> 32) as usize)),
-		8 => (micros as usize, None),
-		_ => todo!(),
-	}
+fn duration_to_sys(t: Duration) -> (usize, Option<usize>) {
+	let ns = u64::try_from(t.as_nanos()).unwrap_or(u64::MAX);
+	#[cfg(target_pointer_width = "32")]
+	return (ns as usize, Some((ns >> 32) as usize));
+	#[cfg(target_pointer_width = "64")]
+	return (ns as usize, None);
 }
 
 fn sys_to_mono((_hi, lo): (usize, usize)) -> Monotonic {

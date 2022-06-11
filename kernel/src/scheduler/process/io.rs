@@ -6,8 +6,11 @@ use crate::memory::r#virtual::{MapError, UnmapError, RWX};
 use crate::memory::Page;
 use crate::object_table::{AnyTicketValue, Error, Handle, Object};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::ptr::{self, NonNull};
-use core::task::Poll;
+use core::{
+	ptr::{self, NonNull},
+	task::Poll,
+	time::Duration,
+};
 use norostb_kernel::io::{self as k_io, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
@@ -271,8 +274,12 @@ impl super::Process {
 		Ok(())
 	}
 
-	pub fn wait_io_queue(&self, base: NonNull<Page>) -> Result<(), WaitQueueError> {
-		loop {
+	pub fn wait_io_queue(
+		&self,
+		base: NonNull<Page>,
+		timeout: Duration,
+	) -> Result<(), WaitQueueError> {
+		for i in 0..2 {
 			let mut io_queues = self.io_queues.lock();
 			let queue = io_queues
 				.iter_mut()
@@ -294,9 +301,9 @@ impl super::Process {
 			// Prevent blocking other threads.
 			drop(io_queues);
 
-			super::super::Thread::current()
-				.unwrap()
-				.sleep(core::time::Duration::MAX);
+			if i == 0 {
+				super::super::Thread::current().unwrap().sleep(timeout);
+			}
 		}
 		Ok(())
 	}

@@ -277,7 +277,7 @@ extern "C" fn sleep(
 ) -> Return {
 	debug!("sleep");
 	let time = merge_u64(time_l, time_h);
-	let time = Duration::from_micros(time.into());
+	let time = Duration::from_nanos(time.into());
 	Thread::current().unwrap().sleep(time);
 	get_mono_time()
 }
@@ -380,18 +380,30 @@ extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: 
 	)
 }
 
-extern "C" fn wait_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+extern "C" fn wait_io(
+	base: usize,
+	timeout_l: usize,
+	timeout_h: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
 	debug!("wait_io");
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
-	Process::current().unwrap().wait_io_queue(base).map_or(
-		Return {
-			status: Error::Unknown as usize,
-			value: 0,
-		},
-		|_| get_mono_time(),
-	)
+	let timeout = merge_u64(timeout_l, timeout_h);
+	let timeout = Duration::from_nanos(timeout.into());
+	Process::current()
+		.unwrap()
+		.wait_io_queue(base, timeout)
+		.map_or(
+			Return {
+				status: Error::Unknown as usize,
+				value: 0,
+			},
+			|_| get_mono_time(),
+		)
 }
 
 extern "C" fn kill_thread(

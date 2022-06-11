@@ -9,6 +9,7 @@ use core::{
 	cell::{Cell, RefCell},
 	future::Future,
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+	time::Duration,
 };
 use driver_utils::io::queue::stream::Job;
 use norostb_kernel::error::Error;
@@ -207,6 +208,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 		}
-		rt::io::poll_queue_and_wait();
+		rt::io::poll_queue_and_wait(Duration::MAX);
 	}
 }

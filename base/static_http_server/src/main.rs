@@ -4,6 +4,7 @@ use std::{
 	io::{ErrorKind, Write},
 	pin::Pin,
 	task::{Context, Poll},
+	time::Duration,
 };
 
 const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request</h1>";
@@ -68,7 +69,7 @@ fn main() {
 			while let Poll::Ready(Some(())) = Pin::new(&mut clients).poll_next(&mut cx) {}
 		}
 
-		rt::io::poll_queue_and_wait();
+		rt::io::poll_queue_and_wait(Duration::MAX);
 	}
 }
 

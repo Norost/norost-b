@@ -6,7 +6,7 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-pub use nora_io_queue::{error, Handle, Pow2Size, SeekFrom};
+pub use nora_io_queue::{error, Handle, Monotonic, Pow2Size, SeekFrom};
 
 use alloc::vec::Vec;
 use arena::Arena;
@@ -17,6 +17,7 @@ use core::{
 	mem::{self, MaybeUninit},
 	pin::Pin,
 	task::{Context, Poll as TPoll, Waker},
+	time::Duration,
 };
 use nora_io_queue::{self as q, Request};
 
@@ -242,12 +243,12 @@ impl Queue {
 		}
 	}
 
-	pub fn poll(&self) {
-		self.inner.borrow_mut().poll();
+	pub fn poll(&self) -> Monotonic {
+		self.inner.borrow_mut().poll()
 	}
 
-	pub fn wait(&self) {
-		self.inner.borrow_mut().wait()
+	pub fn wait(&self, timeout: Duration) -> Option<Monotonic> {
+		(self.ready_responses.get() == 0).then(|| self.inner.borrow_mut().wait(timeout))
 	}
 }
 

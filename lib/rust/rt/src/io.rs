@@ -1,7 +1,7 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-use crate::{tls, RefObject};
+use crate::{time::Monotonic, tls, RefObject};
 use alloc::{boxed::Box, vec::Vec};
 use core::{
 	future::Future,
@@ -10,6 +10,7 @@ use core::{
 	ptr::NonNull,
 	sync::atomic::Ordering,
 	task::{Context, Poll as PollF, RawWaker, RawWakerVTable, Waker},
+	time::Duration,
 };
 use nora_io_queue_rt::Full;
 pub use nora_io_queue_rt::{
@@ -152,7 +153,7 @@ macro_rules! impl_io {
 					Ok(r) => return r,
 					Err(Full(_)) => {
 						q.poll();
-						q.wait();
+						q.wait(Duration::MAX);
 						q.process();
 					}
 				}
@@ -172,7 +173,7 @@ macro_rules! impl_io {
 					Ok(r) => return r,
 					Err(Full(b)) => {
 						q.poll();
-						q.wait();
+						q.wait(Duration::MAX);
 						q.process();
 						b
 					}
@@ -196,7 +197,7 @@ pub fn close(handle: Handle) {
 	let q = queue();
 	while q.submit_close(handle).is_err() {
 		q.poll();
-		q.wait();
+		q.wait(Duration::MAX);
 		q.process();
 	}
 }
@@ -212,18 +213,20 @@ pub fn create_root() -> Result<Handle> {
 }
 
 /// Poll & process the I/O queue once.
-pub fn poll_queue() {
+pub fn poll_queue() -> Monotonic {
 	let q = queue();
-	q.poll();
+	let t = q.poll();
 	q.process();
+	t
 }
 
 /// Poll & process the I/O queue once, waiting until any responses are available.
-pub fn poll_queue_and_wait() {
+pub fn poll_queue_and_wait(timeout: Duration) -> Monotonic {
 	let q = queue();
-	q.poll();
-	q.wait();
+	let t = q.poll();
+	let t = q.wait(timeout).unwrap_or(t);
 	q.process();
+	t
 }
 
 /// Block on an asynchronous I/O task until it is finished.
@@ -247,7 +250,7 @@ where
 	let q = queue();
 	loop {
 		q.poll();
-		q.wait();
+		q.wait(Duration::MAX);
 		q.process();
 		if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
 			return res;
