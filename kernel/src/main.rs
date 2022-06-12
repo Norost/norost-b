@@ -122,7 +122,7 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 fn panic(info: &PanicInfo) -> ! {
 	arch::disable_interrupts();
 	fatal!("Panic!");
-	fatal!("{:#?}", info);
+	fatal!("{}", info);
 	loop {
 		arch::halt();
 	}
