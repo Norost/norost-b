@@ -23,9 +23,7 @@ pub fn yield_current_thread() {
 		);
 		// Fake timer interrupt
 		core::arch::asm!(
-			"cli",
 			"int {}",
-			"sti",
 			const super::TIMER_IRQ,
 			options(nomem, nostack, preserves_flags)
 		)
