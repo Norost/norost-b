@@ -1,7 +1,6 @@
 use super::{PPNBox, PageFrameIter, PPN};
 use crate::memory::frame;
 use crate::scheduler::MemoryObject;
-use alloc::boxed::Box;
 use core::num::NonZeroUsize;
 
 /// A physically contiguous range of pages
@@ -23,9 +22,15 @@ impl DMAFrame {
 	}
 }
 
-impl MemoryObject for DMAFrame {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		(0..self.count).map(|i| self.base.skip(i)).collect()
+unsafe impl MemoryObject for DMAFrame {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		(0..self.count)
+			.map(|i| self.base.skip(i))
+			.for_each(|p| f(&[p]));
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.count.try_into().unwrap()
 	}
 }
 

@@ -5,7 +5,7 @@ use crate::memory::{
 };
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
 use core::ptr::NonNull;
@@ -48,7 +48,7 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 	) -> Result<NonNull<Page>, MapError> {
-		let (range, frames, index) = Self::map_object_common(
+		let (range, index) = Self::map_object_common(
 			&self.objects,
 			NonNull::new(Page::SIZE as _).unwrap(),
 			base,
@@ -56,14 +56,14 @@ impl AddressSpace {
 		)?;
 
 		unsafe {
-			self.mmu_address_space
-				.map(
-					range.start().as_ptr() as *const _,
-					frames.into_vec().into_iter(),
-					rwx,
-					hint_color,
-				)
-				.map_err(MapError::Arch)?
+			let mut f =
+				self.mmu_address_space
+					.map(range.start().as_ptr() as *const _, rwx, hint_color);
+			object.physical_pages(&mut |p| {
+				for &p in p.iter() {
+					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+				}
+			});
 		};
 		self.objects.insert(index, (range.clone(), object));
 		Ok(*range.start())
@@ -79,7 +79,7 @@ impl AddressSpace {
 		// on the heap allocator
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
 
-		let (range, frames, index) = Self::map_object_common(
+		let (range, index) = Self::map_object_common(
 			&objects,
 			// TODO don't hardcode base address
 			// Current one is between kernel base & identity map base,
@@ -90,12 +90,13 @@ impl AddressSpace {
 		)?;
 
 		unsafe {
-			r#virtual::AddressSpace::kernel_map(
-				range.start().as_ptr() as *const _,
-				frames.into_vec().into_iter(),
-				rwx,
-			)
-			.map_err(MapError::Arch)?
+			let mut f =
+				r#virtual::AddressSpace::kernel_map(range.start().as_ptr() as *const _, rwx);
+			object.physical_pages(&mut |p| {
+				for &p in p.iter() {
+					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+				}
+			});
 		};
 		objects.insert(index, (range.clone(), object));
 		Ok(*range.start())
@@ -106,9 +107,9 @@ impl AddressSpace {
 		default: NonNull<Page>,
 		base: Option<NonNull<Page>>,
 		object: &dyn MemoryObject,
-	) -> Result<(RangeInclusive<NonNull<Page>>, Box<[PPN]>, usize), MapError> {
-		let frames = object.physical_pages();
-		let count = NonZeroUsize::new(frames.len()).ok_or(MapError::ZeroSize)?;
+	) -> Result<(RangeInclusive<NonNull<Page>>, usize), MapError> {
+		let frames_len = object.physical_pages_len();
+		let count = NonZeroUsize::new(frames_len).ok_or(MapError::ZeroSize)?;
 		let (base, index) = match base {
 			Some(base) => (base, objects.partition_point(|e| e.0.start() < &base)),
 			None => Self::find_free_range(objects, count, default)?,
@@ -124,7 +125,7 @@ impl AddressSpace {
 			return Err(MapError::Overflow);
 		}
 		let end = NonNull::new(end).unwrap();
-		Ok((base..=end, frames, index))
+		Ok((base..=end, index))
 	}
 
 	pub fn unmap_object(

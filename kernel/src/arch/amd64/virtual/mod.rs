@@ -19,16 +19,20 @@ pub unsafe fn add_identity_mapping(phys: usize, size: usize) -> Result<bool, Ide
 	assert_eq!(size & 0xfff, 0, "size is not a multiple of the page size");
 	unsafe {
 		let virt = phys_to_virt(phys.try_into().unwrap()).cast();
+		let mut mapper = AddressSpace::kernel_map(virt, RWX::RW);
 		let iter = PageFrameIter {
 			base: PPN::from_ptr(virt),
 			count: size / 4096,
 		};
-
-		match AddressSpace::kernel_map(virt, iter, RWX::RW) {
-			Ok(_) => Ok(true),
-			Err(MapError::AlreadyMapped) => Ok(false),
-			Err(MapError::OutOfFrames) => Err(IdentityMapError::OutOfFrames),
+		let mut added = false;
+		for p in iter {
+			match mapper(p) {
+				Ok(_) => added = true,
+				Err(MapError::AlreadyMapped) => {}
+				Err(MapError::OutOfFrames) => todo!("{:?}", IdentityMapError::OutOfFrames),
+			}
 		}
+		Ok(added)
 	}
 }
 

@@ -34,9 +34,13 @@ impl PciDevice {
 	}
 }
 
-impl MemoryObject for PciDevice {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		[self.config_region()].into()
+unsafe impl MemoryObject for PciDevice {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		f(&[self.config_region()])
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		1
 	}
 }
 
@@ -111,9 +115,13 @@ pub struct BarRegion {
 	frames: Box<[PPN]>,
 }
 
-impl MemoryObject for BarRegion {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		self.frames.clone()
+unsafe impl MemoryObject for BarRegion {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		f(&self.frames)
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.frames.len()
 	}
 }
 

@@ -131,8 +131,8 @@ fn panic(info: &PanicInfo) -> ! {
 /// A single driver binary.
 struct Driver(&'static [u8]);
 
-impl MemoryObject for Driver {
-	fn physical_pages(&self) -> Box<[PPN]> {
+unsafe impl MemoryObject for Driver {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
 		let address = unsafe { memory::r#virtual::virt_to_phys(self.0.as_ptr()) };
 		assert_eq!(
 			address & u64::try_from(Page::MASK).unwrap(),
@@ -141,7 +141,11 @@ impl MemoryObject for Driver {
 		);
 		let base = PPN((address >> Page::OFFSET_BITS).try_into().unwrap());
 		let count = Page::min_pages_for_bytes(self.0.len());
-		PageFrameIter { base, count }.collect()
+		PageFrameIter { base, count }.for_each(|p| f(&[p]));
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		Page::min_pages_for_bytes(self.0.len())
 	}
 }
 

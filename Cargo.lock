@@ -129,7 +129,6 @@ version = "0.1.1"
 dependencies = [
  "driver_utils",
  "futures",
- "nora_io_queue_rt",
  "norostb_kernel",
  "norostb_rt",
  "pci",

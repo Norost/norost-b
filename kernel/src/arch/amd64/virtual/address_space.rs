@@ -36,7 +36,7 @@ impl AddressSpace {
 		Ok(slf)
 	}
 
-	/// Map the frames to the given address. This will override any existing mappings.
+	/// Map frames to the given address. This will override any existing mappings.
 	///
 	/// This is intended for mapping into userspace only.
 	///
@@ -46,47 +46,42 @@ impl AddressSpace {
 	pub unsafe fn map(
 		&mut self,
 		address: *const Page,
-		frames: impl ExactSizeIterator<Item = frame::PPN>,
 		rwx: RWX,
 		hint_color: u8,
-	) -> Result<(), MapError> {
-		unsafe { Self::map_common(self.table_mut(), address, frames, rwx, hint_color, true) }
+	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
+		unsafe { Self::map_common(self.table_mut(), address, rwx, hint_color, true) }
 	}
 
 	pub unsafe fn kernel_map(
 		address: *const Page,
-		frames: impl ExactSizeIterator<Item = frame::PPN>,
 		rwx: RWX,
-	) -> Result<(), MapError> {
-		unsafe { Self::map_common(Self::current(), address, frames, rwx, 0, false) }
+	) -> impl FnMut(PPN) -> Result<(), MapError> + 'static {
+		unsafe { Self::map_common(Self::current(), address, rwx, 0, false) }
 	}
 
 	unsafe fn map_common(
 		tbl: &mut [common::Entry; 512],
-		address: *const Page,
-		frames: impl ExactSizeIterator<Item = frame::PPN>,
+		mut address: *const Page,
 		rwx: RWX,
 		hint_color: u8,
 		user: bool,
-	) -> Result<(), MapError> {
-		for (i, ppn) in frames.enumerate() {
-			loop {
-				match common::get_entry_mut(tbl, address.wrapping_add(i) as u64, 0, 3) {
-					Ok(e) => {
-						debug_assert!(!e.is_present(), "page already set");
-						e.set_page(ppn.as_phys() as u64, user, rwx.w()).unwrap();
-						break;
-					}
-					Err((e, _)) => {
-						e.make_table(user, hint_color).map_err(|e| match e {
-							common::MakeTableError::IsLeaf => MapError::AlreadyMapped,
-							common::MakeTableError::OutOfFrames => MapError::OutOfFrames,
-						})?;
-					}
+	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
+		move |ppn| loop {
+			match common::get_entry_mut(tbl, address as u64, 0, 3) {
+				Ok(e) => {
+					debug_assert!(!e.is_present(), "page already set");
+					e.set_page(ppn.as_phys() as u64, user, rwx.w()).unwrap();
+					address = address.wrapping_add(1);
+					break Ok(());
+				}
+				Err((e, _)) => {
+					e.make_table(user, hint_color).map_err(|e| match e {
+						common::MakeTableError::IsLeaf => MapError::AlreadyMapped,
+						common::MakeTableError::OutOfFrames => MapError::OutOfFrames,
+					})?;
 				}
 			}
 		}
-		Ok(())
 	}
 
 	pub unsafe fn unmap(

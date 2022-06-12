@@ -3,7 +3,7 @@ use crate::memory::r#virtual::{MapError, RWX};
 use crate::memory::Page;
 use crate::object_table::Object;
 use crate::scheduler::{process::frame::PPN, MemoryObject};
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ops::Range;
@@ -75,15 +75,31 @@ struct MemorySlice {
 	range: Range<usize>,
 }
 
-impl MemoryObject for MemorySlice {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		self.inner
-			.physical_pages()
-			.into_vec()
-			.into_iter()
-			.skip(self.range.start)
-			.take(self.range.end - self.range.start)
-			.collect()
+unsafe impl MemoryObject for MemorySlice {
+	fn physical_pages(&self, cb: &mut dyn FnMut(&[PPN])) {
+		let mut skip = self.range.start;
+		let mut len = self.range.end - self.range.start;
+		self.inner.physical_pages(&mut |f| {
+			if len == 0 {
+				// pass
+			} else if let Some(s) = skip.checked_sub(f.len()) {
+				skip = s;
+			} else {
+				let f = &f[skip..];
+				skip = 0;
+				if f.len() > len {
+					cb(&f[..len]);
+					len = 0;
+				} else {
+					cb(f);
+					len -= f.len();
+				}
+			}
+		})
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.range.end - self.range.start
 	}
 }
 
@@ -95,7 +111,8 @@ impl super::Process {
 		objects: arena::Arena<Arc<dyn Object>, u8>,
 	) -> Result<Arc<Self>, ElfError> {
 		// FIXME don't require contiguous pages.
-		let data = data_object.physical_pages();
+		let mut data = alloc::vec::Vec::new();
+		data_object.physical_pages(&mut |f| data.extend_from_slice(f));
 
 		// FIXME definitely don't require unsafe code.
 		let data = unsafe {
@@ -214,19 +231,23 @@ impl super::Process {
 					let mut offt = 0;
 					let page_offt = usize::try_from(header.offset).unwrap() & Page::MASK;
 					let mut wr_i = page_offt;
-					for p in data_object.physical_pages().into_vec() {
-						let (from, to) = (offt, offt + u64::try_from(Page::SIZE).unwrap());
-						for i in from.max(header.offset)..to.min(header.offset + header.file_size) {
-							let rd_i = usize::try_from(i).unwrap() & Page::MASK;
-							assert_eq!(rd_i & Page::MASK, wr_i & Page::MASK);
-							unsafe {
-								let b = p.as_ptr().cast::<u8>().add(rd_i).read();
-								mem.write(wr_i, &[b]);
+					data_object.physical_pages(&mut |pl| {
+						for &p in pl {
+							let (from, to) = (offt, offt + u64::try_from(Page::SIZE).unwrap());
+							for i in
+								from.max(header.offset)..to.min(header.offset + header.file_size)
+							{
+								let rd_i = usize::try_from(i).unwrap() & Page::MASK;
+								assert_eq!(rd_i & Page::MASK, wr_i & Page::MASK);
+								unsafe {
+									let b = p.as_ptr().cast::<u8>().add(rd_i).read();
+									mem.write(wr_i, &[b]);
+								}
+								wr_i += 1;
 							}
-							wr_i += 1;
+							offt = to;
 						}
-						offt = to;
-					}
+					});
 					assert_eq!(u64::try_from(wr_i - page_offt).unwrap(), header.file_size);
 					address_space
 						.map_object(Some(virt), mem, rwx, slf.hint_color)
