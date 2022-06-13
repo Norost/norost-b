@@ -81,9 +81,12 @@ impl Object for PciDevice {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			count: size.get().try_into().unwrap(),
 		};
-		Some(Arc::new(BarRegion {
+		dbg!(frames.count);
+		let r = Some(Arc::new(BarRegion {
 			frames: frames.collect(),
-		}))
+		}) as Arc<dyn MemoryObject>);
+		dbg!("ok");
+		r
 	}
 }
 

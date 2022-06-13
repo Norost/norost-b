@@ -93,6 +93,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_intel_hd_graphics"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "norostb_kernel",
+ "norostb_rt",
+ "norostb_rt_alloc",
+ "pci",
+]
+
+[[package]]
 name = "driver_scancode_to_char"
 version = "0.1.0"
 dependencies = [
