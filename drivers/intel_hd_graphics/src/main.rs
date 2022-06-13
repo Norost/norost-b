@@ -63,14 +63,72 @@ macro_rules! reg {
 		}
 	};
 	{
+		$(#[doc = $doc:literal])*
 		$name:ident @ $address:literal
 		$($fn:ident $setfn:ident [$param:tt] $ty:ty)*
 	} => {
+		$(#[doc = $doc])*
+		#[allow(dead_code)]
 		pub struct $name(u32);
 
 		impl $name {
+			#[allow(dead_code)]
 			pub const REG: u32 = $address;
 
+			#[allow(dead_code)]
+			pub fn from_raw(n: u32) -> Self {
+				Self(n)
+			}
+
+			#[allow(dead_code)]
+			pub fn as_raw(&self) -> u32 {
+				self.0
+			}
+
+			$(reg!(@INTERNAL $fn $setfn [$param] $ty);)*
+		}
+	};
+	{
+		$(#[doc = $doc:literal])*
+		$name:ident [$($variant:ident @ $address:literal),+ $(,)?]
+		$($fn:ident $setfn:ident [$param:tt] $ty:ty)*
+	} => {
+		$(#[doc = $doc])*
+		#[allow(dead_code)]
+		pub enum $name { $($variant(u32),)+ }
+
+		impl $name {
+			#[allow(dead_code)]
+			pub fn get_reg(&self) -> u32 {
+				match self {
+					$(Self::$variant(_) => $address,)+
+				}
+			}
+
+			#[allow(dead_code)]
+			pub fn from_raw(n: u32) -> Self {
+				Self(n)
+			}
+
+			#[allow(dead_code)]
+			pub fn as_raw(&self) -> u32 {
+				self.0
+			}
+
+			$(reg!(@INTERNAL $fn $setfn [$param] $ty);)*
+		}
+	};
+	{
+		$(#[doc = $doc:literal])*
+		$name:ident
+		$($fn:ident $setfn:ident [$param:tt] $ty:ty)*
+	} => {
+		$(#[doc = $doc])*
+		#[allow(dead_code)]
+		#[derive(Clone)]
+		pub struct $name(u32);
+
+		impl $name {
 			#[allow(dead_code)]
 			pub fn from_raw(n: u32) -> Self {
 				Self(n)
@@ -108,13 +166,13 @@ macro_rules! bit2enum {
 		$name:ident
 		$($variant:ident $val:literal)*
 	} => {
-		#[derive(Clone, Copy, Debug)]
+		#[derive(Clone, Copy, Debug, PartialEq)]
 		pub enum $name {
 			$($variant = $val,)*
 		}
 
-		impl PanicFrom<u32> for $name {
-			fn panic_from(value: u32) {
+		impl $crate::PanicFrom<u32> for $name {
+			fn panic_from(value: u32) -> Self {
 				match value {
 					$($val => Self::$variant,)*
 					_ => unreachable!(),
@@ -126,7 +184,7 @@ macro_rules! bit2enum {
 		try $name:ident
 		$($variant:ident $val:literal)*
 	} => {
-		#[derive(Clone, Copy, Debug)]
+		#[derive(Clone, Copy, Debug, PartialEq)]
 		pub enum $name {
 			$($variant = $val,)*
 		}
@@ -145,12 +203,13 @@ macro_rules! bit2enum {
 }
 
 macro_rules! log {
-	($($arg:tt)*) => {
+	($($arg:tt)*) => {{
 		let _ = rt::io::stderr().map(|o| writeln!(o, $($arg)*));
-	};
+	}};
 }
 
 mod control;
+mod displayport;
 mod gmbus;
 mod plane;
 mod vga;
@@ -258,14 +317,50 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 				let mut control = control::Control::new(control.cast());
 
-				// This is the only errata I found wrt. GMBUS. (see vol15)
+				// This is the only errata I found wrt. GMBUS. (see vol15) and DP AUX
 				// It doesn't seem to do anything though.
-				/*
 				unsafe {
 					let v = control.load(0xc2020);
 					control.store(0xc2020, v | (1 << 12));
 				}
-				*/
+
+				// Ensure Self Refreshing Display is disabled (SRD)
+				const SRD_CTL_A: u32 = 0x60800;
+				const SRD_CTL_B: u32 = 0x61800;
+				const SRD_CTL_C: u32 = 0x62800;
+				const SRD_CTL_EDP: u32 = 0x6f800;
+				for reg in [SRD_CTL_A, SRD_CTL_B, SRD_CTL_C, SRD_CTL_EDP] {
+					unsafe {
+						let v = control.load(reg);
+						control.store(reg, v & !(1 << 31));
+					}
+				}
+
+				unsafe {
+					for port in [
+						displayport::Port::A,
+						displayport::Port::B,
+						displayport::Port::C,
+						displayport::Port::D,
+						//displayport::Port::E,
+					] {
+						let mut edid = [0; 128];
+						let _ =
+							displayport::i2c_write_read(&mut control, port, 0x50, &[0], &mut edid)
+								.map(|()| {
+									for c in edid.as_chunks::<16>().0 {
+										log!("{:02x?}", c);
+									}
+									log!("stop DP (yay)");
+									rt::thread::sleep(core::time::Duration::MAX);
+								})
+								.map_err(|e| log!("{:?}", e));
+						rt::thread::sleep(core::time::Duration::from_secs(5));
+					}
+				}
+
+				log!("stop DP");
+				rt::thread::sleep(core::time::Duration::MAX);
 
 				use gmbus::PinPair;
 				for pp in [PinPair::DacDdc, PinPair::DdiB, PinPair::DdiC, PinPair::DdiD] {
@@ -274,15 +369,17 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					unsafe {
 						// Reset GMBUS controller
 						let mut cmd = gmbus::Gmbus1::from_raw(0);
+						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
 						cmd.set_software_clear_interrupt(true);
 						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
 						cmd.set_software_clear_interrupt(false);
 						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
 
+						control.store(gmbus::Gmbus4::REG, 31); // just in case
 						control.store(gmbus::Gmbus5::REG, 0); // just in case
 
 						// Select device
-						let mut select = gmbus::Gmbus0::from_raw(4);
+						let mut select = gmbus::Gmbus0::from_raw(control.load(gmbus::Gmbus0::REG));
 						select.set_rate(gmbus::Rate::Hz100K);
 						select.set_pin_pair(pp);
 						log!("will wr {:#04x}", select.as_raw());
