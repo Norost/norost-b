@@ -16,6 +16,8 @@
 
 extern crate alloc;
 
+use core::time::Duration;
+
 macro_rules! reg {
 	(@INTERNAL $fn:ident $setfn:ident [$bit:literal] $ty:ty) => {
 		#[allow(dead_code)]
@@ -58,7 +60,7 @@ macro_rules! reg {
 		pub fn $setfn(&mut self, value: $ty) -> &mut Self {
 			const MASK: u32 = (1 << ($high - $low + 1)) - 1;
 			self.0 &= const { !(MASK << $low) };
-			self.0 |= (value as u32) << $low;
+			self.0 |= u32::from(value) << $low;
 			self
 		}
 	};
@@ -179,6 +181,12 @@ macro_rules! bit2enum {
 				}
 			}
 		}
+
+		impl From<$name> for u32 {
+			fn from(s: $name) -> Self {
+				s as Self
+			}
+		}
 	};
 	{
 		try $name:ident
@@ -199,6 +207,24 @@ macro_rules! bit2enum {
 				}
 			}
 		}
+
+		impl From<$name> for u32 {
+			fn from(s: $name) -> Self {
+				s as Self
+			}
+		}
+	};
+}
+
+macro_rules! impl_reg {
+	($base:literal $val:ident $load:ident $store:ident) => {
+		unsafe fn $load(&self, control: &mut Control) -> $val {
+			$val(control.load($base + self.offset()))
+		}
+
+		unsafe fn $store(&self, control: &mut Control, val: $val) {
+			control.store($base + self.offset(), val.0)
+		}
 	};
 }
 
@@ -208,10 +234,29 @@ macro_rules! log {
 	}};
 }
 
+pub struct GraphicsAddress(u32);
+
+impl PanicFrom<u32> for GraphicsAddress {
+	fn panic_from(n: u32) -> Self {
+		assert_eq!(n & 0xfff, 0, "address is not aligned");
+		Self(n)
+	}
+}
+
+impl From<GraphicsAddress> for u32 {
+	fn from(addr: GraphicsAddress) -> Self {
+		addr.0
+	}
+}
+
 mod control;
 mod displayport;
+mod edid;
 mod gmbus;
+mod mode;
+mod pipe;
 mod plane;
+mod transcoder;
 mod vga;
 
 use alloc::vec::Vec;
@@ -336,82 +381,98 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 
-				unsafe {
-					for port in [
+				let mut edid = [0; 128];
+				let mut port = None;
+				let port = unsafe {
+					for p in [
 						displayport::Port::A,
 						displayport::Port::B,
 						displayport::Port::C,
 						displayport::Port::D,
-						//displayport::Port::E,
 					] {
-						let mut edid = [0; 128];
-						let _ =
-							displayport::i2c_write_read(&mut control, port, 0x50, &[0], &mut edid)
-								.map(|()| {
-									for c in edid.as_chunks::<16>().0 {
-										log!("{:02x?}", c);
-									}
-									log!("stop DP (yay)");
-									rt::thread::sleep(core::time::Duration::MAX);
-								})
-								.map_err(|e| log!("{:?}", e));
-						rt::thread::sleep(core::time::Duration::from_secs(5));
+						match displayport::i2c_write_read(&mut control, p, 0x50, &[0], &mut edid) {
+							Ok(()) => {
+								for c in edid.as_chunks::<16>().0 {
+									log!("{:02x?}", c);
+								}
+								port = Some(p);
+								break;
+							}
+							Err(e) => log!("{:?}", e),
+						}
 					}
+					if let Some(port) = port {
+						port
+					} else {
+						log!("No DisplayPort device found");
+						return 1;
+					}
+				};
+				let edid = edid::Edid::new(edid).unwrap();
+				let mode = mode::Mode::from_edid(&edid).unwrap();
+				log!("{:?}", &mode);
+
+				let vga_enable = root.open(b"vga/enable").unwrap();
+				log!("{:?}", vga_enable.read_vec(1).unwrap());
+
+				//log!("Disabling VGA, enabling primary surface & painting colors in 3 seconds");
+				//rt::thread::sleep(Duration::from_secs(3));
+
+				let (width, height) = (mode.horizontal.active + 1, mode.vertical.active + 1);
+
+				let config = plane::Config {
+					base: GraphicsAddress(0),
+					format: plane::PixelFormat::BGRX8888,
+					stride: width * 4,
+				};
+
+				// See vol11 p. 112 "Sequences for DisplayPort"
+				// We're skipping step 1 to 4 for now since it should already be set up by
+				// firmware.
+				use transcoder::Transcoder;
+				unsafe {
+					// Disable sequence
+					plane::disable(&mut control, plane::Plane::A);
+					pipe::disable(&mut control, pipe::Pipe::A);
+					//transcoder::disable(&mut control, Transcoder::EDP);
+					//displayport::disable(&mut control, displayport::Port::A);
+					vga_enable.write(&[0]).unwrap();
+					vga::disable_vga(&mut control);
+					//rt::thread::sleep(Duration::MAX);
+
+					// EDP uses pipe (transcoder?) A's panels
+					//displayport::configure(&mut control, displayport::Port::A);
+					//transcoder::configure(&mut control, Transcoder::EDP, None, mode);
+					pipe::configure(&mut control, pipe::Pipe::A, &mode);
+					plane::enable(&mut control, plane::Plane::A, config);
+					/*
+					const DDI_BUF_CTL_A: u32 = 0x64000;
+					let v = control.load(DDI_BUF_CTL_A);
+					control.store(DDI_BUF_CTL_A, v | (1 << 31));
+					*/
+
+					/*
+					let v = control.load(SRD_CTL_EDP);
+					control.store(SRD_CTL_EDP, v | (1 << 31));
+					*/
 				}
 
-				log!("stop DP");
-				rt::thread::sleep(core::time::Duration::MAX);
-
-				use gmbus::PinPair;
-				for pp in [PinPair::DacDdc, PinPair::DdiB, PinPair::DdiC, PinPair::DdiD] {
-					rt::thread::sleep(core::time::Duration::from_secs(5));
-					log!("{:?}", pp);
-					unsafe {
-						// Reset GMBUS controller
-						let mut cmd = gmbus::Gmbus1::from_raw(0);
-						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
-						cmd.set_software_clear_interrupt(true);
-						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
-						cmd.set_software_clear_interrupt(false);
-						control.store(gmbus::Gmbus1::REG, cmd.as_raw());
-
-						control.store(gmbus::Gmbus4::REG, 31); // just in case
-						control.store(gmbus::Gmbus5::REG, 0); // just in case
-
-						// Select device
-						let mut select = gmbus::Gmbus0::from_raw(control.load(gmbus::Gmbus0::REG));
-						select.set_rate(gmbus::Rate::Hz100K);
-						select.set_pin_pair(pp);
-						log!("will wr {:#04x}", select.as_raw());
-						control.store(gmbus::Gmbus0::REG, select.as_raw());
-						log!(
-							"{:#04x} -> {:#04x}",
-							gmbus::Gmbus0::REG,
-							control.load(gmbus::Gmbus0::REG)
-						);
-					}
-					log!("gmbus0");
-
-					let mut edid = [0; 128];
-					unsafe {
-						/*
-						log!("edid wr");
-						if let Err(e) = gmbus::write(&mut control, 0x50, &[0]) {
-							log!("error: {:?}", e);
-							continue;
+				// Funny colors GO
+				let plane_buf = memory.cast::<[u8; 4]>();
+				for y in 0..height {
+					for x in 0..width {
+						let (x, y) = (usize::from(x), usize::from(y));
+						let r = x * 256 / usize::from(width);
+						let g = y * 256 / usize::from(height);
+						let b = 255 - (r + g) / 2;
+						let bgrx = [b as u8, g as u8, r as u8, 0];
+						let bgrx = [0, 0, r as u8, 0];
+						unsafe {
+							*plane_buf.as_ptr().add(y * usize::from(width) + x) = bgrx;
+							//*plane_buf.as_ptr().add(y * usize::from(width) + x) = 0x00ff0000;
 						}
-						*/
-						log!("edid rd");
-						if let Err(e) = gmbus::read(&mut control, 0x50, &mut edid) {
-							log!("error: {:?}", e);
-							continue;
-						}
-						log!("edid done");
+						rt::thread::sleep(Duration::from_millis(1));
 					}
-					for c in edid.as_chunks::<32>().0 {
-						log!("{:02x?}", c);
-					}
-					break;
 				}
 			}
 			_ => unreachable!(),

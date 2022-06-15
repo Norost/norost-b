@@ -12,3 +12,4 @@ rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 pci = { path = "../../lib/rust/pci" }
 kernel = { package = "norostb_kernel", path = "../../lib/rust/kernel" }
+endian = { path = "../../lib/rust/endian" }

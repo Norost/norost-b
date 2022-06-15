@@ -35,7 +35,7 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 	// Do not reorder the calls!
 	unsafe {
 		#[cfg(feature = "driver-vga")]
-		vga::init();
+		vga::init(root);
 
 		acpi::init(boot, root);
 

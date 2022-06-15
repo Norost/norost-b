@@ -61,6 +61,72 @@ bit2enum! {
 	N20 20
 }
 
+reg! {
+	TransportControl
+	enable set_enable [31] bool
+	mode set_mode [(27:27)] TransportMode
+	force_act set_force_act [25] bool
+	enhanced_framing set_enhanced_framing [18] bool
+	fdi_auto_train set_fdi_auto_train [15] bool
+	link_training set_link_training [(try 10:8)] LinkTraining
+	alternate_sr_scrambler set_alternate_sr_scrambler [6] bool
+}
+
+bit2enum! {
+	TransportMode
+	Sst 0
+	Mst 1
+}
+
+bit2enum! {
+	try LinkTraining
+	Pattern1 0b000
+	Pattern2 0b001
+	Idle 0b010
+	Normal 0b011
+	Pattern3 0b100
+}
+
+reg! {
+	DdiBufferControl
+	enable set_enable [31] bool
+	voltage_swing set_voltage_swing [(27:24)] u8 // FIXME u4
+	port_reversal set_port_reversal [16] bool
+	idle_status set_idle_status [7] bool
+	a_lane_control set_a_lane_control [(4:4)] ALaneControl
+	port_width set_port_width [(try 3:1)] PortWidth
+	init_display_detected set_init_display_detected [0] bool
+}
+
+bit2enum! {
+	ALaneControl
+	X2 0
+	X4 1
+}
+
+bit2enum! {
+	try PortWidth
+	X1 0b000
+	X2 0b001
+	X4 0b011
+}
+
+reg! {
+	PortClockSelect
+	clock set_clock [(try 31:29)] PortClock
+}
+
+bit2enum! {
+	try PortClock
+	LcPll2700 0b000
+	LcPll1350 0b001
+	LcPll810  0b010
+	SPll      0b011
+	WrPll1    0b100
+	WrPll2    0b101
+	None      0b111
+}
+
 #[derive(Clone, Copy)]
 pub enum Port {
 	/// Known as DDI_AUX_{CTL,DATA} in vol2a and located at an entirely different address from the
@@ -74,7 +140,7 @@ pub enum Port {
 }
 
 impl Port {
-	fn offset(&self) -> u32 {
+	fn offset_aux(&self) -> u32 {
 		match self {
 			Self::A => 0x64010,
 			Self::B => 0xe4110,
@@ -85,12 +151,12 @@ impl Port {
 	}
 
 	fn ctl_port(&self) -> u32 {
-		self.offset()
+		self.offset_aux()
 	}
 
 	fn data_port(&self, instance: u8) -> u32 {
 		assert!(instance < 5, "there are only 5 data registers per port");
-		self.offset() + 4 + u32::from(instance) * 4
+		self.offset_aux() + 4 + u32::from(instance) * 4
 	}
 
 	unsafe fn load_ctl(&self, control: &mut Control) -> DpAuxCtl {
@@ -108,6 +174,21 @@ impl Port {
 	unsafe fn store_data(&self, control: &mut Control, instance: u8, data: DpAuxData) {
 		control.store(self.data_port(instance), data.0)
 	}
+
+	unsafe fn offset(&self) -> u32 {
+		0x100
+			* match self {
+				Self::A => 0,
+				Self::B => 1,
+				Self::C => 2,
+				Self::D => 3,
+				Self::E => 4,
+			}
+	}
+
+	impl_reg!(0x46100 PortClockSelect load_port_clk_sel store_port_clk_sel);
+	impl_reg!(0x64040 TransportControl load_dp_tp_ctl store_dp_tp_ctl);
+	impl_reg!(0x64000 DdiBufferControl load_ddi_buf_ctl store_ddi_buf_ctl);
 }
 
 /// Wait for an AUX CH reply.
@@ -163,11 +244,9 @@ unsafe fn i2c_init(
 	loop {
 		let mut ctl = port.load_ctl(control);
 		let mut data = DpAuxData(0);
-		log!("ctl : {:08x}", ctl.0);
 		data.set_byte_0(i2c_format_request(read, true));
 		data.set_byte_1(0);
 		data.set_byte_2(address);
-		log!("> {:08x}", data.0);
 		ctl.set_message_size(MessageSize::N3);
 		ctl.set_receive_error(true); // Clear error
 		ctl.set_time_out_error(true); // Clear timeout
@@ -210,7 +289,6 @@ unsafe fn i2c_finish(
 		data.set_byte_0(i2c_format_request(true, false));
 		data.set_byte_1(0);
 		data.set_byte_2(address);
-		log!("> {:08x}", data.0);
 		ctl.set_message_size(MessageSize::N3);
 		ctl.set_send_busy(true);
 		port.store_data(control, 0, data);
@@ -255,7 +333,6 @@ unsafe fn i2c_put(
 		data0.set_byte_2(address);
 		data0.set_byte_3(0); // length - 1
 		data1.set_byte_0(byte);
-		log!("> {:08x} {:08x}", data0.0, data1.0);
 		ctl.set_message_size(MessageSize::N5);
 		ctl.set_send_busy(true);
 		port.store_data(control, 0, data0);
@@ -295,7 +372,6 @@ unsafe fn i2c_fetch(
 		data.set_byte_1(0);
 		data.set_byte_2(address);
 		data.set_byte_3(0); // length - 1
-		log!("> {:08x}", data.0);
 		ctl.set_message_size(MessageSize::N4);
 		ctl.set_send_busy(true);
 		port.store_data(control, 0, data);
@@ -435,4 +511,45 @@ pub enum I2CReply {
 	I2CDefer,
 	AuxNotAcknowledged,
 	AuxDefer,
+}
+
+pub unsafe fn configure(control: &mut Control, port: Port) {
+	// See vol11 p. 112 "Sequences for DisplayPort"
+
+	// TODO PLL
+
+	let mut tp = port.load_dp_tp_ctl(control);
+	tp.set_enable(true);
+	tp.set_link_training(LinkTraining::Pattern1);
+	port.store_dp_tp_ctl(control, tp);
+
+	// TODO DDI_BUF_TRANS
+
+	let mut ddi = port.load_ddi_buf_ctl(control);
+	ddi.set_enable(true);
+	port.store_ddi_buf_ctl(control, ddi);
+
+	rt::thread::sleep(core::time::Duration::from_millis(10));
+	// TODO DP training sequence
+
+	match port {
+		Port::B | Port::C | Port::D | Port::E => todo!(),
+		Port::A => {}
+	}
+}
+
+pub unsafe fn disable(control: &mut Control, port: Port) {
+	let mut bufctl = port.load_ddi_buf_ctl(control);
+	bufctl.set_enable(false);
+	port.store_ddi_buf_ctl(control, bufctl);
+
+	let mut tpctl = port.load_dp_tp_ctl(control);
+	tpctl.set_enable(false);
+	port.store_dp_tp_ctl(control, tpctl);
+
+	log!("a {:08x}", port.load_ddi_buf_ctl(control).0);
+	while !port.load_ddi_buf_ctl(control).idle_status() {
+		rt::thread::yield_now();
+	}
+	log!("b");
 }

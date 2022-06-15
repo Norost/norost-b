@@ -97,6 +97,7 @@ name = "driver_intel_hd_graphics"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "endian",
  "norostb_kernel",
  "norostb_rt",
  "norostb_rt_alloc",
