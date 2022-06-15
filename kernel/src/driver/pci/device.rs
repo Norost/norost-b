@@ -77,11 +77,13 @@ impl Object for PciDevice {
 		}
 		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
 		let addr = BaseAddress::address(orig, upper).unwrap();
-		let frames = PageFrameIter {
+		let mut frames = PageFrameIter {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			count: size.get().try_into().unwrap(),
 		};
 		dbg!(frames.count);
+		// FIXME there needs to be a better way to limit the amount of pages.
+		frames.count = frames.count.min(1 << 20);
 		let r = Some(Arc::new(BarRegion {
 			frames: frames.collect(),
 		}) as Arc<dyn MemoryObject>);
