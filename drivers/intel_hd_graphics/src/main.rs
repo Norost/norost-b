@@ -1,7 +1,10 @@
 //! # Intel HD Graphics driver
 //!
-//! Based on https://github.com/managarm/managarm/blob/master/drivers/gfx/intel/
+//! Based on https://github.com/managarm/managarm/blob/master/drivers/gfx/intel/ and
+//! https://github.com/himanshugoel2797/Cardinal/tree/master/drivers/display/ihd/common
+//!
 //! Documentation can be found at https://01.org/linuxgraphics/documentation
+//!
 //! (Incomplete) guide can be foudn at https://wiki.osdev.org/Intel_HD_Graphics
 //!
 //! ## Supported devices
@@ -76,36 +79,6 @@ macro_rules! reg {
 		impl $name {
 			#[allow(dead_code)]
 			pub const REG: u32 = $address;
-
-			#[allow(dead_code)]
-			pub fn from_raw(n: u32) -> Self {
-				Self(n)
-			}
-
-			#[allow(dead_code)]
-			pub fn as_raw(&self) -> u32 {
-				self.0
-			}
-
-			$(reg!(@INTERNAL $fn $setfn [$param] $ty);)*
-		}
-	};
-	{
-		$(#[doc = $doc:literal])*
-		$name:ident [$($variant:ident @ $address:literal),+ $(,)?]
-		$($fn:ident $setfn:ident [$param:tt] $ty:ty)*
-	} => {
-		$(#[doc = $doc])*
-		#[allow(dead_code)]
-		pub enum $name { $($variant(u32),)+ }
-
-		impl $name {
-			#[allow(dead_code)]
-			pub fn get_reg(&self) -> u32 {
-				match self {
-					$(Self::$variant(_) => $address,)+
-				}
-			}
 
 			#[allow(dead_code)]
 			pub fn from_raw(n: u32) -> Self {
@@ -234,6 +207,7 @@ macro_rules! log {
 	}};
 }
 
+#[derive(Clone, Copy)]
 pub struct GraphicsAddress(u32);
 
 impl PanicFrom<u32> for GraphicsAddress {
@@ -249,15 +223,20 @@ impl From<GraphicsAddress> for u32 {
 	}
 }
 
+mod backlight;
 mod control;
+mod ddi;
 mod displayport;
 mod edid;
 mod gmbus;
 mod mode;
+mod panel;
 mod pipe;
 mod plane;
+mod pll;
 mod transcoder;
 mod vga;
+mod watermark;
 
 use alloc::vec::Vec;
 
@@ -414,47 +393,80 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 				let vga_enable = root.open(b"vga/enable").unwrap();
 				log!("{:?}", vga_enable.read_vec(1).unwrap());
+				//rt::thread::sleep(Duration::MAX);
+
+				pll::compute_sdvo(mode.pixel_clock);
 
 				//log!("Disabling VGA, enabling primary surface & painting colors in 3 seconds");
 				//rt::thread::sleep(Duration::from_secs(3));
 
 				let (width, height) = (mode.horizontal.active + 1, mode.vertical.active + 1);
 
+				let stride = width * 4;
+				let stride = (stride + 63) & !63;
 				let config = plane::Config {
 					base: GraphicsAddress(0),
 					format: plane::PixelFormat::BGRX8888,
-					stride: width * 4,
+					stride,
 				};
 
 				// See vol11 p. 112 "Sequences for DisplayPort"
 				// We're skipping step 1 to 4 for now since it should already be set up by
 				// firmware.
+				/*
 				use transcoder::Transcoder;
 				unsafe {
+					let (h, v) = transcoder::get_hv_active(&mut control, Transcoder::EDP);
+
 					// Disable sequence
 					plane::disable(&mut control, plane::Plane::A);
-					pipe::disable(&mut control, pipe::Pipe::A);
+
 					//transcoder::disable(&mut control, Transcoder::EDP);
+
 					//displayport::disable(&mut control, displayport::Port::A);
+					//pll::disable_all(&mut control);
+					//backlight::disable(&mut control);
+					//panel::disable_fitter(&mut control, panel::Pipe::A);
+					//transcoder::disable_only(&mut control, Transcoder::EDP);
 					vga_enable.write(&[0]).unwrap();
 					vga::disable_vga(&mut control);
-					//rt::thread::sleep(Duration::MAX);
 
-					// EDP uses pipe (transcoder?) A's panels
-					//displayport::configure(&mut control, displayport::Port::A);
-					//transcoder::configure(&mut control, Transcoder::EDP, None, mode);
-					pipe::configure(&mut control, pipe::Pipe::A, &mode);
-					plane::enable(&mut control, plane::Plane::A, config);
+					//rt::thread::sleep(Duration::MAX);
+					rt::thread::sleep(Duration::from_millis(50));
+
+					rt::thread::sleep(Duration::from_millis(50));
 					/*
-					const DDI_BUF_CTL_A: u32 = 0x64000;
-					let v = control.load(DDI_BUF_CTL_A);
-					control.store(DDI_BUF_CTL_A, v | (1 << 31));
+					pll::configure(&mut control, pll::WrPll::N1);
+					pll::configure(&mut control, pll::WrPll::N2);
 					*/
+
+					//transcoder::configure(&mut control, Transcoder::EDP, None, mode);
+					//displayport::enable(&mut control, displayport::Port::A);
+					//transcoder::enable(&mut control, Transcoder::EDP);
+					pipe::configure(&mut control, pipe::Pipe::A, &mode);
+					//panel::enable_fitter(&mut control, panel::Pipe::A);
+					//pipe::set_hv(&mut control, pipe::Pipe::A,  h, v);
+					plane::enable(&mut control, plane::Plane::A, config);
+					//panel::disable_all_fitters(&mut control);
+					//transcoder::enable_only(&mut control, Transcoder::EDP);
+
+					//backlight::enable(&mut control);
+					//displayport::configure(&mut control, displayport::Port::A);
 
 					/*
 					let v = control.load(SRD_CTL_EDP);
 					control.store(SRD_CTL_EDP, v | (1 << 31));
 					*/
+				}
+				*/
+
+				// This is the most minimal sequence that kinda-but-not-really works
+				unsafe {
+					//plane::enable(&mut control, plane::Plane::A, config);
+					for x in 0..1920 {
+						pipe::set_hv(&mut control, pipe::Pipe::A, x, 1079);
+						rt::thread::sleep(Duration::from_millis(5));
+					}
 				}
 
 				// Funny colors GO
@@ -466,12 +478,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let g = y * 256 / usize::from(height);
 						let b = 255 - (r + g) / 2;
 						let bgrx = [b as u8, g as u8, r as u8, 0];
-						let bgrx = [0, 0, r as u8, 0];
+						//let bgrx = [255 - r as u8, ((y % 4) * 64) as u8, r as u8, 0];
 						unsafe {
-							*plane_buf.as_ptr().add(y * usize::from(width) + x) = bgrx;
+							*plane_buf.as_ptr().add(y * usize::from(stride / 4) + x) = bgrx;
 							//*plane_buf.as_ptr().add(y * usize::from(width) + x) = 0x00ff0000;
 						}
-						rt::thread::sleep(Duration::from_millis(1));
+						rt::thread::sleep(Duration::from_millis(10));
 					}
 				}
 			}

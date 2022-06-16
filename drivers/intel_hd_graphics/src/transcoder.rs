@@ -30,6 +30,11 @@ reg! {
 }
 
 reg! {
+	SynchronizeShift
+	//sync_shift_start
+}
+
+reg! {
 	Total
 	total set_total [(28:16)] u16 // FIXME u13
 	// FIXME TRANS_HTOTAL has an extra bit for this.
@@ -143,6 +148,7 @@ impl Transcoder {
 	impl_reg!(0x6000c Total load_vtotal store_vtotal);
 	impl_reg!(0x60010 Blank load_vblank store_vblank);
 	impl_reg!(0x60014 Synchronize load_vsync store_vsync);
+	impl_reg!(0x60028 SynchronizeShift load_vsyncshift store_vsyncshift);
 	impl_reg!(0x60400 DdiFunctionControl load_ddi_func_ctl store_ddi_func_ctl);
 }
 
@@ -187,10 +193,12 @@ pub unsafe fn configure(
 	let mut vtotal = transcoder.load_vtotal(control);
 	let mut vblank = transcoder.load_vblank(control);
 	let mut vsync = transcoder.load_vsync(control);
+	let mut vsyncshift = transcoder.load_vsyncshift(control);
 	f(&mut vtotal, &mut vblank, &mut vsync, &mode.vertical);
 	transcoder.store_vtotal(control, vtotal);
 	transcoder.store_vblank(control, vblank);
 	transcoder.store_vsync(control, vsync);
+	transcoder.store_vsyncshift(control, vsyncshift);
 
 	let mut ddi_func = transcoder.load_ddi_func_ctl(control);
 	ddi_func.set_enable(true);
@@ -207,7 +215,12 @@ pub unsafe fn configure(
 
 	let mut cfg = transcoder.load_config(control);
 	cfg.set_enable(true);
-	cfg.set_interlaced_mode(InterlacedMode::PfPd);
+	transcoder.store_config(control, cfg);
+}
+
+pub unsafe fn enable(control: &mut Control, transcoder: Transcoder) {
+	let mut cfg = transcoder.load_config(control);
+	cfg.set_enable(true);
 	transcoder.store_config(control, cfg);
 }
 
@@ -231,4 +244,80 @@ pub unsafe fn disable(control: &mut Control, transcoder: Transcoder) {
 	let mut clk = transcoder.load_clock_select(control);
 	clk.set_clock_select(ClockSource::None);
 	transcoder.store_clock_select(control, clk);
+}
+
+pub unsafe fn disable_only(control: &mut Control, transcoder: Transcoder) {
+	let mut func = transcoder.load_ddi_func_ctl(control);
+	//func.set_enable(false);
+	transcoder.store_ddi_func_ctl(control, func);
+
+	let mut cfg = transcoder.load_config(control);
+	cfg.set_enable(false);
+	transcoder.store_config(control, cfg);
+}
+
+pub unsafe fn enable_only(control: &mut Control, transcoder: Transcoder) {
+	let mut cfg = transcoder.load_config(control);
+	cfg.set_enable(true);
+	transcoder.store_config(control, cfg);
+
+	let mut func = transcoder.load_ddi_func_ctl(control);
+	func.set_enable(true);
+	transcoder.store_ddi_func_ctl(control, func);
+}
+
+#[derive(Clone, Copy)]
+pub struct TranscoderState {
+	clock_source: ClockSource,
+	htotal: u16,
+	hblank: u16,
+	hsync: u16,
+	vtotal: u16,
+	vblank: u16,
+	vsync: u16,
+	vsyncshift: u16,
+	ddi: DdiSelect,
+}
+
+/*
+unsafe fn save_state(control: &mut Control) -> TranscoderState {
+	let clk = transcoder.load_clock_select(control);
+	let clock_source = clk.clock_select().unwrap();
+
+	let htotal = transcoder.load_htotal(control);
+	let hblank = transcoder.load_hblank(control);
+	let hsync = transcoder.load_hsync(control);
+
+	let vtotal = transcoder.load_vtotal(control);
+	let vblank = transcoder.load_vblank(control);
+	let vsync = transcoder.load_vsync(control);
+	let vsyncshift = transcoder.load_vsyncshift(control);
+
+	let mut ddi_func = transcoder.load_ddi_func_ctl(control);
+	let ddi = ddi_func.
+	ddi_func.set_ddi_select(match ddi {
+		None => DdiSelect::None,
+		Some(Ddi::B) => DdiSelect::B,
+		Some(Ddi::C) => DdiSelect::C,
+		Some(Ddi::D) => DdiSelect::D,
+		Some(Ddi::E) => DdiSelect::E,
+	});
+	ddi_func.set_ddi_mode_select(DdiMode::DpSst); // FIXME don't hardcode
+	ddi_func.set_bits_per_color(BitsPerColor::B8); // FIXME ditto
+	transcoder.store_ddi_func_ctl(control, ddi_func);
+
+	let mut cfg = transcoder.load_config(control);
+	cfg.set_enable(true);
+	cfg.set_interlaced_mode(InterlacedMode::PfPd);
+	transcoder.store_config(control, cfg);
+}
+
+fn restore_state(control: &mut Control, state: TranscoderState) {
+}
+*/
+
+pub unsafe fn get_hv_active(control: &mut Control, transcoder: Transcoder) -> (u16, u16) {
+	let htotal = transcoder.load_htotal(control);
+	let vtotal = transcoder.load_vtotal(control);
+	(htotal.active(), vtotal.active())
 }

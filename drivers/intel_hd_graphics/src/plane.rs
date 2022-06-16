@@ -81,6 +81,9 @@ pub struct Config {
 }
 
 pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
+	// TODO make a type that guarantees stride is properly aligned.
+	assert_eq!(config.stride & 63, 0, "stride must be a multiple of 64");
+
 	// Reserved fields are all MBZ
 	let mut offt = PrimaryOffset(0);
 	offt.set_start_x_position(0);
@@ -88,7 +91,8 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	plane.store_primary_offset(control, offt);
 
 	let mut stride = plane.load_primary_stride(control);
-	stride.set_stride(config.stride);
+	stride.set_stride(config.stride / 64);
+	stride.set_stride(1920 * 4 / 64);
 	plane.store_primary_stride(control, stride);
 
 	let mut surf = plane.load_primary_surface(control);
@@ -99,12 +103,20 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	ctl.set_enable(true);
 	ctl.set_gamma_enable(false);
 	ctl.set_pixel_format(config.format);
-	ctl.set_pipe_csc_enable(true);
+	ctl.set_pipe_csc_enable(false);
 	ctl.set_rotate_180(false);
 	ctl.set_tiled_surface(false);
 	ctl.set_async_address_update_enable(false);
-	ctl.set_stereo_surface_vblank_mask(VBlankMask::None);
 	plane.store_primary_control(control, ctl);
+
+	let mut stride = plane.load_primary_stride(control);
+	stride.set_stride(config.stride / 64);
+	stride.set_stride(1920 * 4 / 64);
+	plane.store_primary_stride(control, stride);
+
+	let mut surf = plane.load_primary_surface(control);
+	surf.set_base_address(config.base);
+	plane.store_primary_surface(control, surf);
 }
 
 pub unsafe fn disable(control: &mut Control, plane: Plane) {

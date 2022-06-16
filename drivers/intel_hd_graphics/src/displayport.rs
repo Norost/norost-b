@@ -529,14 +529,46 @@ pub unsafe fn configure(control: &mut Control, port: Port) {
 	ddi.set_enable(true);
 	port.store_ddi_buf_ctl(control, ddi);
 
+	return;
+
 	rt::thread::sleep(core::time::Duration::from_millis(10));
 	// TODO DP training sequence
+	{
+		let mut tp = port.load_dp_tp_ctl(control);
+		tp.set_link_training(LinkTraining::Pattern1);
+		port.store_dp_tp_ctl(control, tp);
+		rt::thread::sleep(core::time::Duration::from_millis(10));
 
+		let mut tp = port.load_dp_tp_ctl(control);
+		tp.set_link_training(LinkTraining::Pattern2);
+		port.store_dp_tp_ctl(control, tp);
+		rt::thread::sleep(core::time::Duration::from_millis(10));
+
+		let mut tp = port.load_dp_tp_ctl(control);
+		tp.set_link_training(LinkTraining::Pattern2);
+		port.store_dp_tp_ctl(control, tp);
+		rt::thread::sleep(core::time::Duration::from_millis(10));
+
+		let mut tp = port.load_dp_tp_ctl(control);
+		tp.set_link_training(LinkTraining::Pattern3);
+		port.store_dp_tp_ctl(control, tp);
+		rt::thread::sleep(core::time::Duration::from_millis(10));
+
+		let mut tp = port.load_dp_tp_ctl(control);
+		tp.set_link_training(LinkTraining::Pattern3);
+		port.store_dp_tp_ctl(control, tp);
+		rt::thread::sleep(core::time::Duration::from_millis(10));
+	}
+
+	/*
 	match port {
 		Port::B | Port::C | Port::D | Port::E => todo!(),
 		Port::A => {}
 	}
+	*/
 }
+
+pub unsafe fn enable(control: &mut Control, port: Port) {}
 
 pub unsafe fn disable(control: &mut Control, port: Port) {
 	let mut bufctl = port.load_ddi_buf_ctl(control);
@@ -547,9 +579,10 @@ pub unsafe fn disable(control: &mut Control, port: Port) {
 	tpctl.set_enable(false);
 	port.store_dp_tp_ctl(control, tpctl);
 
-	log!("a {:08x}", port.load_ddi_buf_ctl(control).0);
+	/*
 	while !port.load_ddi_buf_ctl(control).idle_status() {
 		rt::thread::yield_now();
 	}
-	log!("b");
+	*/
+	rt::thread::sleep(core::time::Duration::from_millis(10));
 }
