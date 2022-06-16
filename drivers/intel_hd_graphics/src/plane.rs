@@ -93,6 +93,8 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	let mut stride = plane.load_primary_stride(control);
 	//stride.set_stride(config.stride / 64);
 	//stride.set_stride(1920 * 4 / 64);
+	stride.set_stride(0x500 / 64);
+	stride.set_stride(0x2000 / 64);
 	plane.store_primary_stride(control, stride);
 
 	let mut surf = plane.load_primary_surface(control);

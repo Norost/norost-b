@@ -463,20 +463,29 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 				let plane_buf = memory.cast::<[u8; 4]>();
 				unsafe {
+					vga_enable.write(&[0]).unwrap();
+					vga::disable_vga(&mut control);
 					let (x, mut y) = (20, 80);
 					// This is the most minimal sequence that kinda-but-not-really works
-					//plane::disable(&mut control, plane::Plane::A);
+					plane::disable(&mut control, plane::Plane::A);
 					rt::thread::sleep(Duration::from_millis(1));
-					//plane::enable(&mut control, plane::Plane::A, config);
-					//pipe::set_hv(&mut control, pipe::Pipe::A, 1919, 1079);
+					pipe::set_hv(&mut control, pipe::Pipe::A, 1919, 1079);
+					//panel::disable_fitter(&mut control, panel::Pipe::A);
+					//panel::enable_fitter(&mut control, panel::Pipe::A);
+					plane::enable(&mut control, plane::Plane::A, config);
+					/*
 					let real_stride =
-						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4);
+						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4) * 2;
+					*/
+					let real_stride = 0x1000 / 4;
 					for loc in [
 						0x70180, // PRI_CTL_A
 						0x70188, // PRI_STRIDE_A
 						0x68080, // PF_CTRL_A
 						0x68074, // PF_WIN_SZ_A
 						0x6001C, // PIPE_SRCSZ_A
+						0x43408, // IPS_CTL
+						0x45270, // WM_LINETIME_A
 					] {
 						let b = console::bitify_u32_hex(control.load(loc));
 						//let b = console::bitify_u32_hex(loc);
