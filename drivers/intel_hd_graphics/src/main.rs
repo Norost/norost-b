@@ -224,6 +224,7 @@ impl From<GraphicsAddress> for u32 {
 }
 
 mod backlight;
+mod console;
 mod control;
 mod ddi;
 mod displayport;
@@ -460,16 +461,40 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				*/
 
-				// This is the most minimal sequence that kinda-but-not-really works
+				let plane_buf = memory.cast::<[u8; 4]>();
 				unsafe {
+					let (x, mut y) = (20, 80);
+					// This is the most minimal sequence that kinda-but-not-really works
+					//plane::disable(&mut control, plane::Plane::A);
+					rt::thread::sleep(Duration::from_millis(1));
 					//plane::enable(&mut control, plane::Plane::A, config);
-					for x in 0..1920 {
-						pipe::set_hv(&mut control, pipe::Pipe::A, x, 1079);
-						rt::thread::sleep(Duration::from_millis(5));
+					//pipe::set_hv(&mut control, pipe::Pipe::A, 1919, 1079);
+					let real_stride =
+						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4);
+					for loc in [
+						0x70180, // PRI_CTL_A
+						0x70188, // PRI_STRIDE_A
+						0x68080, // PF_CTRL_A
+						0x68074, // PF_WIN_SZ_A
+						0x6001C, // PIPE_SRCSZ_A
+					] {
+						let b = console::bitify_u32_hex(control.load(loc));
+						//let b = console::bitify_u32_hex(loc);
+						for (dy, l) in b.iter().enumerate() {
+							for dx in 0..8 * 8 {
+								let on = l[dx / 8] & (1 << 7 - dx % 8) != 0;
+								let clr = [[0; 4], [255; 4]][usize::from(on)];
+								*plane_buf.as_ptr().add((y + dy) * real_stride + x + dx) = clr;
+							}
+						}
+						y += 12;
 					}
 				}
 
+				rt::thread::sleep(Duration::MAX);
+
 				// Funny colors GO
+				let stride = 0x1000usize;
 				let plane_buf = memory.cast::<[u8; 4]>();
 				for y in 0..height {
 					for x in 0..width {
@@ -483,7 +508,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							*plane_buf.as_ptr().add(y * usize::from(stride / 4) + x) = bgrx;
 							//*plane_buf.as_ptr().add(y * usize::from(width) + x) = 0x00ff0000;
 						}
-						rt::thread::sleep(Duration::from_millis(10));
+						//rt::thread::sleep(Duration::from_millis(1));
 					}
 				}
 			}

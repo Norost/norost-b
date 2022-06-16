@@ -84,3 +84,8 @@ pub unsafe fn set_hv(control: &mut Control, pipe: Pipe, h: u16, v: u16) {
 	sz.set_vertical_source_size(v);
 	pipe.store_source_size(control, sz);
 }
+
+pub unsafe fn get_hv(control: &mut Control, pipe: Pipe) -> (u16, u16) {
+	let sz = pipe.load_source_size(control);
+	(sz.horizontal_source_size(), sz.vertical_source_size())
+}

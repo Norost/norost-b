@@ -91,8 +91,8 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	plane.store_primary_offset(control, offt);
 
 	let mut stride = plane.load_primary_stride(control);
-	stride.set_stride(config.stride / 64);
-	stride.set_stride(1920 * 4 / 64);
+	//stride.set_stride(config.stride / 64);
+	//stride.set_stride(1920 * 4 / 64);
 	plane.store_primary_stride(control, stride);
 
 	let mut surf = plane.load_primary_surface(control);
@@ -108,19 +108,14 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	ctl.set_tiled_surface(false);
 	ctl.set_async_address_update_enable(false);
 	plane.store_primary_control(control, ctl);
-
-	let mut stride = plane.load_primary_stride(control);
-	stride.set_stride(config.stride / 64);
-	stride.set_stride(1920 * 4 / 64);
-	plane.store_primary_stride(control, stride);
-
-	let mut surf = plane.load_primary_surface(control);
-	surf.set_base_address(config.base);
-	plane.store_primary_surface(control, surf);
 }
 
 pub unsafe fn disable(control: &mut Control, plane: Plane) {
 	let mut ctl = plane.load_primary_control(control);
 	ctl.set_enable(false);
 	plane.store_primary_control(control, ctl);
+}
+
+pub unsafe fn get_stride(control: &mut Control, plane: Plane) -> u16 {
+	plane.load_primary_stride(control).stride() * 64
 }
