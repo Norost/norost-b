@@ -593,6 +593,6 @@ pub unsafe fn set_port_clock(control: &mut Control, port: Port, clock: PortClock
 
 pub unsafe fn set_training_pattern(control: &mut Control, port: Port, pattern: LinkTraining) {
 	let mut tp = port.load_dp_tp_ctl(control);
-	tp.set_link_training(LinkTraining::Pattern1);
+	tp.set_link_training(pattern);
 	port.store_dp_tp_ctl(control, tp);
 }

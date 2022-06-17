@@ -418,13 +418,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					// Disable sequence
 					// b. Disable planes (VGA or hires)
 					//plane::disable(&mut control, plane::Plane::A);
+					vga_enable.write(&[0]).unwrap();
+					rt::thread::sleep(Duration::from_micros(100));
+					vga::disable_vga(&mut control);
 					// c. Disable TRANS_CONF
 					transcoder::disable(&mut control, Transcoder::EDP);
 					// h. Disable panel fitter
 					panel::disable_fitter(&mut control, panel::Pipe::A);
 					// i. Configure Transcoder Clock Select to direct no clock to the transcoder
 					transcoder::disable_clock(&mut control, Transcoder::EDP);
-					/*
 					displayport::disable(&mut control, displayport::Port::A);
 					backlight::disable(&mut control);
 					displayport::set_port_clock(
@@ -432,28 +434,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						displayport::Port::A,
 						displayport::PortClock::None,
 					);
-					*/
-
-					vga_enable.write(&[0]).unwrap();
-					vga::disable_vga(&mut control);
-
-					rt::thread::sleep(Duration::from_millis(50));
-					//rt::thread::sleep(Duration::from_millis(1000));
-
-					/*
-					pll::configure(&mut control, pll::WrPll::N1);
-					pll::configure(&mut control, pll::WrPll::N2);
-					*/
 
 					// FIXME don't hardcode port clock, configure it properly instead
-					/*
 					backlight::enable_panel(&mut control);
 					displayport::configure(
 						&mut control,
 						displayport::Port::A,
 						displayport::PortClock::LcPll1350,
 					);
-					*/
 					// a. If DisplayPort multi-stream - use AUX to program receiver VC Payload ID
 					// table to add stream
 
@@ -464,9 +452,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					// desired.
 					pipe::configure(&mut control, pipe::Pipe::A, &mode);
 					plane::enable(&mut control, plane::Plane::A, config);
-					//transcoder::configure_rest(&mut control, Transcoder::EDP, None, mode);
-					transcoder::enable_only(&mut control, Transcoder::EDP);
-					/*
+					transcoder::configure_rest(&mut control, Transcoder::EDP, None, mode);
+					//transcoder::enable_only(&mut control, Transcoder::EDP);
 					// k. If eDP (DDI A), set DP_TP_CTL link training to Normal
 					displayport::set_training_pattern(
 						&mut control,
@@ -474,7 +461,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						displayport::LinkTraining::Normal,
 					);
 					backlight::enable_backlight(&mut control);
-					*/
 
 					/*
 					let v = control.load(SRD_CTL_EDP);
@@ -526,10 +512,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 
-				rt::thread::sleep(Duration::MAX);
+				//rt::thread::sleep(Duration::MAX);
 
 				// Funny colors GO
-				let stride = 0x1000usize;
+				let stride = 1920;
 				let plane_buf = memory.cast::<[u8; 4]>();
 				for y in 0..height {
 					for x in 0..width {
@@ -540,7 +526,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let bgrx = [b as u8, g as u8, r as u8, 0];
 						//let bgrx = [255 - r as u8, ((y % 4) * 64) as u8, r as u8, 0];
 						unsafe {
-							*plane_buf.as_ptr().add(y * usize::from(stride / 4) + x) = bgrx;
+							*plane_buf.as_ptr().add(y * stride + x) = bgrx;
 							//*plane_buf.as_ptr().add(y * usize::from(width) + x) = 0x00ff0000;
 						}
 						//rt::thread::sleep(Duration::from_millis(1));

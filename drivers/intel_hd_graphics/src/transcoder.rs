@@ -191,7 +191,6 @@ pub unsafe fn configure_rest(
 	//    settings
 	// FIXME don't rely on firmware configuration
 
-	/*
 	let mut htotal = transcoder.load_htotal(control);
 	let mut hblank = transcoder.load_hblank(control);
 	let mut hsync = transcoder.load_hsync(control);
@@ -203,13 +202,12 @@ pub unsafe fn configure_rest(
 	let mut vtotal = transcoder.load_vtotal(control);
 	let mut vblank = transcoder.load_vblank(control);
 	let mut vsync = transcoder.load_vsync(control);
-	let mut vsyncshift = transcoder.load_vsyncshift(control);
+	//let mut vsyncshift = transcoder.load_vsyncshift(control);
 	f(&mut vtotal, &mut vblank, &mut vsync, &mode.vertical);
 	transcoder.store_vtotal(control, vtotal);
 	transcoder.store_vblank(control, vblank);
 	transcoder.store_vsync(control, vsync);
-	transcoder.store_vsyncshift(control, vsyncshift);
-	*/
+	//transcoder.store_vsyncshift(control, vsyncshift);
 
 	// g. Configure and enable TRANS_DDI_FUNC_CTL
 	let mut ddi_func = transcoder.load_ddi_func_ctl(control);
@@ -222,7 +220,10 @@ pub unsafe fn configure_rest(
 		Some(Ddi::E) => DdiSelect::E,
 	});
 	ddi_func.set_ddi_mode_select(DdiMode::DpSst); // FIXME don't hardcode
-	ddi_func.set_bits_per_color(BitsPerColor::B8); // FIXME ditto
+											  // FIXME using any value other than B6 causes glitches. Display probably
+											  // needs to be reset to change this.
+											  //ddi_func.set_bits_per_color(BitsPerColor::B8); // FIXME ditto
+	ddi_func.set_bits_per_color(BitsPerColor::B6); // FIXME ditto
 	transcoder.store_ddi_func_ctl(control, ddi_func);
 
 	// h. If DisplayPort multistream - Enable pipe VC payload allocation in TRANS_DDI_FUNC_CTL
