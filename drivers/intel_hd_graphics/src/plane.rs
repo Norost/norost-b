@@ -84,6 +84,10 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	// TODO make a type that guarantees stride is properly aligned.
 	assert_eq!(config.stride & 63, 0, "stride must be a multiple of 64");
 
+	let mut ctl = plane.load_primary_control(control);
+	ctl.set_enable(true);
+	plane.store_primary_control(control, ctl);
+
 	// Reserved fields are all MBZ
 	let mut offt = PrimaryOffset(0);
 	offt.set_start_x_position(0);

@@ -20,4 +20,15 @@ impl Control {
 			value,
 		)
 	}
+
+	pub unsafe fn load_byte(&mut self, offset: u32) -> u8 {
+		ptr::read_volatile(self.base.as_ptr().add(offset.try_into().unwrap()).cast())
+	}
+
+	pub unsafe fn store_byte(&mut self, offset: u32, value: u8) {
+		ptr::write_volatile(
+			self.base.as_ptr().add(offset.try_into().unwrap()).cast(),
+			value,
+		)
+	}
 }

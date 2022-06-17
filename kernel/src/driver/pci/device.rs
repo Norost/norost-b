@@ -72,15 +72,18 @@ impl Object for PciDevice {
 		let (size, orig) = bar.size();
 		bar.set(orig);
 		let size = size?;
+
 		if !BaseAddress::is_mmio(orig) {
 			return None;
 		}
+
 		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
 		let addr = BaseAddress::address(orig, upper).unwrap();
 		let mut frames = PageFrameIter {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			count: size.get().try_into().unwrap(),
 		};
+		dbg!(addr as *const ());
 		dbg!(frames.count);
 		// FIXME there needs to be a better way to limit the amount of pages.
 		frames.count = frames.count.min(1 << 20);

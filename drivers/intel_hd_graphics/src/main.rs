@@ -322,23 +322,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				};
 				*/
 
-				log!("a");
 				let control = map_bar(0);
-				log!("b");
 				let memory = map_bar(2);
-				log!("c {:?}", (control, memory));
-
-				/*
-				rt::thread::sleep(core::time::Duration::from_secs(5));
-				unsafe {
-					let b = base.as_ptr().cast::<u64>();
-					for i in 0..10 {
-						*b.add(i) = u64::MAX;
-						log!("{}", i);
-						rt::thread::sleep(core::time::Duration::from_secs(5));
-					}
-				}
-				*/
 
 				let mut control = control::Control::new(control.cast());
 
@@ -390,16 +375,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				};
 				let edid = edid::Edid::new(edid).unwrap();
 				let mode = mode::Mode::from_edid(&edid).unwrap();
-				log!("{:?}", &mode);
-
-				let vga_enable = root.open(b"vga/enable").unwrap();
-				log!("{:?}", vga_enable.read_vec(1).unwrap());
-				//rt::thread::sleep(Duration::MAX);
 
 				pll::compute_sdvo(mode.pixel_clock);
-
-				//log!("Disabling VGA, enabling primary surface & painting colors in 3 seconds");
-				//rt::thread::sleep(Duration::from_secs(3));
 
 				let (width, height) = (mode.horizontal.active + 1, mode.vertical.active + 1);
 
@@ -417,9 +394,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				unsafe {
 					// Disable sequence
 					// b. Disable planes (VGA or hires)
-					//plane::disable(&mut control, plane::Plane::A);
-					vga_enable.write(&[0]).unwrap();
-					rt::thread::sleep(Duration::from_micros(100));
+					plane::disable(&mut control, plane::Plane::A);
 					vga::disable_vga(&mut control);
 					// c. Disable TRANS_CONF
 					transcoder::disable(&mut control, Transcoder::EDP);
@@ -488,7 +463,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let (x, mut y) = (20, 80);
 					let real_stride =
 						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4);
-					//let real_stride = 0x1000 / 4;
 					for loc in [
 						0x70180, // PRI_CTL_A
 						0x70188, // PRI_STRIDE_A
