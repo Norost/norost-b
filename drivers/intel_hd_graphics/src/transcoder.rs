@@ -155,23 +155,8 @@ impl Transcoder {
 /// # Note
 ///
 /// The transcoder must be disabled.
-pub unsafe fn configure(
-	control: &mut Control,
-	transcoder: Transcoder,
-	ddi: Option<Ddi>,
-	mode: Mode,
-) {
-	// See vol11 p. 112 "Sequences for DisplayPort"
-	let f =
-		|total: &mut Total, blank: &mut Blank, sync: &mut Synchronize, timings: &mode::Timings| {
-			total.set_total(timings.total);
-			total.set_active(timings.active);
-			blank.set_blank_start(timings.active);
-			blank.set_blank_end(timings.total);
-			sync.set_sync_start(timings.sync_start);
-			sync.set_sync_end(timings.sync_end);
-		};
-
+pub unsafe fn configure_clock(control: &mut Control, transcoder: Transcoder, ddi: Option<Ddi>) {
+	// b. Configure Transcoder Clock Select to direct the Port clock to the Transcoder
 	let mut clk = transcoder.load_clock_select(control);
 	clk.set_clock_select(match ddi {
 		None => ClockSource::None,
@@ -182,6 +167,31 @@ pub unsafe fn configure(
 	});
 	transcoder.store_clock_select(control, clk);
 
+	// c. Configure and enable planes (VGA or hires). This can be done later if desired.
+	// e. Enable panel fitter if needed (must be enabled for VGA)
+}
+
+pub unsafe fn configure_rest(
+	control: &mut Control,
+	transcoder: Transcoder,
+	ddi: Option<Ddi>,
+	mode: Mode,
+) {
+	let f =
+		|total: &mut Total, blank: &mut Blank, sync: &mut Synchronize, timings: &mode::Timings| {
+			total.set_total(timings.total);
+			total.set_active(timings.active);
+			blank.set_blank_start(timings.active);
+			blank.set_blank_end(timings.total);
+			sync.set_sync_start(timings.sync_start);
+			sync.set_sync_end(timings.sync_end);
+		};
+
+	// f. Configure transcoder timings, M/N/TU/VC payload size, and other pipe and transcoder
+	//    settings
+	// FIXME don't rely on firmware configuration
+
+	/*
 	let mut htotal = transcoder.load_htotal(control);
 	let mut hblank = transcoder.load_hblank(control);
 	let mut hsync = transcoder.load_hsync(control);
@@ -199,7 +209,9 @@ pub unsafe fn configure(
 	transcoder.store_vblank(control, vblank);
 	transcoder.store_vsync(control, vsync);
 	transcoder.store_vsyncshift(control, vsyncshift);
+	*/
 
+	// g. Configure and enable TRANS_DDI_FUNC_CTL
 	let mut ddi_func = transcoder.load_ddi_func_ctl(control);
 	ddi_func.set_enable(true);
 	ddi_func.set_ddi_select(match ddi {
@@ -213,6 +225,11 @@ pub unsafe fn configure(
 	ddi_func.set_bits_per_color(BitsPerColor::B8); // FIXME ditto
 	transcoder.store_ddi_func_ctl(control, ddi_func);
 
+	// h. If DisplayPort multistream - Enable pipe VC payload allocation in TRANS_DDI_FUNC_CTL
+	// i. If DisplayPort multistream - Wait for ACT sent status in DP_TP_STATUS and receiver DPCD
+	//    (timeout after >410us)
+
+	// j. Configure and enable TRANS_CONF
 	let mut cfg = transcoder.load_config(control);
 	cfg.set_enable(true);
 	transcoder.store_config(control, cfg);
@@ -225,35 +242,36 @@ pub unsafe fn enable(control: &mut Control, transcoder: Transcoder) {
 }
 
 pub unsafe fn disable(control: &mut Control, transcoder: Transcoder) {
+	// c. Disable TRANS_CONF
 	let mut cfg = transcoder.load_config(control);
 	cfg.set_enable(false);
 	transcoder.store_config(control, cfg);
-	log!("tr a {:08x}", transcoder.load_config(control).0);
-	//while transcoder.load_config(control).state() {
-	rt::thread::yield_now();
-	//}
-	log!("tr b {:08x}", transcoder.load_config(control).0);
 
-	// TODO displayport multistream
+	// d. Wait for off status in TRANS_CONF, timeout after two frame times
+	while transcoder.load_config(control).state() {
+		rt::thread::yield_now();
+	}
 
+	// e. If DisplayPort multistream - use AUX to program receiver VC Payload ID table to delete
+	//    stream
+	// f. If done with this VC payload
+	//    i. Disable VC payload allocation in TRANS_DDI_FUNC_CTL
+	//    ii. Wait for ACT sent status in DP_TP_STATUS and receiver DPCD+
+
+	// g. Disable TRANS_DDI_FUNC_CTL with DDI_Select set to None
 	let mut func = transcoder.load_ddi_func_ctl(control);
 	func.set_enable(false);
 	func.set_ddi_select(DdiSelect::None);
 	transcoder.store_ddi_func_ctl(control, func);
 
+	// h. Disable panel fitter
+}
+
+pub unsafe fn disable_clock(control: &mut Control, transcoder: Transcoder) {
+	// i. Configure Transcoder Clock Select to direct no clock to the transcoder
 	let mut clk = transcoder.load_clock_select(control);
 	clk.set_clock_select(ClockSource::None);
 	transcoder.store_clock_select(control, clk);
-}
-
-pub unsafe fn disable_only(control: &mut Control, transcoder: Transcoder) {
-	let mut func = transcoder.load_ddi_func_ctl(control);
-	//func.set_enable(false);
-	transcoder.store_ddi_func_ctl(control, func);
-
-	let mut cfg = transcoder.load_config(control);
-	cfg.set_enable(false);
-	transcoder.store_config(control, cfg);
 }
 
 pub unsafe fn enable_only(control: &mut Control, transcoder: Transcoder) {

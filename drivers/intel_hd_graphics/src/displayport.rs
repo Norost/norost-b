@@ -98,6 +98,12 @@ reg! {
 	init_display_detected set_init_display_detected [0] bool
 }
 
+reg! {
+	DdiBufferTranslation
+	balance_leg_enable set_balance_leg_enable [31] bool
+	// TODO de_emp_level, vref_sel, v_swing
+}
+
 bit2enum! {
 	ALaneControl
 	X2 0
@@ -127,7 +133,7 @@ bit2enum! {
 	None      0b111
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Port {
 	/// Known as DDI_AUX_{CTL,DATA} in vol2a and located at an entirely different address from the
 	/// other registers. Don't ask me why.
@@ -513,76 +519,80 @@ pub enum I2CReply {
 	AuxDefer,
 }
 
-pub unsafe fn configure(control: &mut Control, port: Port) {
+pub unsafe fn configure(control: &mut Control, port: Port, clock: PortClock) {
 	// See vol11 p. 112 "Sequences for DisplayPort"
 
-	// TODO PLL
+	// a. Configure Port Clock Select to direct the CPU Display PLL to the port
+	set_port_clock(control, port, clock);
 
+	// b. Configure and enable DP_TP_CTL with link training pattern 1 selected
 	let mut tp = port.load_dp_tp_ctl(control);
 	tp.set_enable(true);
+	tp.set_mode(TransportMode::Sst);
+	tp.set_fdi_auto_train(false);
 	tp.set_link_training(LinkTraining::Pattern1);
 	port.store_dp_tp_ctl(control, tp);
 
-	// TODO DDI_BUF_TRANS
+	// c. Configure DDI_BUF_TRANS. This can be done earlier if desired.
+	// TODO do we really need to set up anything in DDI_BUF_TRANS?
 
+	// d. Configure and enable DDI_BUF_CTL
 	let mut ddi = port.load_ddi_buf_ctl(control);
 	ddi.set_enable(true);
 	port.store_ddi_buf_ctl(control, ddi);
 
-	return;
+	// e. Wait >518 us for buffers to enable before starting training or allow for longer time
+	//    in TP1 before software timeout
+	// FIXME how to check for DDI buffer status?
+	rt::thread::sleep(core::time::Duration::from_millis(1));
 
-	rt::thread::sleep(core::time::Duration::from_millis(10));
-	// TODO DP training sequence
-	{
-		let mut tp = port.load_dp_tp_ctl(control);
-		tp.set_link_training(LinkTraining::Pattern1);
-		port.store_dp_tp_ctl(control, tp);
-		rt::thread::sleep(core::time::Duration::from_millis(10));
-
-		let mut tp = port.load_dp_tp_ctl(control);
-		tp.set_link_training(LinkTraining::Pattern2);
-		port.store_dp_tp_ctl(control, tp);
-		rt::thread::sleep(core::time::Duration::from_millis(10));
-
-		let mut tp = port.load_dp_tp_ctl(control);
-		tp.set_link_training(LinkTraining::Pattern2);
-		port.store_dp_tp_ctl(control, tp);
-		rt::thread::sleep(core::time::Duration::from_millis(10));
-
-		let mut tp = port.load_dp_tp_ctl(control);
-		tp.set_link_training(LinkTraining::Pattern3);
-		port.store_dp_tp_ctl(control, tp);
-		rt::thread::sleep(core::time::Duration::from_millis(10));
-
-		let mut tp = port.load_dp_tp_ctl(control);
-		tp.set_link_training(LinkTraining::Pattern3);
-		port.store_dp_tp_ctl(control, tp);
-		rt::thread::sleep(core::time::Duration::from_millis(10));
+	// f. Follow DisplayPort specification training sequence (see notes for failure handling)
+	//
+	// "For a closed, embedded connection, the DisplayPort transmitter and receiver may be set to pre-calibrated parameters without going through the full link training sequence. In this mode, the DisplayPort Source Device may start a normal operation without the AUX CH handshake for link training, as described in Section 2.5.3.3."
+	if port != Port::A {
+		todo!()
 	}
 
-	/*
-	match port {
-		Port::B | Port::C | Port::D | Port::E => todo!(),
-		Port::A => {}
+	// g. If DisplayPort multi-stream - Set DP_TP_CTL link training to Idle Pattern, wait
+	//    for 5 idle patterns (DP_TP_STATUS Min_Idles_Sent) (timeout after 800 us)
+	// ergo skip
+
+	// h. Set DP_TP_CTL link training to Normal, skip if eDP (DDI A)
+	if port != Port::A {
+		todo!()
 	}
-	*/
 }
 
-pub unsafe fn enable(control: &mut Control, port: Port) {}
-
 pub unsafe fn disable(control: &mut Control, port: Port) {
+	// a. Disable DDI_BUF_CTL
 	let mut bufctl = port.load_ddi_buf_ctl(control);
 	bufctl.set_enable(false);
 	port.store_ddi_buf_ctl(control, bufctl);
 
+	// b. Disable DP_TP_CTL (do not set port to idle when disabling)
 	let mut tpctl = port.load_dp_tp_ctl(control);
 	tpctl.set_enable(false);
 	port.store_dp_tp_ctl(control, tpctl);
 
-	/*
+	// c. Wait 8 us or poll on DDI_BUF_CTL Idle Status for buffers to return to idle
 	while !port.load_ddi_buf_ctl(control).idle_status() {
 		rt::thread::yield_now();
 	}
-	*/
-	rt::thread::sleep(core::time::Duration::from_millis(10));
+
+	// TODO perform d. from here somehow
+
+	// TODO disable port clock
+}
+
+pub unsafe fn set_port_clock(control: &mut Control, port: Port, clock: PortClock) {
+	// Disable: e. Configure Port Clock Select to direct no clock to the port
+	let mut v = port.load_port_clk_sel(control);
+	v.set_clock(clock);
+	port.store_port_clk_sel(control, v);
+}
+
+pub unsafe fn set_training_pattern(control: &mut Control, port: Port, pattern: LinkTraining) {
+	let mut tp = port.load_dp_tp_ctl(control);
+	tp.set_link_training(LinkTraining::Pattern1);
+	port.store_dp_tp_ctl(control, tp);
 }

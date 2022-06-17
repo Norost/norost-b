@@ -412,72 +412,97 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				};
 
 				// See vol11 p. 112 "Sequences for DisplayPort"
-				// We're skipping step 1 to 4 for now since it should already be set up by
-				// firmware.
-				/*
+				// FIXME configure PLL ourselves instead of relying on preset value.
 				use transcoder::Transcoder;
 				unsafe {
-					let (h, v) = transcoder::get_hv_active(&mut control, Transcoder::EDP);
-
 					// Disable sequence
-					plane::disable(&mut control, plane::Plane::A);
+					// b. Disable planes (VGA or hires)
+					//plane::disable(&mut control, plane::Plane::A);
+					// c. Disable TRANS_CONF
+					transcoder::disable(&mut control, Transcoder::EDP);
+					// h. Disable panel fitter
+					panel::disable_fitter(&mut control, panel::Pipe::A);
+					// i. Configure Transcoder Clock Select to direct no clock to the transcoder
+					transcoder::disable_clock(&mut control, Transcoder::EDP);
+					/*
+					displayport::disable(&mut control, displayport::Port::A);
+					backlight::disable(&mut control);
+					displayport::set_port_clock(
+						&mut control,
+						displayport::Port::A,
+						displayport::PortClock::None,
+					);
+					*/
 
-					//transcoder::disable(&mut control, Transcoder::EDP);
-
-					//displayport::disable(&mut control, displayport::Port::A);
-					//pll::disable_all(&mut control);
-					//backlight::disable(&mut control);
-					//panel::disable_fitter(&mut control, panel::Pipe::A);
-					//transcoder::disable_only(&mut control, Transcoder::EDP);
 					vga_enable.write(&[0]).unwrap();
 					vga::disable_vga(&mut control);
 
-					//rt::thread::sleep(Duration::MAX);
 					rt::thread::sleep(Duration::from_millis(50));
+					//rt::thread::sleep(Duration::from_millis(1000));
 
-					rt::thread::sleep(Duration::from_millis(50));
 					/*
 					pll::configure(&mut control, pll::WrPll::N1);
 					pll::configure(&mut control, pll::WrPll::N2);
 					*/
 
-					//transcoder::configure(&mut control, Transcoder::EDP, None, mode);
-					//displayport::enable(&mut control, displayport::Port::A);
-					//transcoder::enable(&mut control, Transcoder::EDP);
-					pipe::configure(&mut control, pipe::Pipe::A, &mode);
-					//panel::enable_fitter(&mut control, panel::Pipe::A);
-					//pipe::set_hv(&mut control, pipe::Pipe::A,  h, v);
-					plane::enable(&mut control, plane::Plane::A, config);
-					//panel::disable_all_fitters(&mut control);
-					//transcoder::enable_only(&mut control, Transcoder::EDP);
+					// FIXME don't hardcode port clock, configure it properly instead
+					/*
+					backlight::enable_panel(&mut control);
+					displayport::configure(
+						&mut control,
+						displayport::Port::A,
+						displayport::PortClock::LcPll1350,
+					);
+					*/
+					// a. If DisplayPort multi-stream - use AUX to program receiver VC Payload ID
+					// table to add stream
 
-					//backlight::enable(&mut control);
-					//displayport::configure(&mut control, displayport::Port::A);
+					// b. Configure Transcoder Clock Select to direct the Port clock to the
+					// Transcoder
+					transcoder::configure_clock(&mut control, Transcoder::EDP, None);
+					// c. Configure and enable planes (VGA or hires). This can be done later if
+					// desired.
+					pipe::configure(&mut control, pipe::Pipe::A, &mode);
+					plane::enable(&mut control, plane::Plane::A, config);
+					//transcoder::configure_rest(&mut control, Transcoder::EDP, None, mode);
+					transcoder::enable_only(&mut control, Transcoder::EDP);
+					/*
+					// k. If eDP (DDI A), set DP_TP_CTL link training to Normal
+					displayport::set_training_pattern(
+						&mut control,
+						displayport::Port::A,
+						displayport::LinkTraining::Normal,
+					);
+					backlight::enable_backlight(&mut control);
+					*/
 
 					/*
 					let v = control.load(SRD_CTL_EDP);
 					control.store(SRD_CTL_EDP, v | (1 << 31));
 					*/
 				}
-				*/
 
-				let plane_buf = memory.cast::<[u8; 4]>();
+				/*
 				unsafe {
 					vga_enable.write(&[0]).unwrap();
 					vga::disable_vga(&mut control);
-					let (x, mut y) = (20, 80);
 					// This is the most minimal sequence that kinda-but-not-really works
 					plane::disable(&mut control, plane::Plane::A);
 					rt::thread::sleep(Duration::from_millis(1));
 					pipe::set_hv(&mut control, pipe::Pipe::A, 1919, 1079);
+					panel::set_hv(&mut control, panel::Pipe::A, 1919, 1080);
 					//panel::disable_fitter(&mut control, panel::Pipe::A);
 					//panel::enable_fitter(&mut control, panel::Pipe::A);
 					plane::enable(&mut control, plane::Plane::A, config);
-					/*
+				}
+				*/
+
+				let plane_buf = memory.cast::<[u8; 4]>();
+				unsafe {
+					let (x, mut y) = (20, 80);
 					let real_stride =
-						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4) * 2;
-					*/
-					let real_stride = 0x1000 / 4;
+						usize::from(plane::get_stride(&mut control, plane::Plane::A) / 4);
+					//let real_stride = 0x1000 / 4;
 					for loc in [
 						0x70180, // PRI_CTL_A
 						0x70188, // PRI_STRIDE_A
@@ -486,6 +511,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						0x6001C, // PIPE_SRCSZ_A
 						0x43408, // IPS_CTL
 						0x45270, // WM_LINETIME_A
+						0x46100, // PORT_CLK_SEL_DDIA
 					] {
 						let b = console::bitify_u32_hex(control.load(loc));
 						//let b = console::bitify_u32_hex(loc);

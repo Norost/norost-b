@@ -66,3 +66,10 @@ pub unsafe fn disable_all_fitters(control: &mut Control) {
 		.into_iter()
 		.for_each(|p| disable_fitter(control, p));
 }
+
+pub unsafe fn set_hv(control: &mut Control, pipe: Pipe, h: u16, v: u16) {
+	let mut size = pipe.load_window_size(control);
+	size.set_xsize(h);
+	size.set_ysize(v);
+	pipe.store_window_size(control, size);
+}
