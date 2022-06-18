@@ -10,8 +10,9 @@ reg! {
 	pipe_csc set_pipe_csc [24] bool
 }
 
-const SR_INDEX: u32 = 0x3c4;
-const SR_DATA: u32 = 0x3c5;
+const SR_INDEX: u16 = 0x3c4;
+#[allow(dead_code)]
+const SR_DATA: u16 = 0x3c5;
 
 struct Sr01(u8);
 
@@ -24,12 +25,14 @@ impl Sr01 {
 	}
 }
 
-pub unsafe fn disable_vga(control: &mut Control) {
+pub unsafe fn disable_vga(control: &mut Control, io: rt::RefObject<'_>) {
 	// Disable VGA screen
-	control.store_byte(SR_INDEX, Sr01::INDEX);
-	let mut sr01 = Sr01(control.load_byte(SR_DATA));
+	io.seek(rt::io::SeekFrom::Start(SR_INDEX.into())).unwrap();
+	io.write(&[Sr01::INDEX]).unwrap();
+	let mut sr01 = Sr01(0);
+	io.peek(core::slice::from_mut(&mut sr01.0)).unwrap();
 	sr01.set_disabled(true);
-	control.store_byte(SR_DATA, sr01.0);
+	io.write(core::slice::from_ref(&sr01.0)).unwrap();
 	rt::thread::sleep(core::time::Duration::from_micros(100));
 
 	// Disable VGA plane

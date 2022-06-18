@@ -300,6 +300,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	// Open & configure
 	let dev = root.open(&path).unwrap();
+	let ioport = root.open(b"portio/map").expect("can't access I/O ports");
 
 	let pci_config = kernel::syscall::map_object(dev.as_raw(), None, 0, usize::MAX).unwrap();
 
@@ -388,14 +389,28 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					stride,
 				};
 
+				unsafe {
+					for loc in [
+						0x70180, // PRI_CTL_A
+						0x70188, // PRI_STRIDE_A
+						0x68080, // PF_CTRL_A
+						0x68074, // PF_WIN_SZ_A
+						0x6001C, // PIPE_SRCSZ_A
+						0x46100, // PORT_CLK_SEL_DDIA
+						0x41000, // VGA_CONTROL
+					] {
+						log!("{:08x} -> {:08x}", loc, control.load(loc));
+					}
+				}
+
 				// See vol11 p. 112 "Sequences for DisplayPort"
 				// FIXME configure PLL ourselves instead of relying on preset value.
 				use transcoder::Transcoder;
 				unsafe {
 					// Disable sequence
 					// b. Disable planes (VGA or hires)
+					vga::disable_vga(&mut control, ioport.as_ref_object());
 					plane::disable(&mut control, plane::Plane::A);
-					vga::disable_vga(&mut control);
 					// c. Disable TRANS_CONF
 					transcoder::disable(&mut control, Transcoder::EDP);
 					// h. Disable panel fitter

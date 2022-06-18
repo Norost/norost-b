@@ -17,7 +17,15 @@ scancodes = { path = "../lib/rust/scancodes" }
 compiler_builtins = { version = "0.1", features = ["mem"] }
 
 [features]
-default = ["mem-max-16t", "driver-pci", "driver-hpet", "driver-vga", "driver-ps2-keyboard"]
+# TODO only enable driver-portio for x86 platforms
+default = [
+	"mem-max-16t",
+	"driver-pci",
+	"driver-hpet",
+	"driver-vga",
+	"driver-ps2-keyboard",
+	"driver-portio",
+]
 mem-max-16t = []
 mem-max-256m = []
 driver-pci = []
@@ -27,5 +35,6 @@ driver-rtc = []
 driver-vga = []
 driver-ps2 = []
 driver-ps2-keyboard = ["driver-ps2"]
+driver-portio = []
 debug = []
 debug-sanitize-heap = []
