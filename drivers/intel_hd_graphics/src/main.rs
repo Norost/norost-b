@@ -486,11 +486,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 
-				//rt::thread::sleep(Duration::MAX);
-
 				// Funny colors GO
-				let stride = 1920;
-				let plane_buf = memory.cast::<[u8; 4]>();
+				let stride = usize::from(stride) / 4;
 				for y in 0..height {
 					for x in 0..width {
 						let (x, y) = (usize::from(x), usize::from(y));
@@ -498,12 +495,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let g = y * 256 / usize::from(height);
 						let b = 255 - (r + g) / 2;
 						let bgrx = [b as u8, g as u8, r as u8, 0];
-						//let bgrx = [255 - r as u8, ((y % 4) * 64) as u8, r as u8, 0];
 						unsafe {
-							*plane_buf.as_ptr().add(y * stride + x) = bgrx;
-							//*plane_buf.as_ptr().add(y * usize::from(width) + x) = 0x00ff0000;
+							core::arch::x86_64::_mm_stream_si32(
+								memory.cast::<i32>().as_ptr().add(y * stride + x),
+								i32::from_ne_bytes(bgrx),
+							);
 						}
-						//rt::thread::sleep(Duration::from_millis(1));
 					}
 				}
 			}
