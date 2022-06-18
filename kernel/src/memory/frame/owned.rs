@@ -43,9 +43,13 @@ impl OwnedPageFrames {
 	}
 }
 
-impl MemoryObject for OwnedPageFrames {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		self.frames.clone()
+unsafe impl MemoryObject for OwnedPageFrames {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		f(&self.frames)
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.frames.len()
 	}
 }
 

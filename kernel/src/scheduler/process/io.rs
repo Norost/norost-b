@@ -38,10 +38,13 @@ pub(super) struct Queue {
 
 impl Queue {
 	fn kernel_io_queue(&self) -> k_io::Queue {
-		let frames = self.frames.physical_pages();
-		assert_eq!(frames.len(), 1, "TODO");
+		let mut frame = None;
+		self.frames.physical_pages(&mut |f| {
+			assert!(frame.is_none() && f.len() == 1, "TODO");
+			frame = Some(f[0]);
+		});
 		k_io::Queue {
-			base: NonNull::new(frames[0].as_ptr()).unwrap().cast(),
+			base: NonNull::new(frame.unwrap().as_ptr()).unwrap().cast(),
 			requests_mask: self.requests_mask,
 			responses_mask: self.responses_mask,
 		}

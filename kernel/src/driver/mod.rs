@@ -6,6 +6,8 @@ pub mod hpet;
 pub mod pci;
 #[cfg(feature = "driver-pic")]
 pub mod pic;
+#[cfg(feature = "driver-portio")]
+pub mod portio;
 #[cfg(feature = "driver-ps2")]
 pub mod ps2;
 #[cfg(feature = "driver-rtc")]
@@ -35,7 +37,7 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 	// Do not reorder the calls!
 	unsafe {
 		#[cfg(feature = "driver-vga")]
-		vga::init();
+		vga::init(root);
 
 		acpi::init(boot, root);
 
@@ -44,6 +46,9 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 
 		#[cfg(feature = "driver-rtc")]
 		rtc::init();
+
+		#[cfg(feature = "driver-portio")]
+		portio::init(root);
 
 		apic::post_init();
 

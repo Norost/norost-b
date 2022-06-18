@@ -66,7 +66,7 @@ impl BaseAddress {
 		value & 0x6 == 0x0
 	}
 
-	/// Return the physical MMIO address the BAR(s) point(s) to. This may be a 64 bit address
+	/// Return the physical address the BAR(s) point(s) to. This may be a 64 bit address
 	pub fn address(lower: u32, upper: impl FnOnce() -> Option<u32>) -> Option<u64> {
 		if Self::is_64bit(lower) {
 			Some(u64::from(lower & !0xf) | u64::from(upper()?) << 32)

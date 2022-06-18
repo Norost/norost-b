@@ -2,14 +2,16 @@
 //!
 //! For now it's just a big, dumb stack as that's easy.
 
+mod chain;
 mod dma_frame;
-mod dumb_stack;
+mod fixed_bitmap;
 mod owned;
 
 pub use dma_frame::*;
 pub use owned::*;
 
 use super::Page;
+use crate::sync::SpinLock;
 use core::fmt;
 use core::num::NonZeroUsize;
 use core::ptr;
@@ -28,6 +30,9 @@ pub type PPNBox = u64;
 pub type PPNBox = u32;
 #[cfg(feature = "mem-max-256m")]
 pub type PPNBox = u16;
+
+static DEFAULT: SpinLock<chain::Chain> = SpinLock::new(chain::Chain::new());
+static DMA: SpinLock<Option<fixed_bitmap::FixedBitmap>> = SpinLock::new(None);
 
 impl PPN {
 	pub fn try_from_usize(ptr: usize) -> Result<Self, PPNError> {
@@ -192,7 +197,7 @@ pub fn allocate<F>(
 where
 	F: FnMut(PPN),
 {
-	let mut stack = dumb_stack::STACK.auto_lock();
+	let mut stack = DEFAULT.auto_lock();
 	(stack.count() >= count)
 		.then(|| {
 			for _ in 0..count {
@@ -204,9 +209,10 @@ where
 
 /// Allocate a physically contiguous range of pages.
 pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
-	dumb_stack::STACK
-		.auto_lock()
-		.pop_contiguous_range(count)
+	DMA.auto_lock()
+		.as_mut()
+		.expect("DMA allocator not initialized")
+		.pop_range(count)
 		.ok_or(AllocateContiguousError::OutOfFrames)
 }
 
@@ -219,11 +225,9 @@ pub unsafe fn deallocate<F>(count: usize, mut callback: F) -> Result<(), Dealloc
 where
 	F: FnMut() -> PPN,
 {
-	let mut stack = dumb_stack::STACK.auto_lock();
+	let mut stack = DEFAULT.auto_lock();
 	for _ in 0..count {
-		stack
-			.push(callback())
-			.expect("stack is full (double free?)");
+		stack.push(callback())
 	}
 	Ok(())
 }
@@ -234,7 +238,13 @@ where
 ///
 /// The region may not already be in use.
 pub unsafe fn add_memory_region(mut region: MemoryRegion) {
-	let mut stack = dumb_stack::STACK.isr_lock();
+	{
+		let mut dma = DMA.isr_lock();
+		if dma.is_none() {
+			*dma = fixed_bitmap::FixedBitmap::new_from_region(&mut region);
+		}
+	}
+	let mut stack = DEFAULT.isr_lock();
 	while let Some(ppn) = region.take() {
 		// Clear the page beforehand to improve alloc speed and clear any potential secrets.
 		ppn.clear();
@@ -245,5 +255,5 @@ pub unsafe fn add_memory_region(mut region: MemoryRegion) {
 
 #[allow(dead_code)]
 pub fn free_memory() -> usize {
-	dumb_stack::STACK.lock().count() * 4096
+	DEFAULT.lock().count() * 4096
 }

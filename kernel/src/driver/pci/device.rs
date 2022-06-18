@@ -34,9 +34,13 @@ impl PciDevice {
 	}
 }
 
-impl MemoryObject for PciDevice {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		[self.config_region()].into()
+unsafe impl MemoryObject for PciDevice {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		f(&[self.config_region()])
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		1
 	}
 }
 
@@ -68,18 +72,26 @@ impl Object for PciDevice {
 		let (size, orig) = bar.size();
 		bar.set(orig);
 		let size = size?;
+
 		if !BaseAddress::is_mmio(orig) {
 			return None;
 		}
+
 		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
 		let addr = BaseAddress::address(orig, upper).unwrap();
-		let frames = PageFrameIter {
+		let mut frames = PageFrameIter {
 			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 			count: size.get().try_into().unwrap(),
 		};
-		Some(Arc::new(BarRegion {
+		dbg!(addr as *const ());
+		dbg!(frames.count);
+		// FIXME there needs to be a better way to limit the amount of pages.
+		frames.count = frames.count.min(1 << 20);
+		let r = Some(Arc::new(BarRegion {
 			frames: frames.collect(),
-		}))
+		}) as Arc<dyn MemoryObject>);
+		dbg!("ok");
+		r
 	}
 }
 
@@ -111,9 +123,13 @@ pub struct BarRegion {
 	frames: Box<[PPN]>,
 }
 
-impl MemoryObject for BarRegion {
-	fn physical_pages(&self) -> Box<[PPN]> {
-		self.frames.clone()
+unsafe impl MemoryObject for BarRegion {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+		f(&self.frames)
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.frames.len()
 	}
 }
 
