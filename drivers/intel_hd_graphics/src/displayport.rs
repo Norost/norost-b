@@ -133,7 +133,7 @@ bit2enum! {
 	None      0b111
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Port {
 	/// Known as DDI_AUX_{CTL,DATA} in vol2a and located at an entirely different address from the
 	/// other registers. Don't ask me why.

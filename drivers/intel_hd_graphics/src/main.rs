@@ -374,6 +374,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						return 1;
 					}
 				};
+				assert_eq!(port, displayport::Port::A, "TODO support multiple ports");
 				let edid = edid::Edid::new(edid).unwrap();
 				let mode = mode::Mode::from_edid(&edid).unwrap();
 
@@ -452,26 +453,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					);
 					backlight::enable_backlight(&mut control);
 
-					/*
 					let v = control.load(SRD_CTL_EDP);
 					control.store(SRD_CTL_EDP, v | (1 << 31));
-					*/
 				}
-
-				/*
-				unsafe {
-					vga_enable.write(&[0]).unwrap();
-					vga::disable_vga(&mut control);
-					// This is the most minimal sequence that kinda-but-not-really works
-					plane::disable(&mut control, plane::Plane::A);
-					rt::thread::sleep(Duration::from_millis(1));
-					pipe::set_hv(&mut control, pipe::Pipe::A, 1919, 1079);
-					panel::set_hv(&mut control, panel::Pipe::A, 1919, 1080);
-					//panel::disable_fitter(&mut control, panel::Pipe::A);
-					//panel::enable_fitter(&mut control, panel::Pipe::A);
-					plane::enable(&mut control, plane::Plane::A, config);
-				}
-				*/
 
 				let plane_buf = memory.cast::<[u8; 4]>();
 				unsafe {
