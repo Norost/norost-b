@@ -17,6 +17,7 @@
 #![feature(never_type)]
 #![feature(new_uninit)]
 #![feature(optimize_attribute)]
+#![feature(pointer_byte_offsets, pointer_is_aligned)]
 #![feature(slice_index_methods)]
 #![feature(stmt_expr_attributes)]
 #![feature(waker_getters)]

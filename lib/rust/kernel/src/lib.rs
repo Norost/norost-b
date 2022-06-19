@@ -17,6 +17,7 @@ pub mod error;
 #[macro_use]
 pub mod syscall;
 pub mod io;
+pub mod object;
 pub mod time;
 
 #[repr(align(4096))]

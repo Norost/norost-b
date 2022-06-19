@@ -12,7 +12,7 @@ use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::error::Error;
+use norostb_kernel::{error::Error, object::NewObjectType};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -33,8 +33,8 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	physical_address,
 	undefined,
 	undefined,
-	undefined,
-	undefined,
+	has_single_owner,
+	new_object,
 	map_object,
 	sleep,
 	undefined,
@@ -43,7 +43,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	kill_thread,
 	wait_thread,
 	exit,
-	create_root,
+	undefined,
 	duplicate_handle,
 	spawn_thread,
 	create_io_rings,
@@ -204,6 +204,65 @@ extern "C" fn physical_address(
 		.unwrap()
 		.0;
 	Return { status: 0, value }
+}
+
+extern "C" fn has_single_owner(
+	handle: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	Process::current()
+		.unwrap()
+		.object_apply(handle as u32, |o| Return {
+			status: 0,
+			value: (Arc::strong_count(o) == 1).into(),
+		})
+		.unwrap_or(Return {
+			status: Error::InvalidObject as _,
+			value: 0,
+		})
+}
+
+extern "C" fn new_object(ty: usize, a0: usize, a1: usize, _: usize, _: usize, _: usize) -> Return {
+	let Some(ty) = NewObjectType::try_from_raw(ty) else {
+		return Return {
+			status: Error::InvalidData as _,
+			value: 0,
+		};
+	};
+	let proc = Process::current().unwrap();
+	match ty {
+		NewObjectType::MemoryMap => {
+			let f = |a| NonNull::new(a as *mut _);
+			let (Some(start), Some(end)) = (f(a0), f(a1)) else {
+				return Return {
+					status: Error::InvalidData as _,
+					value: 0,
+				};
+			};
+			proc.create_memory_map(start..=end)
+				.ok_or(Error::InvalidData)
+		}
+		NewObjectType::Root => proc
+			.add_object(Arc::new(crate::object_table::Root::new()))
+			.map_err(|e| match e {}),
+		NewObjectType::Duplicate => proc
+			.duplicate_object_handle(a0 as u32)
+			.ok_or(Error::InvalidObject),
+	}
+	.map_or_else(
+		|e| Return {
+			status: e as _,
+			value: 0,
+		},
+		|h| Return {
+			status: 0,
+			value: h.try_into().unwrap(),
+		},
+	)
 }
 
 extern "C" fn map_object(
@@ -500,22 +559,6 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 		// SAFETY: there is no thread state to save.
 		unsafe { scheduler::next_thread() }
 	}
-}
-
-extern "C" fn create_root(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	Process::current()
-		.unwrap()
-		.add_object(Arc::new(crate::object_table::Root::new()))
-		.map_or_else(
-			|e| Return {
-				status: e as _,
-				value: 0,
-			},
-			|h| Return {
-				status: 0,
-				value: h.try_into().unwrap(),
-			},
-		)
 }
 
 extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {

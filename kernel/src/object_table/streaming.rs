@@ -113,12 +113,19 @@ impl Object for StreamingTableOwner {
 		assert!(c.next().is_none());
 		match job.ty {
 			_ if job.result != 0 => tw.complete_err(Error::from(job.result)),
-			Job::OPEN | Job::CREATE => {
-				let obj = Arc::new(StreamObject {
-					handle: job.handle,
-					table: Self::into_inner_weak(&self),
-				});
-				tw.into_object().complete(Ok(obj))
+			Job::OPEN | Job::OPEN_SHARE | Job::CREATE => {
+				tw.into_object().complete(Ok(if job.ty == Job::OPEN_SHARE {
+					// FIXME we don't guarantee this is the correct process
+					crate::scheduler::process::Process::current()
+						.unwrap()
+						.object_apply(job.handle, |o| o.clone())
+						.unwrap_or_else(|| todo!())
+				} else {
+					Arc::new(StreamObject {
+						handle: job.handle,
+						table: Self::into_inner_weak(&self),
+					})
+				}))
 			}
 			Job::WRITE => {
 				let Ok(len) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {

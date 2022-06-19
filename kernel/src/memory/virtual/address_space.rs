@@ -1,10 +1,11 @@
-use crate::arch::r#virtual;
-use crate::memory::{
-	r#virtual::{PPN, RWX},
-	Page,
+use crate::{
+	arch::r#virtual,
+	memory::{
+		r#virtual::{PPN, RWX},
+		Page,
+	},
+	{object_table::MemoryMap, scheduler::MemoryObject, sync::SpinLock},
 };
-use crate::scheduler::MemoryObject;
-use crate::sync::SpinLock;
 use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 use core::ops::RangeInclusive;
@@ -176,6 +177,56 @@ impl AddressSpace {
 		} else {
 			todo!("partial unmap");
 		}
+	}
+
+	/// Create a [`MemoryMap`] from an address range.
+	///
+	/// There may not be any holes in the given range.
+	pub fn create_memory_map(&mut self, range: RangeInclusive<NonNull<Page>>) -> Option<MemoryMap> {
+		let (s, e) = (range.start().as_ptr(), range.end().as_ptr());
+		if !s.is_aligned() || !e.wrapping_byte_add(1).is_aligned() || s > e {
+			// TODO return an error instead of just None.
+			return None;
+		}
+		let mut it = self.objects.iter();
+		let mut obj = Vec::new();
+		// TODO use binary search to find start and end
+		let (start_offset, mut last_end, end_size) = 'l: loop {
+			for (r, o) in &mut it {
+				if r.contains(range.start()) {
+					obj.push(o.clone());
+					break 'l (
+						// FIXME r.start() may not correspond with object start
+						r.start().as_ptr() as usize - range.start().as_ptr() as usize,
+						r.end().as_ptr(),
+						r.contains(r.end())
+							.then(|| range.end().as_ptr() as usize - r.start().as_ptr() as usize),
+					);
+				}
+			}
+			return None;
+		};
+		let end_size = end_size.or_else(|| 'g: loop {
+			for (r, o) in &mut it {
+				if last_end.wrapping_add(1) != r.start().as_ptr() {
+					return None;
+				}
+				last_end = r.end().as_ptr();
+				obj.push(o.clone());
+				if r.contains(range.end()) {
+					// FIXME ditto but end
+					break 'g Some(range.end().as_ptr() as usize - r.start().as_ptr() as usize);
+				}
+			}
+			break None;
+		})? + 1;
+		debug_assert_eq!(start_offset % Page::SIZE, 0);
+		debug_assert_eq!(end_size % Page::SIZE, 0);
+		Some(MemoryMap::new(
+			obj,
+			start_offset / Page::SIZE,
+			end_size / Page::SIZE,
+		))
 	}
 
 	/// Map a virtual address to a physical address.

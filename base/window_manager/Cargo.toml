@@ -1,13 +1,9 @@
 [package]
-name = "driver_virtio_gpu"
+name = "window_manager"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kernel = { package = "norostb_kernel", path = "../../lib/rust/kernel" }
-pci = { path = "../../lib/rust/pci" }
-virtio = { path = "../../lib/rust/virtio" }
-virtio_gpu = { path = "../../lib/rust/virtio_gpu" }
 rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 

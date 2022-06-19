@@ -5,7 +5,9 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::mem;
+use core::ptr::NonNull;
+use driver_utils::io::queue::stream::Job;
+use rt::io::{Error, Handle};
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -32,6 +34,11 @@ macro_rules! log {
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
+	let table_name = rt::args::Args::new()
+		.skip(1)
+		.next()
+		.expect("expected table path");
+
 	let root = rt::io::file_root().unwrap();
 	let it = root.open(b"pci/info").unwrap();
 	let dev = loop {
@@ -138,13 +145,49 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	dev.draw(id, rect, &mut buf).expect("failed to draw");
-	rt::thread::sleep(core::time::Duration::from_secs(5));
-	dev.draw(id, rect, &mut buf).expect("failed to draw");
-	rt::thread::sleep(core::time::Duration::from_secs(5));
+	// Wrap framebuffer for sharing
+	let fb_share = rt::Object::new(rt::NewObject::MemoryMap {
+		range: fb.virt()..=NonNull::new(fb.virt().as_ptr().wrapping_add(fb.size() - 1)).unwrap(),
+	})
+	.unwrap()
+	.into_raw();
+
 	dev.draw(id, rect, &mut buf).expect("failed to draw");
 
-	rt::thread::sleep(core::time::Duration::MAX);
+	// Create table
+	let tbl = rt::io::file_root().unwrap().create(table_name).unwrap();
 
-	0
+	// Begin event loop
+	loop {
+		let data = tbl.read_vec(64).unwrap();
+		let resp = match Job::deserialize(&data).unwrap() {
+			Job::Open {
+				job_id,
+				handle,
+				path,
+			} => match (handle, path) {
+				(Handle::MAX, b"framebuffer") => {
+					Job::reply_open_share_clear(data, job_id, fb_share)
+				}
+				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, 0),
+				(Handle::MAX, _) => Job::reply_error_clear(data, job_id, Error::DoesNotExist),
+				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
+			},
+			Job::Write {
+				job_id,
+				handle,
+				data: d,
+			} => match (handle, d) {
+				(0, &[]) => {
+					dev.draw(id, rect, &mut buf).expect("failed to draw");
+					Job::reply_write_clear(data, job_id, 0)
+				}
+				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
+			},
+			Job::Close { .. } => continue,
+			_ => todo!(),
+		}
+		.unwrap();
+		tbl.write_vec(resp, 0).unwrap();
+	}
 }

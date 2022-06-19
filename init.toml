@@ -3,7 +3,6 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
 #stdin = "ps2_kbd/stream"
@@ -26,7 +25,7 @@ file_root = ""
 
 [program.virtio_gpu]
 path = "virtio-gpu"
-args = [ "net" ]
+args = [ "gpu" ]
 target = "net"
 file_root = ""
 
@@ -55,3 +54,8 @@ file_root = ""
 disabled = true
 path = "intel_hd_graphics"
 file_root = ""
+
+[program.window_manager]
+path = "window_manager"
+after = [ "gpu/framebuffer" ]
+file_root = "gpu"

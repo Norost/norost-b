@@ -44,6 +44,7 @@ install base    init               init
 #install base    jail               jail
 install base    minish             minish
 #install base    static_http_server static_http_server
+install base    window_manager     window_manager
 
 # Note: make sure grub-pc-bin is installed! Otherwise QEMU may hang on
 # "Booting from disk" or return error code 0009

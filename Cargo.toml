@@ -29,6 +29,7 @@ members = [
 	"base/jail",
 	"base/minish",
 	"base/static_http_server",
+	"base/window_manager",
 ]
 
 [profile.dev]

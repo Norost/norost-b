@@ -173,7 +173,13 @@ impl super::Process {
 					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
 					let object = objects.get(handle).unwrap();
-					let mut ticket = object.clone().write(data);
+					// TODO crappy workaround for Stream table
+					// We should instead pass a reference to the objects list or some Context
+					// object.
+					let object = object.clone();
+					drop(objects);
+					let mut ticket = object.write(data);
+					objects = self.objects.lock();
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(b.try_into().unwrap()),

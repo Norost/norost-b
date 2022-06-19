@@ -123,6 +123,25 @@ impl<'a> Job<'a> {
 	with!(u64 reply_write reply_write_clear = WRITE, amount);
 	with!(u64 reply_seek reply_seek_clear = SEEK, position);
 
+	pub fn reply_open_share(buf: &mut Vec<u8>, job_id: u32, handle: Handle) -> Result<(), ()> {
+		let i = buf.len();
+		Self::reply_open(buf, job_id, handle)?;
+		buf[i] = io::Job::OPEN_SHARE;
+		Ok(())
+	}
+
+	pub fn reply_open_share_clear(
+		mut buf: Vec<u8>,
+		job_id: u32,
+		handle: Handle,
+	) -> Result<Vec<u8>, (Vec<u8>, ())> {
+		buf.clear();
+		match Self::reply_open_share(&mut buf, job_id, handle) {
+			Ok(()) => Ok(buf),
+			Err(e) => Err((buf, e)),
+		}
+	}
+
 	pub fn reply_read<F>(buf: &mut Vec<u8>, job_id: u32, peek: bool, data: F) -> Result<(), ()>
 	where
 		F: FnOnce(&mut Vec<u8>) -> Result<(), ()>,

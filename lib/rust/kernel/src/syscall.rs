@@ -4,6 +4,8 @@ pub const ID_MONOTONIC_TIME: usize = 2;
 pub const ID_ALLOC_DMA: usize = 3;
 pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
+pub const ID_HAS_SINGLE_OWNER: usize = 7;
+pub const ID_NEW_OBJECT: usize = 8;
 pub const ID_MAP_OBJECT: usize = 9;
 pub const ID_SLEEP: usize = 10;
 
@@ -11,15 +13,18 @@ pub const ID_DESTROY_IO_QUEUE: usize = 13;
 pub const ID_KILL_THREAD: usize = 14;
 pub const ID_WAIT_THREAD: usize = 15;
 pub const ID_EXIT: usize = 16;
-pub const ID_CREATE_ROOT: usize = 17;
-pub const ID_DUPLICATE_HANDLE: usize = 18;
+
 pub const ID_SPAWN_THREAD: usize = 19;
 pub const ID_CREATE_IO_QUEUE: usize = 20;
 pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
-use crate::time::Monotonic;
-use crate::{error, Page};
+use crate::{
+	error,
+	object::{NewObject, NewObjectType},
+	time::Monotonic,
+	Page,
+};
 use core::arch::asm;
 use core::fmt;
 use core::num::NonZeroUsize;
@@ -151,6 +156,24 @@ pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
 }
 
 #[inline]
+pub fn new_object(args: NewObject) -> error::Result<Handle> {
+	ret(match args {
+		NewObject::MemoryMap { range } => {
+			syscall!(ID_NEW_OBJECT(
+				NewObjectType::MemoryMap as usize,
+				range.start().as_ptr(),
+				range.end().as_ptr()
+			))
+		}
+		NewObject::Root => syscall!(ID_NEW_OBJECT(NewObjectType::Root as usize)),
+		NewObject::Duplicate { handle } => {
+			syscall!(ID_NEW_OBJECT(NewObjectType::Duplicate as usize, handle))
+		}
+	})
+	.map(|(_, h)| h as u32)
+}
+
+#[inline]
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<Page>>,
@@ -176,16 +199,6 @@ pub unsafe fn spawn_thread(
 	stack: *const (),
 ) -> error::Result<Handle> {
 	ret(syscall!(ID_SPAWN_THREAD(start, stack))).map(|(_, h)| h as Handle)
-}
-
-#[inline]
-pub fn create_root() -> error::Result<Handle> {
-	ret(syscall!(ID_CREATE_ROOT())).map(|(_, v)| v as u32)
-}
-
-#[inline]
-pub fn duplicate_handle(handle: Handle) -> error::Result<Handle> {
-	ret(syscall!(ID_DUPLICATE_HANDLE(handle))).map(|(_, v)| v as u32)
 }
 
 #[inline]
