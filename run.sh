@@ -16,6 +16,6 @@ exec qemu-system-x86_64 \
 	-device virtio-blk-pci,drive=disk0 \
 	-netdev user,id=net0,hostfwd=tcp::5555-:80 \
 	-device virtio-net-pci,netdev=net0 \
-	-device virtio-gpu-pci \
+	-vga virtio
 	-s \
 	"$@"
