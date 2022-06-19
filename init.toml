@@ -24,6 +24,12 @@ args = [ "disk" ]
 target = "disk"
 file_root = ""
 
+[program.virtio_gpu]
+path = "virtio-gpu"
+args = [ "net" ]
+target = "net"
+file_root = ""
+
 [program.virtio_net]
 disabled = true
 path = "virtio-net"
@@ -46,5 +52,6 @@ after = [ "ps2_keyboard/scancodes" ]
 file_root = ""
 
 [program.intel_hd_graphics]
+disabled = true
 path = "intel_hd_graphics"
 file_root = ""

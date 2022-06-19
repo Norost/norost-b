@@ -136,6 +136,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_virtio_gpu"
+version = "0.1.0"
+dependencies = [
+ "norostb_kernel",
+ "norostb_rt",
+ "norostb_rt_alloc",
+ "pci",
+ "virtio",
+ "virtio_gpu",
+]
+
+[[package]]
 name = "driver_virtio_net"
 version = "0.1.1"
 dependencies = [
@@ -608,6 +620,16 @@ dependencies = [
  "endian",
  "memoffset",
  "norostb_kernel",
+ "pci",
+ "virtio",
+ "volatile",
+]
+
+[[package]]
+name = "virtio_gpu"
+version = "0.1.0"
+dependencies = [
+ "endian",
  "pci",
  "virtio",
  "volatile",

@@ -1,0 +1,10 @@
+[package]
+name = "virtio_gpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+endian = { path = "../endian/" }
+pci = { path = "../pci/" }
+virtio = { path = "../virtio" }
+volatile = { path = "../volatile" }

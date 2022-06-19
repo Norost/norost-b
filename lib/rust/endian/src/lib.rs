@@ -1,34 +1,52 @@
 #![no_std]
 
-use core::fmt;
-use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
+use core::{fmt, ops::*};
 
 macro_rules! ety {
-	(@INTERNAL impl arithemic $name:ident, $ty:ty, $trait:ident.$fn:ident) => {
+	($name:ident, $ty:ty, $trait:ident.$fn:ident, $traitas:ident.$fnas:ident) => {
 		impl $trait<Self> for $name {
 			type Output = Self;
 
 			fn $fn(self, rhs: Self) -> Self {
-				$ty::from(self.0).$fn($ty::from(rhs.0)).into()
+				Self::from(<$ty>::from(self).$fn(<$ty>::from(rhs)))
 			}
 		}
-	};
-	(@INTERNAL impl bitwise $name:ident, $ty:ty, $trait:ident.$fn:ident, $traitas:ident.$fnas:ident) => {
-		impl $trait<Self> for $name {
+
+		impl $trait<$ty> for $name {
 			type Output = Self;
 
-			fn $fn(self, rhs: Self) -> Self {
-				Self(self.0.$fn(rhs.0))
+			fn $fn(self, rhs: $ty) -> Self {
+				Self::from(<$ty>::from(self).$fn(rhs))
+			}
+		}
+
+		impl $trait<$name> for $ty {
+			type Output = Self;
+
+			fn $fn(self, rhs: $name) -> Self {
+				self.$fn(Self::from(rhs))
 			}
 		}
 
 		impl $traitas<Self> for $name {
 			fn $fnas(&mut self, rhs: Self) {
-				self.0 = self.0.$fn(rhs.0)
+				*self = self.$fn(rhs)
+			}
+		}
+
+		impl $traitas<$ty> for $name {
+			fn $fnas(&mut self, rhs: $ty) {
+				*self = self.$fn(rhs)
+			}
+		}
+
+		impl $traitas<$name> for $ty {
+			fn $fnas(&mut self, rhs: $name) {
+				*self = self.$fn(rhs)
 			}
 		}
 	};
-	(@INTERNAL $ty:ty, $name:ident, $from:ident, $to:ident) => {
+	($ty:ty, $name:ident, $from:ident, $to:ident) => {
 		#[allow(non_camel_case_types)]
 		#[derive(Clone, Copy, Default, PartialEq, Eq)]
 		#[repr(transparent)]
@@ -76,9 +94,14 @@ macro_rules! ety {
 			}
 		}
 
-		ety!(@INTERNAL impl bitwise $name, $ty, BitOr.bitor, BitOrAssign.bitor_assign);
-		ety!(@INTERNAL impl bitwise $name, $ty, BitAnd.bitand, BitAndAssign.bitand_assign);
-		ety!(@INTERNAL impl bitwise $name, $ty, BitXor.bitxor, BitXorAssign.bitxor_assign);
+		ety!($name, $ty, Add.add, AddAssign.add_assign);
+		ety!($name, $ty, Sub.sub, SubAssign.sub_assign);
+		ety!($name, $ty, Mul.mul, MulAssign.mul_assign);
+		ety!($name, $ty, Div.div, DivAssign.div_assign);
+		ety!($name, $ty, Rem.rem, RemAssign.rem_assign);
+		ety!($name, $ty, BitOr.bitor, BitOrAssign.bitor_assign);
+		ety!($name, $ty, BitAnd.bitand, BitAndAssign.bitand_assign);
+		ety!($name, $ty, BitXor.bitxor, BitXorAssign.bitxor_assign);
 
 		impl Not for $name {
 			type Output = Self;
@@ -89,10 +112,10 @@ macro_rules! ety {
 		}
 	};
 	(be $ty:ty, $name:ident) => {
-		ety!(@INTERNAL $ty, $name, from_be, to_be);
+		ety!($ty, $name, from_be, to_be);
 	};
 	(le $ty:ty, $name:ident) => {
-		ety!(@INTERNAL $ty, $name, from_le, to_le);
+		ety!($ty, $name, from_le, to_le);
 	};
 }
 
@@ -104,3 +127,16 @@ ety!(le u8, u8le);
 ety!(le u16, u16le);
 ety!(le u32, u32le);
 ety!(le u64, u64le);
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	// Just one test is plenty to ensure we've implemented the operators correctly.
+	#[test]
+	fn add() {
+		assert_eq!(u32le::from(5) + u32le::from(7), 12.into());
+		assert_eq!(u32le::from(5) + 7, 12.into());
+		assert_eq!(5 + u32le::from(7), 12);
+	}
+}
