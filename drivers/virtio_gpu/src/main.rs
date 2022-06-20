@@ -5,9 +5,10 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::ptr::NonNull;
+use core::{ptr::NonNull, str};
 use driver_utils::io::queue::stream::Job;
 use rt::io::{Error, Handle};
+use virtio_gpu::Rect;
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -47,7 +48,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			log!("no VirtIO GPU device found");
 			return 1;
 		}
-		let s = core::str::from_utf8(&e).unwrap();
+		let s = str::from_utf8(&e).unwrap();
 		let (loc, id) = s.split_once(' ').unwrap();
 		if id == "1af4:1050" {
 			let mut path = Vec::from(*b"pci/");
@@ -110,7 +111,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	// Allocate draw buffer
-	let (width, height) = (400, 300);
+	let (width, height) = (432, 243);
 	let (fb, fb_size) = kernel::syscall::alloc_dma(None, width * height * 4)
 		.expect("failed to allocate framebuffer buffer");
 	let fb_phys = kernel::syscall::physical_address(fb).unwrap();
@@ -125,7 +126,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Set up scanout
 	let mut backing = virtio_gpu::BackingStorage::new(buf2);
 	backing.push(&fb);
-	let rect = virtio_gpu::Rect::new(0, 0, width.try_into().unwrap(), height.try_into().unwrap());
+	let rect = Rect::new(0, 0, width.try_into().unwrap(), height.try_into().unwrap());
 	let ret = unsafe { dev.init_scanout(virtio_gpu::Format::Rgbx8Unorm, rect, backing, &mut buf) };
 	let id = ret.unwrap();
 
@@ -157,6 +158,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Create table
 	let tbl = rt::io::file_root().unwrap().create(table_name).unwrap();
 
+	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
+	const SYNC_HANDLE: Handle = 0xffff_fffe;
+
+	let mut handles = driver_utils::Arena::new();
+
+	enum H {
+		Resolution,
+	}
+
 	// Begin event loop
 	loop {
 		let data = tbl.read_vec(64).unwrap();
@@ -169,22 +179,86 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				(Handle::MAX, b"framebuffer") => {
 					Job::reply_open_share_clear(data, job_id, fb_share)
 				}
-				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, 0),
+				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, SYNC_HANDLE),
+				(Handle::MAX, b"resolution") => {
+					let handle = handles.insert(H::Resolution);
+					Job::reply_open_clear(data, job_id, handle)
+				}
 				(Handle::MAX, _) => Job::reply_error_clear(data, job_id, Error::DoesNotExist),
 				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
+			},
+			Job::Read {
+				job_id,
+				handle,
+				length,
+				peek,
+			} => match handle {
+				Handle::MAX | SYNC_HANDLE => {
+					Job::reply_error_clear(data, job_id, Error::InvalidOperation)
+				}
+				h => match &mut handles[h] {
+					H::Resolution => Job::reply_read_clear(data, job_id, peek, |b| {
+						use alloc::string::ToString;
+						let (w, h) = (width.to_string(), height.to_string());
+						b.extend_from_slice(w.as_bytes());
+						b.push(b'x');
+						b.extend_from_slice(h.as_bytes());
+						Ok(())
+					}),
+				},
 			},
 			Job::Write {
 				job_id,
 				handle,
 				data: d,
 			} => match (handle, d) {
-				(0, &[]) => {
+				// Blit the entire screen
+				(SYNC_HANDLE, &[]) => {
 					dev.draw(id, rect, &mut buf).expect("failed to draw");
 					Job::reply_write_clear(data, job_id, 0)
 				}
+				// Blit a specific area
+				(SYNC_HANDLE, s) => {
+					if let Some(r) = (|| {
+						let s = str::from_utf8(d).ok()?;
+						let f = |n: &str| n.parse::<u32>().ok();
+						let (l, h) = s.split_once(' ')?;
+						let (xl, yl) = l.split_once(',')?;
+						let (xh, yh) = h.split_once(',')?;
+						let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
+						let (xl, yl) = (x0.min(x1), y0.min(y1));
+						let (xh, yh) = (x0.max(x1), y0.max(y1));
+						Some(Rect::new(xl, yl, xh - xl, yh - yl))
+					})() {
+						dev.draw(id, r, &mut buf).expect("failed to draw");
+						let l = s.len().try_into().unwrap();
+						Job::reply_write_clear(data, job_id, l)
+					} else {
+						Job::reply_error_clear(data, job_id, Error::InvalidData)
+					}
+				}
+				/* TODO binary modifier
+				// Blit a specific area
+				(SYNC_HANDLE, &[xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1]) => {
+					let f = |l, h| u16::from_le_bytes([l, h]).into();
+					let (x0, y0, x1, y1) = (f(xl0, xl1), f(yl0, yl1), f(xh0, xh1), f(yh0, yh1));
+					let (xl, yl) = (x0.min(x1), y0.min(y1));
+					let (xh, yh) = (x0.max(x1), y0.max(y1));
+					let r = Rect::new(xl, yl, xh - xl, yh - yl);
+					dev.draw(id, r, &mut buf).expect("failed to draw");
+					let l = d.len().try_into().unwrap();
+					Job::reply_write_clear(data, job_id, l)
+				}
+				*/
 				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
 			},
-			Job::Close { .. } => continue,
+			Job::Close { handle } => match handle {
+				Handle::MAX | SYNC_HANDLE => continue,
+				h => {
+					handles.remove(h).unwrap();
+					continue;
+				}
+			},
 			_ => todo!(),
 		}
 		.unwrap();

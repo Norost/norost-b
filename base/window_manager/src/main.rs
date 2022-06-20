@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::ptr::NonNull;
+use core::{ptr::NonNull, str};
 use driver_utils::io::queue::stream::Job;
 use rt::io::{Error, Handle};
 
@@ -34,7 +34,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.unwrap()
 		.cast::<[u8; 4]>();
 	let sync = root.open(b"sync").unwrap();
-	let (w, h) = (400, 300);
+	let (w, h) = {
+		let r = root.open(b"resolution").unwrap();
+		let r = r.read_vec(16).unwrap();
+		let r = str::from_utf8(&r).unwrap();
+		let (w, h) = r.split_once('x').unwrap();
+		(w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap())
+	};
+	let (w, h) = (w.try_into().unwrap(), h.try_into().unwrap());
 	for y in 0..h {
 		for x in 0..w {
 			let r = x * x;
@@ -44,12 +51,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			}
 		}
 	}
-	rt::io::stderr().unwrap().write(b"a");
-	rt::thread::sleep(core::time::Duration::from_secs(5));
 	// FIXME wakes way too early.
-	rt::io::stderr().unwrap().write(b"b");
 	rt::thread::sleep(core::time::Duration::from_secs(5));
-	rt::io::stderr().unwrap().write(b"c");
+	sync.write(b"40,40 80,80").unwrap();
+	rt::thread::sleep(core::time::Duration::from_secs(1));
+	rt::thread::sleep(core::time::Duration::from_secs(1));
+	sync.write(b"120,120 80,80").unwrap();
+	rt::thread::sleep(core::time::Duration::from_secs(1));
+	rt::thread::sleep(core::time::Duration::from_secs(1));
 	sync.write(b"").unwrap();
 	0
 }
