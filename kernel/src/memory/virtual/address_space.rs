@@ -191,7 +191,7 @@ impl AddressSpace {
 		let mut it = self.objects.iter();
 		let mut obj = Vec::new();
 		// TODO use binary search to find start and end
-		let (start_offset, mut last_end, end_size) = 'l: loop {
+		let (start_offset, mut last_end, has_end) = 'l: loop {
 			for (r, o) in &mut it {
 				if r.contains(range.start()) {
 					obj.push(o.clone());
@@ -199,33 +199,35 @@ impl AddressSpace {
 						// FIXME r.start() may not correspond with object start
 						r.start().as_ptr() as usize - range.start().as_ptr() as usize,
 						r.end().as_ptr(),
-						r.contains(r.end())
-							.then(|| range.end().as_ptr() as usize - r.start().as_ptr() as usize),
+						r.contains(r.end()),
 					);
 				}
 			}
 			return None;
 		};
-		let end_size = end_size.or_else(|| 'g: loop {
-			for (r, o) in &mut it {
-				if last_end.wrapping_add(1) != r.start().as_ptr() {
-					return None;
+		if !has_end {
+			'g: loop {
+				for (r, o) in &mut it {
+					if last_end.wrapping_add(1) != r.start().as_ptr() {
+						return None;
+					}
+					last_end = r.end().as_ptr();
+					obj.push(o.clone());
+					if r.contains(range.end()) {
+						// FIXME ditto but end
+						break 'g;
+					}
 				}
-				last_end = r.end().as_ptr();
-				obj.push(o.clone());
-				if r.contains(range.end()) {
-					// FIXME ditto but end
-					break 'g Some(range.end().as_ptr() as usize - r.start().as_ptr() as usize);
-				}
+				return None;
 			}
-			break None;
-		})? + 1;
+		}
+		let total_size = range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1;
 		debug_assert_eq!(start_offset % Page::SIZE, 0);
-		debug_assert_eq!(end_size % Page::SIZE, 0);
+		debug_assert_eq!(total_size % Page::SIZE, 0);
 		Some(MemoryMap::new(
-			obj,
+			obj.into(),
 			start_offset / Page::SIZE,
-			end_size / Page::SIZE,
+			total_size / Page::SIZE,
 		))
 	}
 
