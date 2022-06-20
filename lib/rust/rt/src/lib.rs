@@ -38,7 +38,7 @@ use core::ptr::NonNull;
 
 pub use norostb_kernel::{error::Error, time, AtomicHandle, Handle};
 pub use process::Process;
-pub use table::{Object, RefObject};
+pub use table::{NewObject, Object, RefObject};
 
 cfg_if::cfg_if! {
 	if #[cfg(target_arch = "x86_64")] {

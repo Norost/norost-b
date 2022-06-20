@@ -9,12 +9,18 @@ use core::{
 	mem::{self, MaybeUninit},
 };
 
-pub use norostb_kernel::{io::Job, Handle};
+pub use norostb_kernel::{io::Job, object::NewObject, Handle};
 
 #[derive(Debug)]
 pub struct Object(Handle);
 
 impl Object {
+	/// Create a new local object.
+	#[inline]
+	pub fn new(args: NewObject) -> io::Result<Self> {
+		io::new_object(args).map(Self)
+	}
+
 	#[inline]
 	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
 		io::block_on(io::open(self.0, path.into(), 0))
@@ -102,16 +108,6 @@ impl Object {
 	#[inline]
 	pub fn poll(&self) -> io::Result<u64> {
 		io::block_on(io::poll(self.0))
-	}
-
-	#[inline]
-	pub fn duplicate(&self) -> io::Result<Self> {
-		io::duplicate(self.0).map(Self)
-	}
-
-	#[inline]
-	pub fn create_root() -> io::Result<Self> {
-		io::create_root().map(Self)
 	}
 
 	#[inline]

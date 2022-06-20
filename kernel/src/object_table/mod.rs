@@ -5,6 +5,7 @@
 //! Objects can be searched/filtered with tags. Individual objects are addressed by unique
 //! integer IDs.
 
+mod memory_map;
 mod object;
 mod query;
 mod root;
@@ -19,6 +20,7 @@ pub use norostb_kernel::{
 	syscall::Handle,
 };
 
+pub use memory_map::MemoryMap;
 pub use object::*;
 pub use query::*;
 pub use root::Root;

@@ -12,8 +12,7 @@ use crate::sync::{Mutex, SpinLock};
 use crate::util::{erase_handle, unerase_handle};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
+use core::{num::NonZeroUsize, ops::RangeInclusive, ptr::NonNull};
 use norostb_kernel::Handle;
 
 pub use table::init;
@@ -92,6 +91,18 @@ impl Process {
 		self.address_space.lock().unmap_object(base, count)
 	}
 
+	/// Create a [`MemoryMap`] from an address range.
+	///
+	/// There may not be any holes in the given range.
+	pub fn create_memory_map(&self, range: RangeInclusive<NonNull<Page>>) -> Option<Handle> {
+		let mut objects = self.objects.auto_lock();
+		let mut address_space = self.address_space.auto_lock();
+		address_space
+			.create_memory_map(range)
+			.map(|o| objects.insert(Arc::new(o)))
+			.map(erase_handle)
+	}
+
 	/// Duplicate a reference to an object.
 	pub fn duplicate_object_handle(&self, handle: Handle) -> Option<Handle> {
 		let mut objects = self.objects.lock();
@@ -101,6 +112,14 @@ impl Process {
 		} else {
 			None
 		}
+	}
+
+	/// Operate on a reference to an object.
+	pub fn object_apply<R, F>(&self, handle: Handle, f: F) -> Option<R>
+	where
+		F: FnOnce(&Arc<dyn Object>) -> R,
+	{
+		self.objects.auto_lock().get(unerase_handle(handle)).map(f)
 	}
 
 	/// Map a virtual address to a physical address.

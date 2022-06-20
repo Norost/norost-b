@@ -1,6 +1,12 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
+pub use nora_io_queue_rt::{
+	error::{Error, Result},
+	Create, Handle, Open, Peek, Poll, Pow2Size, Queue, Read, Seek, SeekFrom, Share, Write,
+};
+pub use norostb_kernel::object::NewObject;
+
 use crate::{time::Monotonic, tls, RefObject};
 use alloc::{boxed::Box, vec::Vec};
 use core::{
@@ -13,10 +19,6 @@ use core::{
 	time::Duration,
 };
 use nora_io_queue_rt::Full;
-pub use nora_io_queue_rt::{
-	error::Result, Create, Handle, Open, Peek, Poll, Pow2Size, Queue, Read, Seek, SeekFrom, Share,
-	Write,
-};
 use norostb_kernel::syscall;
 
 macro_rules! transmute_handle {
@@ -193,6 +195,21 @@ impl_io!(None poll() -> Poll, submit_poll);
 impl_io!(None share(share: Handle) -> Share, submit_share);
 
 #[inline]
+pub fn new_object(args: NewObject) -> Result<Handle> {
+	syscall::new_object(args)
+}
+
+#[inline]
+pub fn map_object(
+	handle: Handle,
+	base: Option<NonNull<u8>>,
+	offset: u64,
+	length: usize,
+) -> Result<NonNull<u8>> {
+	syscall::map_object(handle, base.map(NonNull::cast), offset, length).map(NonNull::cast)
+}
+
+#[inline]
 pub fn close(handle: Handle) {
 	let q = queue();
 	while q.submit_close(handle).is_err() {
@@ -200,16 +217,6 @@ pub fn close(handle: Handle) {
 		q.wait(Duration::MAX);
 		q.process();
 	}
-}
-
-#[inline]
-pub fn duplicate(handle: Handle) -> Result<Handle> {
-	syscall::duplicate_handle(handle)
-}
-
-#[inline]
-pub fn create_root() -> Result<Handle> {
-	syscall::create_root()
 }
 
 /// Poll & process the I/O queue once.

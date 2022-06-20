@@ -3,7 +3,6 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
 #stdin = "ps2_kbd/stream"
@@ -22,6 +21,12 @@ disabled = true
 path = "virtio-blk"
 args = [ "disk" ]
 target = "disk"
+file_root = ""
+
+[program.virtio_gpu]
+path = "virtio-gpu"
+args = [ "gpu" ]
+target = "net"
 file_root = ""
 
 [program.virtio_net]
@@ -46,5 +51,11 @@ after = [ "ps2_keyboard/scancodes" ]
 file_root = ""
 
 [program.intel_hd_graphics]
+disabled = true
 path = "intel_hd_graphics"
 file_root = ""
+
+[program.window_manager]
+path = "window_manager"
+after = [ "gpu/framebuffer" ]
+file_root = "gpu"

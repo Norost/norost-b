@@ -9,6 +9,7 @@ members = [
 	"drivers/intel_hd_graphics",
 	"drivers/scancode_to_char",
 	"drivers/virtio_block",
+	"drivers/virtio_gpu",
 	"drivers/virtio_net",
 	"lib/rust/arena",
 	"lib/rust/driver_utils",
@@ -16,6 +17,8 @@ members = [
 	"lib/rust/pci",
 	"lib/rust/scancodes",
 	"lib/rust/virtio",
+	"lib/rust/virtio_block",
+	"lib/rust/virtio_gpu",
 	"lib/rust/virtio_net",
 	"lib/rust/volatile",
 	"lib/rust/rt",
@@ -26,6 +29,7 @@ members = [
 	"base/jail",
 	"base/minish",
 	"base/static_http_server",
+	"base/window_manager",
 ]
 
 [profile.dev]

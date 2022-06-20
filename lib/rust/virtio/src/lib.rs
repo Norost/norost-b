@@ -5,4 +5,4 @@ pub mod pci;
 pub mod phys;
 pub mod queue;
 
-pub use phys::{PhysAddr, PhysRegion};
+pub use phys::{PhysAddr, PhysMap, PhysRegion};

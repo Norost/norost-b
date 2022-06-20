@@ -533,6 +533,7 @@ impl Job {
 	pub const SEEK: u8 = 6;
 	pub const CLOSE: u8 = 7;
 	pub const PEEK: u8 = 8;
+	pub const OPEN_SHARE: u8 = Self::OPEN | 1 << 7;
 
 	#[inline]
 	pub fn deserialize(data: &[u8]) -> Option<(Self, &[u8])> {
