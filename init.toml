@@ -58,4 +58,4 @@ file_root = ""
 [program.window_manager]
 path = "window_manager"
 after = [ "gpu/framebuffer" ]
-file_root = "gpu"
+file_root = ""

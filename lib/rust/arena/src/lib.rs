@@ -197,8 +197,14 @@ impl<V, G: Generation> Arena<V, G> {
 		}
 	}
 
+	#[inline(always)]
 	pub fn len(&self) -> usize {
 		self.count
+	}
+
+	#[inline(always)]
+	pub fn is_empty(&self) -> bool {
+		self.len() == 0
 	}
 }
 

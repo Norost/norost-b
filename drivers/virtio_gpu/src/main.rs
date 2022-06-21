@@ -228,7 +228,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
 						let (xl, yl) = (x0.min(x1), y0.min(y1));
 						let (xh, yh) = (x0.max(x1), y0.max(y1));
-						Some(Rect::new(xl, yl, xh - xl, yh - yl))
+						Some(Rect::new(xl, yl, xh - xl + 1, yh - yl + 1))
 					})() {
 						dev.draw(id, r, &mut buf).expect("failed to draw");
 						let l = s.len().try_into().unwrap();
