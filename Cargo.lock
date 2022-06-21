@@ -276,6 +276,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui_cli"
+version = "0.1.0"
+dependencies = [
+ "norostb_rt",
+ "norostb_rt_alloc",
+]
+
+[[package]]
 name = "init"
 version = "0.1.0"
 dependencies = [

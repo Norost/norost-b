@@ -7,7 +7,6 @@ use alloc::boxed::Box;
 use driver_utils::{Arena, Handle};
 
 pub struct Manager {
-	table: rt::Object,
 	windows: Arena<Window>,
 	workspaces: Box<[Workspace]>,
 	current_workspace: u8,
@@ -17,12 +16,7 @@ pub struct Manager {
 impl Manager {
 	pub fn new(global_window_params: GlobalWindowParams) -> Result<Self, NewManagerError> {
 		let ws = Workspace::new().map_err(NewManagerError::NewWorkspace)?;
-		let table = rt::io::file_root()
-			.ok_or(NewManagerError::NoFileRoot)?
-			.create(b"window_manager")
-			.map_err(NewManagerError::Io)?;
 		Ok(Self {
-			table,
 			windows: Arena::new(),
 			workspaces: [ws].into(),
 			current_workspace: 0,
@@ -70,6 +64,5 @@ impl Manager {
 #[derive(Debug)]
 pub enum NewManagerError {
 	NoFileRoot,
-	Io(rt::io::Error),
 	NewWorkspace(NewWorkspaceError),
 }

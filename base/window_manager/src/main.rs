@@ -86,11 +86,57 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	};
 
-	fill(manager.window_rect(w0, size).unwrap(), [255, 0, 0]);
-	fill(manager.window_rect(w1, size).unwrap(), [0, 255, 0]);
-	fill(manager.window_rect(w2, size).unwrap(), [0, 0, 255]);
+	let colors = [
+		[255, 0, 0],
+		[0, 255, 0],
+		[0, 0, 255],
+		[255, 255, 0],
+		[0, 255, 255],
+		[255, 0, 255],
+	];
+
+	fill(
+		math::Rect::from_size(math::Point::ORIGIN, size),
+		[50, 50, 50],
+	);
+	for (w, c) in manager.window_handles().zip(&colors) {
+		fill(manager.window_rect(w, size).unwrap(), *c);
+	}
 
 	sync.write(b"").unwrap();
+
+	let table = root.create(b"window_manager").unwrap();
+
+	loop {
+		let buf = table.read_vec(64).unwrap();
+		let buf = match Job::deserialize(&buf).unwrap() {
+			Job::Create {
+				handle,
+				job_id,
+				path,
+			} => match (handle, path) {
+				(Handle::MAX, b"window") => {
+					let h = manager.new_window(size).unwrap();
+					fill(
+						math::Rect::from_size(math::Point::ORIGIN, size),
+						[50, 50, 50],
+					);
+					for (w, c) in manager.window_handles().zip(&colors) {
+						fill(manager.window_rect(w, size).unwrap(), *c);
+					}
+					sync.write(b"").unwrap();
+					Job::reply_create_clear(buf, job_id, h)
+				}
+				_ => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
+			},
+			Job::Close { handle } => {
+				todo!()
+			}
+			_ => todo!(),
+		}
+		.unwrap();
+		table.write_vec(buf, 0).unwrap();
+	}
 
 	0
 }

@@ -16,6 +16,11 @@ target = "file"
 after = [ "disk/data" ]
 file_root = ""
 
+[program.gui_cli]
+path = "gui_cli"
+after = [ "window_manager" ]
+file_root = ""
+
 [program.virtio_blk]
 disabled = true
 path = "virtio-blk"

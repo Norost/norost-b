@@ -1,0 +1,8 @@
+[package]
+name = "gui_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
+rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
