@@ -25,6 +25,7 @@ members = [
 	"lib/rust/rt_alloc",
 	"lib/rust/io_queue",
 	"lib/rust/io_queue_rt",
+	"lib/rust/ipc/window_manager",
 	"base/gui_cli",
 	"base/init",
 	"base/jail",

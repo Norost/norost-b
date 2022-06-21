@@ -33,6 +33,17 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 
 	let window = root.create(b"window_manager/window").unwrap();
+	let window = root.create(b"window_manager/window").unwrap();
+
+	let mut draw = ipc_wm::DrawRect::new(Vec::new());
+	draw.set_size(ipc_wm::Size { x: 15, y: 15 });
+	draw.pixels_mut()
+		.unwrap()
+		.iter_mut()
+		.enumerate()
+		.for_each(|(i, c)| *c = i as _);
+
+	window.write_vec(draw.raw, 0).unwrap();
 
 	rt::thread::sleep(core::time::Duration::MAX);
 	rt::thread::sleep(core::time::Duration::MAX);

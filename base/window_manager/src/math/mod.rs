@@ -1,3 +1,7 @@
+mod rect;
+
+pub use rect::*;
+
 use core::ops::{Add, AddAssign, Mul, Neg, RangeInclusive, Sub, SubAssign};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +16,11 @@ impl Point {
 	#[inline(always)]
 	pub const fn new(x: u32, y: u32) -> Self {
 		Self { x, y }
+	}
+
+	#[inline(always)]
+	pub const fn into_vector(self) -> Vector {
+		Vector::new(self.x as _, self.y as _)
 	}
 }
 
@@ -105,79 +114,6 @@ impl Neg for Vector {
 	#[inline(always)]
 	fn neg(self) -> Self {
 		Self::ZERO - self
-	}
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rect {
-	low: Point,
-	high: Point,
-}
-
-impl Rect {
-	/// `a` and `b` are *inclusive*.
-	#[inline]
-	pub const fn new(a: Point, b: Point) -> Self {
-		const fn min(a: u32, b: u32) -> u32 {
-			if a < b {
-				a
-			} else {
-				b
-			}
-		}
-		const fn max(a: u32, b: u32) -> u32 {
-			if a > b {
-				a
-			} else {
-				b
-			}
-		}
-		Self {
-			low: Point::new(min(a.x, b.x), min(a.y, b.y)),
-			high: Point::new(max(a.x, b.x), max(a.y, b.y)),
-		}
-	}
-
-	pub fn from_size(low: Point, size: Size) -> Self {
-		Self {
-			low,
-			high: low + size.into_vector() - Vector::ONE,
-		}
-	}
-
-	pub fn from_ranges(x: RangeInclusive<u32>, y: RangeInclusive<u32>) -> Self {
-		Self {
-			low: Point::new(*x.start(), *y.start()),
-			high: Point::new(*x.end(), *y.end()),
-		}
-	}
-
-	/// Low point is *inclusive*.
-	#[inline(always)]
-	pub const fn low(&self) -> Point {
-		self.low
-	}
-
-	/// High point is *inclusive*.
-	#[inline(always)]
-	pub const fn high(&self) -> Point {
-		self.high
-	}
-
-	#[inline]
-	pub fn size(&self) -> Size {
-		let Vector { x, y } = self.high - self.low + Vector::ONE;
-		Size::new(x as _, y as _)
-	}
-
-	#[inline(always)]
-	pub const fn x(&self) -> RangeInclusive<u32> {
-		self.low.x..=self.high.x
-	}
-
-	#[inline(always)]
-	pub const fn y(&self) -> RangeInclusive<u32> {
-		self.low.y..=self.high.y
 	}
 }
 

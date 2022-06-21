@@ -51,7 +51,7 @@ impl Manager {
 			.flatten()
 			.map(|rect| {
 				let d = Vector::ONE * self.global_window_params.border_width;
-				Rect::new(rect.low() + d, rect.high() - d)
+				Rect::from_points(rect.low() + d, rect.high() - d)
 			})
 	}
 

@@ -25,6 +25,7 @@ mod workspace;
 use alloc::vec::Vec;
 use core::{ptr::NonNull, str};
 use driver_utils::io::queue::stream::Job;
+use math::{Point, Rect, Size};
 use rt::io::{Error, Handle};
 
 #[cfg(not(test))]
@@ -62,7 +63,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		let (w, h) = r.split_once('x').unwrap();
 		(w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap())
 	};
-	let size = math::Size::new(w, h);
+	let size = Size::new(w, h);
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::new(gwp).unwrap();
@@ -95,10 +96,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		[255, 0, 255],
 	];
 
-	fill(
-		math::Rect::from_size(math::Point::ORIGIN, size),
-		[50, 50, 50],
-	);
+	fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 	for (w, c) in manager.window_handles().zip(&colors) {
 		fill(manager.window_rect(w, size).unwrap(), *c);
 	}
@@ -108,7 +106,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let table = root.create(b"window_manager").unwrap();
 
 	loop {
-		let buf = table.read_vec(64).unwrap();
+		let buf = table.read_vec(2048).unwrap();
 		let buf = match Job::deserialize(&buf).unwrap() {
 			Job::Create {
 				handle,
@@ -117,10 +115,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			} => match (handle, path) {
 				(Handle::MAX, b"window") => {
 					let h = manager.new_window(size).unwrap();
-					fill(
-						math::Rect::from_size(math::Point::ORIGIN, size),
-						[50, 50, 50],
-					);
+					fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for (w, c) in manager.window_handles().zip(&colors) {
 						fill(manager.window_rect(w, size).unwrap(), *c);
 					}
@@ -128,6 +123,44 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					Job::reply_create_clear(buf, job_id, h)
 				}
 				_ => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
+			},
+			Job::Write {
+				handle,
+				job_id,
+				data,
+			} => match handle {
+				Handle::MAX => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
+				h => {
+					let display = Rect::from_size(Point::ORIGIN, size);
+					let rect = manager.window_rect(h, size).unwrap();
+					let draw = ipc_wm::DrawRect { raw: data.into() };
+					let draw_size = draw.size().unwrap();
+					let draw_size = Size::new(
+						(u32::from(draw_size.x) + 1).min(rect.size().x),
+						(u32::from(draw_size.y) + 1).min(rect.size().y),
+					);
+					let draw_orig = draw.origin().unwrap();
+					let draw_orig = Point::new(draw_orig.x, draw_orig.y);
+					let draw_rect = rect
+						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
+						.unwrap();
+					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
+					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
+					let pixels = draw.pixels().unwrap();
+					for (fy, ty) in (0..draw_size.y as usize).zip(draw_rect.y()) {
+						for (fx, tx) in (0..draw_size.x as usize).zip(draw_rect.x()) {
+							let c = &pixels[fy * draw_size.x as usize + fx..][..3];
+							unsafe {
+								fb.as_ptr()
+									.add(ty as usize * w as usize + tx as usize)
+									.write([c[0], c[1], c[2], 0]);
+							}
+						}
+					}
+					sync.write(b"").unwrap();
+					let l = data.len().try_into().unwrap();
+					Job::reply_write_clear(buf, job_id, l)
+				}
 			},
 			Job::Close { handle } => {
 				todo!()
