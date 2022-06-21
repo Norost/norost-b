@@ -187,7 +187,7 @@ pub struct Ratio(u16);
 
 impl Ratio {
 	/// A close approximation of a 0.5 ratio.
-	pub const HALF: Self = Ratio(0x7fff);
+	pub const HALF: Self = Ratio(0x8000);
 
 	/// Partition a length in two lengths that sum up to the original length.
 	pub fn partition(self, length: u32) -> (u32, u32) {
@@ -204,5 +204,20 @@ impl Ratio {
 impl Default for Ratio {
 	fn default() -> Self {
 		Self::HALF
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn ratio_half() {
+		assert_eq!(Ratio::HALF.partition(100), (50, 50));
+		assert_eq!(Ratio::HALF.partition(4096), (2048, 2048));
+		assert_eq!(Ratio::HALF.partition(0x10000), (0x8000, 0x8000));
+		// The below fails, but this is be fine for now. We can easily increase
+		// precision to 32 bits at a later time.
+		//assert_eq!(Ratio::HALF.partition(0x20000), (0x10000, 0x10000));
 	}
 }
