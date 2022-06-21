@@ -168,8 +168,13 @@ impl Object {
 }
 
 impl Drop for Object {
+	/// Close the handle to this object.
+	///
+	/// This destructor polls the I/O queue immediately after closing. To delay the poll, use
+	/// [`io::close`].
 	fn drop(&mut self) {
-		io::close(self.0)
+		io::close(self.0);
+		io::poll_queue();
 	}
 }
 
