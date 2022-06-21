@@ -47,6 +47,20 @@ impl<T> Arena<T> {
 		self.inner.is_empty()
 	}
 
+	#[inline(always)]
+	pub fn iter(&self) -> impl Iterator<Item = (Handle, &T)> {
+		self.inner
+			.iter()
+			.map(|(h, v)| (Self::convert_from_handle(h).unwrap(), v))
+	}
+
+	#[inline(always)]
+	pub fn iter_mut(&mut self) -> impl Iterator<Item = (Handle, &mut T)> {
+		self.inner
+			.iter_mut()
+			.map(|(h, v)| (Self::convert_from_handle(h).unwrap(), v))
+	}
+
 	fn convert_to_handle(handle: Handle) -> Option<::arena::Handle<()>> {
 		handle
 			.try_into()

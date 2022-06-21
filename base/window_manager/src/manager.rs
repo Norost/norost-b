@@ -1,6 +1,6 @@
 use crate::{
 	math::{Rect, Size, Vector},
-	window::{GlobalWindowParams, Window},
+	window::{GlobalWindowParams, PathIter, Window},
 	workspace::{Direction, NewWorkspaceError, Workspace},
 };
 use alloc::boxed::Box;
@@ -36,7 +36,7 @@ impl Manager {
 			let p;
 			(p, update) = self.workspaces[usize::from(self.current_workspace)]
 				.split_leaf(
-					Default::default(),
+					PathIter::right_bottom(),
 					handle,
 					None,
 					Default::default(),
@@ -59,6 +59,11 @@ impl Manager {
 				let d = Vector::ONE * self.global_window_params.border_width;
 				Rect::new(rect.low() + d, rect.high() - d)
 			})
+	}
+
+	#[inline(always)]
+	pub fn window_handles(&self) -> impl Iterator<Item = Handle> + '_ {
+		self.windows.iter().map(|(h, _)| h)
 	}
 }
 

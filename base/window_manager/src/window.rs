@@ -39,11 +39,18 @@ pub struct PathIter {
 }
 
 impl PathIter {
+	#[inline(always)]
 	pub fn new(depth: u8, directions: u32) -> Self {
 		Self {
 			count: depth,
 			path: directions,
 		}
+	}
+
+	/// Create a path iterator that goes to the right bottom for up to 24 levels.
+	#[inline(always)]
+	pub fn right_bottom() -> Self {
+		Self::new(24, 0xffffff)
 	}
 }
 
