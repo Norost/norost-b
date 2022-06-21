@@ -163,7 +163,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			},
 			Job::Close { handle } => {
-				todo!()
+				manager.destroy_window(handle).unwrap();
+				fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+				for (w, c) in manager.window_handles().zip(&colors) {
+					fill(manager.window_rect(w, size).unwrap(), *c);
+				}
+				sync.write(b"").unwrap();
+				continue;
 			}
 			_ => todo!(),
 		}

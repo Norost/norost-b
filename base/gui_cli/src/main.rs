@@ -46,7 +46,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	window.write_vec(draw.raw, 0).unwrap();
 
 	rt::thread::sleep(core::time::Duration::MAX);
-	rt::thread::sleep(core::time::Duration::MAX);
+	rt::thread::sleep(core::time::Duration::from_secs(2));
+	drop(window);
+	rt::thread::sleep(core::time::Duration::from_secs(2));
+	rt::thread::sleep(core::time::Duration::from_secs(2));
 
 	0
 }

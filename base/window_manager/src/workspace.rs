@@ -10,6 +10,7 @@ pub struct Workspace {
 	root: Handle,
 }
 
+// TODO consider making it doubly linked to avoid excessive use of Paths
 enum Node {
 	Parent {
 		left: Handle,
@@ -119,6 +120,44 @@ impl Workspace {
 		}
 	}
 
+	/// Remove a leaf, replacing its parent with its sibling.
+	///
+	/// Returns the path of the sibling along with its new path, if any.
+	///
+	/// # Panics
+	///
+	/// The path does not lead to a leaf.
+	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<(Handle, Path)> {
+		let mut cur = self.root;
+		let mut prev = None;
+		let mut path = Path {
+			depth: 0,
+			directions: 0,
+		};
+		loop {
+			match &self.nodes[cur] {
+				Node::Parent { left, right, .. } => {
+					let d = rem_path.next().expect("path does not lead to leaf");
+					let s = *if d { left } else { right };
+					prev = Some((cur, s, path));
+					cur = *if d { right } else { left };
+					path.directions |= u32::from(d) << path.depth;
+					path.depth += 1;
+				}
+				Node::Leaf { window } => {
+					let w = *window;
+					self.nodes.remove(cur).unwrap();
+					return if let Some((parent, sibling, path)) = prev {
+						self.nodes[parent] = self.nodes.remove(sibling).unwrap();
+						Some((w, path))
+					} else {
+						None
+					};
+				}
+			}
+		}
+	}
+
 	/// Calculate the [`Rect`] a leaf occupies.
 	///
 	/// # Panics
@@ -161,6 +200,7 @@ impl Workspace {
 	}
 }
 
+#[derive(Clone, Copy)]
 pub struct Path {
 	pub depth: u8,
 	pub directions: u32,
