@@ -72,7 +72,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let w2 = manager.new_window(size).unwrap();
 
 	let mut fill = |rect: math::Rect, color: [u8; 3]| {
-		writeln!(rt::io::stderr().unwrap(), "{:?}", rect);
 		for y in rect.y() {
 			for x in rect.x() {
 				let x = usize::try_from(x).unwrap();
@@ -106,7 +105,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let table = root.create(b"window_manager").unwrap();
 
 	loop {
-		let buf = table.read_vec(1 << 16).unwrap();
+		let buf = table.read_vec(1 << 20).unwrap();
 		let buf = match Job::deserialize(&buf).unwrap() {
 			Job::Create {
 				handle,
@@ -135,6 +134,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let rect = manager.window_rect(h, size).unwrap();
 					let draw = ipc_wm::DrawRect { raw: data.into() };
 					let draw_size = draw.size().unwrap();
+					// TODO do we actually want this?
 					let draw_size = Size::new(
 						(u32::from(draw_size.x) + 1).min(rect.size().x),
 						(u32::from(draw_size.y) + 1).min(rect.size().y),
@@ -147,12 +147,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
 					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
 					let pixels = draw.pixels().unwrap();
+					assert!(
+						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
+					);
 					for (fy, ty) in (0..draw_size.y as usize).zip(draw_rect.y()) {
 						for (fx, tx) in (0..draw_size.x as usize).zip(draw_rect.x()) {
 							let i = fy * draw_size.x as usize + fx;
 							let c = &pixels[i * 3..(i + 1) * 3];
 							unsafe {
-								fb.as_ptr()
+								let i = fb
+									.as_ptr()
 									.add(ty as usize * w as usize + tx as usize)
 									.write([c[0], c[1], c[2], 0]);
 							}
