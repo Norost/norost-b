@@ -40,12 +40,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let window = root.create(b"window_manager/window").unwrap();
 	let window = root.create(b"window_manager/window").unwrap();
 
-	let s = "Hello";
+	let s = "Hello, world!";
 	let mut x_offt = 0;
 	let y_offt = 50;
 
 	for c in s.chars() {
 		let c = font.get(c);
+		if c.width() == 0 {
+			continue;
+		}
 
 		let mut draw = ipc_wm::DrawRect::new(Vec::new());
 		draw.set_origin(ipc_wm::Point {

@@ -111,7 +111,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	// Allocate draw buffer
-	let (width, height) = (432, 243);
+	let (width, height) = (2560, 1440);
 	let (fb, fb_size) = kernel::syscall::alloc_dma(None, width * height * 4)
 		.expect("failed to allocate framebuffer buffer");
 	let fb_phys = kernel::syscall::physical_address(fb).unwrap();

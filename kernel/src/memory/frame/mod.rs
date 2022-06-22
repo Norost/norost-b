@@ -32,7 +32,7 @@ pub type PPNBox = u32;
 pub type PPNBox = u16;
 
 static DEFAULT: SpinLock<chain::Chain> = SpinLock::new(chain::Chain::new());
-static DMA: SpinLock<Option<fixed_bitmap::FixedBitmap>> = SpinLock::new(None);
+static DMA: SpinLock<fixed_bitmap::FixedBitmap> = SpinLock::new(Default::default());
 
 impl PPN {
 	pub fn try_from_usize(ptr: usize) -> Result<Self, PPNError> {
@@ -210,8 +210,6 @@ where
 /// Allocate a physically contiguous range of pages.
 pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
 	DMA.auto_lock()
-		.as_mut()
-		.expect("DMA allocator not initialized")
 		.pop_range(count)
 		.ok_or(AllocateContiguousError::OutOfFrames)
 }
@@ -238,12 +236,7 @@ where
 ///
 /// The region may not already be in use.
 pub unsafe fn add_memory_region(mut region: MemoryRegion) {
-	{
-		let mut dma = DMA.isr_lock();
-		if dma.is_none() {
-			*dma = fixed_bitmap::FixedBitmap::new_from_region(&mut region);
-		}
-	}
+	DMA.isr_lock().add_region(&mut region);
 	let mut stack = DEFAULT.isr_lock();
 	while let Some(ppn) = region.take() {
 		// Clear the page beforehand to improve alloc speed and clear any potential secrets.
