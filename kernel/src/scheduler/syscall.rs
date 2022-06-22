@@ -67,13 +67,13 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 	debug!("alloc {:#x} {} {:#b}", base, size, rwx);
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
-			status: 1,
+			status: Error::InvalidData as _,
 			value: 0,
 		};
 	};
 	let Some(rwx) = raw_to_rwx(rwx) else {
 		return Return {
-			status: 1,
+			status: Error::InvalidData as _,
 			value: 0,
 		};
 	};
@@ -85,7 +85,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 			proc.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
 				.map_or(
 					Return {
-						status: usize::MAX,
+						status: Error::Unknown as _,
 						value: 0,
 					},
 					|base| Return {
@@ -95,7 +95,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 				)
 		}
 		Err(_) => Return {
-			status: usize::MAX - 1,
+			status: Error::CantCreateObject as _,
 			value: 0,
 		},
 	}

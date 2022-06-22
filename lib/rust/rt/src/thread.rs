@@ -107,15 +107,16 @@ impl Thread {
 		unsafe extern "C" fn start() -> ! {
 			#[cfg(target_arch = "x86_64")]
 			unsafe {
-				core::arch::asm!("
-					mov rdi, [rsp - 8 * 1]
-					mov rsi, [rsp - 8 * 2]
-					mov rdx, [rsp - 8 * 3]
-					mov rcx, [rsp - 8 * 4]
-                    mov r9, [rsp - 8 * 5]
-					mov r8, rax
-					jmp {main}
-					",
+				core::arch::asm!(
+					"mov rdi, [rsp - 8 * 1]",
+					"mov rsi, [rsp - 8 * 2]",
+					"mov rdx, [rsp - 8 * 3]",
+					"mov rcx, [rsp - 8 * 4]",
+					"mov r9, [rsp - 8 * 5]",
+					"mov r8, rax",
+					// The stack must be 16-byte aligned *before* calling, so don't
+					// use a jmp here.
+					"call {main}",
 					main = sym main,
 					options(noreturn),
 				);

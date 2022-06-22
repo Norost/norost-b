@@ -57,12 +57,17 @@ pub unsafe fn write_tls_offset(offset: usize, data: usize) {
 #[export_name = "_start"]
 #[naked]
 extern "C" fn _start() -> ! {
+	const _: () = assert!(
+		norostb_kernel::syscall::ID_ALLOC == 0,
+		"xor optimization is invalid"
+	);
 	unsafe {
 		// rax: thread handle
 		// rsp: pointer to program arguments & environment variables
 		asm!(
 			// Allocate stack space manually so the OS provides a guard page for us.
-			"mov eax, {alloc}",
+			//"mov eax, {alloc}",
+			"xor eax, eax", // ID_ALLOC
 			"xor edi, edi", // Any base
 			"mov esi, 1 << 16", // 64 KiB ought to be enough for now.
 			"mov edx, 4 | 2", // RW
@@ -72,9 +77,11 @@ extern "C" fn _start() -> ! {
 			"mov rdi, rsp",
 			// The stack is located at $rdx, if successful
 			// $rax denotes tha actual amount of allocated memory
-			"lea rsp, [rdx + rax]",
+			// Substract 8 since pages are at least 4096 bytes and the stack must be
+			// 16-byte aligned *before* "calling" (in our case, we jump)
+			"lea rsp, [rdx + rax - 8]",
 			// Only jump if stack allocation did *not* fail, i.e. $rax is not negative
-			"test eax, eax",
+			"test rax, rax",
 			"jns {start}",
 
 			// Exit (abort) immediately as a last resort
@@ -82,7 +89,7 @@ extern "C" fn _start() -> ! {
 			"mov edi, 130", // Exit code
 			"syscall",
 			start = sym super::rt_start,
-			alloc = const norostb_kernel::syscall::ID_ALLOC,
+			//alloc = const norostb_kernel::syscall::ID_ALLOC,
 			exit = const norostb_kernel::syscall::ID_EXIT,
 			options(noreturn),
 		);
