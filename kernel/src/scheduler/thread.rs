@@ -67,6 +67,7 @@ impl Thread {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
+			push(0); // align to mod 16 + 8
 			push(crate::arch::GDT::USER_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
@@ -133,6 +134,7 @@ impl Thread {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
+			push(0); // align to mod 16 + 8
 			push(crate::arch::amd64::GDT::KERNEL_SS.into());
 			push(stack); // rsp
 			 // rflags: Set reserved bit 1, enable interrupts (IF)
@@ -199,11 +201,11 @@ impl Thread {
 						"kernel stack is corrupted (ss mismatch)",
 					)
 				}
-				// On return to userspace $rsp should be exactly equal to kernel_stack_top
+				// On return to userspace $rsp should be exactly equal to kernel_stack_top - 8
 				crate::arch::amd64::GDT::USER_CS => {
 					assert_eq!(
 						p.add(15 + 1 + 1 + 1 + 1 + 1),
-						self.kernel_stack_top.as_ptr().cast(),
+						self.kernel_stack_top.as_ptr().cast::<usize>().sub(1),
 						"kernel stack is corrupted (rsp doesn't match kernel_stack_top)",
 					);
 					assert_eq!(
