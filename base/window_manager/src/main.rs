@@ -149,7 +149,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let pixels = draw.pixels().unwrap();
 					for (fy, ty) in (0..draw_size.y as usize).zip(draw_rect.y()) {
 						for (fx, tx) in (0..draw_size.x as usize).zip(draw_rect.x()) {
-							let c = &pixels[fy * draw_size.x as usize + fx..][..3];
+							let i = fy * draw_size.x as usize + fx;
+							let c = &pixels[i * 3..(i + 1) * 3];
 							unsafe {
 								fb.as_ptr()
 									.add(ty as usize * w as usize + tx as usize)
