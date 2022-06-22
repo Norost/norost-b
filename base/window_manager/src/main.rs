@@ -106,7 +106,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let table = root.create(b"window_manager").unwrap();
 
 	loop {
-		let buf = table.read_vec(2048).unwrap();
+		let buf = table.read_vec(1 << 16).unwrap();
 		let buf = match Job::deserialize(&buf).unwrap() {
 			Job::Create {
 				handle,

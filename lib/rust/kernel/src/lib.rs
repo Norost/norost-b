@@ -33,6 +33,12 @@ impl Page {
 	pub fn min_pages_for_bytes(bytes: usize) -> usize {
 		(bytes + Self::MASK) / Self::SIZE
 	}
+
+	/// Return the minimum amount of pages to cover the given amount of bytes in bytes.
+	#[inline]
+	pub fn align_size(bytes: usize) -> usize {
+		(bytes + Self::MASK) & !Self::MASK
+	}
 }
 
 pub type Handle = u32;

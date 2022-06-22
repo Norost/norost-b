@@ -26,14 +26,14 @@ impl Thread {
 				Err(e) => {
 					// TODO free queue
 					unsafe {
-						syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+						syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
 					}
 					return Err(e);
 				}
 			},
 			Err(e) => {
 				unsafe {
-					syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+					syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
 				}
 				return Err(e);
 			}
@@ -127,7 +127,7 @@ impl Thread {
 		unsafe {
 			syscall::spawn_thread(start, stack_top as *const ())
 				.map_err(|_| {
-					syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+					syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
 					error::Error::Unknown
 				})
 				.map(Self)

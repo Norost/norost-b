@@ -4,7 +4,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Point {
 	pub x: u32,
 	pub y: u32,
@@ -28,7 +28,7 @@ impl Point {
 
 /// Each component is encoded as the size minus 1, e.g. `16` is encoded as `15`,
 /// `65536` is encoded as `65535` (`0xffff`).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Size {
 	pub x: u16,
 	pub y: u16,

@@ -6,9 +6,10 @@
 #![feature(slice_ptr_get, slice_ptr_len)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use core::alloc::{self, AllocError, Allocator as IAllocator, Layout};
-use core::mem;
-use core::ptr::{self, NonNull};
+use core::{
+	alloc::{self, AllocError, Allocator as IAllocator, Layout},
+	ptr::{self, NonNull},
+};
 use norostb_kernel::{
 	syscall::{self, RWX},
 	Page,
@@ -19,45 +20,18 @@ use norostb_kernel::{
 /// All instances use the same memory pool.
 pub struct Allocator;
 
-/// Whether we should allocate pages directly from the os or rely on slabmalloc
-/// for the given layout.
-fn should_alloc_pages(layout: Layout) -> bool {
-	layout.size() >= mem::size_of::<norostb_kernel::Page>() || true
-}
-
-/// Allocate a range of pages directly from the kernel.
-fn alloc_pages(layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-	syscall::alloc(None, layout.size(), RWX::RW)
-		.map(|(ptr, size)| NonNull::slice_from_raw_parts(ptr.cast(), size.get()))
-		.map_err(|_| AllocError)
-}
-
-/// Give back a range of pages to the kernel.
-fn dealloc_pages(ptr: NonNull<u8>, size: usize) {
-	unsafe {
-		syscall::dealloc(ptr.cast(), size, false, true).expect("failed to deallocate");
-	}
-}
-
 unsafe impl alloc::Allocator for Allocator {
 	#[inline]
 	fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
 		// Keep in mind this is a *safe* function, so we have to avoid UB even if the arguments'
 		// values are beyond reason.
-		if layout.align() >= mem::size_of::<norostb_kernel::Page>() {
-			unsafe {
-				core::arch::asm!("ud2");
-			}
+		if layout.align() > Page::SIZE {
 			// We don't support ridiculous alignment requirements.
 			Err(AllocError)
-		} else if should_alloc_pages(layout) {
-			// If the allocation is larger than a single page, then just allocate the required
-			// pages directly.
-			alloc_pages(layout)
 		} else {
-			// For smaller allocations, use slabmalloc so we don't potentially waste a huge
-			// amount of memory.
-			todo!()
+			syscall::alloc(None, Page::align_size(layout.size()), RWX::RW)
+				.map(|(ptr, size)| NonNull::slice_from_raw_parts(ptr.cast(), size.get()))
+				.map_err(|_| AllocError)
 		}
 	}
 
@@ -67,30 +41,18 @@ unsafe impl alloc::Allocator for Allocator {
 	/// * `layout` must [*fit*] that block of memory.
 	#[inline]
 	unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-		// Layout should fit the memory block pointed at by ptr, so no extra safety checks should
-		// be necessary.
-		if should_alloc_pages(layout) {
-			// We allocated a page directly, so we can give it directly back to the OS.
-			dealloc_pages(ptr, layout.size())
-		} else {
-			todo!()
+		// We allocated a page directly, so we can give it directly back to the OS.
+		unsafe {
+			let _r = syscall::dealloc(ptr.cast(), Page::align_size(layout.size()));
+			debug_assert!(_r.is_ok(), "{:?}", _r);
 		}
 	}
 
 	#[inline]
 	fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
 		let mem = self.allocate(layout)?;
-		if should_alloc_pages(layout) {
-			// The OS already cleared the pages for us, so we don't need to clear it ourselves.
-			Ok(mem)
-		} else {
-			// We allocated from slabmalloc, which doesn't clear memory for us.
-			// SAFETY: the pointer we got from allocate() is valid.
-			unsafe {
-				mem.as_ptr().as_mut_ptr().write_bytes(0, mem.len());
-			}
-			Ok(mem)
-		}
+		// The OS already cleared the pages for us, so we don't need to clear it ourselves.
+		Ok(mem)
 	}
 
 	#[inline]
@@ -104,13 +66,11 @@ unsafe impl alloc::Allocator for Allocator {
 			old_layout.size() <= new_layout.size(),
 			"new layout must be larger"
 		);
-		if !should_alloc_pages(old_layout) || !should_alloc_pages(new_layout) {
-			todo!()
-		} else if Page::min_pages_for_bytes(old_layout.size())
-			< Page::min_pages_for_bytes(new_layout.size())
-		{
+		let old = Page::align_size(old_layout.size());
+		let new = Page::align_size(new_layout.size());
+		if old < new {
 			// We need to copy & reallocate
-			let new = alloc_pages(new_layout)?;
+			let new = self.allocate(new_layout)?;
 			unsafe {
 				new.as_ptr()
 					.as_mut_ptr()
@@ -132,15 +92,18 @@ unsafe impl alloc::Allocator for Allocator {
 		new_layout: Layout,
 	) -> Result<NonNull<[u8]>, AllocError> {
 		let ptr = unsafe { self.grow(ptr, old_layout, new_layout)? };
-		if should_alloc_pages(new_layout) {
-			// The pages have already been cleared by the kernel, so no need to do anything.
+		let old = Page::align_size(old_layout.size());
+		let new = Page::align_size(new_layout.size());
+		if old < new {
+			// We reallocated & the pages have already been cleared by the kernel, so no need
+			// to do anything.
 			Ok(ptr)
 		} else {
-			// slabmalloc doesn't clear memory.
+			// We need to clear the upper part of the last page.
 			unsafe {
 				ptr.as_ptr()
 					.as_mut_ptr()
-					.wrapping_add(old_layout.size())
+					.add(old_layout.size())
 					.write_bytes(0, new_layout.size() - old_layout.size());
 			}
 			Ok(ptr)
@@ -158,27 +121,19 @@ unsafe impl alloc::Allocator for Allocator {
 			old_layout.size() >= new_layout.size(),
 			"new layout must be smaller"
 		);
-		if should_alloc_pages(old_layout) && !should_alloc_pages(new_layout)
-		//|| ZoneAllocator::get_max_size(old_layout.size())
-		//	.map_or(false, |s| s >= new_layout.size())
-		{
-			// We need to copy from directly allocated pages to slabmalloc.
-			let new = alloc_pages(new_layout)?;
-			unsafe {
-				new.as_ptr()
-					.as_mut_ptr()
-					.copy_from_nonoverlapping(ptr.as_ptr(), old_layout.size());
-				self.deallocate(ptr, old_layout);
-			}
-			Ok(new)
-		} else if should_alloc_pages(new_layout) {
+		let old = Page::align_size(old_layout.size());
+		let new = Page::align_size(new_layout.size());
+		if new < old {
 			// Give any pages we don't need back to the kernel.
-			let size = new_layout.size() - old_layout.size();
-			dealloc_pages(
-				NonNull::new(ptr.as_ptr().wrapping_add(old_layout.size())).unwrap(),
-				size,
-			);
-			Ok(NonNull::slice_from_raw_parts(ptr, size))
+			if old != new {
+				unsafe {
+					self.deallocate(
+						NonNull::new_unchecked(ptr.as_ptr().add(new)),
+						Layout::from_size_align_unchecked(old - new, Page::SIZE),
+					);
+				}
+			}
+			Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()))
 		} else {
 			// We don't need to do anything.
 			Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()))

@@ -155,7 +155,7 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		gs_store!(user_stack_ptr = user_stack);
 		gs_store!(kernel_stack_ptr = thread.kernel_stack.get().as_ptr());
-		gs_load!(tss).set_rsp(0, thread.kernel_stack_top.as_ptr().cast());
+		gs_load!(tss).set_rsp(0, thread.kernel_stack_top().as_ptr().cast());
 		gs_store!(process = thread.process().map_or_else(ptr::null, Arc::as_ptr));
 		gs_store!(thread = Arc::into_raw(thread));
 	}
@@ -214,6 +214,9 @@ unsafe extern "C" fn handler() {
 			"push rsi",
 			"push rcx",
 
+			// Ensure stack is aligned to 16 bytes before call
+			"sub rsp, 8",
+
 			// Check if the syscall ID is valid
 			"cmp rax, {syscall_count}",
 			"jae 1f",
@@ -223,6 +226,8 @@ unsafe extern "C" fn handler() {
 			"mov rcx, r10", // r10 is used as 4th parameter
 			"call rax",
 			"2:",
+
+			"add rsp, 8",
 
 			"pop rcx",
 			"pop rsi",

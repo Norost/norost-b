@@ -27,7 +27,6 @@ pub struct Thread {
 	pub user_stack: Cell<Option<NonNull<usize>>>,
 	pub kernel_stack: Cell<NonNull<usize>>,
 	kernel_stack_base: NonNull<Page>,
-	pub kernel_stack_top: NonNull<Page>,
 	// This does create a cyclic reference and risks leaking memory, but should
 	// be faster & more convienent in the long run.
 	//
@@ -60,14 +59,11 @@ impl Thread {
 			let kernel_stack_base =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
-			let kernel_stack_top =
-				NonNull::new(kernel_stack_base.as_ptr().add(KERNEL_STACK_SIZE.get())).unwrap();
-			let mut kernel_stack = kernel_stack_top.as_ptr().cast::<usize>();
+			let mut kernel_stack = kernel_stack_top(kernel_stack_base).cast::<usize>().as_ptr();
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(0); // align to mod 16 + 8
 			push(crate::arch::GDT::USER_SS.into());
 			push(stack); // rsp
 			push(0x202); // rflags: Set reserved bit 1, enable interrupts (IF)
@@ -85,7 +81,6 @@ impl Thread {
 				user_stack: Cell::new(NonNull::new(stack as *mut _)),
 				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				kernel_stack_base,
-				kernel_stack_top,
 				process: Some(process),
 				sleep: Default::default(),
 				arch_specific: Default::default(),
@@ -126,15 +121,15 @@ impl Thread {
 			let kernel_stack_base =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
-			let kernel_stack_top =
-				NonNull::new(kernel_stack_base.as_ptr().add(KERNEL_STACK_SIZE.get())).unwrap();
-			let mut kernel_stack = kernel_stack_top.as_ptr().cast::<usize>();
+			// The stack must be aligned to 16 bytes *before* a call according to SysV ABI.
+			// We will write 5 + 15 registers, which comes out at 160 bytes, ergo it is
+			// already properly aligned.
+			let mut kernel_stack = kernel_stack_top(kernel_stack_base).cast::<usize>().as_ptr();
 			let stack = kernel_stack as usize;
 			let mut push = |val: usize| {
 				kernel_stack = kernel_stack.sub(1);
 				kernel_stack.write(val);
 			};
-			push(0); // align to mod 16 + 8
 			push(crate::arch::amd64::GDT::KERNEL_SS.into());
 			push(stack); // rsp
 			 // rflags: Set reserved bit 1, enable interrupts (IF)
@@ -150,7 +145,6 @@ impl Thread {
 				user_stack: Cell::new(None),
 				kernel_stack: Cell::new(NonNull::new(kernel_stack).unwrap()),
 				kernel_stack_base,
-				kernel_stack_top,
 				process: None,
 				sleep: Default::default(),
 				arch_specific: Default::default(),
@@ -201,11 +195,11 @@ impl Thread {
 						"kernel stack is corrupted (ss mismatch)",
 					)
 				}
-				// On return to userspace $rsp should be exactly equal to kernel_stack_top - 8
+				// On return to userspace $rsp should be exactly equal to kernel_stack_top
 				crate::arch::amd64::GDT::USER_CS => {
 					assert_eq!(
 						p.add(15 + 1 + 1 + 1 + 1 + 1),
-						self.kernel_stack_top.as_ptr().cast::<usize>().sub(1),
+						self.kernel_stack_top().as_ptr().cast(),
 						"kernel stack is corrupted (rsp doesn't match kernel_stack_top)",
 					);
 					assert_eq!(
@@ -336,10 +330,19 @@ impl Thread {
 		arch::amd64::current_thread_ptr()
 	}
 
+	#[inline]
+	pub fn kernel_stack_top(&self) -> NonNull<Page> {
+		kernel_stack_top(self.kernel_stack_base)
+	}
+
 	/// Whether this thread has been destroyed.
 	pub fn destroyed(&self) -> bool {
 		self.destroyed.get()
 	}
+}
+
+fn kernel_stack_top(base: NonNull<Page>) -> NonNull<Page> {
+	unsafe { NonNull::new_unchecked(base.as_ptr().add(KERNEL_STACK_SIZE.get())) }
 }
 
 impl Drop for Thread {

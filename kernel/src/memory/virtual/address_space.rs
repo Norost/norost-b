@@ -172,10 +172,17 @@ impl AddressSpace {
 			.wrapping_sub(1)
 			.cast();
 		let unmap_range = base..=NonNull::new(end).unwrap();
+		// TODO it may be beneficial to tell the MemoryObject which
+		// specific ranges are unused.
+		// It may also make sense to special-case regular memory.
 		if &unmap_range == range {
 			Ok(Some(objects.remove(i).1))
+		} else if unmap_range.end() == range.end() {
+			let end = unsafe { NonNull::new_unchecked(unmap_range.start().as_ptr().byte_sub(1)) };
+			objects[i].0 = *range.start()..=end;
+			Ok(None)
 		} else {
-			todo!("partial unmap");
+			todo!("partial unmap {:?} != {:?}", unmap_range, range);
 		}
 	}
 

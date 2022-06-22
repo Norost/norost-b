@@ -64,7 +64,7 @@ fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 }
 
 extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("alloc {:#x} {} {:#b}", base, size, rwx);
+	debug!("alloc {:#x} {} {:#03b}", base, size, rwx);
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
 			status: Error::InvalidData as _,
@@ -101,57 +101,37 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 	}
 }
 
-extern "C" fn dealloc(
-	base: usize,
-	size: usize,
-	flags: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("dealloc");
-	let dealloc_partial_start = flags & 1 > 0;
-	let dealloc_partial_end = flags & 2 > 0;
-
-	// Round up base & size depending on flags.
-	let (base, size) = if dealloc_partial_start {
-		(base & !Page::MASK, (size + base) & Page::MASK)
-	} else {
-		(
-			(base + Page::MASK) & !Page::MASK,
-			size - (Page::SIZE.wrapping_sub(base) & Page::MASK),
-		)
+extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("dealloc {:#x} {} {:#03b}", base, size);
+	if base & Page::MASK != 0 || size & Page::MASK != 0 {
+		return Return {
+			status: Error::InvalidData as _,
+			value: 0,
+		};
+	}
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return {
+			status: 0,
+			value: 0,
+		};
 	};
-
-	let (base, size) = if dealloc_partial_end {
-		(base, (size + Page::MASK) & !Page::MASK)
-	} else {
-		(base, size & !Page::MASK)
-	};
-
 	let Some(count) = NonZeroUsize::new(size / Page::MASK) else {
 		return Return {
 			status: 0,
 			value: 0,
 		};
 	};
-	let Some(base) = NonNull::new(base as *mut _) else {
-		return Return {
-			status: usize::MAX,
-			value: 0,
-		}
-	};
 	Process::current()
 		.unwrap()
 		.unmap_memory_object(base, count)
 		.map_or(
 			Return {
-				status: usize::MAX - 1,
+				status: Error::Unknown as _,
 				value: 0,
 			},
 			|_| Return {
-				status: 0,
-				value: size,
+				status: size,
+				value: base.as_ptr() as usize,
 			},
 		)
 }

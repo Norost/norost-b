@@ -108,24 +108,22 @@ pub fn alloc(
 	size: usize,
 	rwx: RWX,
 ) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
+	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
 	ret(syscall!(ID_ALLOC(base, size, rwx as usize))).map(|(status, value)| {
-		(
-			NonNull::new(value as *mut _).unwrap(),
-			NonZeroUsize::new(status).unwrap(),
-		)
+		// SAFETY: the kernel always returns a non-zero status (size) and value (base ptr).
+		// If the kernel is buggy we're screwed anyways.
+		unsafe {
+			(
+				NonNull::new_unchecked(value as *mut _),
+				NonZeroUsize::new_unchecked(status),
+			)
+		}
 	})
 }
 
 #[inline]
-pub unsafe fn dealloc(
-	base: NonNull<Page>,
-	size: usize,
-	dealloc_partial_start: bool,
-	dealloc_partial_end: bool,
-) -> error::Result<()> {
-	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
-	ret(syscall!(ID_DEALLOC(base.as_ptr(), size, flags))).map(|_| ())
+pub unsafe fn dealloc(base: NonNull<Page>, size: usize) -> error::Result<()> {
+	ret(syscall!(ID_DEALLOC(base.as_ptr(), size))).map(|_| ())
 }
 
 #[inline]
@@ -138,15 +136,16 @@ pub fn alloc_dma(
 	base: Option<NonNull<Page>>,
 	size: usize,
 ) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	ret(syscall!(ID_ALLOC_DMA(
-		base.map_or_else(ptr::null_mut, NonNull::as_ptr),
-		size
-	)))
-	.map(|(status, value)| {
-		(
-			NonNull::new(value as *mut _).unwrap(),
-			NonZeroUsize::new(status).unwrap(),
-		)
+	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
+	ret(syscall!(ID_ALLOC_DMA(base, size))).map(|(status, value)| {
+		// SAFETY: the kernel always returns a non-zero status (size) and value (base ptr).
+		// If the kernel is buggy we're screwed anyways.
+		unsafe {
+			(
+				NonNull::new_unchecked(value as *mut _),
+				NonZeroUsize::new_unchecked(status),
+			)
+		}
 	})
 }
 
