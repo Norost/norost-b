@@ -12,7 +12,9 @@ where
 	Self: Any,
 {
 	/// The physical pages used by this object that must be mapped.
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]));
+	///
+	/// If the closure returns `false`, this function **must** stop calling the closure.
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool);
 
 	/// The total amount of physical pages.
 	fn physical_pages_len(&self) -> usize;

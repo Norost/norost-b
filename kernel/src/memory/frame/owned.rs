@@ -44,8 +44,8 @@ impl OwnedPageFrames {
 }
 
 unsafe impl MemoryObject for OwnedPageFrames {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
-		f(&self.frames)
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		f(&self.frames);
 	}
 
 	fn physical_pages_len(&self) -> usize {

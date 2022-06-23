@@ -35,8 +35,8 @@ impl PciDevice {
 }
 
 unsafe impl MemoryObject for PciDevice {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
-		f(&[self.config_region()])
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		f(&[self.config_region()]);
 	}
 
 	fn physical_pages_len(&self) -> usize {
@@ -124,8 +124,8 @@ pub struct BarRegion {
 }
 
 unsafe impl MemoryObject for BarRegion {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
-		f(&self.frames)
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		f(&self.frames);
 	}
 
 	fn physical_pages_len(&self) -> usize {

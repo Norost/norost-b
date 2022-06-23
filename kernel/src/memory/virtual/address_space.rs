@@ -64,6 +64,7 @@ impl AddressSpace {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
 				}
+				true
 			});
 		};
 		self.objects.insert(index, (range.clone(), object));
@@ -97,6 +98,7 @@ impl AddressSpace {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
 				}
+				true
 			});
 		};
 		objects.insert(index, (range.clone(), object));

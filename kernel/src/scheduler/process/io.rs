@@ -42,6 +42,7 @@ impl Queue {
 		self.frames.physical_pages(&mut |f| {
 			assert!(frame.is_none() && f.len() == 1, "TODO");
 			frame = Some(f[0]);
+			true
 		});
 		k_io::Queue {
 			base: NonNull::new(frame.unwrap().as_ptr()).unwrap().cast(),

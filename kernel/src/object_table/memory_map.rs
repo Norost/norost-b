@@ -34,15 +34,17 @@ impl Object for MemoryMap {
 }
 
 unsafe impl MemoryObject for MemoryMap {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
 		let mut offset @ mut total = 0;
+		let mut cont = true;
 		let mut f = |mut p: &[PPN]| {
 			if total >= self.total_size {
-				return;
+				cont = false;
+				return false;
 			}
 			if offset + p.len() < self.start_offset {
 				offset += p.len();
-				return;
+				return true;
 			}
 			if offset < self.start_offset {
 				p = &p[self.start_offset - offset..];
@@ -51,9 +53,15 @@ unsafe impl MemoryObject for MemoryMap {
 				p = &p[..self.total_size - total]
 			}
 			total += p.len();
-			f(p)
+			cont = f(p);
+			cont
 		};
-		self.objects.iter().for_each(|o| o.physical_pages(&mut f));
+		for o in self.objects.iter() {
+			o.physical_pages(&mut f);
+			if !cont {
+				return;
+			}
+		}
 	}
 
 	fn physical_pages_len(&self) -> usize {
