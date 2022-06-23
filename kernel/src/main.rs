@@ -18,6 +18,7 @@
 #![feature(new_uninit)]
 #![feature(optimize_attribute)]
 #![feature(pointer_byte_offsets, pointer_is_aligned)]
+#![feature(result_flattening)]
 #![feature(slice_index_methods)]
 #![feature(stmt_expr_attributes)]
 #![feature(waker_getters)]
@@ -133,7 +134,7 @@ fn panic(info: &PanicInfo) -> ! {
 struct Driver(&'static [u8]);
 
 unsafe impl MemoryObject for Driver {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
 		let address = unsafe { memory::r#virtual::virt_to_phys(self.0.as_ptr()) };
 		assert_eq!(
 			address & u64::try_from(Page::MASK).unwrap(),
@@ -142,7 +143,11 @@ unsafe impl MemoryObject for Driver {
 		);
 		let base = PPN((address >> Page::OFFSET_BITS).try_into().unwrap());
 		let count = Page::min_pages_for_bytes(self.0.len());
-		PageFrameIter { base, count }.for_each(|p| f(&[p]));
+		for p in (PageFrameIter { base, count }) {
+			if !f(&[p]) {
+				break;
+			}
+		}
 	}
 
 	fn physical_pages_len(&self) -> usize {

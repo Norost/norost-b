@@ -34,6 +34,11 @@ pub enum Job<'a> {
 		handle: Handle,
 		from: io::SeekFrom,
 	},
+	Share {
+		job_id: u32,
+		handle: Handle,
+		share: Handle,
+	},
 }
 
 macro_rules! with {
@@ -114,6 +119,11 @@ impl<'a> Job<'a> {
 					from: io::SeekFrom::try_from_raw(job.from_anchor, offt).ok()?,
 				}
 			}
+			io::Job::SHARE => Self::Share {
+				job_id,
+				handle,
+				share: u32::from_ne_bytes(data.try_into().ok()?),
+			},
 			_ => return None,
 		})
 	}
@@ -169,6 +179,27 @@ impl<'a> Job<'a> {
 	{
 		buf.clear();
 		match Self::reply_read(&mut buf, job_id, peek, data) {
+			Ok(()) => Ok(buf),
+			Err(e) => Err((buf, e)),
+		}
+	}
+
+	pub fn reply_share(buf: &mut Vec<u8>, job_id: u32) -> Result<(), ()> {
+		buf.extend_from_slice(
+			io::Job {
+				ty: io::Job::SHARE,
+				job_id,
+				..Default::default()
+			}
+			.as_ref(),
+		);
+		Ok(())
+	}
+
+	/// Same as [`Self::reply_share`] but clears the buffer first.
+	pub fn reply_share_clear(mut buf: Vec<u8>, job_id: u32) -> Result<Vec<u8>, (Vec<u8>, ())> {
+		buf.clear();
+		match Self::reply_share(&mut buf, job_id) {
 			Ok(()) => Ok(buf),
 			Err(e) => Err((buf, e)),
 		}

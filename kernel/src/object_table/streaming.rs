@@ -5,8 +5,9 @@ use alloc::{
 	sync::{Arc, Weak},
 	vec::Vec,
 };
+use arena::Arena;
 use core::{
-	mem,
+	mem, str,
 	sync::atomic::{AtomicU32, Ordering},
 };
 use norostb_kernel::{
@@ -19,6 +20,8 @@ pub struct StreamingTable {
 	jobs: SpinLock<Vec<(Box<[u8]>, Option<AnyTicketWaker>)>>,
 	tickets: SpinLock<Vec<(JobId, AnyTicketWaker)>>,
 	job_handlers: SpinLock<Vec<(TicketWaker<Box<[u8]>>, usize)>>,
+	/// Objects that are being shared.
+	shared: SpinLock<Arena<Arc<dyn Object>, ()>>,
 }
 
 /// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
@@ -32,6 +35,7 @@ impl StreamingTableOwner {
 			jobs: Default::default(),
 			tickets: Default::default(),
 			job_handlers: Default::default(),
+			shared: Default::default(),
 		}))
 	}
 
@@ -78,6 +82,17 @@ impl StreamingTable {
 }
 
 impl Object for StreamingTableOwner {
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		Ticket::new_complete(
+			str::from_utf8(path)
+				.ok()
+				.and_then(|s| s.parse::<u32>().ok())
+				.map(|h| arena::Handle::from_raw(h as usize, ()))
+				.and_then(|h| self.0.shared.auto_lock().remove(h))
+				.ok_or(Error::InvalidData),
+		)
+	}
+
 	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		if length < mem::size_of::<Job>() + 8 {
 			return Ticket::new_complete(Err(Error::InvalidData));
@@ -140,6 +155,7 @@ impl Object for StreamingTableOwner {
 				};
 				tw.into_u64().complete(Ok(offset))
 			}
+			Job::SHARE => tw.into_u64().complete(Ok(0)),
 			_ => return Ticket::new_complete(Err(Error::InvalidOperation)),
 		}
 		Ticket::new_complete(Ok(data.len()))
@@ -269,6 +285,23 @@ impl Object for StreamObject {
 			},
 			&from_offset.to_ne_bytes(),
 		)
+	}
+
+	fn share(&self, share: &Arc<dyn Object>) -> Ticket<u64> {
+		match self.table.upgrade() {
+			None => Ticket::new_complete(Err(Error::Cancelled)),
+			Some(tbl) => {
+				let share = tbl.shared.auto_lock().insert(share.clone());
+				tbl.submit_job(
+					Job {
+						ty: Job::SHARE,
+						handle: self.handle,
+						..Default::default()
+					},
+					&u32::try_from(share.into_raw().0).unwrap().to_ne_bytes(),
+				)
+			}
+		}
 	}
 }
 

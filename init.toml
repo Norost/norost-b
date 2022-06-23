@@ -62,5 +62,5 @@ file_root = ""
 
 [program.window_manager]
 path = "window_manager"
-after = [ "gpu/framebuffer" ]
+after = [ "gpu/sync" ]
 file_root = ""

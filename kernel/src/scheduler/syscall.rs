@@ -1,18 +1,20 @@
-use crate::memory::{
-	frame,
-	frame::OwnedPageFrames,
-	r#virtual::{AddressSpace, RWX},
-	Page,
-};
-use crate::scheduler;
-use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
+use crate::{
+	memory::{
+		frame,
+		frame::OwnedPageFrames,
+		r#virtual::{AddressSpace, RWX},
+		Page,
+	},
+	object_table::{Object, Root, SubRange},
+	scheduler::{self, process::Process, syscall::frame::DMAFrame, Thread},
+};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{error::Error, object::NewObjectType};
+use norostb_kernel::{error::Error, object::NewObject};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -206,32 +208,42 @@ extern "C" fn has_single_owner(
 		})
 }
 
-extern "C" fn new_object(ty: usize, a0: usize, a1: usize, _: usize, _: usize, _: usize) -> Return {
-	let Some(ty) = NewObjectType::try_from_raw(ty) else {
+extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: usize) -> Return {
+	debug!("new_object {} {:#x} {:#x} {:#x}", ty, a, b, c);
+	let Some(args) = NewObject::try_from_args(ty, a, b, c) else {
 		return Return {
 			status: Error::InvalidData as _,
 			value: 0,
-		};
+		}
 	};
 	let proc = Process::current().unwrap();
-	match ty {
-		NewObjectType::MemoryMap => {
-			let f = |a| NonNull::new(a as *mut _);
-			let (Some(start), Some(end)) = (f(a0), f(a1)) else {
-				return Return {
-					status: Error::InvalidData as _,
-					value: 0,
-				};
-			};
-			proc.create_memory_map(start..=end)
-				.ok_or(Error::InvalidData)
-		}
-		NewObjectType::Root => proc
-			.add_object(Arc::new(crate::object_table::Root::new()))
+	match args {
+		NewObject::SubRange { handle, range } => proc
+			.object_transform_new(handle, |o| {
+				o.clone()
+					.memory_object(0)
+					.ok_or(Error::InvalidOperation)
+					.and_then(|o| SubRange::new(o.clone(), range).map_err(|_| Error::InvalidData))
+			})
+			.ok_or(Error::InvalidObject)
+			.flatten(),
+		NewObject::Root => proc
+			.add_object(Arc::new(Root::new()))
 			.map_err(|e| match e {}),
-		NewObjectType::Duplicate => proc
-			.duplicate_object_handle(a0 as u32)
+		NewObject::Duplicate { handle } => proc
+			.duplicate_object_handle(handle)
 			.ok_or(Error::InvalidObject),
+		NewObject::SharedMemory { size } => (size % Page::SIZE == 0)
+			.then(|| NonZeroUsize::new(size / Page::SIZE))
+			.flatten()
+			.ok_or(Error::InvalidData)
+			.and_then(|s| {
+				OwnedPageFrames::new(s, proc.allocate_hints(0 as _)).map_err(|e| match e {
+					frame::AllocateError::OutOfFrames => Error::CantCreateObject,
+				})
+			})
+			.map(|o| Arc::new(o) as Arc<dyn Object>)
+			.and_then(|o| proc.add_object(o).map_err(|e| match e {})),
 	}
 	.map_or_else(
 		|e| Return {

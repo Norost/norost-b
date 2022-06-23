@@ -21,7 +21,7 @@ pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::{
 	error,
-	object::{NewObject, NewObjectType},
+	object::{NewObject, NewObjectArgs, NewObjectType},
 	time::Monotonic,
 	Page,
 };
@@ -156,18 +156,13 @@ pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
 
 #[inline]
 pub fn new_object(args: NewObject) -> error::Result<Handle> {
+	use NewObjectArgs::*;
+	let (ty, args) = args.into_args();
 	ret(match args {
-		NewObject::MemoryMap { range } => {
-			syscall!(ID_NEW_OBJECT(
-				NewObjectType::MemoryMap as usize,
-				range.start().as_ptr(),
-				range.end().as_ptr()
-			))
-		}
-		NewObject::Root => syscall!(ID_NEW_OBJECT(NewObjectType::Root as usize)),
-		NewObject::Duplicate { handle } => {
-			syscall!(ID_NEW_OBJECT(NewObjectType::Duplicate as usize, handle))
-		}
+		N0 => syscall!(ID_NEW_OBJECT(ty)),
+		N1(a) => syscall!(ID_NEW_OBJECT(ty, a)),
+		N2(a, b) => syscall!(ID_NEW_OBJECT(ty, a, b)),
+		N3(a, b, c) => syscall!(ID_NEW_OBJECT(ty, a, b, c)),
 	})
 	.map(|(_, h)| h as u32)
 }

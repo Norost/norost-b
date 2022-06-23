@@ -1,6 +1,6 @@
 use super::{AllocateError, AllocateHints, Page, PPN};
-use crate::scheduler::MemoryObject;
-use alloc::{boxed::Box, vec::Vec};
+use crate::{object_table::Object, scheduler::MemoryObject};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 
 /// An allocation of page frames.
@@ -43,9 +43,15 @@ impl OwnedPageFrames {
 	}
 }
 
+impl Object for OwnedPageFrames {
+	fn memory_object(self: Arc<Self>, _: u64) -> Option<Arc<dyn MemoryObject>> {
+		Some(self)
+	}
+}
+
 unsafe impl MemoryObject for OwnedPageFrames {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
-		f(&self.frames)
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		f(&self.frames);
 	}
 
 	fn physical_pages_len(&self) -> usize {

@@ -23,10 +23,12 @@ impl DMAFrame {
 }
 
 unsafe impl MemoryObject for DMAFrame {
-	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN])) {
-		(0..self.count)
-			.map(|i| self.base.skip(i))
-			.for_each(|p| f(&[p]));
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		for p in (0..self.count).map(|i| self.base.skip(i)) {
+			if !f(&[p]) {
+				break;
+			}
+		}
 	}
 
 	fn physical_pages_len(&self) -> usize {

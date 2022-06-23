@@ -4,7 +4,7 @@ use crate::{
 		r#virtual::{PPN, RWX},
 		Page,
 	},
-	{object_table::MemoryMap, scheduler::MemoryObject, sync::SpinLock},
+	{object_table::SubRange, scheduler::MemoryObject, sync::SpinLock},
 };
 use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
@@ -64,6 +64,7 @@ impl AddressSpace {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
 				}
+				true
 			});
 		};
 		self.objects.insert(index, (range.clone(), object));
@@ -97,6 +98,7 @@ impl AddressSpace {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
 				}
+				true
 			});
 		};
 		objects.insert(index, (range.clone(), object));
@@ -184,58 +186,6 @@ impl AddressSpace {
 		} else {
 			todo!("partial unmap {:?} != {:?}", unmap_range, range);
 		}
-	}
-
-	/// Create a [`MemoryMap`] from an address range.
-	///
-	/// There may not be any holes in the given range.
-	pub fn create_memory_map(&mut self, range: RangeInclusive<NonNull<Page>>) -> Option<MemoryMap> {
-		let (s, e) = (range.start().as_ptr(), range.end().as_ptr());
-		if !s.is_aligned() || !e.wrapping_byte_add(1).is_aligned() || s > e {
-			// TODO return an error instead of just None.
-			return None;
-		}
-		let mut it = self.objects.iter();
-		let mut obj = Vec::new();
-		// TODO use binary search to find start and end
-		let (start_offset, mut last_end, has_end) = 'l: loop {
-			for (r, o) in &mut it {
-				if r.contains(range.start()) {
-					obj.push(o.clone());
-					break 'l (
-						// FIXME r.start() may not correspond with object start
-						r.start().as_ptr() as usize - range.start().as_ptr() as usize,
-						r.end().as_ptr(),
-						r.contains(r.end()),
-					);
-				}
-			}
-			return None;
-		};
-		if !has_end {
-			'g: loop {
-				for (r, o) in &mut it {
-					if last_end.wrapping_add(1) != r.start().as_ptr() {
-						return None;
-					}
-					last_end = r.end().as_ptr();
-					obj.push(o.clone());
-					if r.contains(range.end()) {
-						// FIXME ditto but end
-						break 'g;
-					}
-				}
-				return None;
-			}
-		}
-		let total_size = range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1;
-		debug_assert_eq!(start_offset % Page::SIZE, 0);
-		debug_assert_eq!(total_size % Page::SIZE, 0);
-		Some(MemoryMap::new(
-			obj.into(),
-			start_offset / Page::SIZE,
-			total_size / Page::SIZE,
-		))
 	}
 
 	/// Map a virtual address to a physical address.
