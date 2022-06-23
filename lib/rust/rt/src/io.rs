@@ -255,6 +255,10 @@ where
 		return res;
 	}
 	let q = queue();
+	// FIXME this turns in a spinloop if the task we're waiting for is not ready but another
+	// is. We need to be able to tell the kernel we are waiting for a specific request.
+	// For now thread::yield_now() alleviates this performance pitfall for requests that can
+	// be completed "immediately" by another process, but that won't work for e.g. disk requests.
 	loop {
 		q.poll();
 		q.wait(Duration::MAX);
@@ -262,6 +266,7 @@ where
 		if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
 			return res;
 		}
+		crate::thread::yield_now();
 	}
 }
 
