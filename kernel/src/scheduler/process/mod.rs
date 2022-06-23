@@ -91,18 +91,6 @@ impl Process {
 		self.address_space.lock().unmap_object(base, count)
 	}
 
-	/// Create a [`MemoryMap`] from an address range.
-	///
-	/// There may not be any holes in the given range.
-	pub fn create_memory_map(&self, range: RangeInclusive<NonNull<Page>>) -> Option<Handle> {
-		let mut objects = self.objects.auto_lock();
-		let mut address_space = self.address_space.auto_lock();
-		address_space
-			.create_memory_map(range)
-			.map(|o| objects.insert(Arc::new(o)))
-			.map(erase_handle)
-	}
-
 	/// Duplicate a reference to an object.
 	pub fn duplicate_object_handle(&self, handle: Handle) -> Option<Handle> {
 		let mut objects = self.objects.lock();
@@ -120,6 +108,17 @@ impl Process {
 		F: FnOnce(&Arc<dyn Object>) -> R,
 	{
 		self.objects.auto_lock().get(unerase_handle(handle)).map(f)
+	}
+
+	/// Create a new object from another object.
+	pub fn object_transform_new<R, O, F>(&self, handle: Handle, f: F) -> Option<Result<Handle, R>>
+	where
+		O: Object + 'static,
+		F: FnOnce(&Arc<dyn Object>) -> Result<Arc<O>, R>,
+	{
+		let mut obj = self.objects.auto_lock();
+		let res = f(obj.get(unerase_handle(handle))?);
+		Some(res.map(|o| erase_handle(obj.insert(o as Arc<dyn Object>))))
 	}
 
 	/// Map a virtual address to a physical address.

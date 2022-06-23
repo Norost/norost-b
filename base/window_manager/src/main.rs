@@ -23,7 +23,10 @@ mod window;
 mod workspace;
 
 use alloc::vec::Vec;
-use core::{ptr::NonNull, str};
+use core::{
+	ptr::{self, NonNull},
+	str,
+};
 use driver_utils::io::queue::stream::Job;
 use math::{Point, Rect, Size};
 use rt::io::{Error, Handle};
@@ -51,10 +54,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
-	let fb = root.open(b"gpu/framebuffer").unwrap();
-	let fb = rt::io::map_object(fb.as_raw(), None, 0, usize::MAX)
-		.unwrap()
-		.cast::<[u8; 4]>();
 	let sync = root.open(b"gpu/sync").unwrap();
 	let (w, h) = {
 		let r = root.open(b"gpu/resolution").unwrap();
@@ -65,25 +64,36 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 	let size = Size::new(w, h);
 
+	let shmem_size = size.x as usize * size.y as usize * 3;
+	let shmem_size = (shmem_size + 0xfff) & !0xfff;
+	let mut shmem_obj =
+		rt::io::new_object(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
+	let shmem = rt::io::map_object(shmem_obj, None, 0, shmem_size).unwrap();
+	sync.share(&rt::Object::from_raw(shmem_obj))
+		.expect("failed to share mem with GPU");
+
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::new(gwp).unwrap();
 	let w0 = manager.new_window(size).unwrap();
 	let w1 = manager.new_window(size).unwrap();
 	let w2 = manager.new_window(size).unwrap();
 
-	let mut fill = |rect: math::Rect, color: [u8; 3]| {
-		for y in rect.y() {
-			for x in rect.x() {
-				let x = usize::try_from(x).unwrap();
-				let y = usize::try_from(y).unwrap();
-				let w = usize::try_from(w).unwrap();
-				unsafe {
-					fb.as_ptr()
-						.add(y * w + x)
-						.write([color[0], color[1], color[2], 0]);
-				}
+	let sync_rect = |rect: math::Rect| {
+		let mut s = alloc::string::String::with_capacity(64);
+		use core::fmt::Write;
+		let (l, h) = (rect.low(), rect.high());
+		write!(&mut s, "{},{} {},{}", l.x, l.y, h.x, h.y).unwrap();
+		sync.write(s.as_bytes()).unwrap();
+	};
+	let fill = |rect: math::Rect, color: [u8; 3]| {
+		let s = rect.size().x as usize * rect.size().y as usize;
+		assert!(s * 3 <= shmem_size, "TODO");
+		for i in 0..s {
+			unsafe {
+				shmem.as_ptr().cast::<[u8; 3]>().add(i).write(color);
 			}
 		}
+		sync_rect(rect);
 	};
 
 	let colors = [
@@ -99,8 +109,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	for (w, c) in manager.window_handles().zip(&colors) {
 		fill(manager.window_rect(w, size).unwrap(), *c);
 	}
-
-	sync.write(b"").unwrap();
 
 	let table = root.create(b"window_manager").unwrap();
 
@@ -118,7 +126,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					for (w, c) in manager.window_handles().zip(&colors) {
 						fill(manager.window_rect(w, size).unwrap(), *c);
 					}
-					sync.write(b"").unwrap();
 					Job::reply_create_clear(buf, job_id, h)
 				}
 				_ => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
@@ -150,19 +157,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					assert!(
 						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
 					);
-					for (fy, ty) in (0..draw_size.y as usize).zip(draw_rect.y()) {
-						for (fx, tx) in (0..draw_size.x as usize).zip(draw_rect.x()) {
-							let i = fy * draw_size.x as usize + fx;
-							let c = &pixels[i * 3..(i + 1) * 3];
-							unsafe {
-								let i = fb
-									.as_ptr()
-									.add(ty as usize * w as usize + tx as usize)
-									.write([c[0], c[1], c[2], 0]);
-							}
-						}
+					// TODO we can avoid this copy by passing shared memory buffers directly
+					// to the GPU
+					unsafe {
+						shmem
+							.as_ptr()
+							.copy_from_nonoverlapping(pixels.as_ptr(), pixels.len());
 					}
-					sync.write(b"").unwrap();
+					sync_rect(draw_rect);
 					let l = data.len().try_into().unwrap();
 					Job::reply_write_clear(buf, job_id, l)
 				}
@@ -173,7 +175,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				for (w, c) in manager.window_handles().zip(&colors) {
 					fill(manager.window_rect(w, size).unwrap(), *c);
 				}
-				sync.write(b"").unwrap();
 				continue;
 			}
 			_ => todo!(),

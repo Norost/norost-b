@@ -230,9 +230,7 @@ impl super::Process {
 						address: virt.cast().as_ptr(),
 						color: slf.hint_color,
 					};
-					let mem = Arc::new(
-						OwnedPageFrames::new(alloc, hint).map_err(ElfError::AllocateError)?,
-					);
+					let mem = OwnedPageFrames::new(alloc, hint).map_err(ElfError::AllocateError)?;
 					// FIXME this is utter shit
 					let mut offt = 0;
 					let page_offt = usize::try_from(header.offset).unwrap() & Page::MASK;
@@ -257,7 +255,7 @@ impl super::Process {
 					});
 					assert_eq!(u64::try_from(wr_i - page_offt).unwrap(), header.file_size);
 					address_space
-						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_object(Some(virt), Arc::new(mem), rwx, slf.hint_color)
 						.map_err(ElfError::MapError)?;
 				}
 			} else {

@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
 use driver_utils::io::queue::stream::Job;
 use rt::io::{Error, Handle};
@@ -146,22 +146,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	// Wrap framebuffer for sharing
-	let fb_share = rt::Object::new(rt::NewObject::MemoryMap {
-		range: fb.virt()..=NonNull::new(fb.virt().as_ptr().wrapping_add(fb.size() - 1)).unwrap(),
-	})
-	.unwrap()
-	.into_raw();
-
 	dev.draw(id, rect, &mut buf).expect("failed to draw");
 
 	// Create table
 	let tbl = rt::io::file_root().unwrap().create(table_name).unwrap();
 
 	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
-	const SYNC_HANDLE: Handle = 0xffff_fffe;
+	const SYNC_HANDLE: Handle = Handle::MAX - 1;
 
 	let mut handles = driver_utils::Arena::new();
+	let mut command_buf = (NonNull::new(kernel::Page::SIZE as *mut u8).unwrap(), 0);
 
 	enum H {
 		Resolution,
@@ -176,9 +170,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				handle,
 				path,
 			} => match (handle, path) {
-				(Handle::MAX, b"framebuffer") => {
-					Job::reply_open_share_clear(data, job_id, fb_share)
-				}
 				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, SYNC_HANDLE),
 				(Handle::MAX, b"resolution") => {
 					let handle = handles.insert(H::Resolution);
@@ -212,11 +203,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				handle,
 				data: d,
 			} => match (handle, d) {
-				// Blit the entire screen
-				(SYNC_HANDLE, &[]) => {
-					dev.draw(id, rect, &mut buf).expect("failed to draw");
-					Job::reply_write_clear(data, job_id, 0)
-				}
 				// Blit a specific area
 				(SYNC_HANDLE, s) => {
 					if let Some(r) = (|| {
@@ -230,6 +216,39 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let (xh, yh) = (x0.max(x1), y0.max(y1));
 						Some(Rect::new(xl, yl, xh - xl + 1, yh - yl + 1))
 					})() {
+						let area = r.height() as usize * r.width() as usize;
+						assert!(area * 4 <= fb.size());
+						assert!(area * 3 <= command_buf.1);
+						/*
+						unsafe {
+							fb.virt().as_ptr().write_bytes(200, fb.size());
+							for i in 0..area {
+								let [r, g, b] = *command_buf.0.as_ptr().cast::<[u8; 3]>().add(i);
+								fb.virt().as_ptr().cast::<[u8; 4]>().add(i).write([r, g, b, 0]);
+							}
+						}
+						*/
+						unsafe {
+							fb.virt().as_ptr().write_bytes(200, fb.size());
+							for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
+								for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
+									let fi = fy as usize * r.width() as usize + fx as usize;
+									// QEMU uses the stride of the *host* for the *guest*
+									// memory too. Don't ask me why, this is documented literally
+									// nowhere.
+									// This, by the way, is the *only* reason we're forced to
+									// allocate a framebuffer matching the host size.
+									let ti = ty as usize * width as usize + tx as usize;
+									let [r, g, b] =
+										*command_buf.0.as_ptr().cast::<[u8; 3]>().add(fi);
+									fb.virt()
+										.as_ptr()
+										.cast::<[u8; 4]>()
+										.add(ti)
+										.write([r, g, b, 0]);
+								}
+							}
+						}
 						dev.draw(id, r, &mut buf).expect("failed to draw");
 						let l = s.len().try_into().unwrap();
 						Job::reply_write_clear(data, job_id, l)
@@ -252,6 +271,25 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				*/
 				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
 			},
+			Job::Share {
+				job_id,
+				handle,
+				share,
+			} => {
+				let obj = tbl.open(share.to_string().as_bytes()).unwrap();
+				// FIXME map_object should return the real size
+				let size = usize::MAX;
+				match handle {
+					SYNC_HANDLE => match kernel::syscall::map_object(obj.as_raw(), None, 0, size) {
+						Err(e) => Job::reply_error_clear(data, job_id, e),
+						Ok(buf) => {
+							command_buf = (buf.cast(), size);
+							Job::reply_share_clear(data, job_id)
+						}
+					},
+					_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
+				}
+			}
 			Job::Close { handle } => match handle {
 				Handle::MAX | SYNC_HANDLE => continue,
 				h => {

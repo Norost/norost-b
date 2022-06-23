@@ -521,7 +521,6 @@ pub struct Job {
 	pub from_anchor: u8,
 	pub result: i16,
 	pub job_id: JobId,
-
 	pub handle: Handle,
 }
 
@@ -533,6 +532,7 @@ impl Job {
 	pub const SEEK: u8 = 6;
 	pub const CLOSE: u8 = 7;
 	pub const PEEK: u8 = 8;
+	pub const SHARE: u8 = 9;
 	pub const OPEN_SHARE: u8 = Self::OPEN | 1 << 7;
 
 	#[inline]
