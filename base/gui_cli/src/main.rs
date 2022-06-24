@@ -50,11 +50,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let window = root.create(b"window_manager/window").unwrap();
 
 	// Clear some area at the top so the text doesn't look ugly
-	let mut draw = ipc_wm::DrawRect::new(Vec::new());
-	draw.set_origin(ipc_wm::Point { x: 0, y: 0 });
-	draw.set_size(ipc_wm::Size { x: 700, y: 320 });
-	draw.pixels_mut().unwrap().fill(0);
-	window.write_vec(draw.raw, 0).unwrap();
+	let mut raw = Vec::new();
+	let mut draw = ipc_wm::DrawRect::new_vec(
+		&mut raw,
+		ipc_wm::Point { x: 0, y: 0 },
+		ipc_wm::Size { x: 700, y: 320 },
+	);
+	draw.pixels_mut().fill(0);
+	window.write_vec(raw, 0).unwrap();
 
 	let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
 	layout.append(fonts, &TextStyle::new("ABC\n", 160.0, 0));
@@ -66,19 +69,21 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 		let font = &fonts[glyph.font_index];
 
-		let mut draw = ipc_wm::DrawRect::new(Vec::new());
-		draw.set_origin(ipc_wm::Point {
-			x: glyph.x as _,
-			y: glyph.y as _,
-		});
-		draw.set_size(ipc_wm::Size {
-			x: (glyph.width - 1) as _,
-			y: (glyph.height - 1) as _,
-		});
+		let mut raw = Vec::new();
+		let mut draw = ipc_wm::DrawRect::new_vec(
+			&mut raw,
+			ipc_wm::Point {
+				x: glyph.x as _,
+				y: glyph.y as _,
+			},
+			ipc_wm::Size {
+				x: (glyph.width - 1) as _,
+				y: (glyph.height - 1) as _,
+			},
+		);
 
 		let (_, covmap) = font.rasterize_config(glyph.key);
 		draw.pixels_mut()
-			.unwrap()
 			.chunks_exact_mut(3)
 			.zip(covmap.iter())
 			.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));

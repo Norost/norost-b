@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::marker::PhantomData;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Point {
@@ -54,40 +55,61 @@ impl Size {
 	}
 }
 
-pub struct DrawRect {
-	pub raw: Vec<u8>,
+pub struct DrawRect<'a, T>
+where
+	T: AsRef<[u8]> + 'a,
+{
+	raw: T,
+	_marker: PhantomData<&'a mut T>,
 }
 
-impl DrawRect {
-	pub fn new(mut raw: Vec<u8>) -> Self {
+impl<'a, T> DrawRect<'a, T>
+where
+	T: AsRef<[u8]> + 'a,
+{
+	pub fn from_bytes(raw: T) -> Option<Self> {
+		(12 + Self::get_size(raw.as_ref())?.area() * 3 >= raw.as_ref().len()).then(|| Self {
+			raw,
+			_marker: PhantomData,
+		})
+	}
+
+	pub fn origin(&self) -> Point {
+		Point::from_raw(self.raw.as_ref()[..8].try_into().unwrap())
+	}
+
+	pub fn size(&self) -> Size {
+		Self::get_size(self.raw.as_ref()).unwrap()
+	}
+
+	pub fn pixels(&self) -> &[u8] {
+		&self.raw.as_ref()[12..12 + self.size().area() * 3]
+	}
+
+	fn get_size(raw: &[u8]) -> Option<Size> {
+		Some(Size::from_raw(raw.get(8..12)?.try_into().unwrap()))
+	}
+}
+
+impl<'a, T> DrawRect<'a, T>
+where
+	T: AsRef<[u8]> + AsMut<[u8]> + 'a,
+{
+	pub fn pixels_mut(&mut self) -> &mut [u8] {
+		let s = self.size().area();
+		&mut self.raw.as_mut()[12..12 + s * 3]
+	}
+}
+
+impl<'a> DrawRect<'a, &'a mut Vec<u8>> {
+	pub fn new_vec(raw: &'a mut Vec<u8>, origin: Point, size: Size) -> Self {
 		raw.clear();
-		raw.resize(12, 0);
-		Self { raw }
-	}
-
-	pub fn origin(&self) -> Option<Point> {
-		Some(Point::from_raw(self.raw.get(..8)?.try_into().unwrap()))
-	}
-
-	pub fn size(&self) -> Option<Size> {
-		Some(Size::from_raw(self.raw.get(8..12)?.try_into().unwrap()))
-	}
-
-	pub fn set_origin(&mut self, origin: Point) {
-		self.raw[..8].copy_from_slice(&origin.to_raw())
-	}
-
-	pub fn set_size(&mut self, size: Size) {
-		self.raw.resize(12 + size.area() * 3, 0);
-		self.raw[8..12].copy_from_slice(&size.to_raw());
-	}
-
-	pub fn pixels(&self) -> Option<&[u8]> {
-		self.raw.get(12..12 + self.size()?.area() * 3)
-	}
-
-	pub fn pixels_mut(&mut self) -> Option<&mut [u8]> {
-		let s = self.size()?.area();
-		self.raw.get_mut(12..12 + s * 3)
+		raw.resize(12 + size.area() * 3, 0);
+		raw[8..12].copy_from_slice(&size.to_raw());
+		raw[..8].copy_from_slice(&origin.to_raw());
+		Self {
+			raw: &mut *raw,
+			_marker: PhantomData,
+		}
 	}
 }

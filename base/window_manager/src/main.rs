@@ -139,21 +139,21 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				h => {
 					let display = Rect::from_size(Point::ORIGIN, size);
 					let rect = manager.window_rect(h, size).unwrap();
-					let draw = ipc_wm::DrawRect { raw: data.into() };
-					let draw_size = draw.size().unwrap();
+					let draw = ipc_wm::DrawRect::from_bytes(data).unwrap();
+					let draw_size = draw.size();
 					// TODO do we actually want this?
 					let draw_size = Size::new(
 						(u32::from(draw_size.x) + 1).min(rect.size().x),
 						(u32::from(draw_size.y) + 1).min(rect.size().y),
 					);
-					let draw_orig = draw.origin().unwrap();
+					let draw_orig = draw.origin();
 					let draw_orig = Point::new(draw_orig.x, draw_orig.y);
 					let draw_rect = rect
 						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
 						.unwrap();
 					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
 					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
-					let pixels = draw.pixels().unwrap();
+					let pixels = draw.pixels();
 					assert!(
 						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
 					);
