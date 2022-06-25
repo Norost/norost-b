@@ -88,7 +88,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			.zip(covmap.iter())
 			.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));
 
-		window.write_vec(draw.raw, 0).unwrap();
+		window.write_vec(raw, 0).unwrap();
 	}
 
 	rt::thread::sleep(core::time::Duration::MAX);
