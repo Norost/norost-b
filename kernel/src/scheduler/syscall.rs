@@ -46,7 +46,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	wait_thread,
 	exit,
 	undefined,
-	duplicate_handle,
+	undefined,
 	spawn_thread,
 	create_io_rings,
 	submit_io,
@@ -288,32 +288,6 @@ extern "C" fn map_object(
 			|base| Return {
 				status: 0,
 				value: base.as_ptr() as usize,
-			},
-		)
-}
-
-extern "C" fn duplicate_handle(
-	handle: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("duplicate_handle");
-	let handle = handle as u32;
-
-	Process::current()
-		.unwrap()
-		.duplicate_object_handle(handle)
-		.map_or(
-			Return {
-				status: 1,
-				value: 0,
-			},
-			|handle| Return {
-				status: 0,
-				value: handle.try_into().unwrap(),
 			},
 		)
 }
