@@ -167,8 +167,9 @@ extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _
 #[cfg(target_pointer_width = "64")]
 extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
 	use super::block_on;
+	let handle = unerase_handle(handle as _);
+	debug!("do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
 	Process::current().unwrap().objects_operate(|objects| {
-		let handle = unerase_handle(handle as _);
 		let Some(o) = objects.get(handle) else { return Return::INVALID_OBJECT };
 		let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
 		let return_u64 = |r| Return {
@@ -180,7 +181,7 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 			Request::READ => block_on(if c != 0 { o.peek(b) } else { o.read(b) }).map_or_else(
 				Return::error,
 				|r| {
-					assert!(r.len() < b);
+					assert!(r.len() <= b, "object returned too much data");
 					unsafe {
 						(a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len());
 					}
@@ -199,16 +200,17 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 			}
 			Request::OPEN => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+				let _ = core::str::from_utf8(r);
 				block_on(o.clone().open(r)).map_or_else(Return::error, |o| ins(objects, o))
 			}
 			Request::CREATE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
 				block_on(o.clone().create(r)).map_or_else(Return::error, |o| ins(objects, o))
 			}
-			Request::SEEK => b
+			Request::SEEK => a
 				.try_into()
 				.ok()
-				.and_then(|b| SeekFrom::try_from_raw(b, c as _).ok())
+				.and_then(|a| SeekFrom::try_from_raw(a, b as _).ok())
 				.map_or(Return::INVALID_DATA, |s| {
 					block_on(o.seek(s)).map_or_else(Return::error, return_u64)
 				}),

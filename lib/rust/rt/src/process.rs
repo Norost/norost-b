@@ -1,6 +1,3 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use crate::{args, io, Object, RefObject};
 use alloc::vec::Vec;
 
@@ -28,8 +25,7 @@ impl Process {
 			let mut l = 0u32;
 			stack.extend(0u32.to_ne_bytes());
 			for (ty, h) in objects {
-				let t = io::block_on(io::share(proc_objects.as_raw(), h.as_raw()))?;
-				let t = u32::try_from(t).unwrap();
+				let t = io::share(proc_objects.as_raw(), h.as_raw())?;
 				stack.extend(ty.to_ne_bytes());
 				stack.extend(t.to_ne_bytes());
 				l += 1;

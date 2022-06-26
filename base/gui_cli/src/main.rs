@@ -57,19 +57,19 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		ipc_wm::Size { x: 700, y: 320 },
 	);
 	draw.pixels_mut().fill(0);
-	window.write_vec(raw, 0).unwrap();
+	window.write(&raw).unwrap();
 
 	let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
 	layout.append(fonts, &TextStyle::new("ABC\n", 160.0, 0));
 	layout.append(fonts, &TextStyle::new("Hello, world!", 40.0, 0));
 
+	let t = rt::time::Monotonic::now();
 	for glyph in layout.glyphs().iter() {
 		if !glyph.char_data.rasterize() {
 			continue;
 		}
 		let font = &fonts[glyph.font_index];
 
-		let mut raw = Vec::new();
 		let mut draw = ipc_wm::DrawRect::new_vec(
 			&mut raw,
 			ipc_wm::Point {
@@ -88,8 +88,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			.zip(covmap.iter())
 			.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));
 
-		window.write_vec(raw, 0).unwrap();
+		window.write(&raw).unwrap();
 	}
+	let t = rt::time::Monotonic::now()
+		.checked_duration_since(t)
+		.unwrap();
+	rt::dbg!(t);
 
 	rt::thread::sleep(core::time::Duration::MAX);
 	rt::thread::sleep(core::time::Duration::MAX);

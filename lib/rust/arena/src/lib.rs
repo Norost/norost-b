@@ -51,7 +51,7 @@ where
 			self.index.fmt(f)
 		} else {
 			self.index.fmt(f)?;
-			"@".fmt(f)?;
+			f.write_str("@")?;
 			self.generation.fmt(f)
 		}
 	}

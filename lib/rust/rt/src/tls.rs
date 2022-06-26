@@ -4,9 +4,6 @@ use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 const ENTRIES: usize = 128;
 
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use alloc::boxed::Box;
 
 #[derive(Debug)]
@@ -90,25 +87,16 @@ fn allocated() -> &'static Bitset {
 #[linkage = "weak"]
 #[export_name = "__rt_tls_destructors"]
 fn destructors() -> &'static [AtomicPtr<()>; ENTRIES] {
-	static DESTRUCTORS: [AtomicPtr<()>; ENTRIES] = {
-		let mut d = [const { AtomicPtr::new(ptr::null_mut()) }; ENTRIES];
-		d[0] = AtomicPtr::new(crate::io::queue_dtor as _);
-		d
-	};
+	static DESTRUCTORS: [AtomicPtr<()>; ENTRIES] =
+		[const { AtomicPtr::new(ptr::null_mut()) }; ENTRIES];
 	&DESTRUCTORS
 }
 
 /// Create & initialize TLS storage for a new thread.
 #[must_use = "this must be passed to the new thread"]
-pub(crate) fn create_for_thread(
-	init: impl Iterator<Item = (Key, *mut ())>,
-) -> crate::io::Result<*mut ()> {
+pub(crate) fn create_for_thread() -> crate::io::Result<*mut ()> {
 	// TODO allocation may fail.
-	let mut entries = Box::<[Entry]>::new_zeroed_slice(ENTRIES);
-	for (k, data) in init {
-		entries[k.0].write(Entry { data });
-	}
-	Ok(Box::into_raw(entries).cast())
+	Ok(Box::into_raw(Box::<[Entry]>::new_zeroed_slice(ENTRIES)).cast())
 }
 
 /// Initialize TLS storage for the current thread.
@@ -161,9 +149,9 @@ pub(crate) unsafe fn deinit_thread() {
 ///
 /// This function may only be called once.
 pub(crate) unsafe fn init() {
-	let entries = create_for_thread([].into_iter()).unwrap_or_else(|_| {
+	let entries = create_for_thread().unwrap_or_else(|_| {
 		// We can't do anything
-		core::intrinsics::abort()
+		crate::exit(130)
 	});
 	unsafe {
 		init_thread(entries);
