@@ -445,7 +445,6 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
- "nora_io_queue_rt",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",

@@ -56,9 +56,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let sync = root.open(b"gpu/sync").unwrap();
 	let (w, h) = {
+		let mut b = [0; 16];
 		let r = root.open(b"gpu/resolution").unwrap();
-		let r = r.read_vec(16).unwrap();
-		let r = str::from_utf8(&r).unwrap();
+		let l = r.read(&mut b).unwrap();
+		let r = str::from_utf8(&b[..l]).unwrap();
 		let (w, h) = r.split_once('x').unwrap();
 		(w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap())
 	};
@@ -112,9 +113,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let table = root.create(b"window_manager").unwrap();
 
+	let mut buf = Vec::new();
+	buf.resize(1 << 20, 0);
 	loop {
-		let buf = table.read_vec(1 << 20).unwrap();
-		let buf = match Job::deserialize(&buf).unwrap() {
+		let l = table.read(&mut buf).unwrap();
+		buf = match Job::deserialize(&buf[..l]).unwrap() {
 			Job::Create {
 				handle,
 				job_id,
@@ -180,7 +183,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			_ => todo!(),
 		}
 		.unwrap();
-		table.write_vec(buf, 0).unwrap();
+		table.write(&buf).unwrap();
 	}
 
 	0

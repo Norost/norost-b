@@ -22,7 +22,11 @@
 #![feature(new_uninit)]
 #![feature(ptr_metadata)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused)]
 
+#[cfg(not(feature = "rustc-dep-of-std"))]
+extern crate alloc;
+#[allow(unused_extern_crates)]
 extern crate compiler_builtins;
 
 // Shamelessly copied from stdlib.
@@ -80,7 +84,6 @@ cfg_if::cfg_if! {
 unsafe extern "C" fn rt_start(arguments: Option<NonNull<u8>>) -> ! {
 	unsafe {
 		tls::init();
-		io::init(arguments);
 		args::init(arguments);
 	}
 	// SAFETY: we can't actually guarantee safety due to weak linkage.

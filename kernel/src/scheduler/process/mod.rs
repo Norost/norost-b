@@ -106,6 +106,14 @@ impl Process {
 		}
 	}
 
+	/// Lock & operate on the objects handles held by this process.
+	pub fn objects_operate<'a, R, F>(&'a self, f: F) -> R
+	where
+		F: FnOnce(&mut Arena<Arc<dyn Object>, u8>) -> R,
+	{
+		f(&mut self.objects.lock())
+	}
+
 	/// Operate on a reference to an object.
 	pub fn object_apply<R, F>(&self, handle: Handle, f: F) -> Option<R>
 	where

@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 norostb_kernel = { path = "../kernel" }
 cfg-if = "1.0"
-nora_io_queue_rt = { path = "../io_queue_rt" }
 
 # When built as part of libstd
 alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
@@ -19,6 +18,5 @@ rustc-dep-of-std = [
 	"core",
 	"cfg-if/rustc-dep-of-std",
 	"norostb_kernel/rustc-dep-of-std",
-	"nora_io_queue_rt/rustc-dep-of-std",
 	"compiler_builtins/rustc-dep-of-std",
 ]

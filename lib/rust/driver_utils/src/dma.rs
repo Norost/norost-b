@@ -6,10 +6,11 @@ pub fn alloc_dma(size: NonZeroUsize) -> rt::io::Result<(NonNull<u8>, u64, NonZer
 	let size = size.to_string();
 	let root = rt::io::file_root().unwrap();
 	let buf = root.open(b"dma")?.create(size.as_bytes())?;
-	let buf_phys = buf.open(b"phys").unwrap().read_vec(32).unwrap();
-	let buf_size = buf.open(b"size").unwrap().read_vec(32).unwrap();
-	let buf_phys = str::from_utf8(&buf_phys).unwrap().parse::<u64>().unwrap();
-	let buf_size = str::from_utf8(&buf_size)
+	let mut r = [0; 32];
+	let r_len = buf.open(b"phys").unwrap().read(&mut r).unwrap();
+	let buf_phys = str::from_utf8(&r[..r_len]).unwrap().parse::<u64>().unwrap();
+	let r_len = buf.open(b"size").unwrap().read(&mut r).unwrap();
+	let buf_size = str::from_utf8(&r[..r_len])
 		.unwrap()
 		.parse::<NonZeroUsize>()
 		.unwrap();

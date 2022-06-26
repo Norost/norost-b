@@ -1,8 +1,4 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use super::io;
-use alloc::vec::Vec;
 use core::{
 	fmt,
 	marker::PhantomData,
@@ -10,43 +6,35 @@ use core::{
 	ptr::NonNull,
 };
 
-pub use norostb_kernel::{io::Job, object::NewObject, Handle};
+pub use norostb_kernel::{
+	io::{DoIo, Job},
+	object::NewObject,
+	Handle,
+};
 
 #[derive(Debug)]
 pub struct Object(Handle);
 
 impl Object {
 	/// Create a new local object.
-	#[inline]
+	#[inline(always)]
 	pub fn new(args: NewObject) -> io::Result<Self> {
 		io::new_object(args).map(Self)
 	}
 
-	#[inline]
+	#[inline(always)]
 	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::open(self.0, path.into(), 0))
-			.map(|(_, h)| Self(h))
-			.map_err(|(_, e)| e)
+		io::open(self.0, path).map(Self)
 	}
 
-	#[inline]
+	#[inline(always)]
 	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::create(self.0, path.into(), 0))
-			.map(|(_, h)| Self(h))
-			.map_err(|(_, e)| e)
+		io::create(self.0, path).map(Self)
 	}
 
-	#[inline]
-	pub fn read_vec(&self, amount: usize) -> io::Result<Vec<u8>> {
-		io::block_on(io::read(self.0, Vec::new(), amount)).map_err(|(_, e)| e)
-	}
-
-	#[inline]
+	#[inline(always)]
 	pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
-		self.read_vec(buf.len()).map(|b| {
-			buf[..b.len()].copy_from_slice(&b);
-			b.len()
-		})
+		io::read(self.0, buf)
 	}
 
 	#[inline]
@@ -54,23 +42,16 @@ impl Object {
 		&self,
 		buf: &'a mut [MaybeUninit<u8>],
 	) -> io::Result<(&'a mut [u8], &'a mut [MaybeUninit<u8>])> {
-		self.read_vec(buf.len()).map(|b| {
-			let (i, u) = buf.split_at_mut(b.len());
-			(MaybeUninit::write_slice(i, &b), u)
+		io::read_uninit(self.0, buf).map(|l| {
+			let (i, u) = buf.split_at_mut(l);
+			// SAFETY: all bytes in i are initialized
+			(unsafe { MaybeUninit::slice_assume_init_mut(i) }, u)
 		})
 	}
 
-	#[inline]
-	pub fn peek_vec(&self, amount: usize) -> io::Result<Vec<u8>> {
-		io::block_on(io::peek(self.0, Vec::new(), amount)).map_err(|(_, e)| e)
-	}
-
-	#[inline]
+	#[inline(always)]
 	pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-		self.peek_vec(buf.len()).map(|b| {
-			buf[..b.len()].copy_from_slice(&b);
-			b.len()
-		})
+		io::peek(self.0, buf)
 	}
 
 	#[inline]
@@ -78,37 +59,31 @@ impl Object {
 		&self,
 		buf: &'a mut [MaybeUninit<u8>],
 	) -> io::Result<(&'a mut [u8], &'a mut [MaybeUninit<u8>])> {
-		self.peek_vec(buf.len()).map(|b| {
-			let (i, u) = buf.split_at_mut(b.len());
-			(MaybeUninit::write_slice(i, &b), u)
+		io::peek_uninit(self.0, buf).map(|l| {
+			let (i, u) = buf.split_at_mut(l);
+			// SAFETY: all bytes in i are initialized
+			(unsafe { MaybeUninit::slice_assume_init_mut(i) }, u)
 		})
 	}
 
 	#[inline]
-	pub fn write_vec(&self, data: Vec<u8>, offset: usize) -> io::Result<usize> {
-		io::block_on(io::write(self.0, data, offset))
-			.map(|(_, l)| l)
-			.map_err(|(_, e)| e)
-	}
-
-	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
-		self.write_vec(data.into(), 0)
+		io::write(self.0, data)
 	}
 
 	#[inline]
 	pub fn seek(&self, pos: io::SeekFrom) -> io::Result<u64> {
-		io::block_on(io::seek(self.0, pos))
+		io::seek(self.0, pos)
 	}
 
 	#[inline]
 	pub fn share(&self, share: &Object) -> io::Result<u64> {
-		io::block_on(io::share(self.0, share.0))
+		io::share(self.0, share.0)
 	}
 
 	#[inline]
 	pub fn poll(&self) -> io::Result<u64> {
-		io::block_on(io::poll(self.0))
+		io::poll(self.0)
 	}
 
 	#[inline]
@@ -149,27 +124,18 @@ impl Object {
 	/// Convienence method for use with `write!()` et al.
 	pub fn write_fmt(&self, args: fmt::Arguments<'_>) -> io::Result<()> {
 		struct Fmt {
-			buf: Vec<u8>,
 			obj: Handle,
 			res: io::Result<()>,
 		}
 		impl fmt::Write for Fmt {
 			fn write_str(&mut self, s: &str) -> fmt::Result {
-				self.buf.clear();
-				self.buf.extend_from_slice(s.as_bytes());
-				// FIXME we need some kind of write_all
-				match io::block_on(io::write(self.obj, mem::take(&mut self.buf), 0)) {
-					Ok((buf, _len)) => Ok(self.buf = buf),
-					Err((buf, e)) => {
-						self.buf = buf;
-						self.res = Err(e);
-						Err(fmt::Error)
-					}
-				}
+				io::write(self.obj, s.as_bytes()).map(|_| ()).map_err(|e| {
+					self.res = Err(e);
+					fmt::Error
+				})
 			}
 		}
 		let mut f = Fmt {
-			buf: Vec::new(),
 			obj: self.0,
 			res: Ok(()),
 		};
@@ -180,12 +146,8 @@ impl Object {
 
 impl Drop for Object {
 	/// Close the handle to this object.
-	///
-	/// This destructor polls the I/O queue immediately after closing. To delay the poll, use
-	/// [`io::close`].
 	fn drop(&mut self) {
-		io::close(self.0);
-		io::poll_queue();
+		io::close(self.0)
 	}
 }
 

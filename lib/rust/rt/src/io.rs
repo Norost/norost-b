@@ -1,25 +1,17 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
-pub use nora_io_queue_rt::{
+pub use norostb_kernel::{
 	error::{Error, Result},
-	Create, Handle, Open, Peek, Poll, Pow2Size, Queue, Read, Seek, SeekFrom, Share, Write,
+	io::SeekFrom,
+	object::NewObject,
+	Handle,
 };
-pub use norostb_kernel::object::NewObject;
 
-use crate::{time::Monotonic, tls, RefObject};
-use alloc::{boxed::Box, vec::Vec};
+use crate::RefObject;
 use core::{
-	future::Future,
-	mem,
-	pin::Pin,
+	mem::{self, MaybeUninit},
 	ptr::NonNull,
 	sync::atomic::Ordering,
-	task::{Context, Poll as PollF, RawWaker, RawWakerVTable, Waker},
-	time::Duration,
 };
-use nora_io_queue_rt::Full;
-use norostb_kernel::syscall;
+use norostb_kernel::{io::DoIo, syscall};
 
 macro_rules! transmute_handle {
 	($fn:ident, $set_fn:ident -> $handle:ident) => {
@@ -97,104 +89,69 @@ impl<'a> IoSliceMut<'a> {
 	}
 }
 
-// Queue key allocation is hardcoded in tls.rs
-const QUEUE_KEY: tls::Key = tls::Key(0);
-pub(crate) unsafe extern "C" fn queue_dtor(ptr: *mut ()) {
-	unsafe {
-		Box::from_raw(ptr.cast::<Queue>());
-	}
+#[inline(always)]
+pub fn read(handle: Handle, buf: &mut [u8]) -> Result<usize> {
+	// SAFETY: the kernel won't deinitialize unread bytes
+	read_uninit(handle, unsafe { mem::transmute(buf) })
 }
 
-/// Initialize the runtime.
-///
-/// # Safety
-///
-/// This function may only be called once.
-///
-/// TLS storage must be initialized with [`crate::tls::init`].
-pub(crate) unsafe fn init(_arguments: Option<NonNull<u8>>) {
-	let (k, v) = create_for_thread()
-		.ok()
-		.and_then(|mut it| it.next())
-		.unwrap_or_else(|| {
-			// Ditto
-			core::intrinsics::abort()
-		});
-	unsafe {
-		tls::set(k, v);
-	}
+#[inline(always)]
+pub fn read_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
+	syscall::do_io(DoIo::Read {
+		handle,
+		buf,
+		peek: false,
+	})
+	.map(|v| v as _)
 }
 
-/// Create & initialize I/O for a new thread.
-#[must_use = "the values must be put in TLS storage"]
-pub(crate) fn create_for_thread() -> Result<impl Iterator<Item = (tls::Key, *mut ())>> {
-	// 2^6 = 64, 32 * 64 + 16 * 64 = 3072, which fits in a single page.
-	Queue::new(Pow2Size::P6, Pow2Size::P6)
-		.map(|q| [(QUEUE_KEY, Box::into_raw(q.into()).cast())].into_iter())
+#[inline(always)]
+pub fn peek(handle: Handle, buf: &mut [u8]) -> Result<usize> {
+	// SAFETY: the kernel won't deinitialize unread bytes
+	peek_uninit(handle, unsafe { mem::transmute(buf) })
 }
 
-fn queue() -> &'static Queue {
-	// SAFETY: only safe if the queue has already been initialized, which it should be.
-	unsafe { &*crate::tls::get(QUEUE_KEY).cast::<Queue>() }
+#[inline(always)]
+pub fn peek_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
+	syscall::do_io(DoIo::Read {
+		handle,
+		buf,
+		peek: true,
+	})
+	.map(|v| v as _)
 }
 
-// Blocking has been chosen since the alternative requires storing requests somewhere
-// else temporarily. This storage has to have an unbounded size and is likely a worse
-// alternative than blocking and/or increasing the size of the queue.
-macro_rules! impl_io {
-	(None $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
-		#[doc = concat!(
-			"An asynchronous ",
-			stringify!($fn),
-			" request. This may block if the queue is full.",
-		)]
-		pub fn $fn(handle: Handle $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
-			let q = queue();
-			loop {
-				match q.$qfn(handle, $($arg,)*) {
-					Ok(r) => return r,
-					Err(Full(_)) => {
-						q.poll();
-						q.wait(Duration::MAX);
-						q.process();
-					}
-				}
-			}
-		}
-	};
-	($buf:ident $fn:ident($($arg:ident: $arg_ty:ty),* $(,)?) -> $ret_ty:ident, $qfn:ident) => {
-		#[doc = concat!(
-			"An asynchronous ",
-			stringify!($fn),
-			" request. This may block if the queue is full.",
-		)]
-		pub fn $fn(handle: Handle, mut $buf: Vec<u8> $(,$arg: $arg_ty)*) -> $ret_ty<'static> {
-			let q = queue();
-			loop {
-				$buf = match q.$qfn(handle, $buf, $($arg,)*) {
-					Ok(r) => return r,
-					Err(Full(b)) => {
-						q.poll();
-						q.wait(Duration::MAX);
-						q.process();
-						b
-					}
-				}
-			}
-		}
-	};
+#[inline(always)]
+pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
+	syscall::do_io(DoIo::Write { handle, data }).map(|v| v as _)
 }
 
-impl_io!(buf read(amount: usize) -> Read, submit_read);
-impl_io!(buf peek(amount: usize) -> Peek, submit_peek);
-impl_io!(data write(offset: usize) -> Write, submit_write);
-impl_io!(path open(offset: usize) -> Open, submit_open);
-impl_io!(path create(offset: usize) -> Create, submit_create);
-impl_io!(None seek(from: SeekFrom) -> Seek, submit_seek);
-impl_io!(None poll() -> Poll, submit_poll);
-impl_io!(None share(share: Handle) -> Share, submit_share);
+#[inline(always)]
+pub fn open(handle: Handle, path: &[u8]) -> Result<Handle> {
+	syscall::do_io(DoIo::Open { handle, path }).map(|v| v as _)
+}
 
-#[inline]
+#[inline(always)]
+pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
+	syscall::do_io(DoIo::Create { handle, path }).map(|v| v as _)
+}
+
+#[inline(always)]
+pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
+	syscall::do_io(DoIo::Seek { handle, from })
+}
+
+#[inline(always)]
+pub fn poll(handle: Handle) -> Result<u64> {
+	syscall::do_io(DoIo::Poll { handle })
+}
+
+#[inline(always)]
+pub fn share(handle: Handle, share: Handle) -> Result<u64> {
+	syscall::do_io(DoIo::Share { handle, share })
+}
+
+#[inline(always)]
 pub fn new_object(args: NewObject) -> Result<Handle> {
 	syscall::new_object(args)
 }
@@ -211,67 +168,5 @@ pub fn map_object(
 
 #[inline]
 pub fn close(handle: Handle) {
-	let q = queue();
-	while q.submit_close(handle).is_err() {
-		q.poll();
-		q.wait(Duration::MAX);
-		q.process();
-	}
-}
-
-/// Poll & process the I/O queue once.
-pub fn poll_queue() -> Monotonic {
-	let q = queue();
-	let t = q.poll();
-	q.process();
-	t
-}
-
-/// Poll & process the I/O queue once, waiting until any responses are available.
-pub fn poll_queue_and_wait(timeout: Duration) -> Monotonic {
-	let q = queue();
-	let t = q.poll();
-	let t = q.wait(timeout).unwrap_or(t);
-	q.process();
-	t
-}
-
-/// Block on an asynchronous I/O task until it is finished.
-pub fn block_on<T, R>(fut: T) -> R
-where
-	T: Future<Output = R>,
-{
-	static DUMMY: RawWakerVTable =
-		RawWakerVTable::new(|_| RawWaker::new(0 as _, &DUMMY), |_| (), |_| (), |_| ());
-
-	let waker = unsafe { Waker::from_raw(RawWaker::new(0 as _, &DUMMY)) };
-	let mut cx = Context::from_waker(&waker);
-
-	// We don't use pin_utils because it doesn't have rustc-dep-of-std
-	let mut fut = fut;
-	// SAFETY: we shadow the original Future and hence can't move it.
-	let mut fut = unsafe { Pin::new_unchecked(&mut fut) };
-	if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
-		return res;
-	}
-	let q = queue();
-	// FIXME this turns in a spinloop if the task we're waiting for is not ready but another
-	// is. We need to be able to tell the kernel we are waiting for a specific request.
-	// For now thread::yield_now() alleviates this performance pitfall for requests that can
-	// be completed "immediately" by another process, but that won't work for e.g. disk requests.
-	loop {
-		q.poll();
-		q.wait(Duration::MAX);
-		q.process();
-		if let PollF::Ready(res) = Pin::new(&mut fut).poll(&mut cx) {
-			return res;
-		}
-		crate::thread::yield_now();
-	}
-}
-
-/// Get the size of the request and response part of the I/O queue.
-pub fn queue_size() -> (Pow2Size, Pow2Size) {
-	let q = queue();
-	(q.requests_size(), q.responses_size())
+	let _ = syscall::do_io(DoIo::Close { handle });
 }

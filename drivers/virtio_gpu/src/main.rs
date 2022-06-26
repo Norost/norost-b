@@ -43,12 +43,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let it = root.open(b"pci/info").unwrap();
 	let dev = loop {
-		let e = it.read_vec(32).unwrap();
-		if e.is_empty() {
+		let mut r = [0; 32];
+		let l = it.read(&mut r).unwrap();
+		if l == 0 {
 			log!("no VirtIO GPU device found");
 			return 1;
 		}
-		let s = str::from_utf8(&e).unwrap();
+		let s = str::from_utf8(&r[..l]).unwrap();
 		let (loc, id) = s.split_once(' ').unwrap();
 		if id == "1af4:1050" {
 			let mut path = Vec::from(*b"pci/");
@@ -153,9 +154,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	}
 
 	// Begin event loop
+	let mut data = Vec::new();
+	data.resize(64, 0);
 	loop {
-		let data = tbl.read_vec(64).unwrap();
-		let resp = match Job::deserialize(&data).unwrap() {
+		let l = tbl.read(&mut data).unwrap();
+		data = match Job::deserialize(&data[..l]).unwrap() {
 			Job::Open {
 				job_id,
 				handle,
@@ -291,6 +294,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			_ => todo!(),
 		}
 		.unwrap();
-		tbl.write_vec(resp, 0).unwrap();
+		tbl.write(&data).unwrap();
 	}
 }
