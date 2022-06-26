@@ -30,9 +30,9 @@ const TIME_SLICE: Duration = Duration::from_millis(33); // 30 times / sec
 /// # Safety
 ///
 /// The current thread's state must be properly saved.
-#[track_caller]
 unsafe fn try_next_thread() -> Result<!, Monotonic> {
-	let mut thr = round_robin::next().unwrap();
+	let next = || round_robin::next().expect("no threads scheduled (did all processes exit?)");
+	let mut thr = next();
 	let first = Arc::as_ptr(&thr);
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
@@ -44,7 +44,7 @@ unsafe fn try_next_thread() -> Result<!, Monotonic> {
 			let _ = thr.resume();
 		}
 		t = t.min(sleep_until);
-		thr = round_robin::next().unwrap();
+		thr = next();
 		if Arc::as_ptr(&thr) == first {
 			return Err(t);
 		}
