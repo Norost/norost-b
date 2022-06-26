@@ -1,5 +1,5 @@
 use super::*;
-use crate::sync::SpinLock;
+use crate::sync::Mutex;
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
@@ -17,11 +17,11 @@ use norostb_kernel::{
 
 pub struct StreamingTable {
 	job_id_counter: AtomicU32,
-	jobs: SpinLock<Vec<(Box<[u8]>, Option<AnyTicketWaker>)>>,
-	tickets: SpinLock<Vec<(JobId, AnyTicketWaker)>>,
-	job_handlers: SpinLock<Vec<(TicketWaker<Box<[u8]>>, usize)>>,
+	jobs: Mutex<Vec<(Box<[u8]>, Option<AnyTicketWaker>)>>,
+	tickets: Mutex<Vec<(JobId, AnyTicketWaker)>>,
+	job_handlers: Mutex<Vec<(TicketWaker<Box<[u8]>>, usize)>>,
 	/// Objects that are being shared.
-	shared: SpinLock<Arena<Arc<dyn Object>, ()>>,
+	shared: Mutex<Arena<Arc<dyn Object>, ()>>,
 }
 
 /// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
@@ -57,11 +57,11 @@ impl StreamingTable {
 		let job_id = job.job_id;
 		let job = job.as_ref().iter().chain(data).copied().collect::<Box<_>>();
 
-		if let Some(w) = self.job_handlers.auto_lock().pop() {
-			self.tickets.auto_lock().push((job_id, ticket_waker.into()));
+		if let Some(w) = self.job_handlers.lock().pop() {
+			self.tickets.lock().push((job_id, ticket_waker.into()));
 			w.0.complete(Ok(job));
 		} else {
-			self.jobs.auto_lock().push((job, Some(ticket_waker.into())));
+			self.jobs.lock().push((job, Some(ticket_waker.into())));
 		}
 
 		ticket.into()
@@ -73,10 +73,10 @@ impl StreamingTable {
 		job.job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
 		let job = (*job.as_ref()).into();
 
-		if let Some(w) = self.job_handlers.auto_lock().pop() {
+		if let Some(w) = self.job_handlers.lock().pop() {
 			w.0.complete(Ok(job));
 		} else {
-			self.jobs.auto_lock().push((job, None));
+			self.jobs.lock().push((job, None));
 		}
 	}
 }
@@ -88,7 +88,7 @@ impl Object for StreamingTableOwner {
 				.ok()
 				.and_then(|s| s.parse::<u32>().ok())
 				.map(|h| arena::Handle::from_raw(h as usize, ()))
-				.and_then(|h| self.0.shared.auto_lock().remove(h))
+				.and_then(|h| self.0.shared.lock().remove(h))
 				.ok_or(Error::InvalidData),
 		)
 	}
@@ -97,11 +97,11 @@ impl Object for StreamingTableOwner {
 		if length < mem::size_of::<Job>() + 8 {
 			return Ticket::new_complete(Err(Error::InvalidData));
 		}
-		match self.0.jobs.auto_lock().pop() {
+		match self.0.jobs.lock().pop() {
 			Some((job, waker)) => {
 				if let Some(w) = waker {
 					let id = Job::deserialize(&job).unwrap().0.job_id;
-					self.0.tickets.auto_lock().push((id, w));
+					self.0.tickets.lock().push((id, w));
 				}
 				Ticket::new_complete(Ok(job))
 			}
@@ -109,7 +109,7 @@ impl Object for StreamingTableOwner {
 				let (ticket, waker) = Ticket::new();
 				self.0
 					.job_handlers
-					.auto_lock()
+					.lock()
 					.push((waker, length - mem::size_of::<Job>()));
 				ticket
 			}
@@ -120,7 +120,7 @@ impl Object for StreamingTableOwner {
 		let Some((job, data)) = Job::deserialize(data) else {
 			return Ticket::new_complete(Err(Error::InvalidData));
 		};
-		let mut c = self.0.tickets.auto_lock();
+		let mut c = self.0.tickets.lock();
 		let mut c = c.drain_filter(|e| e.0 == job.job_id);
 		let Some((_, tw)) = c.next() else {
 			return Ticket::new_complete(Err(Error::InvalidObject));
@@ -291,7 +291,7 @@ impl Object for StreamObject {
 		match self.table.upgrade() {
 			None => Ticket::new_complete(Err(Error::Cancelled)),
 			Some(tbl) => {
-				let share = tbl.shared.auto_lock().insert(share.clone());
+				let share = tbl.shared.lock().insert(share.clone());
 				tbl.submit_job(
 					Job {
 						ty: Job::SHARE,

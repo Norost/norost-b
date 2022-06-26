@@ -301,7 +301,7 @@ impl super::Process {
 			}
 
 			{
-				let mut objects = self.objects.auto_lock();
+				let mut objects = self.objects.lock();
 				let polls = poll_tickets(queue, &mut objects);
 				if polls > 0 {
 					break;

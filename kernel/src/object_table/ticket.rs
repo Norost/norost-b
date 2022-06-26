@@ -43,8 +43,9 @@ pub struct TicketWaker<T> {
 }
 
 impl<T> TicketWaker<T> {
+	#[cfg_attr(debug_assertions, track_caller)]
 	pub fn complete(self, status: Result<T, Error>) {
-		let mut l = self.inner.auto_lock();
+		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
 	}
@@ -73,7 +74,7 @@ impl<T> Future for Ticket<T> {
 	type Output = Result<T, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		let mut t = self.inner.auto_lock();
+		let mut t = self.inner.lock();
 		if let Some(s) = t.status.take() {
 			return Poll::Ready(s);
 		}

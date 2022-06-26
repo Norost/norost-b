@@ -457,7 +457,9 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 	debug!("exit");
 	#[derive(Clone, Copy)]
 	struct D(*const Process, i32);
-	let d = D(Arc::into_raw(Process::current().unwrap()), code as i32);
+	let proc = Process::current().unwrap();
+	proc.prepare_destroy();
+	let d = D(Arc::into_raw(proc), code as i32);
 	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
 	extern "C" fn destroy_process(data: *const ()) -> ! {

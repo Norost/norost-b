@@ -3,16 +3,20 @@ mod io;
 mod table;
 
 use super::{MemoryObject, Thread};
-use crate::arch;
-use crate::memory::frame::{self, AllocateHints};
-use crate::memory::r#virtual::{AddressSpace, MapError, UnmapError, RWX};
-use crate::memory::Page;
-use crate::object_table::{AnyTicket, Object};
-use crate::sync::{Mutex, SpinLock};
-use crate::util::{erase_handle, unerase_handle};
+use crate::{
+	arch,
+	memory::{
+		frame::{self, AllocateHints},
+		r#virtual::{AddressSpace, MapError, UnmapError, RWX},
+		Page,
+	},
+	object_table::{AnyTicket, Object},
+	sync::{Mutex, SpinLock},
+	util::{erase_handle, unerase_handle},
+};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
-use core::{num::NonZeroUsize, ops::RangeInclusive, ptr::NonNull};
+use core::{num::NonZeroUsize, ptr::NonNull};
 use norostb_kernel::Handle;
 
 pub use table::post_init;
@@ -21,7 +25,7 @@ pub struct Process {
 	address_space: SpinLock<AddressSpace>,
 	hint_color: u8,
 	threads: SpinLock<Arena<Arc<Thread>, u8>>,
-	objects: SpinLock<Arena<Arc<dyn Object>, u8>>,
+	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
 }
 
@@ -44,7 +48,7 @@ impl Process {
 	}
 
 	pub unsafe fn activate_address_space(&self) {
-		unsafe { self.address_space.auto_lock().activate() };
+		unsafe { self.address_space.isr_lock().activate() };
 	}
 
 	/// Add an object to the process' object table.
@@ -107,7 +111,7 @@ impl Process {
 	where
 		F: FnOnce(&Arc<dyn Object>) -> R,
 	{
-		self.objects.auto_lock().get(unerase_handle(handle)).map(f)
+		self.objects.lock().get(unerase_handle(handle)).map(f)
 	}
 
 	/// Create a new object from another object.
@@ -116,7 +120,7 @@ impl Process {
 		O: Object + 'static,
 		F: FnOnce(&Arc<dyn Object>) -> Result<Arc<O>, R>,
 	{
-		let mut obj = self.objects.auto_lock();
+		let mut obj = self.objects.lock();
 		let res = f(obj.get(unerase_handle(handle))?);
 		Some(res.map(|o| erase_handle(obj.insert(o as Arc<dyn Object>))))
 	}
@@ -130,7 +134,7 @@ impl Process {
 	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
 		let thread = Arc::new(Thread::new(start, stack, self.clone()).unwrap());
 		let weak = Arc::downgrade(&thread);
-		let mut threads = self.threads.auto_lock();
+		let mut threads = self.threads.lock();
 		let handle = threads.insert(thread);
 		unsafe {
 			threads[handle].set_handle(erase_handle(handle));
@@ -162,6 +166,15 @@ impl Process {
 		}
 	}
 
+	/// Begin preparations to destroy this process.
+	///
+	/// This will stop all threads and remove all handles to objects.
+	pub fn prepare_destroy(&self) {
+		// FIXME actually stop threads.
+		// This is necessary to ensure no threads create more handles in the meantime
+		self.objects.lock().clear();
+	}
+
 	/// Destroy this process.
 	///
 	/// # Safety
@@ -171,7 +184,7 @@ impl Process {
 	#[track_caller]
 	pub unsafe fn destroy(self: Arc<Self>) {
 		// Destroy all threads
-		let mut threads = self.threads.auto_lock();
+		let mut threads = self.threads.isr_lock();
 		for (_, thr) in threads.drain() {
 			// SAFETY: the caller guarantees we're not using any resources of this thread.
 			unsafe {

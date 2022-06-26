@@ -31,7 +31,8 @@ impl Object for UartId {
 				Ticket::new_complete(Ok([r].into()))
 			} else {
 				let (ticket, waker) = Ticket::new();
-				PENDING_READS[usize::from(self.0)].auto_lock().push(waker);
+				// super::get ensures interrupts are disabled
+				PENDING_READS[usize::from(self.0)].isr_lock().push(waker);
 				uart.enable_interrupts(Uart::INTERRUPT_DATA_AVAILABLE);
 				ticket
 			}
@@ -52,7 +53,7 @@ pub(super) fn irq_handler() {
 		let mut rd = queue.isr_lock();
 		while let Some(r) = rd.pop() {
 			if let Some(b) = uart.try_read() {
-				r.complete(Ok([b].into()));
+				r.isr_complete(Ok([b].into()));
 			} else {
 				rd.push(r);
 				break;

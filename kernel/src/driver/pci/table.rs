@@ -18,7 +18,7 @@ impl Object for PciTable {
 			})),
 			_ => path_to_bdf(path)
 				.and_then(|(bus, dev, func)| {
-					let pci = super::PCI.auto_lock();
+					let pci = super::PCI.lock();
 					pci.as_ref()
 						.unwrap()
 						.get(bus, dev, func)
@@ -36,7 +36,7 @@ struct Query {
 
 impl Query {
 	fn next(&self) -> Option<((u16, u16), (u8, u8, u8))> {
-		let pci = super::PCI.auto_lock();
+		let pci = super::PCI.lock();
 		let pci = pci.as_ref().unwrap();
 		loop {
 			let i = self.index.fetch_add(1, Ordering::Relaxed);

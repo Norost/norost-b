@@ -26,8 +26,8 @@ impl PciDevice {
 		Self { bus, device }
 	}
 
-	pub fn config_region(&self) -> PPN {
-		let pci = PCI.auto_lock();
+	fn config_region(&self) -> PPN {
+		let pci = PCI.isr_lock();
 		let pci = pci.as_ref().unwrap();
 		let addr = pci.get_physical_address(self.bus, self.device, 0);
 		PPN::try_from_usize(addr).unwrap()
@@ -52,7 +52,7 @@ impl Object for PciDevice {
 				waiting: Vec::new(),
 			};
 			let o = Arc::new(IrqPoll(SpinLock::new(o)));
-			IRQ_LISTENERS.auto_lock().push(Arc::downgrade(&o));
+			IRQ_LISTENERS.lock().push(Arc::downgrade(&o));
 			Ok(o)
 		} else {
 			Err(Error::DoesNotExist)
@@ -65,7 +65,7 @@ impl Object for PciDevice {
 		}
 
 		let index = usize::try_from(offset - 1).ok()?;
-		let pci = PCI.auto_lock();
+		let pci = PCI.lock();
 		let pci = pci.as_ref().unwrap();
 		let header = pci.get(self.bus, self.device, 0).unwrap();
 		let bar = header.base_addresses().get(index)?;
@@ -107,7 +107,7 @@ pub struct IrqPoll(SpinLock<IrqPollInner>);
 
 impl Object for IrqPoll {
 	fn poll(&self) -> Ticket<usize> {
-		let mut inner = self.0.auto_lock();
+		let mut inner = self.0.lock();
 		if mem::take(&mut inner.irq_occurred) {
 			Ticket::new_complete(Ok(0))
 		} else {

@@ -59,7 +59,7 @@ where
 		allocate_irqs(&mut pci);
 	}
 
-	*PCI.auto_lock() = Some(pci);
+	*PCI.isr_lock() = Some(pci);
 }
 
 pub(super) fn post_init(root: &Root) {

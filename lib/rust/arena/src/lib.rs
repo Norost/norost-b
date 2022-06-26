@@ -206,6 +206,13 @@ impl<V, G: Generation> Arena<V, G> {
 	pub fn is_empty(&self) -> bool {
 		self.len() == 0
 	}
+
+	#[inline]
+	pub fn clear(&mut self) {
+		self.storage.clear();
+		self.count = 0;
+		self.free = usize::MAX;
+	}
 }
 
 impl<V, G: Generation> Index<Handle<G>> for Arena<V, G> {
