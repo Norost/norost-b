@@ -220,7 +220,7 @@ impl DoIo<'_> {
 			}
 			Self::Poll { handle } => (R::POLL, handle, N0),
 			Self::Close { handle } => (R::CLOSE, handle, N0),
-			Self::Share { handle, share } => (R::CLOSE, handle, N1(share as _)),
+			Self::Share { handle, share } => (R::SHARE, handle, N1(share as _)),
 		}
 	}
 }
