@@ -116,7 +116,7 @@ impl Object for StreamingTableOwner {
 		}
 	}
 
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		let Some((job, data)) = Job::deserialize(data) else {
 			return Ticket::new_complete(Err(Error::InvalidData));
 		};
@@ -146,7 +146,7 @@ impl Object for StreamingTableOwner {
 				let Ok(len) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {
 					return Ticket::new_complete(Err(Error::InvalidData));
 				};
-				tw.into_usize().complete(Ok(len as usize))
+				tw.into_u64().complete(Ok(len))
 			}
 			Job::READ | Job::PEEK => tw.into_data().complete(Ok(data.into())),
 			Job::SEEK => {
@@ -158,7 +158,7 @@ impl Object for StreamingTableOwner {
 			Job::SHARE => tw.into_u64().complete(Ok(0)),
 			_ => return Ticket::new_complete(Err(Error::InvalidOperation)),
 		}
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }
 
@@ -263,7 +263,7 @@ impl Object for StreamObject {
 		)
 	}
 
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		self.submit_job(
 			Job {
 				ty: Job::WRITE,

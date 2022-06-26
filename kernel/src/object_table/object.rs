@@ -27,7 +27,7 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<u64> {
 		not_implemented()
 	}
 
@@ -35,7 +35,7 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn poll(&self) -> Ticket<usize> {
+	fn poll(&self) -> Ticket<u64> {
 		not_implemented()
 	}
 

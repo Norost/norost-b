@@ -70,13 +70,13 @@ impl Object for IoMap {
 		})
 	}
 
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		match data {
 			&[a] => Self::put_byte(self.head.fetch_add(1, Ordering::Relaxed), a),
 			&[_, _] => todo!(),
 			&[_, _, _, _] => todo!(),
 			_ => return Ticket::new_complete(Err(Error::InvalidData)),
 		}
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }

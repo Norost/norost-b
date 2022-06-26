@@ -20,11 +20,11 @@ impl Object for SystemTable {
 struct SystemLogRef;
 
 impl Object for SystemLogRef {
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		// TODO make write non-blocking.
 		// FIXME avoid panic
 		write!(SystemLog::new(), "{}", crate::util::ByteStr::new(data)).unwrap();
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }
 

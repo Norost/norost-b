@@ -114,7 +114,7 @@ struct SetStack {
 }
 
 impl Object for SetStack {
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		let stack = self.builder.stack.take().unwrap();
 		unsafe {
 			stack.write(self.builder.stack_offset.get(), data);
@@ -123,7 +123,7 @@ impl Object for SetStack {
 		self.builder
 			.stack_offset
 			.set(self.builder.stack_offset.get() + data.len());
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }
 

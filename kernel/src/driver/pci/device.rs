@@ -99,14 +99,14 @@ struct IrqPollInner {
 	/// `true` if an IRQ occured since the last poll.
 	irq_occurred: bool,
 	/// Tasks waiting for an IRQ to occur.
-	waiting: Vec<TicketWaker<usize>>,
+	waiting: Vec<TicketWaker<u64>>,
 }
 
 /// An object that keeps track of IRQs atomically.
 pub struct IrqPoll(SpinLock<IrqPollInner>);
 
 impl Object for IrqPoll {
-	fn poll(&self) -> Ticket<usize> {
+	fn poll(&self) -> Ticket<u64> {
 		let mut inner = self.0.lock();
 		if mem::take(&mut inner.irq_occurred) {
 			Ticket::new_complete(Ok(0))

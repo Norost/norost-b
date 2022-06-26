@@ -332,7 +332,6 @@ fn poll_tickets(queue: &mut Queue, objects: &mut arena::Arena<Arc<dyn Object>, u
 					Ok(AnyTicketValue::Object(o)) => {
 						push_resp(erase_handle(objects.insert(o)).try_into().unwrap())
 					}
-					Ok(AnyTicketValue::Usize(n)) => push_resp(n as i64),
 					Ok(AnyTicketValue::U64(n)) => push_resp(n as i64),
 					Ok(AnyTicketValue::Data(b)) => {
 						let data =
