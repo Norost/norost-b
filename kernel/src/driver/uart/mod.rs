@@ -18,7 +18,7 @@ pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
 
 /// # Safety
 ///
-/// This function may only be called once at boot time.
+/// This function must be called exactly once at boot time.
 pub unsafe fn early_init() {
 	// This port is guaranteed to exist.
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
@@ -29,13 +29,15 @@ pub unsafe fn early_init() {
 
 /// # Safety
 ///
-/// This function may only be called once after [`init`] and when the APIC is initialized.
-pub unsafe fn post_init(root: &crate::object_table::Root) {
+/// This function must be called exactly once at boot time.
+pub unsafe fn init() {
 	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 	unsafe {
 		x86::init();
 	}
+}
 
+pub fn post_init(root: &crate::object_table::Root) {
 	let table = Arc::new(table::UartTable) as Arc<dyn object_table::Object>;
 	root.add(*b"uart", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.

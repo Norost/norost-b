@@ -7,6 +7,7 @@ use core::{
 	fmt,
 	marker::PhantomData,
 	mem::{self, MaybeUninit},
+	ptr::NonNull,
 };
 
 pub use norostb_kernel::{io::Job, object::NewObject, Handle};
@@ -108,6 +109,16 @@ impl Object {
 	#[inline]
 	pub fn poll(&self) -> io::Result<u64> {
 		io::block_on(io::poll(self.0))
+	}
+
+	#[inline]
+	pub fn map_object(
+		&self,
+		base: Option<NonNull<u8>>,
+		offset: u64,
+		length: usize,
+	) -> io::Result<NonNull<u8>> {
+		io::map_object(self.0, base, offset, length)
 	}
 
 	#[inline]

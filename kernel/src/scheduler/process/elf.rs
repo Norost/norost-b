@@ -335,14 +335,7 @@ pub enum ElfError {
 	OffsetOutOfBounds,
 	AddressOffsetMismatch,
 	AllocateError(frame::AllocateError),
-	AllocateContiguousError(frame::AllocateContiguousError),
 	MapError(MapError),
-}
-
-impl From<frame::AllocateContiguousError> for ElfError {
-	fn from(err: frame::AllocateContiguousError) -> Self {
-		Self::AllocateContiguousError(err)
-	}
 }
 
 impl From<crate::memory::r#virtual::IncompatibleRWXFlags> for ElfError {

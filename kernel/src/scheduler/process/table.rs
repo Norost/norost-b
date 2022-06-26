@@ -127,7 +127,7 @@ impl Object for SetStack {
 	}
 }
 
-pub fn init(root: &crate::object_table::Root) {
+pub fn post_init(root: &crate::object_table::Root) {
 	let tbl = ManuallyDrop::new(Arc::new(ProcessTable) as Arc<dyn Object>);
 	root.add(&b"process"[..], Arc::downgrade(&*tbl));
 }

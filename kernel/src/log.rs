@@ -28,10 +28,7 @@ impl Object for SystemLogRef {
 	}
 }
 
-/// # Safety
-///
-/// This function must be called exactly once
-pub unsafe fn post_init(root: &Root) {
+pub fn post_init(root: &Root) {
 	let table = Arc::new(SystemTable) as Arc<dyn Object>;
 	root.add(*b"system", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.

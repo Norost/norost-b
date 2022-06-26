@@ -5,10 +5,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc};
 use core::sync::atomic::{AtomicU16, Ordering};
 
-/// # Safety
-///
-/// This function may only be called once at boot time
-pub unsafe fn init(root: &Root) {
+pub fn post_init(root: &Root) {
 	let io = Arc::new(Io) as Arc<dyn Object>;
 	root.add(*b"portio", Arc::downgrade(&io));
 	let _ = Arc::into_raw(io);

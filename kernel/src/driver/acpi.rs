@@ -1,5 +1,8 @@
-use crate::boot;
-use crate::memory::r#virtual::{phys_to_virt, virt_to_phys};
+use crate::{
+	boot,
+	memory::r#virtual::{phys_to_virt, virt_to_phys},
+	object_table::Root,
+};
 
 #[derive(Clone, Debug)]
 struct Handler;
@@ -19,7 +22,10 @@ impl acpi::AcpiHandler for Handler {
 	fn unmap_physical_region<T>(_: &acpi::PhysicalMapping<Self, T>) {}
 }
 
-pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
+/// # Safety
+///
+/// This function must be called exactly once at boot time.
+pub unsafe fn init(boot: &boot::Info) {
 	boot.rsdp.validate().unwrap();
 
 	unsafe {
@@ -31,12 +37,15 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 		super::apic::init_acpi(&acpi);
 
 		#[cfg(feature = "driver-ps2")]
-		super::ps2::init_acpi(&acpi, root);
+		super::ps2::init_acpi(&acpi);
 
 		#[cfg(feature = "driver-pci")]
-		super::pci::init_acpi(&acpi, root);
+		super::pci::init_acpi(&acpi);
 
 		#[cfg(feature = "driver-hpet")]
 		super::hpet::init_acpi(&acpi);
+
+		// Calibrate at end since we need another timer for this.
+		super::apic::post_init_acpi();
 	}
 }

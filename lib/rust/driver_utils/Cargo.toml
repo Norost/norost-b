@@ -9,8 +9,10 @@ default-target = "x86_64-unknown-norostb"
 [dependencies]
 arena = { path = "../arena" }
 norostb_kernel = { path = "../kernel" }
+norostb_rt = { path = "../rt" }
 
 [features]
-default = ["std", "alloc"]
+default = ["std", "alloc", "rt"]
 std = []
 alloc = []
+rt = []

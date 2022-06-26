@@ -15,7 +15,7 @@ use arena::Arena;
 use core::{num::NonZeroUsize, ops::RangeInclusive, ptr::NonNull};
 use norostb_kernel::Handle;
 
-pub use table::init;
+pub use table::post_init;
 
 pub struct Process {
 	address_space: SpinLock<AddressSpace>,

@@ -5,8 +5,9 @@ pub mod syscall;
 mod thread;
 mod waker;
 
-use crate::driver::apic;
-use crate::time::Monotonic;
+use crate::{
+	arch, driver::apic, memory::frame::AllocateError, object_table::Root, time::Monotonic,
+};
 use alloc::sync::Arc;
 use core::future::Future;
 use core::marker::Unpin;
@@ -76,18 +77,55 @@ fn poll<T>(mut task: impl Future<Output = T> + Unpin) -> Poll<T> {
 	Pin::new(&mut task).poll(&mut Context::from_waker(&waker))
 }
 
+/// Spawn a new kernel thread.
+pub fn new_kernel_thread_1(
+	f: extern "C" fn(usize) -> !,
+	arg: usize,
+	enable_interrupts: bool,
+) -> Result<(), AllocateError> {
+	let thr = Arc::new(Thread::kernel_new_1(f, arg, enable_interrupts)?);
+	round_robin::insert(Arc::downgrade(&thr));
+	// Forget about the thread so the scheduler can actually do something with it.
+	let _ = Arc::into_raw(thr);
+	Ok(())
+}
+
+/// Exit a kernel thread.
+pub fn exit_kernel_thread() -> ! {
+	// We already leaked a strong reference, so we must not increment it further.
+	let d = Thread::current_ptr().unwrap().as_ptr();
+	arch::run_on_local_cpu_stack_noreturn!(exit, d as *const ());
+
+	extern "C" fn exit(data: *const ()) -> ! {
+		// SAFETY: we leaked a strong reference in new_kernel_thread_*
+		let thread = unsafe { Arc::from_raw(data.cast::<Thread>()) };
+		arch::amd64::clear_current_thread();
+		// SAFETY: we switched to the CPU local stack and won't return to the stack of this thread
+		// We also switched to the default address space in case it's the last thread of the
+		// process.
+		unsafe {
+			thread.destroy();
+		}
+		// SAFETY: there is no thread state to save.
+		unsafe { next_thread() }
+	}
+}
+
 /// # Safety
 ///
 /// This function must be called exactly once.
-pub unsafe fn init(root: &crate::object_table::Root) {
-	process::init(root);
+pub unsafe fn init() {
 	unsafe {
 		for t in SLEEP_THREADS.iter_mut() {
 			t.write(
-				Thread::kernel_new(crate::arch::scheduler::halt_forever, false)
+				Thread::kernel_new_0(arch::scheduler::halt_forever, false)
 					.expect("failed to create sleep thread")
 					.into(),
 			);
 		}
 	}
+}
+
+pub fn post_init(root: &Root) {
+	process::post_init(root);
 }

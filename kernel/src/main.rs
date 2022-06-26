@@ -28,14 +28,16 @@
 
 extern crate alloc;
 
-use crate::memory::frame::{PageFrameIter, PPN};
-use crate::memory::{frame::MemoryRegion, Page};
-use crate::object_table::{Error, Object, QueryIter, Ticket};
-use crate::scheduler::MemoryObject;
+use crate::{
+	memory::{
+		frame::{PageFrameIter, PPN},
+		Page,
+	},
+	object_table::{Error, MemoryObject, Object, QueryIter, Ticket},
+	scheduler::Thread,
+};
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
-use core::cell::Cell;
-use core::mem::ManuallyDrop;
-use core::panic::PanicInfo;
+use core::{cell::Cell, mem::ManuallyDrop, panic::PanicInfo};
 
 #[macro_use]
 mod log;
@@ -51,41 +53,39 @@ mod time;
 mod util;
 
 #[export_name = "main"]
-pub extern "C" fn main(boot_info: &boot::Info) -> ! {
+pub extern "C" fn main(boot_info: &'static mut boot::Info) -> ! {
+	dbg!(boot_info as *const _);
 	unsafe {
 		driver::early_init(boot_info);
 	}
 
-	for region in boot_info.memory_regions() {
-		let (base, size) = (region.base as usize, region.size as usize);
-		let align = (Page::SIZE - base % Page::SIZE) % Page::SIZE;
-		let base = base + align;
-		let count = (size - align) / Page::SIZE;
-		if let Ok(base) = PPN::try_from_usize(base) {
-			let region = MemoryRegion { base, count };
-			unsafe {
-				memory::frame::add_memory_region(region);
-			}
-		}
-	}
-
 	unsafe {
+		memory::init(boot_info.memory_regions_mut());
 		arch::init();
+		driver::init(boot_info);
+		scheduler::init();
 	}
 
+	scheduler::new_kernel_thread_1(post_init, boot_info as *mut _ as _, true)
+		.expect("failed to spawn thread for post-initialization");
+
+	// SAFETY: there is no thread state to save.
+	unsafe { scheduler::next_thread() }
+}
+
+/// A kernel thread that handles the rest of the initialization.
+///
+/// Mutexes may be used here as interrupts are enabled at this point.
+extern "C" fn post_init(boot_info: usize) -> ! {
+	dbg!(boot_info as *const ());
+	let boot_info = unsafe { &mut *(boot_info as *mut boot::Info) };
 	let root = Arc::new(object_table::Root::new());
 
-	unsafe {
-		driver::init(boot_info, &root);
-	}
-
-	unsafe {
-		log::post_init(&root);
-	}
-
-	unsafe {
-		scheduler::init(&root);
-	}
+	// TODO anything involving a root object should be moved to post_init
+	memory::post_init(&root);
+	driver::post_init(&root);
+	scheduler::post_init(&root);
+	log::post_init(&root);
 
 	let mut init = None;
 	for d in boot_info.drivers() {
@@ -109,15 +109,10 @@ pub extern "C" fn main(boot_info: &boot::Info) -> ! {
 	// Spawn init
 	let mut objects = arena::Arena::<Arc<dyn Object>, _>::new();
 	objects.insert(root);
-	match scheduler::process::Process::from_elf(Arc::new(init), None, 0, objects) {
-		Ok(_) => {}
-		Err(e) => {
-			error!("failed to start driver: {:?}", e)
-		}
-	}
+	scheduler::process::Process::from_elf(Arc::new(init), None, 0, objects)
+		.expect("failed to spawn init");
 
-	// SAFETY: there is no thread state to save.
-	unsafe { scheduler::next_thread() }
+	scheduler::exit_kernel_thread()
 }
 
 #[panic_handler]

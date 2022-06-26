@@ -1,8 +1,6 @@
 pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
 pub const ID_MONOTONIC_TIME: usize = 2;
-pub const ID_ALLOC_DMA: usize = 3;
-pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
 pub const ID_HAS_SINGLE_OWNER: usize = 7;
 pub const ID_NEW_OBJECT: usize = 8;
@@ -21,7 +19,7 @@ pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::{
 	error,
-	object::{NewObject, NewObjectArgs, NewObjectType},
+	object::{NewObject, NewObjectArgs},
 	time::Monotonic,
 	Page,
 };
@@ -129,29 +127,6 @@ pub unsafe fn dealloc(base: NonNull<Page>, size: usize) -> error::Result<()> {
 #[inline]
 pub fn monotonic_time() -> Monotonic {
 	sys_to_mono(syscall!(ID_MONOTONIC_TIME()))
-}
-
-#[inline]
-pub fn alloc_dma(
-	base: Option<NonNull<Page>>,
-	size: usize,
-) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
-	ret(syscall!(ID_ALLOC_DMA(base, size))).map(|(status, value)| {
-		// SAFETY: the kernel always returns a non-zero status (size) and value (base ptr).
-		// If the kernel is buggy we're screwed anyways.
-		unsafe {
-			(
-				NonNull::new_unchecked(value as *mut _),
-				NonZeroUsize::new_unchecked(status),
-			)
-		}
-	})
-}
-
-#[inline]
-pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
-	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr()))).map(|(_, v)| v)
 }
 
 #[inline]

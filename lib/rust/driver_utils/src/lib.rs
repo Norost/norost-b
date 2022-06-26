@@ -9,8 +9,11 @@
 #![cfg_attr(feature = "std", feature(norostb))]
 #![cfg_attr(feature = "std", feature(read_buf))]
 
+extern crate alloc;
+
 mod arena;
 
+pub mod dma;
 pub mod io;
 pub mod task;
 

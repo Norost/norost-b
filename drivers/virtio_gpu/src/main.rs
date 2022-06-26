@@ -58,12 +58,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 	let dev = root.open(&dev).unwrap();
 	let poll = dev.open(b"poll").unwrap();
-	let pci = kernel::syscall::map_object(dev.as_raw(), None, 0, usize::MAX).unwrap();
+	let pci = dev.map_object(None, 0, usize::MAX).unwrap();
 	let pci = unsafe { pci::Pci::new(pci.cast(), 0, 0, &[]) };
 
-	let dma_alloc = |size, _align| -> Result<_, ()> {
-		let (d, _) = kernel::syscall::alloc_dma(None, size).unwrap();
-		let a = kernel::syscall::physical_address(d).unwrap();
+	let dma_alloc = |size: usize, _align| -> Result<_, ()> {
+		let (d, a, _) = driver_utils::dma::alloc_dma(size.try_into().unwrap()).unwrap();
 		Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 	};
 
@@ -72,7 +71,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		match h {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					kernel::syscall::map_object(dev.as_raw(), None, (bar + 1).into(), usize::MAX)
+					dev.map_object(None, (bar + 1).into(), usize::MAX)
 						.unwrap()
 						.cast()
 				};
@@ -89,32 +88,24 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	// Allocate buffers for virtio queue requests
-	let (buf, buf_size) =
-		kernel::syscall::alloc_dma(None, 256).expect("failed to allocate framebuffer buffer");
-	let buf_phys = kernel::syscall::physical_address(buf).unwrap();
+	let (buf, buf_phys, buf_size) = driver_utils::dma::alloc_dma(256.try_into().unwrap()).unwrap();
 	let mut buf = unsafe {
-		virtio::PhysMap::new(
-			buf.cast(),
-			virtio::PhysAddr::new(buf_phys.try_into().unwrap()),
-			buf_size.get(),
-		)
+		virtio::PhysMap::new(buf.cast(), virtio::PhysAddr::new(buf_phys), buf_size.get())
 	};
-	let (buf2, buf2_size) =
-		kernel::syscall::alloc_dma(None, 256).expect("failed to allocate framebuffer buffer");
-	let buf2_phys = kernel::syscall::physical_address(buf2).unwrap();
+	let (buf2, buf2_phys, buf2_size) =
+		driver_utils::dma::alloc_dma(256.try_into().unwrap()).unwrap();
 	let buf2 = unsafe {
 		virtio::PhysMap::new(
 			buf2.cast(),
-			virtio::PhysAddr::new(buf2_phys.try_into().unwrap()),
+			virtio::PhysAddr::new(buf2_phys),
 			buf2_size.get(),
 		)
 	};
 
 	// Allocate draw buffer
 	let (width, height) = (2560, 1440);
-	let (fb, fb_size) = kernel::syscall::alloc_dma(None, width * height * 4)
-		.expect("failed to allocate framebuffer buffer");
-	let fb_phys = kernel::syscall::physical_address(fb).unwrap();
+	let (fb, fb_phys, fb_size) =
+		driver_utils::dma::alloc_dma((width * height * 4).try_into().unwrap()).unwrap();
 	let fb = unsafe {
 		virtio::PhysMap::new(
 			fb.cast(),

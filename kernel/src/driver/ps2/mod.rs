@@ -229,7 +229,7 @@ fn install_irq(port: Port, handler: crate::arch::amd64::IDTEntry) {
 /// # Safety
 ///
 /// This function must be called exactly once.
-pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
+pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>) {
 	// https://wiki.osdev.org/%228042%22_PS/2_Controller#Initialising_the_PS.2F2_Controller
 
 	// Ensure the PS/2 controller exists
@@ -339,7 +339,7 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
 			| &[DEVICE_MF2_KEYBOARD, 0x83]
 			=> {
 				#[cfg(feature = "driver-ps2-keyboard")]
-				keyboard::init(port, root);
+				keyboard::init(port);
 				#[cfg(not(feature = "driver-ps2-keyboard"))]
 				info!("ps2: no driver for keyboard (device type {:#02x})", d);
 			}
@@ -348,4 +348,9 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>, root: &Root) {
 			_ => unreachable!(),
 		}
 	}
+}
+
+pub(super) fn post_init(root: &Root) {
+	#[cfg(feature = "driver-ps2-keyboard")]
+	keyboard::post_init(root)
 }

@@ -6,10 +6,12 @@
 //!
 //! [osdev pci]: https://wiki.osdev.org/PCI
 
-use crate::driver::apic::local_apic;
-use crate::memory::r#virtual::{add_identity_mapping, phys_to_virt};
-use crate::object_table;
-use crate::sync::SpinLock;
+use crate::{
+	driver::apic::local_apic,
+	memory::r#virtual::{add_identity_mapping, phys_to_virt},
+	object_table::{self, Root},
+	sync::SpinLock,
+};
 use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
 use alloc::sync::Arc;
 use core::ptr::NonNull;
@@ -22,7 +24,10 @@ pub use device::PciDevice;
 
 static PCI: SpinLock<Option<Pci>> = SpinLock::new(None);
 
-pub unsafe fn init_acpi<H>(acpi: &AcpiTables<H>, root: &crate::object_table::Root)
+/// # Safety
+///
+/// This function must be called exactly once at boot time.
+pub(super) unsafe fn init_acpi<H>(acpi: &AcpiTables<H>)
 where
 	H: AcpiHandler,
 {
@@ -55,7 +60,9 @@ where
 	}
 
 	*PCI.auto_lock() = Some(pci);
+}
 
+pub(super) fn post_init(root: &Root) {
 	let table = Arc::new(table::PciTable) as Arc<dyn object_table::Object>;
 	root.add(*b"pci", Arc::downgrade(&table));
 	let _ = Arc::into_raw(table); // Intentionally leak the table.

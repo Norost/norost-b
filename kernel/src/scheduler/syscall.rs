@@ -7,7 +7,7 @@ use crate::{
 		Page,
 	},
 	object_table::{Object, Root, SubRange},
-	scheduler::{self, process::Process, syscall::frame::DMAFrame, Thread},
+	scheduler::{self, process::Process, Thread},
 };
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
@@ -31,8 +31,8 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	alloc,
 	dealloc,
 	monotonic_time,
-	alloc_dma,
-	physical_address,
+	undefined,
+	undefined,
 	undefined,
 	undefined,
 	has_single_owner,
@@ -140,52 +140,6 @@ extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _:
 
 extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	get_mono_time()
-}
-
-extern "C" fn alloc_dma(
-	base: usize,
-	size: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("alloc_dma");
-	let rwx = RWX::RW;
-	let base = NonNull::new(base as *mut _);
-	let count = (size + Page::MASK) / Page::SIZE;
-	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
-	Process::current()
-		.unwrap()
-		.map_memory_object(base, Box::new(frame), rwx)
-		.map_or(
-			Return {
-				status: usize::MAX,
-				value: 0,
-			},
-			|base| Return {
-				status: count * Page::SIZE,
-				value: base.as_ptr() as usize,
-			},
-		)
-}
-
-extern "C" fn physical_address(
-	address: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("physical_address");
-	let address = NonNull::new(address as *mut _).unwrap();
-	let value = Process::current()
-		.unwrap()
-		.get_physical_address(address)
-		.unwrap()
-		.0;
-	Return { status: 0, value }
 }
 
 extern "C" fn has_single_owner(
