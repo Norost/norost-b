@@ -40,6 +40,7 @@ eked out. Drivers are integrated directly in the application, allowing the
 compiler to perform more extensive optimizations and reducing the amount of
 context and privilige switches.
 
+
 ### Asynchronous I/O
 
 So far, asynchronous I/O using ring buffers seems to be the best-performing on modern
@@ -47,9 +48,11 @@ hardware, since it reduces privilege & context switches associated with blocking
 It also scales well with increasing workloads as more work will be done between each
 poll, i.e. batch size scales automatically.
 
-Synchronous I/O is often easier to use & the right choice if the result is immediately
-needed. Since this type of I/O likely doesn't need to be very performant it is
-implemented on top of the existing asynchronous interface.
+Synchronous I/O is often easier to use & the right choice if the result is
+immediately needed. While synchronous I/O can easily be implemented on top
+of an asynchronous API, it is common enough a dedicated system call has been
+added (`do_io`). It reduces the size of simple programs, makes the runtime
+lighter and is slightly more performant.
 
 
 #### Readiness vs completion
