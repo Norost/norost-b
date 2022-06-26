@@ -125,11 +125,6 @@ impl Process {
 		Some(res.map(|o| erase_handle(obj.insert(o as Arc<dyn Object>))))
 	}
 
-	/// Map a virtual address to a physical address.
-	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
-		self.address_space.lock().get_physical_address(address)
-	}
-
 	/// Spawn a new thread.
 	pub fn spawn_thread(self: &Arc<Self>, start: usize, stack: usize) -> Result<Handle, ()> {
 		let thread = Arc::new(Thread::new(start, stack, self.clone()).unwrap());

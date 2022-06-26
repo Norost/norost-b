@@ -41,7 +41,7 @@ impl Object for DmaFrame {
 		})
 	}
 
-	fn memory_object(self: Arc<Self>, offset: u64) -> Option<Arc<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>, _: u64) -> Option<Arc<dyn MemoryObject>> {
 		Some(self)
 	}
 }

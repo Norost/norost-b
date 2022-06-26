@@ -103,6 +103,7 @@ impl<T> SpinLock<T> {
 	}
 
 	/// Borrow the lock mutably, which is safe since mutable references are always unique.
+	#[allow(dead_code)]
 	pub fn get_mut(&mut self) -> &mut T {
 		self.value.get_mut()
 	}

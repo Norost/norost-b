@@ -4,7 +4,7 @@ use crate::{
 		r#virtual::{PPN, RWX},
 		Page,
 	},
-	{object_table::SubRange, scheduler::MemoryObject, sync::SpinLock},
+	{scheduler::MemoryObject, sync::SpinLock},
 };
 use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
@@ -186,11 +186,6 @@ impl AddressSpace {
 		} else {
 			todo!("partial unmap {:?} != {:?}", unmap_range, range);
 		}
-	}
-
-	/// Map a virtual address to a physical address.
-	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
-		self.mmu_address_space.get_physical_address(address)
 	}
 
 	/// Find a range of free address space.

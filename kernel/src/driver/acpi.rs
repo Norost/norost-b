@@ -1,7 +1,6 @@
 use crate::{
 	boot,
 	memory::r#virtual::{phys_to_virt, virt_to_phys},
-	object_table::Root,
 };
 
 #[derive(Clone, Debug)]

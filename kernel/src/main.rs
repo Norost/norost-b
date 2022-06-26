@@ -34,7 +34,6 @@ use crate::{
 		Page,
 	},
 	object_table::{Error, MemoryObject, Object, QueryIter, Ticket},
-	scheduler::Thread,
 };
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{cell::Cell, mem::ManuallyDrop, panic::PanicInfo};

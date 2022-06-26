@@ -51,13 +51,8 @@ pub unsafe fn init(boot: &boot::Info) {
 	}
 }
 
-/// # Safety
-///
-/// This function may only be called once at boot time.
 pub fn post_init(root: &Root) {
-	unsafe {
-		uart::post_init(root);
-	}
+	uart::post_init(root);
 
 	#[cfg(feature = "driver-portio")]
 	portio::post_init(root);

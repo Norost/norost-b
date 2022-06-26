@@ -7,7 +7,6 @@ mod dma;
 mod fixed_bitmap;
 mod owned;
 
-pub use dma::*;
 pub use owned::*;
 
 use super::Page;
@@ -73,6 +72,7 @@ impl PPN {
 		self.0 as usize * Page::SIZE
 	}
 
+	#[allow(dead_code)]
 	fn clear(self) {
 		unsafe { ptr::write_bytes(self.as_ptr(), 0, 1) }
 	}

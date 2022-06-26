@@ -18,7 +18,6 @@ impl FixedBitmap {
 			return;
 		}
 		if let Some(base) = mr.take_page_range(128 * self.bitmap.0.len()) {
-			let page_size = u64::try_from(Page::SIZE).unwrap();
 			self.base = PPN((base >> Page::OFFSET_BITS)
 				.try_into()
 				.expect("TODO: page address out of range"));
