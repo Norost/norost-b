@@ -1,4 +1,4 @@
-use crate::{args, io, Object, RefObject};
+use crate::{args, io, Handle, Object, RefObject};
 use alloc::vec::Vec;
 
 pub struct Process(Object);
@@ -26,11 +26,17 @@ impl Process {
 			stack.extend(0u32.to_ne_bytes());
 			for (ty, h) in objects {
 				let t = io::share(proc_objects.as_raw(), h.as_raw())?;
+				let t = Handle::try_from(t).unwrap();
 				stack.extend(ty.to_ne_bytes());
 				stack.extend(t.to_ne_bytes());
 				l += 1;
 			}
 			stack[i..i + 4].copy_from_slice(&l.to_ne_bytes());
+			debug_assert_eq!(
+				stack.len(),
+				i + 4 + l as usize * 8,
+				"stack has unexpected size"
+			);
 		}
 
 		// args
