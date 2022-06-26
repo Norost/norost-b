@@ -163,6 +163,75 @@ impl Request {
 	}
 }
 
+pub enum DoIo<'a> {
+	Read {
+		handle: Handle,
+		buf: &'a mut [MaybeUninit<u8>],
+		peek: bool,
+	},
+	Write {
+		handle: Handle,
+		data: &'a [u8],
+	},
+	Open {
+		handle: Handle,
+		path: &'a [u8],
+	},
+	Create {
+		handle: Handle,
+		path: &'a [u8],
+	},
+	Seek {
+		handle: Handle,
+		from: SeekFrom,
+	},
+	Poll {
+		handle: Handle,
+	},
+	Close {
+		handle: Handle,
+	},
+	Share {
+		handle: Handle,
+		share: Handle,
+	},
+}
+
+impl DoIo<'_> {
+	#[inline]
+	pub(crate) fn into_args(self) -> (u8, u32, RawDoIo) {
+		use RawDoIo::*;
+		type R = Request;
+		match self {
+			Self::Read { handle, buf, peek } => (
+				R::READ,
+				handle,
+				N3(buf.as_ptr() as _, buf.len(), peek.into()),
+			),
+			Self::Write { handle, data } => (R::WRITE, handle, N2(data.as_ptr() as _, data.len())),
+			Self::Open { handle, path } => (R::OPEN, handle, N2(path.as_ptr() as _, path.len())),
+			Self::Create { handle, path } => {
+				(R::CREATE, handle, N2(path.as_ptr() as _, path.len()))
+			}
+			Self::Seek { handle, from } => {
+				let (t, o) = from.into_raw();
+				#[cfg(target_pointer_width = "64")]
+				(R::SEEK, handle, N2(t.into(), o as _))
+			}
+			Self::Poll { handle } => (R::POLL, handle, N0),
+			Self::Close { handle } => (R::CLOSE, handle, N0),
+			Self::Share { handle, share } => (R::CLOSE, handle, N1(share as _)),
+		}
+	}
+}
+
+pub(crate) enum RawDoIo {
+	N0,
+	N1(usize),
+	N2(usize, usize),
+	N3(usize, usize, usize),
+}
+
 impl Default for Request {
 	fn default() -> Self {
 		Self {

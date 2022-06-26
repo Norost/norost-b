@@ -2,6 +2,7 @@ pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
 pub const ID_MONOTONIC_TIME: usize = 2;
 
+pub const ID_DO_IO: usize = 6;
 pub const ID_HAS_SINGLE_OWNER: usize = 7;
 pub const ID_NEW_OBJECT: usize = 8;
 pub const ID_MAP_OBJECT: usize = 9;
@@ -18,7 +19,7 @@ pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::{
-	error,
+	error, io,
 	object::{NewObject, NewObjectArgs},
 	time::Monotonic,
 	Page,
@@ -98,6 +99,14 @@ macro_rules! syscall {
 		// Use r10 instead of rcx as the latter gets overwritten by the syscall instruction
 		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4])
 	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5, in("r9") $a6])
+	};
 }
 
 #[inline]
@@ -127,6 +136,21 @@ pub unsafe fn dealloc(base: NonNull<Page>, size: usize) -> error::Result<()> {
 #[inline]
 pub fn monotonic_time() -> Monotonic {
 	sys_to_mono(syscall!(ID_MONOTONIC_TIME()))
+}
+
+#[inline]
+pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
+	let (ty, h, a) = request.into_args();
+	let h = usize::try_from(h).unwrap();
+	let ty = usize::from(ty);
+	#[cfg(target_pointer_width = "64")]
+	ret(match a {
+		io::RawDoIo::N0 => syscall!(ID_DO_IO(ty, h)),
+		io::RawDoIo::N1(a) => syscall!(ID_DO_IO(ty, h, a)),
+		io::RawDoIo::N2(a, b) => syscall!(ID_DO_IO(ty, h, a, b)),
+		io::RawDoIo::N3(a, b, c) => syscall!(ID_DO_IO(ty, h, a, b, c)),
+	})
+	.map(|(_, v)| v as u64)
 }
 
 #[inline]

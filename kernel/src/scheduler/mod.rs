@@ -77,6 +77,18 @@ fn poll<T>(mut task: impl Future<Output = T> + Unpin) -> Poll<T> {
 	Pin::new(&mut task).poll(&mut Context::from_waker(&waker))
 }
 
+/// Block on a task until it finishes.
+fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
+	let waker = waker::new_waker(Thread::current_weak().unwrap());
+	let mut cx = Context::from_waker(&waker);
+	loop {
+		match Pin::new(&mut task).poll(&mut cx) {
+			Poll::Ready(t) => return t,
+			Poll::Pending => Thread::current().unwrap().sleep(Duration::MAX),
+		}
+	}
+}
+
 /// Spawn a new kernel thread.
 pub fn new_kernel_thread_1(
 	f: extern "C" fn(usize) -> !,

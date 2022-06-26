@@ -10,7 +10,11 @@ use core::{
 	ptr::NonNull,
 };
 
-pub use norostb_kernel::{io::Job, object::NewObject, Handle};
+pub use norostb_kernel::{
+	io::{DoIo, Job},
+	object::NewObject,
+	syscall, Handle,
+};
 
 #[derive(Debug)]
 pub struct Object(Handle);
@@ -24,16 +28,20 @@ impl Object {
 
 	#[inline]
 	pub fn open(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::open(self.0, path.into(), 0))
-			.map(|(_, h)| Self(h))
-			.map_err(|(_, e)| e)
+		syscall::do_io(DoIo::Open {
+			handle: self.0,
+			path,
+		})
+		.map(|h| Self(h as _))
 	}
 
 	#[inline]
 	pub fn create(&self, path: &[u8]) -> io::Result<Self> {
-		io::block_on(io::create(self.0, path.into(), 0))
-			.map(|(_, h)| Self(h))
-			.map_err(|(_, e)| e)
+		syscall::do_io(DoIo::Create {
+			handle: self.0,
+			path,
+		})
+		.map(|h| Self(h as _))
 	}
 
 	#[inline]
@@ -93,7 +101,11 @@ impl Object {
 
 	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
-		self.write_vec(data.into(), 0)
+		syscall::do_io(DoIo::Write {
+			handle: self.0,
+			data,
+		})
+		.map(|v| v as _)
 	}
 
 	#[inline]
