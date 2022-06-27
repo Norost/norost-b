@@ -61,6 +61,7 @@ impl AddressSpace {
 			NonNull::new(Page::SIZE as _).unwrap(),
 			base,
 			&*object,
+			max_length,
 		)?;
 
 		unsafe {
@@ -106,6 +107,7 @@ impl AddressSpace {
 			NonNull::new(0xffff_a000_0000_0000usize as _).unwrap(),
 			base,
 			&*object,
+			usize::MAX,
 		)?;
 
 		unsafe {
@@ -127,7 +129,9 @@ impl AddressSpace {
 		default: NonNull<Page>,
 		base: Option<NonNull<Page>>,
 		object: &dyn MemoryObject,
+		max_length: usize,
 	) -> Result<(RangeInclusive<NonNull<Page>>, usize), MapError> {
+		let max_length = max_length / Page::SIZE;
 		let frames_len = object.physical_pages_len();
 		let count = NonZeroUsize::new(frames_len).ok_or(MapError::ZeroSize)?;
 		let (base, index) = match base {
@@ -137,7 +141,7 @@ impl AddressSpace {
 		// FIXME we need to ensure the range doesn't overlap with any other range.
 		let end = base
 			.as_ptr()
-			.wrapping_add(count.get())
+			.wrapping_add(count.get().min(max_length))
 			.cast::<u8>()
 			.wrapping_sub(1)
 			.cast();

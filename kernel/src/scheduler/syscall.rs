@@ -125,7 +125,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 }
 
 extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("dealloc {:#x} {} {:#03b}", base, size);
+	debug!("dealloc {:#x} {}", base, size);
 	if base & Page::MASK != 0 || size & Page::MASK != 0 {
 		return Return {
 			status: Error::InvalidData as _,
