@@ -35,10 +35,6 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn poll(&self) -> Ticket<u64> {
-		not_implemented()
-	}
-
 	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
 		not_implemented()
 	}

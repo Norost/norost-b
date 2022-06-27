@@ -242,20 +242,6 @@ impl super::Process {
 						None => push_resp(Error::InvalidObject as i64),
 					}
 				}
-				Request::POLL => {
-					let handle = unerase_handle(e.arguments_32[0]);
-					match objects.get(handle) {
-						Some(object) => {
-							let mut ticket = object.poll();
-							match poll(&mut ticket) {
-								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-								Poll::Ready(Ok(n)) => push_resp(n as i64),
-								Poll::Ready(Err(e)) => push_resp(e as i64),
-							}
-						}
-						None => push_resp(Error::InvalidObject as i64),
-					}
-				}
 				Request::CLOSE => {
 					let handle = unerase_handle(e.arguments_32[0]);
 					// We are not supposed to return a response under any circumstances.

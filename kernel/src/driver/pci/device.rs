@@ -99,17 +99,17 @@ struct IrqPollInner {
 	/// `true` if an IRQ occured since the last poll.
 	irq_occurred: bool,
 	/// Tasks waiting for an IRQ to occur.
-	waiting: Vec<TicketWaker<u64>>,
+	waiting: Vec<TicketWaker<Box<[u8]>>>,
 }
 
 /// An object that keeps track of IRQs atomically.
 pub struct IrqPoll(SpinLock<IrqPollInner>);
 
 impl Object for IrqPoll {
-	fn poll(&self) -> Ticket<u64> {
+	fn read(&self, _: usize) -> Ticket<Box<[u8]>> {
 		let mut inner = self.0.lock();
 		if mem::take(&mut inner.irq_occurred) {
-			Ticket::new_complete(Ok(0))
+			Ticket::new_complete(Ok([].into()))
 		} else {
 			let (ticket, waker) = Ticket::new();
 			inner.waiting.push(waker);
@@ -150,7 +150,7 @@ pub(super) fn irq_handler() {
 			// There are waiters, so there is no need to set the flag as the event won't be
 			// missed.
 			for w in poll.waiting.drain(..) {
-				w.isr_complete(Ok(1));
+				w.isr_complete(Ok([].into()));
 			}
 		}
 	}

@@ -82,11 +82,6 @@ impl Object {
 	}
 
 	#[inline]
-	pub fn poll(&self) -> io::Result<u64> {
-		io::poll(self.0)
-	}
-
-	#[inline]
 	pub fn map_object(
 		&self,
 		base: Option<NonNull<u8>>,

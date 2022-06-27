@@ -142,11 +142,6 @@ pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
 }
 
 #[inline(always)]
-pub fn poll(handle: Handle) -> Result<u64> {
-	syscall::do_io(DoIo::Poll { handle })
-}
-
-#[inline(always)]
 pub fn share(handle: Handle, share: Handle) -> Result<u64> {
 	syscall::do_io(DoIo::Share { handle, share })
 }

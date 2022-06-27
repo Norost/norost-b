@@ -47,7 +47,6 @@ impl Request {
 	pub const OPEN: u8 = 2;
 	pub const CREATE: u8 = 3;
 	pub const SEEK: u8 = 8;
-	pub const POLL: u8 = 9;
 	pub const CLOSE: u8 = 10;
 	pub const PEEK: u8 = 11;
 	pub const SHARE: u8 = 12;
@@ -109,15 +108,6 @@ impl Request {
 			arguments_8: [t, 0, 0],
 			arguments_32: [handle],
 			arguments_64: [n, 0],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn poll(user_data: u64, handle: Handle) -> Self {
-		Self {
-			ty: Self::POLL,
-			arguments_32: [handle],
 			user_data,
 			..Default::default()
 		}
@@ -185,9 +175,6 @@ pub enum DoIo<'a> {
 		handle: Handle,
 		from: SeekFrom,
 	},
-	Poll {
-		handle: Handle,
-	},
 	Close {
 		handle: Handle,
 	},
@@ -218,7 +205,6 @@ impl DoIo<'_> {
 				#[cfg(target_pointer_width = "64")]
 				(R::SEEK, handle, N2(t.into(), o as _))
 			}
-			Self::Poll { handle } => (R::POLL, handle, N0),
 			Self::Close { handle } => (R::CLOSE, handle, N0),
 			Self::Share { handle, share } => (R::SHARE, handle, N1(share as _)),
 		}

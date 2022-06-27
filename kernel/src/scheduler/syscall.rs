@@ -214,7 +214,6 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 				.map_or(Return::INVALID_DATA, |s| {
 					block_on(o.seek(s)).map_or_else(Return::error, return_u64)
 				}),
-			Request::POLL => block_on(o.poll()).map_or_else(Return::error, return_u64),
 			Request::CLOSE => {
 				objects.remove(handle).unwrap();
 				Return {
