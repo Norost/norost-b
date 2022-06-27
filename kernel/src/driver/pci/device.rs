@@ -46,52 +46,52 @@ unsafe impl MemoryObject for PciDevice {
 
 impl Object for PciDevice {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		Ticket::new_complete(if path == b"poll" {
-			let o = IrqPollInner {
-				irq_occurred: false.into(),
-				waiting: Vec::new(),
-			};
-			let o = Arc::new(IrqPoll(SpinLock::new(o)));
-			IRQ_LISTENERS.lock().push(Arc::downgrade(&o));
-			Ok(o)
-		} else {
-			Err(Error::DoesNotExist)
+		Ticket::new_complete(match path {
+			b"poll" => {
+				let o = IrqPollInner {
+					irq_occurred: false.into(),
+					waiting: Vec::new(),
+				};
+				let o = Arc::new(IrqPoll(SpinLock::new(o)));
+				IRQ_LISTENERS.lock().push(Arc::downgrade(&o));
+				Ok(o)
+			}
+			b"bar0" | b"bar1" | b"bar2" | b"bar3" | b"bar4" | b"bar5" => {
+				let index = usize::from(path[3] - b'0');
+
+				let pci = PCI.lock();
+				let pci = pci.as_ref().unwrap();
+				let header = pci.get(self.bus, self.device, 0).unwrap();
+				let bar = &header.base_addresses()[index];
+				let (size, orig) = bar.size();
+				bar.set(orig);
+
+				if let Some(size) = BaseAddress::is_mmio(orig).then(|| size).flatten() {
+					let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
+					let addr = BaseAddress::address(orig, upper).unwrap();
+					let mut frames = PageFrameIter {
+						base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
+						count: size.get().try_into().unwrap(),
+					};
+					dbg!(addr as *const ());
+					dbg!(frames.count);
+					// FIXME there needs to be a better way to limit the amount of pages.
+					frames.count = frames.count.min(1 << 20);
+					let r = Arc::new(BarRegion {
+						frames: frames.collect(),
+					});
+					dbg!("ok");
+					Ok(r)
+				} else {
+					Err(Error::CantCreateObject)
+				}
+			}
+			_ => Err(Error::DoesNotExist),
 		})
 	}
 
-	fn memory_object(self: Arc<Self>, offset: u64) -> Option<Arc<dyn MemoryObject>> {
-		if offset == 0 {
-			return Some(self);
-		}
-
-		let index = usize::try_from(offset - 1).ok()?;
-		let pci = PCI.lock();
-		let pci = pci.as_ref().unwrap();
-		let header = pci.get(self.bus, self.device, 0).unwrap();
-		let bar = header.base_addresses().get(index)?;
-		let (size, orig) = bar.size();
-		bar.set(orig);
-		let size = size?;
-
-		if !BaseAddress::is_mmio(orig) {
-			return None;
-		}
-
-		let upper = || header.base_addresses().get(index + 1).map(|e| e.get());
-		let addr = BaseAddress::address(orig, upper).unwrap();
-		let mut frames = PageFrameIter {
-			base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
-			count: size.get().try_into().unwrap(),
-		};
-		dbg!(addr as *const ());
-		dbg!(frames.count);
-		// FIXME there needs to be a better way to limit the amount of pages.
-		frames.count = frames.count.min(1 << 20);
-		let r = Some(Arc::new(BarRegion {
-			frames: frames.collect(),
-		}) as Arc<dyn MemoryObject>);
-		dbg!("ok");
-		r
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
+		Some(self)
 	}
 }
 
@@ -121,6 +121,12 @@ impl Object for IrqPoll {
 /// A single MMIO region pointer to by a BAR of a PCI device.
 pub struct BarRegion {
 	frames: Box<[PPN]>,
+}
+
+impl Object for BarRegion {
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
+		Some(self)
+	}
 }
 
 unsafe impl MemoryObject for BarRegion {

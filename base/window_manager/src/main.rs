@@ -67,10 +67,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let shmem_size = size.x as usize * size.y as usize * 3;
 	let shmem_size = (shmem_size + 0xfff) & !0xfff;
-	let mut shmem_obj =
-		rt::io::new_object(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
-	let shmem = rt::io::map_object(shmem_obj, None, 0, shmem_size).unwrap();
-	sync.share(&rt::Object::from_raw(shmem_obj))
+	let shmem_obj = rt::Object::new(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
+	let (shmem, shmem_size) = shmem_obj
+		.map_object(None, rt::io::RWX::RW, 0, shmem_size)
+		.unwrap();
+	sync.share(&shmem_obj)
 		.expect("failed to share mem with GPU");
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };

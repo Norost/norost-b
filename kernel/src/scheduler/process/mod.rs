@@ -66,7 +66,8 @@ impl Process {
 	) -> Result<NonNull<Page>, MapError> {
 		self.address_space
 			.lock()
-			.map_object(base, object.into(), rwx, self.hint_color)
+			.map_object(base, object.into(), rwx, 0, usize::MAX, self.hint_color)
+			.map(|(b, _)| b)
 	}
 
 	/// Map a memory object to a memory range.
@@ -74,16 +75,17 @@ impl Process {
 		&self,
 		handle: Handle,
 		base: Option<NonNull<Page>>,
-		offset: u64,
 		rwx: RWX,
-	) -> Result<NonNull<Page>, MapError> {
+		offset: usize,
+		max_length: usize,
+	) -> Result<(NonNull<Page>, usize), MapError> {
 		let obj = self.objects.lock()[unerase_handle(handle)]
 			.clone()
-			.memory_object(offset)
+			.memory_object()
 			.unwrap();
 		self.address_space
 			.lock()
-			.map_object(base, obj, rwx, self.hint_color)
+			.map_object(base, obj, rwx, offset, max_length, self.hint_color)
 	}
 
 	/// Unmap a memory object in a memory range. This unmapping may be partial.

@@ -1,4 +1,4 @@
-use super::io;
+use crate::io::{self, RWX};
 use core::{
 	fmt,
 	marker::PhantomData,
@@ -85,10 +85,11 @@ impl Object {
 	pub fn map_object(
 		&self,
 		base: Option<NonNull<u8>>,
-		offset: u64,
-		length: usize,
-	) -> io::Result<NonNull<u8>> {
-		io::map_object(self.0, base, offset, length)
+		rwx: RWX,
+		offset: usize,
+		max_length: usize,
+	) -> io::Result<(NonNull<u8>, usize)> {
+		io::map_object(self.0, base, rwx, offset, max_length)
 	}
 
 	#[inline]

@@ -59,7 +59,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 	let dev = root.open(&dev).unwrap();
 	let poll = dev.open(b"poll").unwrap();
-	let pci = dev.map_object(None, 0, usize::MAX).unwrap();
+	let pci = dev
+		.map_object(None, rt::io::RWX::R, 0, usize::MAX)
+		.unwrap()
+		.0;
 	let pci = unsafe { pci::Pci::new(pci.cast(), 0, 0, &[]) };
 
 	let dma_alloc = |size: usize, _align| -> Result<_, ()> {
@@ -72,8 +75,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		match h {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					dev.map_object(None, (bar + 1).into(), usize::MAX)
+					assert!(bar < 6);
+					let mut s = *b"bar0";
+					s[3] += bar;
+					dev.open(&s)
 						.unwrap()
+						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
+						.unwrap()
+						.0
 						.cast()
 				};
 
@@ -271,12 +280,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				share,
 			} => {
 				let obj = tbl.open(share.to_string().as_bytes()).unwrap();
-				// FIXME map_object should return the real size
-				let size = usize::MAX;
 				match handle {
-					SYNC_HANDLE => match kernel::syscall::map_object(obj.as_raw(), None, 0, size) {
+					SYNC_HANDLE => match obj.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
 						Err(e) => Job::reply_error_clear(data, job_id, e),
-						Ok(buf) => {
+						Ok((buf, size)) => {
 							command_buf = (buf.cast(), size);
 							Job::reply_share_clear(data, job_id)
 						}

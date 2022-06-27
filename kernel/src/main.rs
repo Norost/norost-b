@@ -25,6 +25,7 @@
 #![feature(bench_black_box)]
 #![deny(incomplete_features)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused_variables)]
 
 extern crate alloc;
 
@@ -182,7 +183,7 @@ impl Object for DriverObject {
 		Ticket::new_complete(Ok(self.position.get().try_into().unwrap()))
 	}
 
-	fn memory_object(self: Arc<Self>, _: u64) -> Option<Arc<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
 		Some(Arc::new(Driver(self.data)))
 	}
 }

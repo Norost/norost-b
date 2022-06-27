@@ -2,6 +2,7 @@ pub use norostb_kernel::{
 	error::{Error, Result},
 	io::SeekFrom,
 	object::NewObject,
+	syscall::RWX,
 	Handle,
 };
 
@@ -155,10 +156,12 @@ pub fn new_object(args: NewObject) -> Result<Handle> {
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<u8>>,
-	offset: u64,
-	length: usize,
-) -> Result<NonNull<u8>> {
-	syscall::map_object(handle, base.map(NonNull::cast), offset, length).map(NonNull::cast)
+	rwx: RWX,
+	offset: usize,
+	max_length: usize,
+) -> Result<(NonNull<u8>, usize)> {
+	syscall::map_object(handle, base.map(NonNull::cast), rwx, offset, max_length)
+		.map(|(b, l)| (b.cast(), l))
 }
 
 #[inline]

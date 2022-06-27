@@ -9,11 +9,6 @@ pub fn alloc_dma(size: NonZeroUsize) -> rt::io::Result<(NonNull<u8>, u64, NonZer
 	let mut r = [0; 32];
 	let r_len = buf.open(b"phys").unwrap().read(&mut r).unwrap();
 	let buf_phys = str::from_utf8(&r[..r_len]).unwrap().parse::<u64>().unwrap();
-	let r_len = buf.open(b"size").unwrap().read(&mut r).unwrap();
-	let buf_size = str::from_utf8(&r[..r_len])
-		.unwrap()
-		.parse::<NonZeroUsize>()
-		.unwrap();
-	let buf = buf.map_object(None, 0, buf_size.get())?;
-	Ok((buf, buf_phys, buf_size))
+	let (buf, buf_size) = buf.map_object(None, rt::io::RWX::RW, 0, usize::MAX)?;
+	Ok((buf, buf_phys, buf_size.try_into().unwrap()))
 }

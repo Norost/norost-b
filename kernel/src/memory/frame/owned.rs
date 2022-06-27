@@ -44,7 +44,7 @@ impl OwnedPageFrames {
 }
 
 impl Object for OwnedPageFrames {
-	fn memory_object(self: Arc<Self>, _: u64) -> Option<Arc<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
 		Some(self)
 	}
 }

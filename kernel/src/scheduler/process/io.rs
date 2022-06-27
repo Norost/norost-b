@@ -75,10 +75,17 @@ impl super::Process {
 			OwnedPageFrames::new(count.try_into().unwrap(), self.allocate_hints(0 as _)).unwrap(),
 		);
 
-		let user_ptr = self
+		let (user_ptr, _) = self
 			.address_space
 			.lock()
-			.map_object(base, frames.clone(), RWX::RW, self.hint_color)
+			.map_object(
+				base,
+				frames.clone(),
+				RWX::RW,
+				0,
+				usize::MAX,
+				self.hint_color,
+			)
 			.map_err(CreateQueueError::MapError)?;
 		self.io_queues.lock().push(Queue {
 			user_ptr,

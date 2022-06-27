@@ -264,7 +264,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 		NewObject::SubRange { handle, range } => proc
 			.object_transform_new(handle, |o| {
 				o.clone()
-					.memory_object(0)
+					.memory_object()
 					.ok_or(Error::InvalidOperation)
 					.and_then(|o| SubRange::new(o.clone(), range).map_err(|_| Error::InvalidData))
 			})
@@ -303,33 +303,34 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 extern "C" fn map_object(
 	handle: usize,
 	base: usize,
-	offset_l: usize,
-	offset_h_or_length: usize,
-	length_or_rwx: usize,
 	rwx: usize,
+	offset: usize,
+	max_length: usize,
+	_: usize,
 ) -> Return {
-	debug!("map_object");
-	let (offset, _length, _rwx) = match mem::size_of_val(&offset_l) {
-		4 => (
-			(offset_h_or_length as u64) << 32 | offset_l as u64,
-			length_or_rwx,
-			rwx,
-		),
-		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
-		s => unreachable!("unsupported usize size of {}", s),
+	debug!(
+		"map_object {:?} {:#x} {:03b} {} {}",
+		handle, base, rwx, offset, max_length
+	);
+	let Ok(rwx) = RWX::from_flags(rwx & 4 != 0, rwx & 2 != 0, rwx & 1 != 0) else {
+		return Return::INVALID_DATA;
 	};
-	let handle = handle as u32;
-	let base = NonNull::new(base as *mut _);
 	Process::current()
 		.unwrap()
-		.map_memory_object_2(handle, base, offset, RWX::RW)
+		.map_memory_object_2(
+			handle as Handle,
+			NonNull::new(base as _),
+			rwx,
+			offset,
+			max_length,
+		)
 		.map_or(
 			Return {
 				status: 1,
 				value: 0,
 			},
-			|base| Return {
-				status: 0,
+			|(base, length)| Return {
+				status: length,
 				value: base.as_ptr() as usize,
 			},
 		)

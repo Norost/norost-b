@@ -24,12 +24,14 @@ use crate::{
 	time::Monotonic,
 	Page,
 };
-use core::arch::asm;
-use core::fmt;
-use core::num::NonZeroUsize;
-use core::ptr::{self, NonNull};
-use core::str;
-use core::time::Duration;
+use core::{
+	arch::asm,
+	fmt,
+	num::NonZeroUsize,
+	ptr::{self, NonNull},
+	str,
+	time::Duration,
+};
 
 pub struct ExitStatus(pub u32);
 
@@ -67,6 +69,7 @@ pub enum RWX {
 	RWX = 0b111,
 }
 
+#[allow(unused_macro_rules)]
 macro_rules! syscall {
 	(@INTERNAL $id:ident [$(in($reg:tt) $val:expr),*]) => {
 		unsafe {
@@ -170,12 +173,19 @@ pub fn new_object(args: NewObject) -> error::Result<Handle> {
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<Page>>,
-	offset: u64,
-	length: usize,
-) -> error::Result<NonNull<Page>> {
+	rwx: RWX,
+	offset: usize,
+	max_length: usize,
+) -> error::Result<(NonNull<Page>, usize)> {
 	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
-	ret(syscall!(ID_MAP_OBJECT(handle, base, offset, length)))
-		.map(|(_, v)| NonNull::new(v as *mut _).unwrap())
+	ret(syscall!(ID_MAP_OBJECT(
+		handle,
+		base,
+		rwx as usize,
+		offset,
+		max_length
+	)))
+	.map(|(s, v)| (NonNull::new(v as *mut _).unwrap(), s))
 }
 
 #[inline]

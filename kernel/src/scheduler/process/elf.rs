@@ -255,7 +255,14 @@ impl super::Process {
 					});
 					assert_eq!(u64::try_from(wr_i - page_offt).unwrap(), header.file_size);
 					address_space
-						.map_object(Some(virt), Arc::new(mem), rwx, slf.hint_color)
+						.map_object(
+							Some(virt),
+							Arc::new(mem),
+							rwx,
+							0,
+							usize::MAX,
+							slf.hint_color,
+						)
 						.map_err(ElfError::MapError)?;
 				}
 			} else {
@@ -267,7 +274,7 @@ impl super::Process {
 						range: page_offset..page_offset + count.get(),
 					});
 					address_space
-						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_object(Some(virt), mem, rwx, 0, usize::MAX, slf.hint_color)
 						.map_err(ElfError::MapError)?;
 				}
 				// Allocate memory for the region that isn't present in the ELF file.
@@ -281,7 +288,7 @@ impl super::Process {
 						OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?,
 					);
 					address_space
-						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_object(Some(virt), mem, rwx, 0, usize::MAX, slf.hint_color)
 						.map_err(ElfError::MapError)?;
 				}
 			}
@@ -289,8 +296,15 @@ impl super::Process {
 
 		// Map in stack
 		let stack = if let Some(stack_frames) = stack_frames {
-			let stack = address_space
-				.map_object(None, Arc::new(stack_frames), RWX::RW, slf.hint_color)
+			let (stack, _) = address_space
+				.map_object(
+					None,
+					Arc::new(stack_frames),
+					RWX::RW,
+					0,
+					usize::MAX,
+					slf.hint_color,
+				)
 				.map_err(ElfError::MapError)?;
 			stack.as_ptr().wrapping_add(stack_offset) as usize
 		} else {

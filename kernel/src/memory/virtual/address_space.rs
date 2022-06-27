@@ -15,6 +15,7 @@ use core::ptr::NonNull;
 pub enum MapError {
 	Overflow,
 	ZeroSize,
+	UnalignedOffset,
 	Arch(crate::arch::r#virtual::MapError),
 }
 
@@ -47,8 +48,14 @@ impl AddressSpace {
 		base: Option<NonNull<Page>>,
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
+		mut offset: usize,
+		mut max_length: usize,
 		hint_color: u8,
-	) -> Result<NonNull<Page>, MapError> {
+	) -> Result<(NonNull<Page>, usize), MapError> {
+		if offset % Page::SIZE != 0 {
+			return Err(MapError::UnalignedOffset);
+		}
+
 		let (range, index) = Self::map_object_common(
 			&self.objects,
 			NonNull::new(Page::SIZE as _).unwrap(),
@@ -62,13 +69,23 @@ impl AddressSpace {
 					.map(range.start().as_ptr() as *const _, rwx, hint_color);
 			object.physical_pages(&mut |p| {
 				for &p in p.iter() {
-					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+					if let Some(o) = offset.checked_sub(Page::SIZE) {
+						offset = o;
+					} else if let Some(l) = max_length.checked_sub(Page::SIZE) {
+						max_length = l;
+						f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+					} else {
+						return false;
+					}
 				}
 				true
 			});
 		};
 		self.objects.insert(index, (range.clone(), object));
-		Ok(*range.start())
+		Ok((
+			*range.start(),
+			range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1,
+		))
 	}
 
 	/// Map a frame in kernel-space.

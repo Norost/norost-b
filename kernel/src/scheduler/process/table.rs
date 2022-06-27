@@ -87,7 +87,7 @@ struct SetBinary {
 
 impl Object for SetBinary {
 	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
-		if let Some(object) = object.clone().memory_object(0) {
+		if let Some(object) = object.clone().memory_object() {
 			self.builder.bin.set(Some(object.into()));
 			Ticket::new_complete(Ok(0))
 		} else {
