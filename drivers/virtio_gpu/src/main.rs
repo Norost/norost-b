@@ -155,8 +155,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	// Begin event loop
 	let mut data = Vec::new();
-	data.resize(64, 0);
 	loop {
+		data.resize(64, 0);
 		let l = tbl.read(&mut data).unwrap();
 		data = match Job::deserialize(&data[..l]).unwrap() {
 			Job::Open {

@@ -114,8 +114,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let table = root.create(b"window_manager").unwrap();
 
 	let mut buf = Vec::new();
-	buf.resize(1 << 20, 0);
 	loop {
+		buf.resize(1 << 20, 0);
 		let l = table.read(&mut buf).unwrap();
 		buf = match Job::deserialize(&buf[..l]).unwrap() {
 			Job::Create {
