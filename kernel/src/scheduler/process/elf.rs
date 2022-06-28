@@ -89,8 +89,8 @@ impl super::Process {
 			core::slice::from_raw_parts(data[0].as_ptr().cast::<u8>(), Page::SIZE * data.len())
 		};
 
-		let slf = Self::new().map_err(ElfError::AllocateError)?;
-		*slf.objects.lock() = objects;
+		let mut slf = Self::new().map_err(ElfError::AllocateError)?;
+		*slf.objects.get_mut() = objects;
 
 		(data.len() >= 16)
 			.then(|| ())
@@ -148,7 +148,7 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
-		let mut address_space = slf.address_space.lock();
+		let address_space = slf.address_space.get_mut();
 
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
