@@ -32,7 +32,7 @@ impl<T> SpinLock<T> {
 	}
 
 	/// Lock from *outside* an ISR routine. This will disable interrupts.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn lock(&self) -> Guard<T> {
 		// Ensure interrupts weren't disabled already. Re-enabling them after dropping the
@@ -48,7 +48,7 @@ impl<T> SpinLock<T> {
 
 	/// Lock from *inside* an ISR routine. This will *not* disable interrupts, though
 	/// they should already be disabled inside an ISR.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn isr_lock(&self) -> IsrGuard<T> {
 		// Ensure interrupts aren't enabled. If they are, we're most likely not inside
@@ -63,7 +63,7 @@ impl<T> SpinLock<T> {
 
 	/// Lock and determine automatically whether interrupts need to be re-enabled when dropping the
 	/// guard.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn auto_lock(&self) -> AutoGuard<T> {
 		if crate::arch::interrupts_enabled() {
@@ -172,7 +172,8 @@ impl<'a, T> DerefMut for AutoGuard<'a, T> {
 	}
 }
 
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 fn ensure_interrupts_off() {
 	// Ensure interrupts weren't enabled in the meantime, which would lead to a potential
 	// deadlock.

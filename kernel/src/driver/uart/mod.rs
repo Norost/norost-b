@@ -44,7 +44,8 @@ pub fn post_init(root: &crate::object_table::Root) {
 }
 
 /// Acquire a lock on a UART device.
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 pub fn get(i: usize) -> AutoGuard<'static, Uart> {
 	// SAFETY: No thread sets DEVICES[i] to None
 	unsafe { DEVICES[i].as_ref().unwrap().auto_lock() }

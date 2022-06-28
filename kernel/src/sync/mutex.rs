@@ -18,7 +18,8 @@ impl<T> Mutex<T> {
 		}
 	}
 
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
+	#[inline]
 	pub fn lock(&self) -> Guard<T> {
 		// Mutexes may never be locked inside an ISR since it can lead to deadlocks.
 		debug_assert!(
@@ -33,6 +34,7 @@ impl<T> Mutex<T> {
 
 	/// Borrow the lock mutably, which is safe since mutable references are always unique.
 	#[allow(dead_code)]
+	#[inline(always)]
 	pub fn get_mut(&mut self) -> &mut T {
 		self.value.get_mut()
 	}

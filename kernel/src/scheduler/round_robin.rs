@@ -40,7 +40,8 @@ pub fn insert(thread: Weak<Thread>) {
 /// This method should only be called inside ISRs! Internally it uses `SpinLock::isr_lock` to
 /// avoid having the current thread yielded, which could result in the lock being held for
 /// an excessive amount of time.
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 pub fn next() -> Option<Arc<Thread>> {
 	let mut l = THREAD_LIST.isr_lock();
 	if l.0 == 0 {

@@ -76,7 +76,8 @@ impl fmt::Debug for ByteStr<'_> {
 }
 
 /// Converts a typed [`arena::Arena`] handle to a generic [`Handle`] suitable for FFI.
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 pub fn erase_handle(handle: arena::Handle<u8>) -> Handle {
 	let (index, generation) = handle.into_raw();
 	assert!(index < 1 << 24, "can't construct unique handle");
@@ -84,7 +85,8 @@ pub fn erase_handle(handle: arena::Handle<u8>) -> Handle {
 }
 
 /// Converts an untyped [`Handle`] to an [`arena::Arena`] handle.
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 pub fn unerase_handle(handle: Handle) -> arena::Handle<u8> {
 	arena::Handle::from_raw(
 		(handle & 0xff_ffff).try_into().unwrap(),

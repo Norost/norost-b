@@ -186,7 +186,7 @@ impl Process {
 	///
 	/// The caller may *not* be using any resources of this process, especially the address space
 	/// or a thread!
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	pub unsafe fn destroy(self: Arc<Self>) {
 		// Destroy all threads
 		let mut threads = self.threads.isr_lock();

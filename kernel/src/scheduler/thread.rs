@@ -90,8 +90,8 @@ impl Thread {
 		}
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
-	#[track_caller]
 	pub unsafe fn set_handle(&self, handle: Handle) {
 		// Replace thread handle with proper value (rax)
 		unsafe {
@@ -181,7 +181,7 @@ impl Thread {
 	}
 
 	/// Get a reference to the owning process.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn process(&self) -> Option<&Arc<Process>> {
 		self.process.as_ref()

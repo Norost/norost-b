@@ -125,7 +125,7 @@ macro_rules! any_ticket {
 		}
 
 		impl AnyTicketWaker {
-			#[track_caller]
+			#[cfg_attr(debug_assertions, track_caller)]
 			pub fn $f(self) -> TicketWaker<$t> {
 				match self {
 					Self::$v(t) => t,
