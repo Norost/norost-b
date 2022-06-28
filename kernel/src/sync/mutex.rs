@@ -1,21 +1,19 @@
-use crate::scheduler::Thread;
-use core::cell::UnsafeCell;
-use core::ops::{Deref, DerefMut};
+use crate::{arch::sync, scheduler::Thread};
 use core::{
-	ptr,
-	sync::atomic::{AtomicPtr, Ordering},
+	cell::UnsafeCell,
+	ops::{Deref, DerefMut},
 };
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.
 pub struct Mutex<T> {
-	lock: AtomicPtr<Thread>,
+	lock: sync::Mutex,
 	value: UnsafeCell<T>,
 }
 
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
-			lock: AtomicPtr::new(ptr::null_mut()),
+			lock: Default::default(),
 			value: UnsafeCell::new(value),
 		}
 	}
@@ -27,23 +25,10 @@ impl<T> Mutex<T> {
 			crate::arch::interrupts_enabled(),
 			"interrupts are disabled. Is the mutex being locked inside an ISR?"
 		);
-		let thread = Thread::current_ptr()
-			.expect("a mutex cannot be locked outside a thread")
-			.as_ptr();
-		loop {
-			match self.lock.compare_exchange(
-				ptr::null_mut(),
-				thread,
-				Ordering::Acquire,
-				Ordering::Relaxed,
-			) {
-				Ok(_) => return Guard { lock: self },
-				Err(cur) => {
-					assert_ne!(thread, cur, "deadlock: same thread acquired lock twice");
-					Thread::yield_current();
-				}
-			}
+		while !self.lock.try_lock() {
+			Thread::yield_current()
 		}
+		Guard { lock: self }
 	}
 
 	/// Borrow the lock mutably, which is safe since mutable references are always unique.
@@ -87,11 +72,6 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
-		debug_assert_eq!(
-			self.lock.lock.load(Ordering::Relaxed),
-			Thread::current_ptr().unwrap().as_ptr(),
-			"lock is not held by this thread"
-		);
-		self.lock.lock.store(ptr::null_mut(), Ordering::Release);
+		self.lock.lock.unlock()
 	}
 }

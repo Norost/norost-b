@@ -8,6 +8,7 @@ mod float;
 pub mod msr;
 mod multiboot;
 pub mod scheduler;
+pub mod sync;
 mod syscall;
 mod tss;
 pub mod r#virtual;
