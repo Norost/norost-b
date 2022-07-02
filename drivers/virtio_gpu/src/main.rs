@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::io::queue::stream::Job;
+use driver_utils::os::stream_table::{Buffer, Request, Response, Slice};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 
@@ -150,7 +150,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	dev.draw(id, rect, &mut buf).expect("failed to draw");
 
 	// Create table
-	let tbl = rt::io::file_root().unwrap().create(table_name).unwrap();
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 4096 }).unwrap();
+	let mut tbl = driver_utils::os::stream_table::StreamTable::new(&tbl_buf, 64);
+
+	rt::io::file_root()
+		.unwrap()
+		.create(table_name)
+		.unwrap()
+		.share(&tbl.public_table())
+		.unwrap();
 
 	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
 	const SYNC_HANDLE: Handle = Handle::MAX - 1;
@@ -163,144 +171,147 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	}
 
 	// Begin event loop
-	let mut data = Vec::new();
 	loop {
-		data.resize(64, 0);
-		let l = tbl.read(&mut data).unwrap();
-		data = match Job::deserialize(&data[..l]).unwrap() {
-			Job::Open {
-				job_id,
-				handle,
-				path,
-			} => match (handle, path) {
-				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, SYNC_HANDLE),
-				(Handle::MAX, b"resolution") => {
-					let handle = handles.insert(H::Resolution);
-					Job::reply_open_clear(data, job_id, handle)
-				}
-				(Handle::MAX, _) => Job::reply_error_clear(data, job_id, Error::DoesNotExist),
-				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
-			},
-			Job::Read {
-				job_id,
-				handle,
-				length,
-				peek,
-			} => match handle {
-				Handle::MAX | SYNC_HANDLE => {
-					Job::reply_error_clear(data, job_id, Error::InvalidOperation)
-				}
-				h => match &mut handles[h] {
-					H::Resolution => Job::reply_read_clear(data, job_id, peek, |b| {
-						use alloc::string::ToString;
-						let (w, h) = (width.to_string(), height.to_string());
-						b.extend_from_slice(w.as_bytes());
-						b.push(b'x');
-						b.extend_from_slice(h.as_bytes());
-						Ok(())
-					}),
-				},
-			},
-			Job::Write {
-				job_id,
-				handle,
-				data: d,
-			} => match (handle, d) {
-				// Blit a specific area
-				(SYNC_HANDLE, s) => {
-					if let Some(r) = (|| {
-						let s = str::from_utf8(d).ok()?;
-						let f = |n: &str| n.parse::<u32>().ok();
-						let (l, h) = s.split_once(' ')?;
-						let (xl, yl) = l.split_once(',')?;
-						let (xh, yh) = h.split_once(',')?;
-						let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
-						let (xl, yl) = (x0.min(x1), y0.min(y1));
-						let (xh, yh) = (x0.max(x1), y0.max(y1));
-						Some(Rect::new(xl, yl, xh - xl + 1, yh - yl + 1))
-					})() {
-						let area = r.height() as usize * r.width() as usize;
-						assert!(area * 4 <= fb.size());
-						assert!(area * 3 <= command_buf.1);
-						/*
-						unsafe {
-							fb.virt().as_ptr().write_bytes(200, fb.size());
-							for i in 0..area {
-								let [r, g, b] = *command_buf.0.as_ptr().cast::<[u8; 3]>().add(i);
-								fb.virt().as_ptr().cast::<[u8; 4]>().add(i).write([r, g, b, 0]);
-							}
+		let mut send_notif = false;
+		while let Some((handle, flags, req)) = tbl.dequeue() {
+			let (job_id, response) = match req {
+				Request::Open { job_id, path } => (job_id, {
+					let mut p = [0; 64];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					match (handle, &*p) {
+						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
+						(Handle::MAX, b"resolution") => {
+							Response::Handle(handles.insert(H::Resolution))
 						}
-						*/
-						unsafe {
-							fb.virt().as_ptr().write_bytes(200, fb.size());
-							for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
-								for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
-									let fi = fy as usize * r.width() as usize + fx as usize;
-									// QEMU uses the stride of the *host* for the *guest*
-									// memory too. Don't ask me why, this is documented literally
-									// nowhere.
-									// This, by the way, is the *only* reason we're forced to
-									// allocate a framebuffer matching the host size.
-									let ti = ty as usize * width as usize + tx as usize;
-									let [r, g, b] =
-										*command_buf.0.as_ptr().cast::<[u8; 3]>().add(fi);
-									fb.virt()
-										.as_ptr()
-										.cast::<[u8; 4]>()
-										.add(ti)
-										.write([r, g, b, 0]);
+						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
+						_ => Response::Error(Error::InvalidOperation as _),
+					}
+				}),
+				Request::Read { job_id, amount } => (
+					job_id,
+					match handle {
+						Handle::MAX | SYNC_HANDLE => Response::Error(Error::InvalidOperation as _),
+						h => {
+							let (buf, offset) = tbl.alloc(64).unwrap();
+							let l = match &mut handles[h] {
+								H::Resolution => {
+									if flags.binary() {
+										buf.copy_from(0, &(width as u32).to_le_bytes());
+										buf.copy_from(4, &(height as u32).to_le_bytes());
+										8
+									} else {
+										let (w, h) = (width.to_string(), height.to_string());
+										buf.copy_from(0, w.as_bytes());
+										buf.copy_from(w.len(), &[b'x']);
+										buf.copy_from(w.len() + 1, h.as_bytes());
+										(w.len() + 1 + h.len()).try_into().unwrap()
+									}
+								}
+							};
+							Response::Slice(Slice { offset, length: l })
+						}
+					},
+				),
+				Request::Write { job_id, data } => {
+					let mut d = [0; 64];
+					let d = &mut d[..data.len()];
+					data.copy_to(0, d);
+					let r = match handle {
+						// Blit a specific area
+						SYNC_HANDLE => {
+							if flags.binary() {
+								if let &mut [xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1] = d {
+									let f = |l, h| u32::from(u16::from_le_bytes([l, h]));
+									let (x0, y0, x1, y1) =
+										(f(xl0, xl1), f(yl0, yl1), f(xh0, xh1), f(yh0, yh1));
+									let (xl, yl) = (x0.min(x1), y0.min(y1));
+									let (xh, yh) = (x0.max(x1), y0.max(y1));
+									let r = Rect::new(xl, yl, xh - xl, yh - yl);
+									dev.draw(id, r, &mut buf).expect("failed to draw");
+									Response::Amount(d.len().try_into().unwrap())
+								} else {
+									Response::Error(Error::InvalidData as _)
+								}
+							} else {
+								if let Some(r) = (|| {
+									let s = str::from_utf8(d).ok()?;
+									let f = |n: &str| n.parse::<u32>().ok();
+									let (l, h) = s.split_once(' ')?;
+									let (xl, yl) = l.split_once(',')?;
+									let (xh, yh) = h.split_once(',')?;
+									let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
+									let (xl, yl) = (x0.min(x1), y0.min(y1));
+									let (xh, yh) = (x0.max(x1), y0.max(y1));
+									Some(Rect::new(xl, yl, xh - xl + 1, yh - yl + 1))
+								})() {
+									let area = r.height() as usize * r.width() as usize;
+									assert!(area * 4 <= fb.size());
+									assert!(area * 3 <= command_buf.1);
+									unsafe {
+										fb.virt().as_ptr().write_bytes(200, fb.size());
+										for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
+											for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
+												let fi =
+													fy as usize * r.width() as usize + fx as usize;
+												// QEMU uses the stride of the *host* for the *guest*
+												// memory too. Don't ask me why, this is documented literally
+												// nowhere.
+												// This, by the way, is the *only* reason we're forced to
+												// allocate a framebuffer matching the host size.
+												let ti = ty as usize * width as usize + tx as usize;
+												let [r, g, b] = *command_buf
+													.0
+													.as_ptr()
+													.cast::<[u8; 3]>()
+													.add(fi);
+												fb.virt()
+													.as_ptr()
+													.cast::<[u8; 4]>()
+													.add(ti)
+													.write([r, g, b, 0]);
+											}
+										}
+									}
+									dev.draw(id, r, &mut buf).expect("failed to draw");
+									Response::Amount(d.len().try_into().unwrap())
+								} else {
+									Response::Error(Error::InvalidData as _)
 								}
 							}
 						}
-						dev.draw(id, r, &mut buf).expect("failed to draw");
-						let l = s.len().try_into().unwrap();
-						Job::reply_write_clear(data, job_id, l)
-					} else {
-						Job::reply_error_clear(data, job_id, Error::InvalidData)
-					}
+						_ => Response::Error(Error::InvalidOperation as _),
+					};
+					(job_id, r)
 				}
-				/* TODO binary modifier
-				// Blit a specific area
-				(SYNC_HANDLE, &[xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1]) => {
-					let f = |l, h| u16::from_le_bytes([l, h]).into();
-					let (x0, y0, x1, y1) = (f(xl0, xl1), f(yl0, yl1), f(xh0, xh1), f(yh0, yh1));
-					let (xl, yl) = (x0.min(x1), y0.min(y1));
-					let (xh, yh) = (x0.max(x1), y0.max(y1));
-					let r = Rect::new(xl, yl, xh - xl, yh - yl);
-					dev.draw(id, r, &mut buf).expect("failed to draw");
-					let l = d.len().try_into().unwrap();
-					Job::reply_write_clear(data, job_id, l)
-				}
-				*/
-				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
-			},
-			Job::Share {
-				job_id,
-				handle,
-				share,
-			} => {
-				let obj = tbl.open(share.to_string().as_bytes()).unwrap();
-				match handle {
-					SYNC_HANDLE => match obj.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
-						Err(e) => Job::reply_error_clear(data, job_id, e),
-						Ok((buf, size)) => {
-							command_buf = (buf.cast(), size);
-							Job::reply_share_clear(data, job_id)
-						}
+				Request::Share { job_id, share } => (
+					job_id,
+					match handle {
+						SYNC_HANDLE => match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
+							Err(e) => Response::Error(e as _),
+							Ok((buf, size)) => {
+								command_buf = (buf.cast(), size);
+								Response::Amount(0)
+							}
+						},
+						_ => Response::Error(Error::InvalidOperation as _),
 					},
-					_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
-				}
-			}
-			Job::Close { handle } => match handle {
-				Handle::MAX | SYNC_HANDLE => continue,
-				h => {
-					handles.remove(h).unwrap();
-					continue;
-				}
-			},
-			_ => todo!(),
+				),
+				Request::Close => match handle {
+					Handle::MAX | SYNC_HANDLE => continue,
+					h => {
+						handles.remove(h).unwrap();
+						continue;
+					}
+				},
+				Request::Create { job_id, .. }
+				| Request::Destroy { job_id, .. }
+				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
+			};
+			tbl.enqueue(job_id, response);
+			send_notif = true;
 		}
-		.unwrap();
-		tbl.write(&data).unwrap();
+		send_notif.then(|| tbl.flush());
+		tbl.wait();
 	}
 }

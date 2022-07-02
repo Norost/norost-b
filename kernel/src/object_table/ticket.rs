@@ -147,6 +147,14 @@ impl AnyTicketWaker {
 			Self::Data(t) => t.complete(Err(err)),
 		}
 	}
+
+	pub fn isr_complete_err(self, err: Error) {
+		match self {
+			Self::Object(t) => t.isr_complete(Err(err)),
+			Self::U64(t) => t.isr_complete(Err(err)),
+			Self::Data(t) => t.isr_complete(Err(err)),
+		}
+	}
 }
 
 impl Future for AnyTicket {

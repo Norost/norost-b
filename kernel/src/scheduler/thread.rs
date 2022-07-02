@@ -56,7 +56,7 @@ impl Thread {
 					color: 0,
 				},
 			)?;
-			let kernel_stack_base =
+			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
 			let mut kernel_stack = kernel_stack_top(kernel_stack_base).cast::<usize>().as_ptr();
@@ -136,7 +136,7 @@ impl Thread {
 					color: 0,
 				},
 			)?;
-			let kernel_stack_base =
+			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
 			dbg!(kernel_stack_base);

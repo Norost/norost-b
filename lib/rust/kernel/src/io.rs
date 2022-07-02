@@ -569,55 +569,6 @@ impl SeekFrom {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-pub struct Job {
-	pub ty: u8,
-	pub from_anchor: u8,
-	pub result: i16,
-	pub job_id: JobId,
-	pub handle: Handle,
-}
-
-impl Job {
-	pub const OPEN: u8 = 0;
-	pub const READ: u8 = 1;
-	pub const WRITE: u8 = 2;
-	pub const CREATE: u8 = 4;
-	pub const SEEK: u8 = 6;
-	pub const CLOSE: u8 = 7;
-	pub const PEEK: u8 = 8;
-	pub const SHARE: u8 = 9;
-	pub const OPEN_SHARE: u8 = Self::OPEN | 1 << 7;
-
-	#[inline]
-	pub fn deserialize(data: &[u8]) -> Option<(Self, &[u8])> {
-		(mem::size_of::<Self>() <= data.len()).then(|| {
-			// SAFETY: data is large enough
-			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
-			(job, &data[mem::size_of::<Self>()..])
-		})
-	}
-
-	#[inline]
-	pub fn deserialize_mut(data: &mut [u8]) -> Option<(Self, &mut [u8])> {
-		(mem::size_of::<Self>() <= data.len()).then(|| {
-			// SAFETY: data is large enough
-			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
-			(job, &mut data[mem::size_of::<Self>()..])
-		})
-	}
-}
-
-impl AsRef<[u8; mem::size_of::<Self>()]> for Job {
-	fn as_ref(&self) -> &[u8; mem::size_of::<Self>()] {
-		// SAFETY: there are no gaps in Job
-		unsafe { &*(self as *const _ as *const _) }
-	}
-}
-
-pub type JobId = u32;
-
 #[cfg(test)]
 mod test {
 	use super::*;

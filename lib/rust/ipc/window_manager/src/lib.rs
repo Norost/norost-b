@@ -50,7 +50,8 @@ impl Size {
 		r
 	}
 
-	fn area(&self) -> usize {
+	#[inline]
+	pub fn area(&self) -> usize {
 		usize::from(self.x + 1) * usize::from(self.y + 1)
 	}
 }

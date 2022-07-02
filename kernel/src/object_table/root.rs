@@ -6,6 +6,7 @@ use alloc::{
 	sync::{Arc, Weak},
 	vec::Vec,
 };
+use core::mem;
 
 /// A root object. This object has multiple child objects which can be accessed by a name, e.g.
 ///
@@ -78,23 +79,38 @@ impl Object for Root {
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.find(path).map_or_else(
-			|| {
-				Ticket::new_complete(if path.contains(&b'/') {
-					Err(Error::DoesNotExist)
-				} else {
-					let mut objects = self.objects.lock();
-					let tbl = StreamingTableOwner::new();
-					let r = objects.insert(path.into(), StreamingTableOwner::into_inner_weak(&tbl));
-					assert!(r.is_none());
-					Ok(tbl as Arc<dyn Object>)
-				})
-			},
-			|(obj, _, path)| match path {
-				None => Ticket::new_complete(Err(Error::AlreadyExists)),
-				Some(path) => obj.create(path),
-			},
-		)
+		Ticket::new_complete(if path.is_empty() {
+			Err(Error::InvalidData)
+		} else if let Some((obj, _, path)) = self.find(path) {
+			match path {
+				None => Err(Error::AlreadyExists),
+				Some(path) => return obj.create(path),
+			}
+		} else if path.contains(&b'/') {
+			Err(Error::DoesNotExist)
+		} else {
+			Ok(Arc::new(CreateRootEntry {
+				root: self,
+				name: Mutex::new(path.into()),
+			}))
+		})
+	}
+}
+
+struct CreateRootEntry {
+	root: Arc<Root>,
+	name: Mutex<Box<[u8]>>,
+}
+
+impl Object for CreateRootEntry {
+	fn share(&self, share: &Arc<dyn Object>) -> Ticket<u64> {
+		let mut name = self.name.lock();
+		Ticket::new_complete(if name.is_empty() {
+			Err(Error::InvalidOperation)
+		} else {
+			self.root.add(mem::take(&mut *name), Arc::downgrade(share));
+			Ok(0)
+		})
 	}
 }
 

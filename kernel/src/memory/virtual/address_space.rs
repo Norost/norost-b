@@ -94,7 +94,7 @@ impl AddressSpace {
 		base: Option<NonNull<Page>>,
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<NonNull<Page>, MapError> {
+	) -> Result<(NonNull<Page>, usize), MapError> {
 		// FIXME this will deadlock because there is now a circular dependency
 		// on the heap allocator
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
@@ -121,7 +121,10 @@ impl AddressSpace {
 			});
 		};
 		objects.insert(index, (range.clone(), object));
-		Ok(*range.start())
+		Ok((
+			*range.start(),
+			range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1,
+		))
 	}
 
 	fn map_object_common(

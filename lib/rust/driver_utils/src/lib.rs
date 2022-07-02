@@ -15,6 +15,7 @@ mod arena;
 
 pub mod dma;
 pub mod io;
+pub mod os;
 pub mod task;
 
 pub use self::arena::Arena;

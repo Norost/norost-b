@@ -24,6 +24,7 @@ impl_! {
 	Root 1
 	Duplicate 2
 	SharedMemory 3
+	StreamTable 4
 }
 
 pub enum NewObject {
@@ -37,6 +38,11 @@ pub enum NewObject {
 	},
 	SharedMemory {
 		size: usize,
+	},
+	StreamTable {
+		buffer_mem: Handle,
+		buffer_mem_block_size: u32,
+		allow_sharing: bool,
 	},
 }
 
@@ -59,6 +65,18 @@ impl NewObject {
 			Self::Root => (Root, N0),
 			Self::Duplicate { handle } => (Duplicate, N1(handle as _)),
 			Self::SharedMemory { size } => (SharedMemory, N1(size)),
+			Self::StreamTable {
+				buffer_mem,
+				buffer_mem_block_size,
+				allow_sharing,
+			} => (
+				StreamTable,
+				N3(
+					buffer_mem as _,
+					buffer_mem_block_size as _,
+					allow_sharing as _,
+				),
+			),
 		};
 		(t as _, a)
 	}
@@ -74,6 +92,11 @@ impl NewObject {
 			Root => Self::Root,
 			Duplicate => Self::Duplicate { handle: a as _ },
 			SharedMemory => Self::SharedMemory { size: a },
+			StreamTable => Self::StreamTable {
+				buffer_mem: a as _,
+				buffer_mem_block_size: b as _,
+				allow_sharing: c & 1 != 0,
+			},
 		})
 	}
 }
