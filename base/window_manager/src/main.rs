@@ -112,7 +112,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		fill(manager.window_rect(w, size).unwrap(), *c);
 	}
 
-	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 25 }).unwrap();
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 23 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, 1 << 20);
 	root.create(b"window_manager")
 		.unwrap()
@@ -127,6 +127,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let mut p = [0; 8];
 					let p = &mut p[..path.len()];
 					path.copy_to(0, p);
+					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size).unwrap();
@@ -174,8 +175,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 									draw.size().area() * 3,
 								);
 							}
+							let l = data.len().try_into().unwrap();
+							data.manual_drop();
 							sync_rect(draw_rect);
-							Response::Amount(data.len().try_into().unwrap())
+							Response::Amount(l)
 						}
 					},
 				),

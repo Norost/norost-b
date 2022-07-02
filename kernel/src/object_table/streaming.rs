@@ -122,13 +122,15 @@ impl StreamingTable {
 						handle: v as _,
 					}))),
 					AnyTicketWaker::Data(w) => {
+						let s = resp.as_slice().unwrap();
 						let buf = self
 							.buffer_mem
-							.get(resp.as_slice().unwrap())
+							.get(s)
 							.next()
 							.unwrap_or_else(|| todo!("naughty process"));
 						let mut b = Box::new_uninit_slice(buf.len());
 						buf.copy_to_uninit(0, &mut b);
+						self.buffer_mem.dealloc(q.buffer_head_ref(), s.offset);
 						w.complete(Ok(unsafe { Box::<[_]>::assume_init(b) }))
 					}
 					AnyTicketWaker::U64(w) => w.complete(Ok(v)),

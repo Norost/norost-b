@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::os::stream_table::{Buffer, Request, Response, Slice};
+use driver_utils::os::stream_table::{Buffer, Request, Response};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 
@@ -179,6 +179,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let mut p = [0; 64];
 					let p = &mut p[..path.len()];
 					path.copy_to(0, p);
+					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
 						(Handle::MAX, b"resolution") => {
@@ -193,7 +194,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					match handle {
 						Handle::MAX | SYNC_HANDLE => Response::Error(Error::InvalidOperation as _),
 						h => {
-							let (buf, offset) = tbl.alloc(64).unwrap();
+							let buf = tbl.alloc(64).unwrap();
 							let l = match &mut handles[h] {
 								H::Resolution => {
 									if flags.binary() {
@@ -209,7 +210,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 									}
 								}
 							};
-							Response::Slice(Slice { offset, length: l })
+							Response::Data {
+								data: buf,
+								length: l,
+							}
 						}
 					},
 				),
@@ -217,6 +221,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let mut d = [0; 64];
 					let d = &mut d[..data.len()];
 					data.copy_to(0, d);
+					data.manual_drop();
 					let r = match handle {
 						// Blit a specific area
 						SYNC_HANDLE => {
@@ -304,9 +309,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						continue;
 					}
 				},
-				Request::Create { job_id, .. }
-				| Request::Destroy { job_id, .. }
-				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
+				Request::Create { job_id, path } => {
+					path.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
+				Request::Destroy { job_id, .. } | Request::Seek { job_id, .. } => {
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
 			};
 			tbl.enqueue(job_id, response);
 			send_notif = true;

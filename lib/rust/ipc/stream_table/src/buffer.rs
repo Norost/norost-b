@@ -3,6 +3,7 @@ use core::{
 	intrinsics,
 	marker::PhantomData,
 	mem::{self, MaybeUninit},
+	num::NonZeroU32,
 	ptr::NonNull,
 	sync::atomic::AtomicU32,
 };
@@ -169,9 +170,14 @@ impl<'a> Iterator for Resolver<'a> {
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.len == 0 {
 			None
-		} else if let Some(l) = self.len.checked_sub(self.block_size) {
-			self.len = l;
-			todo!()
+		} else if let Some(l) = self
+			.len
+			.checked_sub(self.block_size)
+			.and_then(NonZeroU32::new)
+		{
+			let t = self.len;
+			self.len = l.get();
+			todo!("{:?}", t);
 		} else {
 			unsafe {
 				Some(Buffer::new(

@@ -1,11 +1,12 @@
 use crate::Handle;
-use nora_stream_table::{Buffers, ServerQueue};
+use core::{cell::RefCell, ops::Deref};
+use nora_stream_table::{Buffers, ServerQueue, Slice};
 use norostb_rt::{self as rt, io::SeekFrom};
 
-pub use nora_stream_table::{Buffer, Flags, JobId, Slice};
+pub use nora_stream_table::{Flags, JobId};
 
 pub struct StreamTable {
-	queue: ServerQueue,
+	queue: RefCell<ServerQueue>,
 	buffers: Buffers,
 	notify: rt::Object,
 	table: rt::Object,
@@ -38,7 +39,7 @@ impl StreamTable {
 
 		let notify = tbl.open(b"notify").unwrap();
 		Self {
-			queue,
+			queue: queue.into(),
 			buffers,
 			notify,
 			table: tbl,
@@ -49,22 +50,22 @@ impl StreamTable {
 		self.table.open(b"table").unwrap()
 	}
 
-	pub fn dequeue<'a>(&'a mut self) -> Option<(Handle, Flags, Request)> {
+	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Flags, Request)> {
 		type R = nora_stream_table::Request;
-		let (h, f, r) = self.queue.dequeue()?;
+		let (h, f, r) = self.queue.borrow_mut().dequeue()?;
 		let r = match r {
 			R::Read { job_id, amount } => Request::Read { job_id, amount },
 			R::Write { job_id, data } => Request::Write {
 				job_id,
-				data: self.get_buf(data),
+				data: self.get_owned_buf(data),
 			},
 			R::Open { job_id, path } => Request::Open {
 				job_id,
-				path: self.get_buf(path),
+				path: self.get_owned_buf(path),
 			},
 			R::Create { job_id, path } => Request::Create {
 				job_id,
-				path: self.get_buf(path),
+				path: self.get_owned_buf(path),
 			},
 			R::Destroy { job_id } => Request::Destroy { job_id },
 			R::Close => Request::Close,
@@ -84,16 +85,19 @@ impl StreamTable {
 		Some((h, f, r))
 	}
 
-	pub fn enqueue(&mut self, job_id: JobId, response: Response) {
+	pub fn enqueue(&self, job_id: JobId, response: Response) {
 		type R = nora_stream_table::Response;
 		let r = match response {
 			Response::Error(e) => R::Error(e as _),
 			Response::Amount(n) => R::Amount(n),
 			Response::Position(n) => R::Position(n),
-			Response::Slice(s) => R::Slice(s),
+			Response::Data { data, length } => R::Slice(Slice {
+				offset: data.offset,
+				length,
+			}),
 			Response::Handle(h) => R::Handle(h),
 		};
-		self.queue.try_enqueue(job_id, r).unwrap();
+		self.queue.borrow_mut().try_enqueue(job_id, r).unwrap();
 	}
 
 	pub fn wait(&self) {
@@ -104,16 +108,28 @@ impl StreamTable {
 		self.notify.write(&[]).unwrap();
 	}
 
-	pub fn alloc(&self, size: usize) -> Option<(Buffer<'_>, u32)> {
+	pub fn alloc(&self, size: usize) -> Option<Buffer<'_>> {
 		self.buffers
-			.alloc(self.queue.buffer_head_ref(), size)
-			.map(|(a, b)| match a {
-				nora_stream_table::Data::Single(a) => (a, b),
+			.alloc(self.queue.borrow_mut().buffer_head_ref(), size)
+			.map(|(data, offset)| match data {
+				nora_stream_table::Data::Single(buffer) => Buffer {
+					table: self,
+					offset,
+					buffer,
+				},
 			})
 	}
 
-	fn get_buf(&self, slice: nora_stream_table::Slice) -> Buffer<'_> {
-		self.buffers.get(slice).next().unwrap_or(Buffer::EMPTY)
+	fn get_owned_buf(&self, slice: nora_stream_table::Slice) -> Buffer<'_> {
+		Buffer {
+			table: self,
+			offset: slice.offset,
+			buffer: self
+				.buffers
+				.get(slice)
+				.next()
+				.unwrap_or(nora_stream_table::Buffer::EMPTY),
+		}
 	}
 }
 
@@ -128,10 +144,42 @@ pub enum Request<'a> {
 	Share { job_id: JobId, share: rt::Object },
 }
 
-pub enum Response {
+pub enum Response<'a> {
 	Error(rt::Error),
 	Amount(u32),
 	Position(u64),
-	Slice(Slice),
+	Data { data: Buffer<'a>, length: u32 },
 	Handle(Handle),
 }
+
+pub struct Buffer<'a> {
+	table: &'a StreamTable,
+	pub offset: u32,
+	buffer: nora_stream_table::Buffer<'a>,
+}
+
+impl<'a> Buffer<'a> {
+	pub fn manual_drop(self) {
+		self.table
+			.buffers
+			.dealloc(self.table.queue.borrow().buffer_head_ref(), self.offset);
+	}
+}
+
+impl<'a> Deref for Buffer<'a> {
+	type Target = nora_stream_table::Buffer<'a>;
+
+	#[inline(always)]
+	fn deref(&self) -> &Self::Target {
+		&self.buffer
+	}
+}
+
+/* Something seems broken with match, drop and lifetimes, try uncommenting this and
+ * build virtio_gpu to see the issue
+impl<'a> Drop for Buffer<'a> {
+	fn drop(&mut self) {
+		self.table.buffers.dealloc(self.table.queue.buffer_head_ref(), self.offset)
+	}
+}
+*/
