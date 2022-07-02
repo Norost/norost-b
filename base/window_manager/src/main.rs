@@ -112,8 +112,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		fill(manager.window_rect(w, size).unwrap(), *c);
 	}
 
-	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 23 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, 1 << 20);
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 22 }).unwrap();
+	let mut table = StreamTable::new(&tbl_buf, 1 << 12);
 	root.create(b"window_manager")
 		.unwrap()
 		.share(&table.public_table())
@@ -145,7 +145,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),
 						h => {
-							let header = data.array_chunks::<12>().next().unwrap();
+							let mut header = [0; 12];
+							data.copy_to(0, &mut header);
 							let display = Rect::from_size(Point::ORIGIN, size);
 							let rect = manager.window_rect(h, size).unwrap();
 							let draw = ipc_wm::DrawRect::from_bytes(&header).unwrap();

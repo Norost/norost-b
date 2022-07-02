@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::os::stream_table::{Buffer, Request, Response};
+use driver_utils::os::stream_table::{Data, Request, Response};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 

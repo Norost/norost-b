@@ -92,7 +92,7 @@ impl StreamTable {
 			Response::Amount(n) => R::Amount(n),
 			Response::Position(n) => R::Position(n),
 			Response::Data { data, length } => R::Slice(Slice {
-				offset: data.offset,
+				offset: data.offset().try_into().unwrap(),
 				length,
 			}),
 			Response::Handle(h) => R::Handle(h),
@@ -108,37 +108,26 @@ impl StreamTable {
 		self.notify.write(&[]).unwrap();
 	}
 
-	pub fn alloc(&self, size: usize) -> Option<Buffer<'_>> {
+	pub fn alloc(&self, size: usize) -> Option<Data<'_>> {
 		self.buffers
 			.alloc(self.queue.borrow_mut().buffer_head_ref(), size)
-			.map(|(data, offset)| match data {
-				nora_stream_table::Data::Single(buffer) => Buffer {
-					table: self,
-					offset,
-					buffer,
-				},
-			})
+			.map(|data| Data { table: self, data })
 	}
 
-	fn get_owned_buf(&self, slice: nora_stream_table::Slice) -> Buffer<'_> {
-		Buffer {
+	fn get_owned_buf(&self, slice: nora_stream_table::Slice) -> Data<'_> {
+		Data {
 			table: self,
-			offset: slice.offset,
-			buffer: self
-				.buffers
-				.get(slice)
-				.next()
-				.unwrap_or(nora_stream_table::Buffer::EMPTY),
+			data: self.buffers.get(slice),
 		}
 	}
 }
 
 pub enum Request<'a> {
 	Read { job_id: JobId, amount: u32 },
-	Write { job_id: JobId, data: Buffer<'a> },
-	Open { job_id: JobId, path: Buffer<'a> },
+	Write { job_id: JobId, data: Data<'a> },
+	Open { job_id: JobId, path: Data<'a> },
 	Close,
-	Create { job_id: JobId, path: Buffer<'a> },
+	Create { job_id: JobId, path: Data<'a> },
 	Destroy { job_id: JobId },
 	Seek { job_id: JobId, from: SeekFrom },
 	Share { job_id: JobId, share: rt::Object },
@@ -148,36 +137,36 @@ pub enum Response<'a> {
 	Error(rt::Error),
 	Amount(u32),
 	Position(u64),
-	Data { data: Buffer<'a>, length: u32 },
+	Data { data: Data<'a>, length: u32 },
 	Handle(Handle),
 }
 
-pub struct Buffer<'a> {
+pub struct Data<'a> {
 	table: &'a StreamTable,
-	pub offset: u32,
-	buffer: nora_stream_table::Buffer<'a>,
+	data: nora_stream_table::Data<'a>,
 }
 
-impl<'a> Buffer<'a> {
+impl<'a> Data<'a> {
 	pub fn manual_drop(self) {
-		self.table
-			.buffers
-			.dealloc(self.table.queue.borrow().buffer_head_ref(), self.offset);
+		self.table.buffers.dealloc(
+			self.table.queue.borrow().buffer_head_ref(),
+			self.offset().try_into().unwrap(),
+		);
 	}
 }
 
-impl<'a> Deref for Buffer<'a> {
-	type Target = nora_stream_table::Buffer<'a>;
+impl<'a> Deref for Data<'a> {
+	type Target = nora_stream_table::Data<'a>;
 
 	#[inline(always)]
 	fn deref(&self) -> &Self::Target {
-		&self.buffer
+		&self.data
 	}
 }
 
 /* Something seems broken with match, drop and lifetimes, try uncommenting this and
  * build virtio_gpu to see the issue
-impl<'a> Drop for Buffer<'a> {
+impl<'a> Drop for Data<'a> {
 	fn drop(&mut self) {
 		self.table.buffers.dealloc(self.table.queue.buffer_head_ref(), self.offset)
 	}

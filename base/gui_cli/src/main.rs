@@ -54,9 +54,20 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut draw = ipc_wm::DrawRect::new_vec(
 		&mut raw,
 		ipc_wm::Point { x: 0, y: 0 },
-		ipc_wm::Size { x: 700, y: 320 },
+		ipc_wm::Size {
+			x: 500 - 1,
+			y: 320 - 1,
+		},
 	);
-	draw.pixels_mut().fill(0);
+	let w = 500;
+	for y in 0..320 {
+		for x in 0..w {
+			let a = &mut draw.pixels_mut()[3 * (y * w + x)..][..3];
+			a[0] = (x * 256 / w) as _;
+			a[1] = (y * 256 / 320) as _;
+			a[2] = 255 - ((a[0] as usize + a[1] as usize) / 2) as u8;
+		}
+	}
 	window.write(&raw).unwrap();
 
 	let mut layout = Layout::new(CoordinateSystem::PositiveYDown);

@@ -95,16 +95,13 @@ impl StreamingTable {
 	}
 
 	fn copy_data_from(&self, queue: &mut ClientQueue, data: &[u8]) -> Slice {
-		let (buf, offset) = self
+		let buf = self
 			.buffer_mem
 			.alloc(queue.buffer_head_ref(), data.len())
 			.unwrap_or_else(|| todo!("no buffers available"));
-		let buf = match buf {
-			nora_stream_table::Data::Single(b) => b,
-		};
 		buf.copy_from(0, data);
 		Slice {
-			offset,
+			offset: buf.offset().try_into().unwrap(),
 			length: buf.len().try_into().unwrap(),
 		}
 	}
@@ -123,11 +120,7 @@ impl StreamingTable {
 					}))),
 					AnyTicketWaker::Data(w) => {
 						let s = resp.as_slice().unwrap();
-						let buf = self
-							.buffer_mem
-							.get(s)
-							.next()
-							.unwrap_or_else(|| todo!("naughty process"));
+						let buf = self.buffer_mem.get(s);
 						let mut b = Box::new_uninit_slice(buf.len());
 						buf.copy_to_uninit(0, &mut b);
 						self.buffer_mem.dealloc(q.buffer_head_ref(), s.offset);

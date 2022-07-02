@@ -1,7 +1,7 @@
 #![no_std]
 #![feature(core_intrinsics)]
 #![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
-#![deny(unused)]
+#![cfg_attr(not(debug_assertions), deny(unused))]
 
 mod raw {
 	norost_ipc_spec::compile!(core::include_str!("../../../../ipc/stream_table.ipc"));
