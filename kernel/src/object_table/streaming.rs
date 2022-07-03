@@ -3,6 +3,7 @@ use crate::{
 	memory::{
 		frame::{AllocateError, AllocateHints, OwnedPageFrames, PPN},
 		r#virtual::{AddressSpace, MapError, RWX},
+		Page,
 	},
 	object_table::MemoryObject,
 	sync::Mutex,
@@ -15,7 +16,7 @@ use alloc::{
 use arena::Arena;
 use core::{mem, ptr::NonNull, sync::atomic::Ordering};
 use nora_stream_table::{Buffers, ClientQueue, Flags, JobId, Request, Slice};
-use norostb_kernel::{io::SeekFrom, syscall::Handle};
+use norostb_kernel::{io::SeekFrom, object::Pow2Size, syscall::Handle};
 
 pub struct StreamingTable {
 	jobs: Mutex<Arena<AnyTicketWaker, ()>>,
@@ -39,15 +40,21 @@ pub struct StreamingTableOwner(Arc<StreamingTable>);
 pub enum NewStreamingTableError {
 	Alloc(AllocateError),
 	Map(MapError),
+	BlockSizeTooLarge,
 }
 
 impl StreamingTableOwner {
 	pub fn new(
 		allow_sharing: bool,
 		buffer_mem: Arc<dyn MemoryObject>,
-		buffer_mem_block_len: u32,
+		buffer_mem_block_size: Pow2Size,
 		hints: AllocateHints,
 	) -> Result<Arc<Self>, NewStreamingTableError> {
+		let buffer_size = buffer_mem.physical_pages_len() * Page::SIZE;
+		let block_size = match u32::try_from(buffer_mem_block_size) {
+			Ok(s) if usize::try_from(s).unwrap() <= buffer_size => s,
+			Ok(_) | Err(_) => Err(NewStreamingTableError::BlockSizeTooLarge)?,
+		};
 		let queue_mem = Arc::new(
 			OwnedPageFrames::new(1.try_into().unwrap(), hints)
 				.map_err(NewStreamingTableError::Alloc)?,
@@ -65,9 +72,7 @@ impl StreamingTableOwner {
 			shared: allow_sharing.then(Default::default),
 			queue: Mutex::new(queue),
 			queue_mem,
-			buffer_mem: unsafe {
-				Buffers::new(buffer_mem.cast(), buffer_mem_size, buffer_mem_block_len)
-			},
+			buffer_mem: unsafe { Buffers::new(buffer_mem.cast(), buffer_mem_size, block_size) },
 			notify_singleton: Arc::new(Notify {
 				table: table.clone(),
 				..Default::default()

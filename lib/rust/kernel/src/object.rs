@@ -27,6 +27,71 @@ impl_! {
 	StreamTable 4
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Pow2Size(pub u8);
+
+macro_rules! p2s {
+	($t:ident) => {
+		impl TryFrom<$t> for Pow2Size {
+			type Error = ();
+
+			#[inline]
+			fn try_from(n: $t) -> Result<Self, Self::Error> {
+				(n.count_ones() == 1)
+					.then(|| Self(n.trailing_zeros().try_into().unwrap()))
+					.ok_or(())
+			}
+		}
+
+		impl TryFrom<Pow2Size> for $t {
+			type Error = ();
+
+			#[inline]
+			fn try_from(n: Pow2Size) -> Result<Self, Self::Error> {
+				(usize::from(n.0) < core::mem::size_of::<$t>() * 8)
+					.then(|| (1 << n.0))
+					.ok_or(())
+			}
+		}
+	};
+	(s $t:ident) => {
+		impl TryFrom<$t> for Pow2Size {
+			type Error = ();
+
+			#[inline]
+			fn try_from(n: $t) -> Result<Self, Self::Error> {
+				(n > 0 && n.count_ones() == 1)
+					.then(|| Self(n.trailing_zeros().try_into().unwrap()))
+					.ok_or(())
+			}
+		}
+
+		impl TryFrom<Pow2Size> for $t {
+			type Error = ();
+
+			#[inline]
+			fn try_from(n: Pow2Size) -> Result<Self, Self::Error> {
+				(usize::from(n.0) < core::mem::size_of::<$t>() * 8 - 1)
+					.then(|| (1 << n.0))
+					.ok_or(())
+			}
+		}
+	};
+}
+
+p2s!(u8);
+p2s!(u16);
+p2s!(u32);
+p2s!(u64);
+p2s!(u128);
+p2s!(usize);
+p2s!(s i8);
+p2s!(s i16);
+p2s!(s i32);
+p2s!(s i64);
+p2s!(s i128);
+p2s!(s isize);
+
 pub enum NewObject {
 	SubRange {
 		handle: Handle,
@@ -41,7 +106,7 @@ pub enum NewObject {
 	},
 	StreamTable {
 		buffer_mem: Handle,
-		buffer_mem_block_size: u32,
+		buffer_mem_block_size: Pow2Size,
 		allow_sharing: bool,
 	},
 }
@@ -71,10 +136,9 @@ impl NewObject {
 				allow_sharing,
 			} => (
 				StreamTable,
-				N3(
+				N2(
 					buffer_mem as _,
-					buffer_mem_block_size as _,
-					allow_sharing as _,
+					usize::from(buffer_mem_block_size.0) | usize::from(allow_sharing) << 8,
 				),
 			),
 		};
@@ -94,9 +158,28 @@ impl NewObject {
 			SharedMemory => Self::SharedMemory { size: a },
 			StreamTable => Self::StreamTable {
 				buffer_mem: a as _,
-				buffer_mem_block_size: b as _,
-				allow_sharing: c & 1 != 0,
+				buffer_mem_block_size: Pow2Size(b as _),
+				allow_sharing: b & (1 << 8) != 0,
 			},
 		})
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::*;
+
+	#[test]
+	fn pow2size() {
+		let n = 1 << 20;
+		let v = Pow2Size::try_from(n).unwrap();
+		let v = u32::try_from(v).unwrap();
+		assert_eq!(v, n);
+	}
+
+	#[test]
+	fn pow2size_inval() {
+		let n = 1 << 20 | 1 << 11;
+		assert!(Pow2Size::try_from(n).is_err());
 	}
 }

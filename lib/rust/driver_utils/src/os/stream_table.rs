@@ -1,7 +1,10 @@
 use crate::Handle;
 use core::{cell::RefCell, ops::Deref};
 use nora_stream_table::{Buffers, ServerQueue, Slice};
-use norostb_rt::{self as rt, io::SeekFrom};
+use norostb_rt::{
+	self as rt,
+	io::{Pow2Size, SeekFrom},
+};
 
 pub use nora_stream_table::{Flags, JobId};
 
@@ -14,7 +17,7 @@ pub struct StreamTable {
 
 impl StreamTable {
 	/// Create a `StreamTable` with the given memory object as backing store.
-	pub fn new(buffers: &rt::Object, block_size: u32) -> Self {
+	pub fn new(buffers: &rt::Object, block_size: Pow2Size) -> Self {
 		let tbl = rt::Object::new(rt::NewObject::StreamTable {
 			allow_sharing: true,
 			buffer_mem: buffers.as_raw(),
@@ -29,6 +32,7 @@ impl StreamTable {
 		let (buffers, buffers_size) = buffers
 			.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
 			.unwrap();
+		let block_size = u32::try_from(block_size).unwrap();
 		let buffers = unsafe { Buffers::new(buffers, buffers_size, block_size) };
 		for i in 0..(buffers_size / block_size as usize)
 			.try_into()

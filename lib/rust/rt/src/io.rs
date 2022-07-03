@@ -1,7 +1,7 @@
 pub use norostb_kernel::{
 	error::{Error, Result},
 	io::SeekFrom,
-	object::NewObject,
+	object::{NewObject, Pow2Size},
 	syscall::RWX,
 	Handle,
 };

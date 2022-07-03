@@ -306,6 +306,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 					.map_err(|e| match e {
 						NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
 						NewStreamingTableError::Map(_) => Error::CantCreateObject,
+						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
 					})
 				} else {
 					Err(Error::InvalidData)
