@@ -39,7 +39,10 @@ impl Root {
 		self.objects.lock().insert(name.into(), object);
 	}
 
-	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], Option<&'a [u8]>)> {
+	fn apply<'a, R, F>(&self, path: &'a [u8], f: F) -> Option<R>
+	where
+		F: FnOnce(Arc<dyn Object>, &'a [u8], Option<&'a [u8]>) -> (bool, R),
+	{
 		let (object, rest) = path
 			.iter()
 			.position(|c| *c == b'/')
@@ -47,7 +50,11 @@ impl Root {
 		let mut objects = self.objects.lock();
 		if let Some(obj) = objects.get(object) {
 			if let Some(obj) = Weak::upgrade(&obj) {
-				Some((obj, object, rest))
+				let (remove, ret) = f(obj, object, rest);
+				if remove {
+					objects.remove(object).unwrap();
+				}
+				Some(ret)
 			} else {
 				objects.remove(object);
 				None
@@ -55,6 +62,10 @@ impl Root {
 		} else {
 			None
 		}
+	}
+
+	fn find<'a>(&self, path: &'a [u8]) -> Option<(Arc<dyn Object>, &'a [u8], Option<&'a [u8]>)> {
+		self.apply(path, |a, b, c| (false, (a, b, c)))
 	}
 }
 
@@ -93,6 +104,22 @@ impl Object for Root {
 				root: self,
 				name: Mutex::new(path.into()),
 			}))
+		})
+	}
+
+	fn destroy(&self, path: &[u8]) -> Ticket<u64> {
+		Ticket::new_complete(if path.is_empty() {
+			Err(Error::InvalidData)
+		} else {
+			let ret = self.apply(path, |obj, _, path| match path {
+				None => (true, None),
+				Some(path) => (false, Some(obj.destroy(path))),
+			});
+			match ret {
+				None => Err(Error::DoesNotExist),
+				Some(None) => Ok(0),
+				Some(Some(t)) => return t,
+			}
 		})
 	}
 }

@@ -209,6 +209,10 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
 				block_on(o.clone().create(r)).map_or_else(Return::error, |o| ins(objects, o))
 			}
+			Request::DESTROY => {
+				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+				block_on(o.clone().destroy(r)).map_or_else(Return::error, return_u64)
+			}
 			Request::SEEK => a
 				.try_into()
 				.ok()

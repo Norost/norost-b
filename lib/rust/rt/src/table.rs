@@ -29,6 +29,11 @@ impl Object {
 	}
 
 	#[inline(always)]
+	pub fn destroy(&self, path: &[u8]) -> io::Result<u64> {
+		io::destroy(self.0, path)
+	}
+
+	#[inline(always)]
 	pub fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
 		io::read(self.0, buf)
 	}

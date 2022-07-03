@@ -46,6 +46,7 @@ impl Request {
 	pub const WRITE: u8 = 1;
 	pub const OPEN: u8 = 2;
 	pub const CREATE: u8 = 3;
+	pub const DESTROY: u8 = 4;
 	pub const SEEK: u8 = 8;
 	pub const CLOSE: u8 = 10;
 	pub const PEEK: u8 = 11;
@@ -151,6 +152,15 @@ impl Request {
 			..Default::default()
 		}
 	}
+
+	pub fn destroy(user_data: u64, handle: Handle) -> Self {
+		Self {
+			ty: Self::DESTROY,
+			arguments_32: [handle],
+			user_data,
+			..Default::default()
+		}
+	}
 }
 
 pub enum DoIo<'a> {
@@ -168,6 +178,10 @@ pub enum DoIo<'a> {
 		path: &'a [u8],
 	},
 	Create {
+		handle: Handle,
+		path: &'a [u8],
+	},
+	Destroy {
 		handle: Handle,
 		path: &'a [u8],
 	},
@@ -199,6 +213,9 @@ impl DoIo<'_> {
 			Self::Open { handle, path } => (R::OPEN, handle, N2(path.as_ptr() as _, path.len())),
 			Self::Create { handle, path } => {
 				(R::CREATE, handle, N2(path.as_ptr() as _, path.len()))
+			}
+			Self::Destroy { handle, path } => {
+				(R::DESTROY, handle, N2(path.as_ptr() as _, path.len()))
 			}
 			Self::Seek { handle, from } => {
 				let (t, o) = from.into_raw();

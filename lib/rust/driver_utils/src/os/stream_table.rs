@@ -71,7 +71,10 @@ impl StreamTable {
 				job_id,
 				path: self.get_owned_buf(path),
 			},
-			R::Destroy { job_id } => Request::Destroy { job_id },
+			R::Destroy { job_id, path } => Request::Destroy {
+				job_id,
+				path: self.get_owned_buf(path),
+			},
 			R::Close => Request::Close,
 			R::Seek { job_id, from } => Request::Seek {
 				job_id,
@@ -132,7 +135,7 @@ pub enum Request<'a> {
 	Open { job_id: JobId, path: Data<'a> },
 	Close,
 	Create { job_id: JobId, path: Data<'a> },
-	Destroy { job_id: JobId },
+	Destroy { job_id: JobId, path: Data<'a> },
 	Seek { job_id: JobId, from: SeekFrom },
 	Share { job_id: JobId, share: rt::Object },
 }

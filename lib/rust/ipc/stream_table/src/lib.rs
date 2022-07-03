@@ -160,7 +160,10 @@ impl ServerQueue {
 						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
-					T::Destroy => R::Destroy { job_id },
+					T::Destroy => R::Destroy {
+						job_id,
+						path: Slice::from_raw(args.slice()),
+					},
 					T::SeekStart => R::Seek {
 						job_id,
 						from: S::Start(args.offset_u().get()),
@@ -220,7 +223,7 @@ impl ClientQueue {
 			R::Open { job_id, path } => (job_id, T::Open, v.set_slice(path.into_raw())),
 			R::Close => (JobId::default(), T::Close, ()),
 			R::Create { job_id, path } => (job_id, T::Create, v.set_slice(path.into_raw())),
-			R::Destroy { job_id } => (job_id, T::Destroy, ()),
+			R::Destroy { job_id, path } => (job_id, T::Destroy, v.set_slice(path.into_raw())),
 			R::Seek { job_id, from } => match from {
 				SeekFrom::Start(f) => (job_id, T::SeekStart, v.set_offset_u(U64::new(f))),
 				SeekFrom::Current(f) => (job_id, T::SeekCurrent, v.set_offset_s(S64::new(f))),
@@ -318,7 +321,7 @@ pub enum Request {
 	Open { job_id: JobId, path: Slice },
 	Close,
 	Create { job_id: JobId, path: Slice },
-	Destroy { job_id: JobId },
+	Destroy { job_id: JobId, path: Slice },
 	Seek { job_id: JobId, from: SeekFrom },
 	Share { job_id: JobId, share: Handle },
 }

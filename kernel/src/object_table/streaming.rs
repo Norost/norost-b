@@ -236,6 +236,17 @@ impl Object for StreamObject {
 		})
 	}
 
+	fn destroy(&self, path: &[u8]) -> Ticket<u64> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, Flags::default(), |q, job_id| {
+				Request::Destroy {
+					job_id,
+					path: tbl.copy_data_from(q, path),
+				}
+			})
+		})
+	}
+
 	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
 		let amount = length.try_into().unwrap_or(u32::MAX);
 		self.with_table(|tbl| {

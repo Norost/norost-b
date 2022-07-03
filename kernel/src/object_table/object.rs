@@ -38,6 +38,10 @@ pub trait Object {
 	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
 		not_implemented()
 	}
+
+	fn destroy(&self, _path: &[u8]) -> Ticket<u64> {
+		not_implemented()
+	}
 }
 
 fn not_implemented<T>() -> Ticket<T> {

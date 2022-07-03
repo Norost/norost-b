@@ -138,6 +138,11 @@ pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
 }
 
 #[inline(always)]
+pub fn destroy(handle: Handle, path: &[u8]) -> Result<u64> {
+	syscall::do_io(DoIo::Destroy { handle, path })
+}
+
+#[inline(always)]
 pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
 	syscall::do_io(DoIo::Seek { handle, from })
 }
