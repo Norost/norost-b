@@ -1,0 +1,69 @@
+@name kernel.ipc.StreamTable
+@version 0
+@abi 0
+
+struct Queue {
+	request_tail: u32
+	request_head: u32
+	response_tail: u32
+	response_head: u32
+	buffer_head: u32
+	_reserved_1: [u32; 123]
+	responses: [Response; 128]
+	requests: [Request; 128]
+}
+
+struct Request {
+	ty: RequestType
+	binary: u1
+	advance: u1
+	meta: u1
+	_reserved: u1
+	id: Id
+	handle: Handle
+	args: RequestArgs
+}
+
+enum RequestType {
+	Read
+	Write
+	Open
+	Close
+	Create
+	Destroy
+	SeekStart
+	SeekCurrent
+	SeekEnd
+	Share
+}
+
+union RequestArgs {
+	offset_u: u64
+	offset_s: s64
+	share: Handle
+	slice: Slice
+	amount: u32
+}
+
+struct Response {
+	_reserved: u8
+	id: Id
+	value: ResponseValue
+}
+
+union ResponseValue {
+	error: s64
+	position: u64
+	handle: Handle
+	amount: u32
+	slice: Slice
+	raw: u64
+}
+
+alias Handle: u32
+alias Id: u24
+
+struct Slice {
+	offset: u32
+	length: u32
+}

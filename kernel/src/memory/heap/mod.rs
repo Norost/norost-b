@@ -36,6 +36,7 @@ mod default {
 					);
 					AddressSpace::kernel_map_object(None, frames, RWX::RW)
 						.unwrap()
+						.0
 						.as_ptr()
 						.cast()
 				} else {

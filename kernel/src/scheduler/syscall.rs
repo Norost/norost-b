@@ -6,7 +6,9 @@ use crate::{
 		r#virtual::{AddressSpace, RWX},
 		Page,
 	},
-	object_table::{Handle, Object, Root, SeekFrom, SubRange},
+	object_table::{
+		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTableOwner, SubRange,
+	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
 };
@@ -260,6 +262,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 		}
 	};
 	let proc = Process::current().unwrap();
+	let hints = proc.allocate_hints(0 as _);
 	match args {
 		NewObject::SubRange { handle, range } => proc
 			.object_transform_new(handle, |o| {
@@ -287,6 +290,29 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 			})
 			.map(|o| Arc::new(o) as Arc<dyn Object>)
 			.and_then(|o| proc.add_object(o).map_err(|e| match e {})),
+		NewObject::StreamTable {
+			buffer_mem,
+			buffer_mem_block_size,
+			allow_sharing,
+		} => proc
+			.object_transform_new(buffer_mem, |buffer_mem| {
+				if let Some(buffer_mem) = buffer_mem.clone().memory_object() {
+					StreamingTableOwner::new(
+						allow_sharing,
+						buffer_mem,
+						buffer_mem_block_size,
+						hints,
+					)
+					.map_err(|e| match e {
+						NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
+						NewStreamingTableError::Map(_) => Error::CantCreateObject,
+						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
+					})
+				} else {
+					Err(Error::InvalidData)
+				}
+			})
+			.map_or(Err(Error::InvalidObject), |v| v),
 	}
 	.map_or_else(
 		|e| Return {
@@ -310,7 +336,11 @@ extern "C" fn map_object(
 ) -> Return {
 	debug!(
 		"map_object {:?} {:#x} {:03b} {} {}",
-		handle, base, rwx, offset, max_length
+		unerase_handle(handle as _),
+		base,
+		rwx,
+		offset,
+		max_length
 	);
 	let Ok(rwx) = RWX::from_flags(rwx & 4 != 0, rwx & 2 != 0, rwx & 1 != 0) else {
 		return Return::INVALID_DATA;

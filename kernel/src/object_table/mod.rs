@@ -14,15 +14,11 @@ mod ticket;
 
 pub use crate::scheduler::MemoryObject;
 
-pub use norostb_kernel::{
-	error::Error,
-	io::{JobId, SeekFrom},
-	syscall::Handle,
-};
+pub use norostb_kernel::{error::Error, io::SeekFrom, syscall::Handle};
 
 pub use object::*;
 pub use query::*;
 pub use root::Root;
-pub use streaming::{StreamingTable, StreamingTableOwner};
+pub use streaming::{NewStreamingTableError, StreamingTable, StreamingTableOwner};
 pub use subrange::SubRange;
 pub use ticket::*;

@@ -6,11 +6,7 @@ use core::{
 	ptr::NonNull,
 };
 
-pub use norostb_kernel::{
-	io::{DoIo, Job},
-	object::NewObject,
-	Handle,
-};
+pub use norostb_kernel::{io::DoIo, object::NewObject, Handle};
 
 #[derive(Debug)]
 pub struct Object(Handle);
