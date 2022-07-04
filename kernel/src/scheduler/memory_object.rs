@@ -1,6 +1,5 @@
-use crate::memory::frame::PPN;
+use crate::memory::{frame::PPN, r#virtual::RWX};
 use core::any::Any;
-use core::ops::Range;
 
 /// Objects which can be mapped into an address space.
 ///
@@ -19,9 +18,6 @@ where
 	/// The total amount of physical pages.
 	fn physical_pages_len(&self) -> usize;
 
-	/// Mark a range of physical pages as dirty. May panic if the range
-	/// is invalid.
-	fn mark_dirty(&mut self, range: Range<usize>) {
-		let _ = range;
-	}
+	/// The RWX permissions that may be used for these pages.
+	fn page_permissions(&self) -> RWX;
 }

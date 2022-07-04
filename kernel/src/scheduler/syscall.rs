@@ -3,7 +3,7 @@ use crate::{
 	memory::{
 		frame,
 		frame::OwnedPageFrames,
-		r#virtual::{AddressSpace, RWX},
+		r#virtual::{AddressSpace, MapError, RWX},
 		Page,
 	},
 	object_table::{
@@ -355,9 +355,15 @@ extern "C" fn map_object(
 			offset,
 			max_length,
 		)
-		.map_or(
-			Return {
-				status: 1,
+		.map_or_else(
+			|e| Return {
+				status: (match e {
+					MapError::Overflow
+					| MapError::ZeroSize
+					| MapError::Permission
+					| MapError::UnalignedOffset => Error::InvalidData,
+					MapError::Arch(e) => todo!("{:?}", e),
+				}) as _,
 				value: 0,
 			},
 			|(base, length)| Return {

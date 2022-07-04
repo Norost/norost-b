@@ -169,6 +169,10 @@ unsafe impl MemoryObject for StreamingTableOwner {
 	fn physical_pages_len(&self) -> usize {
 		self.0.queue_mem.physical_pages_len()
 	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::RW
+	}
 }
 
 impl Object for StreamingTable {

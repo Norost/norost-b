@@ -33,6 +33,7 @@ extern crate alloc;
 use crate::{
 	memory::{
 		frame::{PageFrameIter, PPN},
+		r#virtual::RWX,
 		Page,
 	},
 	object_table::{Error, MemoryObject, Object, QueryIter, SeekFrom, Ticket},
@@ -148,6 +149,10 @@ unsafe impl MemoryObject for Driver {
 
 	fn physical_pages_len(&self) -> usize {
 		Page::min_pages_for_bytes(self.0.len())
+	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::RX
 	}
 }
 

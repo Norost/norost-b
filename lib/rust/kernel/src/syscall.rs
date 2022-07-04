@@ -60,6 +60,7 @@ impl fmt::Debug for DebugLossy<'_> {
 
 pub type Handle = u32;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RWX {
 	R = 0b100,
 	W = 0b010,
@@ -68,6 +69,60 @@ pub enum RWX {
 	RX = 0b101,
 	RWX = 0b111,
 }
+
+impl RWX {
+	#[inline]
+	pub fn from_flags(r: bool, w: bool, x: bool) -> Result<RWX, IncompatibleRWXFlags> {
+		match (r, w, x) {
+			(true, false, false) => Ok(Self::R),
+			(false, true, false) => Ok(Self::W),
+			(false, false, true) => Ok(Self::X),
+			(true, true, false) => Ok(Self::RW),
+			(true, false, true) => Ok(Self::RX),
+			(true, true, true) => Ok(Self::RWX),
+			_ => Err(IncompatibleRWXFlags),
+		}
+	}
+
+	#[inline]
+	pub fn is_subset_of(&self, superset: RWX) -> bool {
+		match self {
+			Self::R => superset.r(),
+			Self::W => superset.w(),
+			Self::X => superset.x(),
+			Self::RW => superset.r() && superset.w(),
+			Self::RX => superset.r() && superset.x(),
+			Self::RWX => superset == Self::RWX,
+		}
+	}
+
+	#[inline]
+	pub fn r(&self) -> bool {
+		match self {
+			Self::R | Self::RW | Self::RX | Self::RWX => true,
+			Self::W | Self::X => false,
+		}
+	}
+
+	#[inline]
+	pub fn w(&self) -> bool {
+		match self {
+			Self::W | Self::RW | Self::RWX => true,
+			Self::R | Self::X | Self::RX => false,
+		}
+	}
+
+	#[inline]
+	pub fn x(&self) -> bool {
+		match self {
+			Self::X | Self::RX | Self::RWX => true,
+			Self::R | Self::W | Self::RW => false,
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct IncompatibleRWXFlags;
 
 #[allow(unused_macro_rules)]
 macro_rules! syscall {
