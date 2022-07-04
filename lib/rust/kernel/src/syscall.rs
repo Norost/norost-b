@@ -151,7 +151,6 @@ pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
 		io::RawDoIo::N0 => syscall!(ID_DO_IO(ty, h)),
 		io::RawDoIo::N1(a) => syscall!(ID_DO_IO(ty, h, a)),
 		io::RawDoIo::N2(a, b) => syscall!(ID_DO_IO(ty, h, a, b)),
-		io::RawDoIo::N3(a, b, c) => syscall!(ID_DO_IO(ty, h, a, b, c)),
 	})
 	.map(|(_, v)| v as u64)
 }

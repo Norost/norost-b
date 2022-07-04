@@ -20,7 +20,7 @@ use core::{
 	ptr::{self, NonNull},
 	sync::atomic::{AtomicU32, Ordering},
 };
-use norost_ipc_spec::{S64, U1, U32, U64};
+use norost_ipc_spec::{S64, U32, U64};
 
 const REQUESTS_MASK: u32 = (1 << 8) - 1;
 const RESPONSES_MASK: u32 = (1 << 8) - 1;
@@ -126,7 +126,7 @@ impl ServerQueue {
 	}
 
 	#[inline]
-	pub fn dequeue(&mut self) -> Option<(Handle, Flags, Request)> {
+	pub fn dequeue(&mut self) -> Option<(Handle, Request)> {
 		let index = self.base.request_tail_ref().load(Ordering::Acquire);
 		(index != self.request_head.0).then(|| {
 			let r = unsafe { ptr::read_volatile(self.base.request_ptr(self.request_head.0)) };
@@ -141,17 +141,21 @@ impl ServerQueue {
 			type S = SeekFrom;
 			(
 				handle.get(),
-				Flags::new(r.binary().get(), r.advance().get(), r.meta().get()),
 				match r.ty().unwrap() {
-					T::Read => R::Read {
+					t @ T::Read | t @ T::Peek => R::Read {
 						job_id,
 						amount: args.amount().get(),
+						peek: t == T::Peek,
 					},
 					T::Write => R::Write {
 						job_id,
 						data: Slice::from_raw(args.slice()),
 					},
 					T::Open => R::Open {
+						job_id,
+						path: Slice::from_raw(args.slice()),
+					},
+					T::OpenMeta => R::OpenMeta {
 						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
@@ -213,14 +217,23 @@ impl ClientQueue {
 	///
 	/// This does not check if the queue is full.
 	#[inline]
-	fn enqueue(&mut self, handle: Handle, flags: Flags, request: Request) {
+	fn enqueue(&mut self, handle: Handle, request: Request) {
 		let mut v = raw::RequestArgs::default();
 		type T = raw::RequestType;
 		type R = Request;
 		let (job_id, ty, ()) = match request {
-			R::Read { job_id, amount } => (job_id, T::Read, v.set_amount(U32::new(amount))),
+			R::Read {
+				job_id,
+				amount,
+				peek,
+			} => (
+				job_id,
+				if peek { T::Peek } else { T::Read },
+				v.set_amount(U32::new(amount)),
+			),
 			R::Write { job_id, data } => (job_id, T::Write, v.set_slice(data.into_raw())),
 			R::Open { job_id, path } => (job_id, T::Open, v.set_slice(path.into_raw())),
+			R::OpenMeta { job_id, path } => (job_id, T::OpenMeta, v.set_slice(path.into_raw())),
 			R::Close => (JobId::default(), T::Close, ()),
 			R::Create { job_id, path } => (job_id, T::Create, v.set_slice(path.into_raw())),
 			R::Destroy { job_id, path } => (job_id, T::Destroy, v.set_slice(path.into_raw())),
@@ -233,9 +246,6 @@ impl ClientQueue {
 		};
 		let mut r = raw::Request::default();
 		r.set_ty(ty);
-		r.set_binary(U1::new(flags.binary()));
-		r.set_advance(U1::new(flags.advance()));
-		r.set_meta(U1::new(flags.meta()));
 		r.set_id(job_id);
 		r.set_handle(U32::new(handle));
 		r.set_args(v);
@@ -247,15 +257,10 @@ impl ClientQueue {
 	}
 
 	#[inline]
-	pub fn try_enqueue(
-		&mut self,
-		handle: Handle,
-		flags: Flags,
-		request: Request,
-	) -> Result<(), Full> {
+	pub fn try_enqueue(&mut self, handle: Handle, request: Request) -> Result<(), Full> {
 		let server_head = self.base.request_head_ref().load(Ordering::Relaxed);
 		(server_head != (self.request_tail - Wrapping(REQUESTS_MASK + 1)).0)
-			.then(|| self.enqueue(handle, flags, request))
+			.then(|| self.enqueue(handle, request))
 			.ok_or(Full)
 	}
 
@@ -278,37 +283,6 @@ impl ClientQueue {
 	}
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Flags(u8);
-
-macro_rules! flag {
-	($f:ident $set_f:ident $bit:literal) => {
-		pub fn $f(&self) -> bool {
-			self.0 & (1 << $bit) != 0
-		}
-
-		pub fn $set_f(&mut self, value: bool) {
-			self.0 &= 1 << $bit;
-			self.0 &= u8::from(value) << $bit;
-		}
-	};
-}
-
-impl Flags {
-	#[inline(always)]
-	pub fn new(binary: bool, advance: bool, meta: bool) -> Self {
-		let mut s = Self::default();
-		s.set_binary(binary);
-		s.set_advance(advance);
-		s.set_meta(meta);
-		s
-	}
-
-	flag!(binary set_binary 0);
-	flag!(advance set_advance 1);
-	flag!(meta set_meta 2);
-}
-
 pub enum SeekFrom {
 	Start(u64),
 	Current(i64),
@@ -316,14 +290,40 @@ pub enum SeekFrom {
 }
 
 pub enum Request {
-	Read { job_id: JobId, amount: u32 },
-	Write { job_id: JobId, data: Slice },
-	Open { job_id: JobId, path: Slice },
+	Read {
+		job_id: JobId,
+		amount: u32,
+		peek: bool,
+	},
+	Write {
+		job_id: JobId,
+		data: Slice,
+	},
+	Open {
+		job_id: JobId,
+		path: Slice,
+	},
+	OpenMeta {
+		job_id: JobId,
+		path: Slice,
+	},
 	Close,
-	Create { job_id: JobId, path: Slice },
-	Destroy { job_id: JobId, path: Slice },
-	Seek { job_id: JobId, from: SeekFrom },
-	Share { job_id: JobId, share: Handle },
+	Create {
+		job_id: JobId,
+		path: Slice,
+	},
+	Destroy {
+		job_id: JobId,
+		path: Slice,
+	},
+	Seek {
+		job_id: JobId,
+		from: SeekFrom,
+	},
+	Share {
+		job_id: JobId,
+		share: Handle,
+	},
 }
 
 pub enum Response {

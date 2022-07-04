@@ -12,7 +12,10 @@ use core::{
 	ptr::NonNull,
 	sync::atomic::Ordering,
 };
-use norostb_kernel::{io::DoIo, syscall};
+use norostb_kernel::{
+	io::{DoIo, DoIoOp},
+	syscall,
+};
 
 macro_rules! transmute_handle {
 	($fn:ident, $set_fn:ident -> $handle:ident) => {
@@ -98,10 +101,9 @@ pub fn read(handle: Handle, buf: &mut [u8]) -> Result<usize> {
 
 #[inline(always)]
 pub fn read_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	syscall::do_io(DoIo::Read {
+	syscall::do_io(DoIo {
 		handle,
-		buf,
-		peek: false,
+		op: DoIoOp::ReadUninit { buf },
 	})
 	.map(|v| v as _)
 }
@@ -114,42 +116,62 @@ pub fn peek(handle: Handle, buf: &mut [u8]) -> Result<usize> {
 
 #[inline(always)]
 pub fn peek_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	syscall::do_io(DoIo::Read {
+	syscall::do_io(DoIo {
 		handle,
-		buf,
-		peek: true,
+		op: DoIoOp::ReadUninit { buf },
 	})
 	.map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
-	syscall::do_io(DoIo::Write { handle, data }).map(|v| v as _)
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Write { data },
+	})
+	.map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn open(handle: Handle, path: &[u8]) -> Result<Handle> {
-	syscall::do_io(DoIo::Open { handle, path }).map(|v| v as _)
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Open { path },
+	})
+	.map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
-	syscall::do_io(DoIo::Create { handle, path }).map(|v| v as _)
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Create { path },
+	})
+	.map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn destroy(handle: Handle, path: &[u8]) -> Result<u64> {
-	syscall::do_io(DoIo::Destroy { handle, path })
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Destroy { path },
+	})
 }
 
 #[inline(always)]
 pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
-	syscall::do_io(DoIo::Seek { handle, from })
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Seek { from },
+	})
 }
 
 #[inline(always)]
 pub fn share(handle: Handle, share: Handle) -> Result<u64> {
-	syscall::do_io(DoIo::Share { handle, share })
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Share { share },
+	})
 }
 
 #[inline(always)]
@@ -171,5 +193,8 @@ pub fn map_object(
 
 #[inline]
 pub fn close(handle: Handle) {
-	let _ = syscall::do_io(DoIo::Close { handle });
+	let _ = syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::Close,
+	});
 }

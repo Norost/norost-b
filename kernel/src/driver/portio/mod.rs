@@ -52,18 +52,13 @@ impl Object for IoMap {
 		Ticket::new_complete(Ok(n.into()))
 	}
 
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
 		Ticket::new_complete(match length {
-			1 => Ok(Self::fetch_byte(self.head.fetch_add(1, Ordering::Relaxed))),
-			2 => todo!(),
-			4 => todo!(),
-			_ => Err(Error::InvalidData),
-		})
-	}
-
-	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
-		Ticket::new_complete(match length {
-			1 => Ok(Self::fetch_byte(self.head.load(Ordering::Relaxed))),
+			1 => Ok(Self::fetch_byte(if peek {
+				self.head.load(Ordering::Relaxed)
+			} else {
+				self.head.fetch_add(1, Ordering::Relaxed)
+			})),
 			2 => todo!(),
 			4 => todo!(),
 			_ => Err(Error::InvalidData),

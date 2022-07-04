@@ -79,6 +79,7 @@ impl<T> SpinLock<T> {
 		self.value.get_mut()
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	unsafe fn unlock(&self) {
 		ensure_interrupts_off();

@@ -1,4 +1,4 @@
-use super::{Error, Object, StreamingTableOwner, Ticket};
+use super::{Error, Object, Ticket};
 use crate::{object_table::QueryIter, sync::Mutex};
 use alloc::{
 	boxed::Box,

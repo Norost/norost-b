@@ -57,11 +57,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let sync = root.open(b"gpu/sync").unwrap();
 	let (w, h) = {
 		let mut b = [0; 16];
-		let r = root.open(b"gpu/resolution").unwrap();
+		let r = root.open(b"gpu/resolution_binary").unwrap();
 		let l = r.read(&mut b).unwrap();
-		let r = str::from_utf8(&b[..l]).unwrap();
-		let (w, h) = r.split_once('x').unwrap();
-		(w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap())
+		(
+			u32::from_le_bytes(b[..4].try_into().unwrap()),
+			u32::from_le_bytes(b[4..l].try_into().unwrap()),
+		)
 	};
 	let size = Size::new(w, h);
 
@@ -84,8 +85,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		let mut s = alloc::string::String::with_capacity(64);
 		use core::fmt::Write;
 		let (l, h) = (rect.low(), rect.high());
-		write!(&mut s, "{},{} {},{}", l.x, l.y, h.x, h.y).unwrap();
-		sync.write(s.as_bytes()).unwrap();
+		let [lx0, lx1] = (rect.low().x as u16).to_le_bytes();
+		let [ly0, ly1] = (rect.low().y as u16).to_le_bytes();
+		let [hx0, hx1] = (rect.high().x as u16).to_le_bytes();
+		let [hy0, hy1] = (rect.high().y as u16).to_le_bytes();
+		sync.write(&[lx0, lx1, ly0, ly1, hx0, hx1, hy0, hy1])
+			.unwrap();
 	};
 	let fill = |rect: math::Rect, color: [u8; 3]| {
 		let s = rect.size().x as usize * rect.size().y as usize;
@@ -121,7 +126,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	loop {
 		let mut send_notif = false;
-		while let Some((handle, flags, req)) = table.dequeue() {
+		while let Some((handle, req)) = table.dequeue() {
 			let (job_id, response) = match req {
 				Request::Create { job_id, path } => (job_id, {
 					let mut p = [0; 8];

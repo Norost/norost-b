@@ -167,7 +167,7 @@ extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _
 
 // Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
 #[cfg(target_pointer_width = "64")]
-extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
+extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, _: usize, _: usize) -> Return {
 	use super::block_on;
 	let handle = unerase_handle(handle as _);
 	debug!("do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
@@ -180,19 +180,15 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 		};
 		let ins = |l: &mut arena::Arena<_, _>, o| Return::handle(erase_handle(l.insert(o)));
 		match ty {
-			Request::READ => block_on(if c != 0 { o.peek(b) } else { o.read(b) }).map_or_else(
-				Return::error,
-				|r| {
+			Request::READ | Request::PEEK => block_on(o.clone().read(b, ty == Request::PEEK))
+				.map_or_else(Return::error, |r| {
 					assert!(r.len() <= b, "object returned too much data");
-					unsafe {
-						(a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len());
-					}
+					unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
 					Return {
 						status: 0,
 						value: r.len(),
 					}
-				},
-			),
+				}),
 			Request::WRITE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
 				block_on(o.clone().write(r)).map_or_else(Return::error, |r| Return {
@@ -200,14 +196,16 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 					value: r.try_into().unwrap(),
 				})
 			}
-			Request::OPEN => {
+			Request::OPEN | Request::OPEN_META | Request::CREATE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
-				let _ = core::str::from_utf8(r);
-				block_on(o.clone().open(r)).map_or_else(Return::error, |o| ins(objects, o))
-			}
-			Request::CREATE => {
-				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
-				block_on(o.clone().create(r)).map_or_else(Return::error, |o| ins(objects, o))
+				let o = o.clone();
+				block_on(match ty {
+					Request::OPEN => o.open(r),
+					Request::OPEN_META => o.open_meta(r),
+					Request::CREATE => o.create(r),
+					_ => unreachable!(),
+				})
+				.map_or_else(Return::error, |o| ins(objects, o))
 			}
 			Request::DESTROY => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
@@ -220,13 +218,12 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 				.map_or(Return::INVALID_DATA, |s| {
 					block_on(o.seek(s)).map_or_else(Return::error, return_u64)
 				}),
-			Request::CLOSE => {
-				objects.remove(handle).unwrap();
-				Return {
-					status: 0,
-					value: 0,
-				}
-			}
+			Request::CLOSE => Return {
+				status: objects
+					.remove(handle)
+					.map_or(Error::InvalidObject as _, |_| 0),
+				value: 0,
+			},
 			Request::SHARE => objects
 				.get(unerase_handle(a as _))
 				.map_or(Return::INVALID_OBJECT, |s| {

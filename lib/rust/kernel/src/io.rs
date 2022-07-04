@@ -33,8 +33,8 @@ pub struct Request {
 	pub ty: u8,
 	/// Storage for 8-bit arguments.
 	pub arguments_8: [u8; 3],
-	/// Storage for 32-bit arguments.
-	pub arguments_32: [u32; 1],
+	/// Handle to object to perform the operation on.
+	pub handle: Handle,
 	/// Storage for 64-bit arguments. This storage is also used for pointers.
 	pub arguments_64: [u64; 2],
 	/// User data which will be returned with the response.
@@ -43,187 +43,204 @@ pub struct Request {
 
 impl Request {
 	pub const READ: u8 = 0;
-	pub const WRITE: u8 = 1;
-	pub const OPEN: u8 = 2;
-	pub const CREATE: u8 = 3;
-	pub const DESTROY: u8 = 4;
-	pub const SEEK: u8 = 8;
-	pub const CLOSE: u8 = 10;
-	pub const PEEK: u8 = 11;
-	pub const SHARE: u8 = 12;
+	pub const PEEK: u8 = 1;
+	pub const WRITE: u8 = 2;
+	pub const OPEN: u8 = 3;
+	pub const OPEN_META: u8 = 4;
+	pub const CREATE: u8 = 5;
+	pub const DESTROY: u8 = 6;
+	pub const SEEK: u8 = 7;
+	pub const CLOSE: u8 = 8;
+	pub const SHARE: u8 = 9;
 
+	#[inline(always)]
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
 			ty: Self::READ,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn read_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
 		Self {
 			ty: Self::READ,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
+	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			handle,
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			handle,
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
 	pub fn write(user_data: u64, handle: Handle, buf: &[u8]) -> Self {
 		Self {
 			ty: Self::WRITE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn open(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
+	pub fn open_meta(user_data: u64, handle: Handle, path: &[u8]) -> Self {
+		Self {
+			ty: Self::OPEN_META,
+			handle,
+			arguments_64: [path.as_ptr() as u64, path.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
 	pub fn create(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn seek(user_data: u64, handle: Handle, from: SeekFrom) -> Self {
 		let (t, n) = from.into_raw();
 		Self {
 			ty: Self::SEEK,
+			handle,
 			arguments_8: [t, 0, 0],
-			arguments_32: [handle],
 			arguments_64: [n, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn close(user_data: u64, handle: Handle) -> Self {
 		Self {
 			ty: Self::CLOSE,
-			arguments_32: [handle],
+			handle,
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
-		Self {
-			ty: Self::PEEK,
-			arguments_32: [handle],
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
-		Self {
-			ty: Self::PEEK,
-			arguments_32: [handle],
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
+	#[inline(always)]
 	pub fn share(user_data: u64, handle: Handle, share: Handle) -> Self {
 		Self {
 			ty: Self::SHARE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [share.into(), 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn destroy(user_data: u64, handle: Handle) -> Self {
 		Self {
 			ty: Self::DESTROY,
-			arguments_32: [handle],
+			handle,
 			user_data,
 			..Default::default()
 		}
 	}
 }
 
-pub enum DoIo<'a> {
-	Read {
-		handle: Handle,
-		buf: &'a mut [MaybeUninit<u8>],
-		peek: bool,
-	},
-	Write {
-		handle: Handle,
-		data: &'a [u8],
-	},
-	Open {
-		handle: Handle,
-		path: &'a [u8],
-	},
-	Create {
-		handle: Handle,
-		path: &'a [u8],
-	},
-	Destroy {
-		handle: Handle,
-		path: &'a [u8],
-	},
-	Seek {
-		handle: Handle,
-		from: SeekFrom,
-	},
-	Close {
-		handle: Handle,
-	},
-	Share {
-		handle: Handle,
-		share: Handle,
-	},
+pub struct DoIo<'a> {
+	pub handle: Handle,
+	pub op: DoIoOp<'a>,
+}
+
+pub enum DoIoOp<'a> {
+	/// Read data from an object.
+	Read { buf: &'a mut [u8] },
+	/// Read data from an object.
+	ReadUninit { buf: &'a mut [MaybeUninit<u8>] },
+	/// Read data from an object without discarding it on the server side.
+	Peek { buf: &'a mut [u8] },
+	/// Read data from an object without discarding it on the server side.
+	PeekUninit { buf: &'a mut [MaybeUninit<u8>] },
+	/// Write data to an object.
+	Write { data: &'a [u8] },
+	/// Open an object at the given location.
+	Open { path: &'a [u8] },
+	/// Open an object with meta-information at the given location.
+	OpenMeta { path: &'a [u8] },
+	/// Create an object at the given location.
+	Create { path: &'a [u8] },
+	/// Destroy an object at the given location.
+	Destroy { path: &'a [u8] },
+	/// Set the seek head.
+	Seek { from: SeekFrom },
+	/// Close a handle to an object.
+	Close,
+	/// Share an object.
+	Share { share: Handle },
 }
 
 impl DoIo<'_> {
 	#[inline]
-	pub(crate) fn into_args(self) -> (u8, u32, RawDoIo) {
+	pub(crate) fn into_args(self) -> (u8, Handle, RawDoIo) {
 		use RawDoIo::*;
 		type R = Request;
-		match self {
-			Self::Read { handle, buf, peek } => (
-				R::READ,
-				handle,
-				N3(buf.as_ptr() as _, buf.len(), peek.into()),
-			),
-			Self::Write { handle, data } => (R::WRITE, handle, N2(data.as_ptr() as _, data.len())),
-			Self::Open { handle, path } => (R::OPEN, handle, N2(path.as_ptr() as _, path.len())),
-			Self::Create { handle, path } => {
-				(R::CREATE, handle, N2(path.as_ptr() as _, path.len()))
-			}
-			Self::Destroy { handle, path } => {
-				(R::DESTROY, handle, N2(path.as_ptr() as _, path.len()))
-			}
-			Self::Seek { handle, from } => {
+		let h = self.handle;
+		match self.op {
+			DoIoOp::Read { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::ReadUninit { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::Peek { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::PeekUninit { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::Write { data } => (R::WRITE, h, N2(data.as_ptr() as _, data.len())),
+			DoIoOp::Open { path } => (R::OPEN, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::OpenMeta { path } => (R::OPEN_META, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Create { path } => (R::CREATE, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Destroy { path } => (R::DESTROY, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Seek { from } => {
 				let (t, o) = from.into_raw();
 				#[cfg(target_pointer_width = "64")]
-				(R::SEEK, handle, N2(t.into(), o as _))
+				(R::SEEK, h, N2(t.into(), o as _))
 			}
-			Self::Close { handle } => (R::CLOSE, handle, N0),
-			Self::Share { handle, share } => (R::SHARE, handle, N1(share as _)),
+			DoIoOp::Close => return (R::CLOSE, h, N0),
+			DoIoOp::Share { share } => (R::SHARE, h, N1(share as _)),
 		}
 	}
 }
@@ -232,7 +249,6 @@ pub(crate) enum RawDoIo {
 	N0,
 	N1(usize),
 	N2(usize, usize),
-	N3(usize, usize, usize),
 }
 
 impl Default for Request {
@@ -240,7 +256,7 @@ impl Default for Request {
 		Self {
 			ty: u8::MAX,
 			arguments_8: [0; 3],
-			arguments_32: [0; 1],
+			handle: Default::default(),
 			arguments_64: [0; 2],
 			user_data: 0,
 		}

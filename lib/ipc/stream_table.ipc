@@ -15,10 +15,7 @@ struct Queue {
 
 struct Request {
 	ty: RequestType
-	binary: u1
-	advance: u1
-	meta: u1
-	_reserved: u1
+	_reserved: u4
 	id: Id
 	handle: Handle
 	args: RequestArgs
@@ -26,8 +23,10 @@ struct Request {
 
 enum RequestType {
 	Read
+	Peek
 	Write
 	Open
+	OpenMeta
 	Close
 	Create
 	Destroy

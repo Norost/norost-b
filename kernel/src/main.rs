@@ -35,7 +35,7 @@ use crate::{
 		frame::{PageFrameIter, PPN},
 		Page,
 	},
-	object_table::{Error, MemoryObject, Object, QueryIter, Ticket},
+	object_table::{Error, MemoryObject, Object, QueryIter, SeekFrom, Ticket},
 };
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc};
 use core::{cell::Cell, mem::ManuallyDrop, panic::PanicInfo};
@@ -157,20 +157,14 @@ struct DriverObject {
 }
 
 impl Object for DriverObject {
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
 		let bottom = self.data.len().min(self.position.get());
 		let top = self.data.len().min(self.position.get() + length);
-		self.position.set(top);
+		(!peek).then(|| self.position.set(top));
 		Ticket::new_complete(Ok(self.data[bottom..top].into()))
 	}
 
-	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
-		let bottom = self.data.len().min(self.position.get());
-		let top = self.data.len().min(self.position.get() + length);
-		Ticket::new_complete(Ok(self.data[bottom..top].into()))
-	}
-
-	fn seek(&self, from: norostb_kernel::io::SeekFrom) -> Ticket<u64> {
+	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
 		self.position.set(match from {
 			norostb_kernel::io::SeekFrom::Start(n) => n.try_into().unwrap_or(usize::MAX),
 			norostb_kernel::io::SeekFrom::Current(n) => (i64::try_from(self.position.get())

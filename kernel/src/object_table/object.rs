@@ -10,7 +10,14 @@ pub trait Object {
 	}
 
 	/// Open a single object based on path.
-	fn open(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		let _ = path;
+		not_implemented()
+	}
+
+	/// Open an object with meta-information based on path.
+	fn open_meta(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		let _ = path;
 		not_implemented()
 	}
 
@@ -19,11 +26,8 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn read(&self, _length: usize) -> Ticket<Box<[u8]>> {
-		not_implemented()
-	}
-
-	fn peek(&self, _length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
+		let _ = (length, peek);
 		not_implemented()
 	}
 

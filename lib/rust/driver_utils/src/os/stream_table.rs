@@ -6,7 +6,7 @@ use norostb_rt::{
 	io::{Pow2Size, SeekFrom},
 };
 
-pub use nora_stream_table::{Flags, JobId};
+pub use nora_stream_table::JobId;
 
 pub struct StreamTable {
 	queue: RefCell<ServerQueue>,
@@ -54,16 +54,28 @@ impl StreamTable {
 		self.table.open(b"table").unwrap()
 	}
 
-	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Flags, Request)> {
+	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Request)> {
 		type R = nora_stream_table::Request;
-		let (h, f, r) = self.queue.borrow_mut().dequeue()?;
+		let (h, r) = self.queue.borrow_mut().dequeue()?;
 		let r = match r {
-			R::Read { job_id, amount } => Request::Read { job_id, amount },
+			R::Read {
+				job_id,
+				amount,
+				peek,
+			} => Request::Read {
+				job_id,
+				amount,
+				peek,
+			},
 			R::Write { job_id, data } => Request::Write {
 				job_id,
 				data: self.get_owned_buf(data),
 			},
 			R::Open { job_id, path } => Request::Open {
+				job_id,
+				path: self.get_owned_buf(path),
+			},
+			R::OpenMeta { job_id, path } => Request::OpenMeta {
 				job_id,
 				path: self.get_owned_buf(path),
 			},
@@ -89,7 +101,7 @@ impl StreamTable {
 				share: self.table.open(&share.to_le_bytes()).unwrap(),
 			},
 		};
-		Some((h, f, r))
+		Some((h, r))
 	}
 
 	pub fn enqueue(&self, job_id: JobId, response: Response) {
@@ -130,14 +142,40 @@ impl StreamTable {
 }
 
 pub enum Request<'a> {
-	Read { job_id: JobId, amount: u32 },
-	Write { job_id: JobId, data: Data<'a> },
-	Open { job_id: JobId, path: Data<'a> },
+	Read {
+		job_id: JobId,
+		amount: u32,
+		peek: bool,
+	},
+	Write {
+		job_id: JobId,
+		data: Data<'a>,
+	},
+	Open {
+		job_id: JobId,
+		path: Data<'a>,
+	},
+	OpenMeta {
+		job_id: JobId,
+		path: Data<'a>,
+	},
 	Close,
-	Create { job_id: JobId, path: Data<'a> },
-	Destroy { job_id: JobId, path: Data<'a> },
-	Seek { job_id: JobId, from: SeekFrom },
-	Share { job_id: JobId, share: rt::Object },
+	Create {
+		job_id: JobId,
+		path: Data<'a>,
+	},
+	Destroy {
+		job_id: JobId,
+		path: Data<'a>,
+	},
+	Seek {
+		job_id: JobId,
+		from: SeekFrom,
+	},
+	Share {
+		job_id: JobId,
+		share: rt::Object,
+	},
 }
 
 pub enum Response<'a> {

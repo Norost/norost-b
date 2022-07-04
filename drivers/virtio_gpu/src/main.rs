@@ -169,12 +169,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	enum H {
 		Resolution,
+		ResolutionBinary,
+		Finished,
 	}
 
 	// Begin event loop
 	loop {
 		let mut send_notif = false;
-		while let Some((handle, flags, req)) = tbl.dequeue() {
+		while let Some((handle, req)) = tbl.dequeue() {
 			let (job_id, response) = match req {
 				Request::Open { job_id, path } => (job_id, {
 					let mut p = [0; 64];
@@ -186,31 +188,42 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						(Handle::MAX, b"resolution") => {
 							Response::Handle(handles.insert(H::Resolution))
 						}
+						(Handle::MAX, b"resolution_binary") => {
+							Response::Handle(handles.insert(H::ResolutionBinary))
+						}
 						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
 						_ => Response::Error(Error::InvalidOperation as _),
 					}
 				}),
-				Request::Read { job_id, amount } => (
+				Request::OpenMeta { .. } => todo!(),
+				Request::Read {
+					job_id,
+					amount,
+					peek,
+				} => (
 					job_id,
 					match handle {
 						Handle::MAX | SYNC_HANDLE => Response::Error(Error::InvalidOperation as _),
 						h => {
 							let buf = tbl.alloc(64).unwrap();
 							let l = match &mut handles[h] {
-								H::Resolution => {
-									if flags.binary() {
-										buf.copy_from(0, &(width as u32).to_le_bytes());
-										buf.copy_from(4, &(height as u32).to_le_bytes());
-										8
-									} else {
-										let (w, h) = (width.to_string(), height.to_string());
-										buf.copy_from(0, w.as_bytes());
-										buf.copy_from(w.len(), &[b'x']);
-										buf.copy_from(w.len() + 1, h.as_bytes());
-										(w.len() + 1 + h.len()).try_into().unwrap()
-									}
+								H::ResolutionBinary => {
+									buf.copy_from(0, &(width as u32).to_le_bytes());
+									buf.copy_from(4, &(height as u32).to_le_bytes());
+									8
 								}
+								H::Resolution => {
+									let (w, h) = (width.to_string(), height.to_string());
+									buf.copy_from(0, w.as_bytes());
+									buf.copy_from(w.len(), &[b'x']);
+									buf.copy_from(w.len() + 1, h.as_bytes());
+									(w.len() + 1 + h.len()).try_into().unwrap()
+								}
+								H::Finished => 0,
 							};
+							if !peek {
+								handles[h] = H::Finished;
+							}
 							Response::Data {
 								data: buf,
 								length: l,
@@ -226,64 +239,41 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let r = match handle {
 						// Blit a specific area
 						SYNC_HANDLE => {
-							if flags.binary() {
-								if let &mut [xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1] = d {
-									let f = |l, h| u32::from(u16::from_le_bytes([l, h]));
-									let (x0, y0, x1, y1) =
-										(f(xl0, xl1), f(yl0, yl1), f(xh0, xh1), f(yh0, yh1));
-									let (xl, yl) = (x0.min(x1), y0.min(y1));
-									let (xh, yh) = (x0.max(x1), y0.max(y1));
-									let r = Rect::new(xl, yl, xh - xl, yh - yl);
-									dev.draw(id, r, &mut buf).expect("failed to draw");
-									Response::Amount(d.len().try_into().unwrap())
-								} else {
-									Response::Error(Error::InvalidData as _)
-								}
-							} else {
-								if let Some(r) = (|| {
-									let s = str::from_utf8(d).ok()?;
-									let f = |n: &str| n.parse::<u32>().ok();
-									let (l, h) = s.split_once(' ')?;
-									let (xl, yl) = l.split_once(',')?;
-									let (xh, yh) = h.split_once(',')?;
-									let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
-									let (xl, yl) = (x0.min(x1), y0.min(y1));
-									let (xh, yh) = (x0.max(x1), y0.max(y1));
-									Some(Rect::new(xl, yl, xh - xl + 1, yh - yl + 1))
-								})() {
-									let area = r.height() as usize * r.width() as usize;
-									assert!(area * 4 <= fb.size());
-									assert!(area * 3 <= command_buf.1);
-									unsafe {
-										fb.virt().as_ptr().write_bytes(200, fb.size());
-										for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
-											for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
-												let fi =
-													fy as usize * r.width() as usize + fx as usize;
-												// QEMU uses the stride of the *host* for the *guest*
-												// memory too. Don't ask me why, this is documented literally
-												// nowhere.
-												// This, by the way, is the *only* reason we're forced to
-												// allocate a framebuffer matching the host size.
-												let ti = ty as usize * width as usize + tx as usize;
-												let [r, g, b] = *command_buf
-													.0
-													.as_ptr()
-													.cast::<[u8; 3]>()
-													.add(fi);
-												fb.virt()
-													.as_ptr()
-													.cast::<[u8; 4]>()
-													.add(ti)
-													.write([r, g, b, 0]);
-											}
+							if let &mut [xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1] = d {
+								let f = |l, h| u32::from(u16::from_le_bytes([l, h]));
+								let (x0, y0) = (f(xl0, xl1), f(yl0, yl1));
+								let (x1, y1) = (f(xh0, xh1), f(yh0, yh1));
+								let (xl, yl) = (x0.min(x1), y0.min(y1));
+								let (xh, yh) = (x0.max(x1), y0.max(y1));
+								let r = Rect::new(xl, yl, xh - xl + 1, yh - yl + 1);
+								let area = r.height() as usize * r.width() as usize;
+								assert!(area * 4 <= fb.size());
+								assert!(area * 3 <= command_buf.1);
+								unsafe {
+									fb.virt().as_ptr().write_bytes(200, fb.size());
+									for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
+										for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
+											let fi = fy as usize * r.width() as usize + fx as usize;
+											// QEMU uses the stride of the *host* for the *guest*
+											// memory too. Don't ask me why, this is documented literally
+											// nowhere.
+											// This, by the way, is the *only* reason we're forced to
+											// allocate a framebuffer matching the host size.
+											let ti = ty as usize * width as usize + tx as usize;
+											let [r, g, b] =
+												*command_buf.0.as_ptr().cast::<[u8; 3]>().add(fi);
+											fb.virt()
+												.as_ptr()
+												.cast::<[u8; 4]>()
+												.add(ti)
+												.write([r, g, b, 0]);
 										}
 									}
-									dev.draw(id, r, &mut buf).expect("failed to draw");
-									Response::Amount(d.len().try_into().unwrap())
-								} else {
-									Response::Error(Error::InvalidData as _)
 								}
+								dev.draw(id, r, &mut buf).expect("failed to draw");
+								Response::Amount(d.len().try_into().unwrap())
+							} else {
+								Response::Error(Error::InvalidData as _)
 							}
 						}
 						_ => Response::Error(Error::InvalidOperation as _),

@@ -150,25 +150,14 @@ impl super::Process {
 					ticket,
 				})
 			};
+			let handle = unerase_handle(e.handle);
 			match e.ty {
-				Request::READ => {
-					let handle = unerase_handle(e.arguments_32[0]);
+				Request::READ | Request::PEEK => {
 					let data_ptr = e.arguments_64[0] as *mut u8;
 					let data_len = e.arguments_64[1] as usize;
-					let object = objects.get(handle).unwrap();
-					let mut ticket = object.read(data_len.try_into().unwrap());
-					match poll(&mut ticket) {
-						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
-						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
-						Poll::Ready(Err(e)) => push_resp(e as i64),
-					}
-				}
-				Request::PEEK => {
-					let handle = unerase_handle(e.arguments_32[0]);
-					let data_ptr = e.arguments_64[0] as *mut u8;
-					let data_len = e.arguments_64[1] as usize;
-					let object = objects.get(handle).unwrap();
-					let mut ticket = object.peek(data_len.try_into().unwrap());
+					let object = objects.get(handle).unwrap().clone();
+					let mut ticket =
+						object.read(data_len.try_into().unwrap(), e.ty == Request::PEEK);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
@@ -176,7 +165,6 @@ impl super::Process {
 					}
 				}
 				Request::WRITE => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					let data_ptr = e.arguments_64[0] as *const u8;
 					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
@@ -195,7 +183,6 @@ impl super::Process {
 					}
 				}
 				Request::OPEN => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
@@ -213,7 +200,6 @@ impl super::Process {
 					}
 				}
 				Request::CREATE => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
@@ -228,7 +214,6 @@ impl super::Process {
 					}
 				}
 				Request::SEEK => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					let direction = e.arguments_8[0];
 					let offset = e.arguments_64[0];
 
@@ -250,12 +235,10 @@ impl super::Process {
 					}
 				}
 				Request::CLOSE => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					// We are not supposed to return a response under any circumstances.
 					let _ = objects.remove(handle);
 				}
 				Request::SHARE => {
-					let handle = unerase_handle(e.arguments_32[0]);
 					let share = unerase_handle(e.arguments_64[0] as Handle);
 					if let (Some(obj), Some(shr)) = (objects.get(handle), objects.get(share)) {
 						let mut ticket = obj.clone().share(shr);

@@ -106,7 +106,7 @@ struct IrqPollInner {
 pub struct IrqPoll(SpinLock<IrqPollInner>);
 
 impl Object for IrqPoll {
-	fn read(&self, _: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, _: usize, _: bool) -> Ticket<Box<[u8]>> {
 		let mut inner = self.0.lock();
 		if mem::take(&mut inner.irq_occurred) {
 			Ticket::new_complete(Ok([].into()))
