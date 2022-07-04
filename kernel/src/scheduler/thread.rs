@@ -56,7 +56,7 @@ impl Thread {
 					color: 0,
 				},
 			)?;
-			let kernel_stack_base =
+			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
 			let mut kernel_stack = kernel_stack_top(kernel_stack_base).cast::<usize>().as_ptr();
@@ -90,8 +90,8 @@ impl Thread {
 		}
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
-	#[track_caller]
 	pub unsafe fn set_handle(&self, handle: Handle) {
 		// Replace thread handle with proper value (rax)
 		unsafe {
@@ -105,8 +105,26 @@ impl Thread {
 	}
 
 	/// Create a new kernel-only thread.
-	pub(super) fn kernel_new(
+	pub(super) fn kernel_new_0(
 		start: extern "C" fn() -> !,
+		enable_interrupts: bool,
+	) -> Result<Self, frame::AllocateError> {
+		Self::kernel_new(start as _, &[], enable_interrupts)
+	}
+
+	/// Create a new kernel-only thread.
+	pub(super) fn kernel_new_1(
+		start: extern "C" fn(usize) -> !,
+		arg: usize,
+		enable_interrupts: bool,
+	) -> Result<Self, frame::AllocateError> {
+		Self::kernel_new(start as _, &[arg], enable_interrupts)
+	}
+
+	/// Create a new kernel-only thread.
+	fn kernel_new(
+		start: *const (),
+		args: &[usize],
 		enable_interrupts: bool,
 	) -> Result<Self, frame::AllocateError> {
 		// TODO ditto
@@ -118,9 +136,10 @@ impl Thread {
 					color: 0,
 				},
 			)?;
-			let kernel_stack_base =
+			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
+			dbg!(kernel_stack_base);
 			// The stack must be aligned to 16 bytes *before* a call according to SysV ABI.
 			// We will write 5 + 15 registers, which comes out at 160 bytes, ergo it is
 			// already properly aligned.
@@ -136,6 +155,13 @@ impl Thread {
 			push(0x2 | usize::from(enable_interrupts) * 0x200);
 			push(crate::arch::amd64::GDT::KERNEL_CS.into());
 			push(start as usize); // rip
+
+			// Set arguments
+			debug_assert!(args.len() <= 1, "TODO: more arguments than 1");
+			let (rdi, rsi) = (5, 6);
+			for (&offt, &arg) in [rdi, rsi].iter().zip(args) {
+				kernel_stack.sub(offt).write(arg);
+			}
 
 			// Reserve space for (zeroed) registers
 			// 15 GP registers without RSP
@@ -155,7 +181,7 @@ impl Thread {
 	}
 
 	/// Get a reference to the owning process.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn process(&self) -> Option<&Arc<Process>> {
 		self.process.as_ref()

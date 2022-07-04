@@ -8,6 +8,7 @@ mod float;
 pub mod msr;
 mod multiboot;
 pub mod scheduler;
+pub mod sync;
 mod syscall;
 mod tss;
 pub mod r#virtual;
@@ -378,7 +379,7 @@ pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
 	const _: extern "C" fn(*const ()) -> ! = $f;
 	let data: *const () = $data;
 	unsafe {
-		asm!(
+		core::arch::asm!(
 			"cli",
 			"push rbp",
 			"mov  rbp, rsp",

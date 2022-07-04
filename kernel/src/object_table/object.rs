@@ -5,12 +5,19 @@ use alloc::{boxed::Box, sync::Arc};
 pub trait Object {
 	/// Create a memory object to interact with this object. May be `None` if this object cannot
 	/// be accessed directly through memory operations.
-	fn memory_object(self: Arc<Self>, _offset: u64) -> Option<Arc<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
 		None
 	}
 
 	/// Open a single object based on path.
-	fn open(self: Arc<Self>, _path: &[u8]) -> Ticket<Arc<dyn Object>> {
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		let _ = path;
+		not_implemented()
+	}
+
+	/// Open an object with meta-information based on path.
+	fn open_meta(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		let _ = path;
 		not_implemented()
 	}
 
@@ -19,15 +26,12 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn read(&self, _length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
+		let _ = (length, peek);
 		not_implemented()
 	}
 
-	fn peek(&self, _length: usize) -> Ticket<Box<[u8]>> {
-		not_implemented()
-	}
-
-	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<u64> {
 		not_implemented()
 	}
 
@@ -35,11 +39,11 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn poll(&self) -> Ticket<usize> {
+	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
 		not_implemented()
 	}
 
-	fn share(&self, _object: &Arc<dyn Object>) -> Ticket<u64> {
+	fn destroy(&self, _path: &[u8]) -> Ticket<u64> {
 		not_implemented()
 	}
 }

@@ -1,6 +1,7 @@
 //! Bitmap-based allocator. Intended for DMA allocations.
 
-use super::{MemoryRegion, NonZeroUsize, PPN};
+use super::{NonZeroUsize, Page, PPN};
+use crate::boot::MemoryRegion;
 use core::ops::{BitAnd, BitAndAssign, Not, Shl, Shr};
 
 pub(super) struct FixedBitmap {
@@ -16,11 +17,11 @@ impl FixedBitmap {
 		if self.bitmap.0[0] & 1 != 0 {
 			return;
 		}
-		if let Some(count) = mr.count.checked_sub(128 * self.bitmap.0.len()) {
-			self.base = mr.base;
+		if let Some(base) = mr.take_page_range(128 * self.bitmap.0.len()) {
+			self.base = PPN((base >> Page::OFFSET_BITS)
+				.try_into()
+				.expect("TODO: page address out of range"));
 			self.bitmap.0.iter_mut().for_each(|n| *n = u128::MAX);
-			mr.base = mr.base.skip((128 * self.bitmap.0.len()) as _);
-			mr.count = count;
 		}
 	}
 

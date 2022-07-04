@@ -16,7 +16,7 @@ pub mod uart;
 #[cfg(feature = "driver-vga")]
 pub mod vga;
 
-use crate::boot;
+use crate::{boot, object_table::Root};
 
 /// Initialize drivers that are needed very early in the boot process.
 ///
@@ -32,14 +32,14 @@ pub unsafe fn early_init(_boot: &boot::Info) {
 
 /// # Safety
 ///
-/// This function may only be called once at boot time
-pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
+/// This function must be called exactly once at boot time.
+pub unsafe fn init(boot: &boot::Info) {
 	// Do not reorder the calls!
 	unsafe {
 		#[cfg(feature = "driver-vga")]
-		vga::init(root);
+		vga::init();
 
-		acpi::init(boot, root);
+		acpi::init(boot);
 
 		#[cfg(feature = "driver-pic")]
 		pic::init();
@@ -47,11 +47,19 @@ pub unsafe fn init(boot: &boot::Info, root: &crate::object_table::Root) {
 		#[cfg(feature = "driver-rtc")]
 		rtc::init();
 
-		#[cfg(feature = "driver-portio")]
-		portio::init(root);
-
-		apic::post_init();
-
-		uart::post_init(root);
+		uart::init();
 	}
+}
+
+pub fn post_init(root: &Root) {
+	uart::post_init(root);
+
+	#[cfg(feature = "driver-portio")]
+	portio::post_init(root);
+
+	#[cfg(feature = "driver-ps2")]
+	ps2::post_init(root);
+
+	#[cfg(feature = "driver-ps2")]
+	pci::post_init(root);
 }

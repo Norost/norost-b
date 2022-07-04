@@ -3,18 +3,15 @@
 //! For now it's just a big, dumb stack as that's easy.
 
 mod chain;
-mod dma_frame;
+mod dma;
 mod fixed_bitmap;
 mod owned;
 
-pub use dma_frame::*;
 pub use owned::*;
 
 use super::Page;
-use crate::sync::SpinLock;
-use core::fmt;
-use core::num::NonZeroUsize;
-use core::ptr;
+use crate::{boot, object_table::Root, sync::SpinLock};
+use core::{fmt, num::NonZeroUsize, ptr};
 
 /// A Physical Page Number.
 ///
@@ -32,7 +29,6 @@ pub type PPNBox = u32;
 pub type PPNBox = u16;
 
 static DEFAULT: SpinLock<chain::Chain> = SpinLock::new(chain::Chain::new());
-static DMA: SpinLock<fixed_bitmap::FixedBitmap> = SpinLock::new(Default::default());
 
 impl PPN {
 	pub fn try_from_usize(ptr: usize) -> Result<Self, PPNError> {
@@ -76,6 +72,7 @@ impl PPN {
 		self.0 as usize * Page::SIZE
 	}
 
+	#[allow(dead_code)]
 	fn clear(self) {
 		unsafe { ptr::write_bytes(self.as_ptr(), 0, 1) }
 	}
@@ -145,31 +142,8 @@ impl ExactSizeIterator for PageFrameIter {
 	}
 }
 
-/// A region of physical memory
-#[derive(Clone, Debug)]
-pub struct MemoryRegion {
-	pub base: PPN,
-	pub count: usize,
-}
-
-impl MemoryRegion {
-	/// Take a single PPN from the memory region.
-	pub fn take(&mut self) -> Option<PPN> {
-		self.count.checked_sub(1).map(|c| {
-			self.base.0 += 1;
-			self.count = c;
-			PPN(self.base.0 - 1)
-		})
-	}
-}
-
 #[derive(Debug)]
 pub enum AllocateError {
-	OutOfFrames,
-}
-
-#[derive(Debug)]
-pub enum AllocateContiguousError {
 	OutOfFrames,
 }
 
@@ -207,13 +181,6 @@ where
 		.ok_or(AllocateError::OutOfFrames)
 }
 
-/// Allocate a physically contiguous range of pages.
-pub fn allocate_contiguous(count: NonZeroUsize) -> Result<PPN, AllocateContiguousError> {
-	DMA.auto_lock()
-		.pop_range(count)
-		.ok_or(AllocateContiguousError::OutOfFrames)
-}
-
 /// Free a range of pages.
 ///
 /// # Safety
@@ -230,23 +197,29 @@ where
 	Ok(())
 }
 
-/// Add a region for allocation
-///
-/// # Safety
-///
-/// The region may not already be in use.
-pub unsafe fn add_memory_region(mut region: MemoryRegion) {
-	DMA.isr_lock().add_region(&mut region);
-	let mut stack = DEFAULT.isr_lock();
-	while let Some(ppn) = region.take() {
-		// Clear the page beforehand to improve alloc speed and clear any potential secrets.
-		ppn.clear();
-		// Just discard any leftover pages.
-		let _ = stack.push(ppn);
-	}
-}
-
 #[allow(dead_code)]
 pub fn free_memory() -> usize {
 	DEFAULT.lock().count() * 4096
+}
+
+/// # Safety
+///
+/// This may only be called once at boot time.
+pub(super) unsafe fn init(memory_regions: &mut [boot::MemoryRegion]) {
+	unsafe { dma::init(memory_regions) }
+	let mut stack = DEFAULT.isr_lock();
+	for mr in memory_regions.iter_mut() {
+		while let Some(addr) = mr.take_page() {
+			if let Ok(ppn) = (addr >> Page::OFFSET_BITS).try_into() {
+				stack.push(PPN(ppn));
+			}
+		}
+	}
+}
+
+/// # Safety
+///
+/// This may only be called once at boot time.
+pub(super) fn post_init(root: &Root) {
+	dma::post_init(root)
 }

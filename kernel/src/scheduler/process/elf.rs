@@ -1,13 +1,13 @@
-use crate::memory::frame::{self, AllocateHints, OwnedPageFrames};
-use crate::memory::r#virtual::{MapError, RWX};
-use crate::memory::Page;
-use crate::object_table::Object;
-use crate::scheduler::{process::frame::PPN, MemoryObject};
+use crate::{
+	memory::{
+		frame::{self, AllocateHints, OwnedPageFrames},
+		r#virtual::{MapError, RWX},
+		Page,
+	},
+	object_table::{MemoryObject, Object},
+};
 use alloc::sync::Arc;
-use core::mem;
-use core::num::NonZeroUsize;
-use core::ops::Range;
-use core::ptr::NonNull;
+use core::{mem, num::NonZeroUsize, ops::Range, ptr::NonNull};
 
 #[repr(C)]
 struct FileHeader {
@@ -70,42 +70,6 @@ const FLAG_EXEC: u32 = 0x1;
 const FLAG_WRITE: u32 = 0x2;
 const FLAG_READ: u32 = 0x4;
 
-struct MemorySlice {
-	inner: Arc<dyn MemoryObject>,
-	range: Range<usize>,
-}
-
-unsafe impl MemoryObject for MemorySlice {
-	fn physical_pages(&self, cb: &mut dyn FnMut(&[PPN]) -> bool) {
-		let mut skip = self.range.start;
-		let mut len = self.range.end - self.range.start;
-		self.inner.physical_pages(&mut |f| {
-			if len == 0 {
-				false
-			} else if let Some(s) = skip.checked_sub(f.len()) {
-				skip = s;
-				true
-			} else {
-				let f = &f[skip..];
-				skip = 0;
-				let cont;
-				if f.len() > len {
-					cont = cb(&f[..len]);
-					len = 0;
-				} else {
-					cont = cb(f);
-					len -= f.len();
-				}
-				cont
-			}
-		})
-	}
-
-	fn physical_pages_len(&self) -> usize {
-		self.range.end - self.range.start
-	}
-}
-
 impl super::Process {
 	pub fn from_elf(
 		data_object: Arc<dyn MemoryObject>,
@@ -125,8 +89,8 @@ impl super::Process {
 			core::slice::from_raw_parts(data[0].as_ptr().cast::<u8>(), Page::SIZE * data.len())
 		};
 
-		let slf = Self::new().map_err(ElfError::AllocateError)?;
-		*slf.objects.auto_lock() = objects;
+		let mut slf = Self::new().map_err(ElfError::AllocateError)?;
+		*slf.objects.get_mut() = objects;
 
 		(data.len() >= 16)
 			.then(|| ())
@@ -184,7 +148,7 @@ impl super::Process {
 			.then(|| ())
 			.ok_or(ElfError::OffsetOutOfBounds)?;
 
-		let mut address_space = slf.address_space.auto_lock();
+		let address_space = slf.address_space.get_mut();
 
 		for k in 0..count {
 			// SAFETY: the data is large enough and aligned and the header size matches.
@@ -213,11 +177,11 @@ impl super::Process {
 				.then(|| ())
 				.ok_or(ElfError::AddressOffsetMismatch)?;
 
-			let page_offset = usize::try_from(header.offset >> Page::OFFSET_BITS).unwrap();
 			let (phys, virt) = (header.physical_address, header.virtual_address);
 			let count = page_count(phys..phys + header.file_size);
 			let alloc = page_count(virt..virt + header.memory_size);
 
+			let page_offset = usize::try_from(header.offset).unwrap() & !Page::MASK;
 			let virt_address = header.virtual_address & !page_mask;
 			let virt_address = usize::try_from(virt_address).unwrap();
 			let rwx = RWX::from_flags(f & FLAG_READ > 0, f & FLAG_WRITE > 0, f & FLAG_EXEC > 0)?;
@@ -255,22 +219,33 @@ impl super::Process {
 					});
 					assert_eq!(u64::try_from(wr_i - page_offt).unwrap(), header.file_size);
 					address_space
-						.map_object(Some(virt), Arc::new(mem), rwx, slf.hint_color)
+						.map_object(
+							Some(virt),
+							Arc::new(mem),
+							rwx,
+							0,
+							usize::MAX,
+							slf.hint_color,
+						)
 						.map_err(ElfError::MapError)?;
 				}
 			} else {
 				if let Some(count) = NonZeroUsize::new(count) {
 					// Map part of the ELF file.
 					let virt = NonNull::new(virt_address as *mut _).unwrap();
-					let mem = Arc::new(MemorySlice {
-						inner: data_object.clone(),
-						range: page_offset..page_offset + count.get(),
-					});
 					address_space
-						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_object(
+							Some(virt),
+							data_object.clone(),
+							rwx,
+							page_offset,
+							count.get() * Page::SIZE,
+							slf.hint_color,
+						)
 						.map_err(ElfError::MapError)?;
 				}
 				// Allocate memory for the region that isn't present in the ELF file.
+				// TODO a dedicated zero page would make sense for this.
 				if let Some(size) = NonZeroUsize::new(alloc - count) {
 					let virt = NonNull::new((virt_address + count * Page::SIZE) as *mut _).unwrap();
 					let hint = AllocateHints {
@@ -281,7 +256,7 @@ impl super::Process {
 						OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?,
 					);
 					address_space
-						.map_object(Some(virt), mem, rwx, slf.hint_color)
+						.map_object(Some(virt), mem, rwx, 0, usize::MAX, slf.hint_color)
 						.map_err(ElfError::MapError)?;
 				}
 			}
@@ -289,8 +264,15 @@ impl super::Process {
 
 		// Map in stack
 		let stack = if let Some(stack_frames) = stack_frames {
-			let stack = address_space
-				.map_object(None, Arc::new(stack_frames), RWX::RW, slf.hint_color)
+			let (stack, _) = address_space
+				.map_object(
+					None,
+					Arc::new(stack_frames),
+					RWX::RW,
+					0,
+					usize::MAX,
+					slf.hint_color,
+				)
 				.map_err(ElfError::MapError)?;
 			stack.as_ptr().wrapping_add(stack_offset) as usize
 		} else {
@@ -335,14 +317,7 @@ pub enum ElfError {
 	OffsetOutOfBounds,
 	AddressOffsetMismatch,
 	AllocateError(frame::AllocateError),
-	AllocateContiguousError(frame::AllocateContiguousError),
 	MapError(MapError),
-}
-
-impl From<frame::AllocateContiguousError> for ElfError {
-	fn from(err: frame::AllocateContiguousError) -> Self {
-		Self::AllocateContiguousError(err)
-	}
 }
 
 impl From<crate::memory::r#virtual::IncompatibleRWXFlags> for ElfError {

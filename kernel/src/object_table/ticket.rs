@@ -43,8 +43,9 @@ pub struct TicketWaker<T> {
 }
 
 impl<T> TicketWaker<T> {
+	#[cfg_attr(debug_assertions, track_caller)]
 	pub fn complete(self, status: Result<T, Error>) {
-		let mut l = self.inner.auto_lock();
+		let mut l = self.inner.lock();
 		l.waker.take().map(|w| w.wake());
 		l.status = Some(status);
 	}
@@ -73,7 +74,7 @@ impl<T> Future for Ticket<T> {
 	type Output = Result<T, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-		let mut t = self.inner.auto_lock();
+		let mut t = self.inner.lock();
 		if let Some(s) = t.status.take() {
 			return Poll::Ready(s);
 		}
@@ -85,7 +86,6 @@ impl<T> Future for Ticket<T> {
 /// An enum that can hold the common ticket types.
 pub enum AnyTicket {
 	Object(Ticket<Arc<dyn Object>>),
-	Usize(Ticket<usize>),
 	U64(Ticket<u64>),
 	Data(Ticket<Box<[u8]>>),
 }
@@ -93,7 +93,6 @@ pub enum AnyTicket {
 /// An enum that can hold the common ticket waker types.
 pub enum AnyTicketWaker {
 	Object(TicketWaker<Arc<dyn Object>>),
-	Usize(TicketWaker<usize>),
 	U64(TicketWaker<u64>),
 	Data(TicketWaker<Box<[u8]>>),
 }
@@ -101,7 +100,6 @@ pub enum AnyTicketWaker {
 /// An enum that can hold the common ticket result types.
 pub enum AnyTicketValue {
 	Object(Arc<dyn Object>),
-	Usize(usize),
 	U64(u64),
 	Data(Box<[u8]>),
 }
@@ -127,7 +125,7 @@ macro_rules! any_ticket {
 		}
 
 		impl AnyTicketWaker {
-			#[track_caller]
+			#[cfg_attr(debug_assertions, track_caller)]
 			pub fn $f(self) -> TicketWaker<$t> {
 				match self {
 					Self::$v(t) => t,
@@ -138,7 +136,6 @@ macro_rules! any_ticket {
 	};
 }
 any_ticket!(Arc<dyn Object> => Object, into_object);
-any_ticket!(usize => Usize, into_usize);
 any_ticket!(u64 => U64, into_u64);
 any_ticket!(Box<[u8]> => Data, into_data);
 
@@ -146,9 +143,16 @@ impl AnyTicketWaker {
 	pub fn complete_err(self, err: Error) {
 		match self {
 			Self::Object(t) => t.complete(Err(err)),
-			Self::Usize(t) => t.complete(Err(err)),
 			Self::U64(t) => t.complete(Err(err)),
 			Self::Data(t) => t.complete(Err(err)),
+		}
+	}
+
+	pub fn isr_complete_err(self, err: Error) {
+		match self {
+			Self::Object(t) => t.isr_complete(Err(err)),
+			Self::U64(t) => t.isr_complete(Err(err)),
+			Self::Data(t) => t.isr_complete(Err(err)),
 		}
 	}
 }
@@ -159,7 +163,6 @@ impl Future for AnyTicket {
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
 		match &mut *self {
 			Self::Object(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
-			Self::Usize(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 			Self::U64(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 			Self::Data(t) => Pin::new(t).poll(cx).map(|r| r.map(Into::into)),
 		}

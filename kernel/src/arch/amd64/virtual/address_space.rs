@@ -125,21 +125,6 @@ impl AddressSpace {
 		Ok(())
 	}
 
-	/// Map a virtual address to a physical address.
-	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
-		let offt = address.as_ptr() as usize & 0xfff;
-		let tbl = unsafe { self.table() };
-		// TODO hugepages
-		let e = common::get_entry(tbl, address.as_ptr() as u64, 0, 3)?;
-		let p = e.page()?;
-		// TODO check for executable
-		let rwx = match e.is_writeable() {
-			true => RWX::RW,
-			false => RWX::R,
-		};
-		Some((p as usize | offt, rwx))
-	}
-
 	pub unsafe fn activate(&self) {
 		unsafe {
 			asm!("mov cr3, {0}", in(reg) self.cr3);

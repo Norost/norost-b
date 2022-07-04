@@ -33,7 +33,7 @@ impl SubRange {
 }
 
 impl Object for SubRange {
-	fn memory_object(self: Arc<Self>, _offset: u64) -> Option<Arc<dyn MemoryObject>> {
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
 		Some(self)
 	}
 }

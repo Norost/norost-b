@@ -8,9 +8,11 @@
 #![feature(allow_internal_unsafe)]
 #![feature(asm_sym)]
 #![feature(core_intrinsics)]
+#![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]
+#![deny(unused)]
 
 pub mod error;
 #[cfg(feature = "userspace")]

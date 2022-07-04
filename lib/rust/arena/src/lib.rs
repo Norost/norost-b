@@ -51,7 +51,7 @@ where
 			self.index.fmt(f)
 		} else {
 			self.index.fmt(f)?;
-			"@".fmt(f)?;
+			f.write_str("@")?;
 			self.generation.fmt(f)
 		}
 	}
@@ -205,6 +205,13 @@ impl<V, G: Generation> Arena<V, G> {
 	#[inline(always)]
 	pub fn is_empty(&self) -> bool {
 		self.len() == 0
+	}
+
+	#[inline]
+	pub fn clear(&mut self) {
+		self.storage.clear();
+		self.count = 0;
+		self.free = usize::MAX;
 	}
 }
 

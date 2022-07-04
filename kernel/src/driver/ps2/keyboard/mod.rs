@@ -45,6 +45,10 @@ impl LossyRingBuffer {
 			item
 		})
 	}
+
+	fn peek(&mut self) -> Option<Event> {
+		(self.pop != self.push).then(|| self.data[usize::from(self.pop & 0x7f)])
+	}
 }
 
 static EVENTS: SpinLock<LossyRingBuffer> = SpinLock::new(LossyRingBuffer {
@@ -54,7 +58,9 @@ static EVENTS: SpinLock<LossyRingBuffer> = SpinLock::new(LossyRingBuffer {
 });
 static SCANCODE_READERS: SpinLock<Vec<TicketWaker<Box<[u8]>>>> = SpinLock::new(Vec::new());
 
-pub(super) unsafe fn init(port: Port, root: &Root) {
+static mut INIT: bool = false;
+
+pub(super) unsafe fn init(port: Port) {
 	unsafe {
 		// Use scancode set 2 since it's the only set that should be supported on all systems.
 		write_raw_port_command(port, KeyboardCommand::GetSetScanCodeSet as u8).unwrap();
@@ -82,11 +88,17 @@ pub(super) unsafe fn init(port: Port, root: &Root) {
 		// Enable scanning
 		write_port_command(port, PortCommand::EnableScanning).unwrap();
 		read_port_data_with_acknowledge().unwrap();
-	}
 
-	let tbl = Arc::new(table::KeyboardTable) as Arc<dyn crate::object_table::Object>;
-	root.add(&b"ps2_keyboard"[..], Arc::downgrade(&tbl));
-	mem::forget(tbl)
+		INIT = true;
+	}
+}
+
+pub(super) fn post_init(root: &Root) {
+	if unsafe { INIT } {
+		let tbl = Arc::new(table::KeyboardTable) as Arc<dyn crate::object_table::Object>;
+		root.add(&b"ps2_keyboard"[..], Arc::downgrade(&tbl));
+		mem::forget(tbl)
+	}
 }
 
 extern "C" fn handle_irq() {
@@ -110,6 +122,7 @@ extern "C" fn handle_irq() {
 	match scanset2_decode(seq) {
 		Ok(code) => {
 			unsafe { INDEX = 0 };
+			// FIXME peek
 			if let Some(w) = SCANCODE_READERS.isr_lock().pop() {
 				w.isr_complete(Ok(<[u8; 4]>::from(code).into()));
 			} else {

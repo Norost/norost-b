@@ -1,9 +1,8 @@
 pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
 pub const ID_MONOTONIC_TIME: usize = 2;
-pub const ID_ALLOC_DMA: usize = 3;
-pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
+pub const ID_DO_IO: usize = 6;
 pub const ID_HAS_SINGLE_OWNER: usize = 7;
 pub const ID_NEW_OBJECT: usize = 8;
 pub const ID_MAP_OBJECT: usize = 9;
@@ -20,17 +19,19 @@ pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::{
-	error,
-	object::{NewObject, NewObjectArgs, NewObjectType},
+	error, io,
+	object::{NewObject, NewObjectArgs},
 	time::Monotonic,
 	Page,
 };
-use core::arch::asm;
-use core::fmt;
-use core::num::NonZeroUsize;
-use core::ptr::{self, NonNull};
-use core::str;
-use core::time::Duration;
+use core::{
+	arch::asm,
+	fmt,
+	num::NonZeroUsize,
+	ptr::{self, NonNull},
+	str,
+	time::Duration,
+};
 
 pub struct ExitStatus(pub u32);
 
@@ -68,6 +69,7 @@ pub enum RWX {
 	RWX = 0b111,
 }
 
+#[allow(unused_macro_rules)]
 macro_rules! syscall {
 	(@INTERNAL $id:ident [$(in($reg:tt) $val:expr),*]) => {
 		unsafe {
@@ -99,6 +101,14 @@ macro_rules! syscall {
 	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr)) => {
 		// Use r10 instead of rcx as the latter gets overwritten by the syscall instruction
 		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5, in("r9") $a6])
 	};
 }
 
@@ -132,26 +142,17 @@ pub fn monotonic_time() -> Monotonic {
 }
 
 #[inline]
-pub fn alloc_dma(
-	base: Option<NonNull<Page>>,
-	size: usize,
-) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
-	ret(syscall!(ID_ALLOC_DMA(base, size))).map(|(status, value)| {
-		// SAFETY: the kernel always returns a non-zero status (size) and value (base ptr).
-		// If the kernel is buggy we're screwed anyways.
-		unsafe {
-			(
-				NonNull::new_unchecked(value as *mut _),
-				NonZeroUsize::new_unchecked(status),
-			)
-		}
+pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
+	let (ty, h, a) = request.into_args();
+	let h = usize::try_from(h).unwrap();
+	let ty = usize::from(ty);
+	#[cfg(target_pointer_width = "64")]
+	ret(match a {
+		io::RawDoIo::N0 => syscall!(ID_DO_IO(ty, h)),
+		io::RawDoIo::N1(a) => syscall!(ID_DO_IO(ty, h, a)),
+		io::RawDoIo::N2(a, b) => syscall!(ID_DO_IO(ty, h, a, b)),
 	})
-}
-
-#[inline]
-pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
-	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr()))).map(|(_, v)| v)
+	.map(|(_, v)| v as u64)
 }
 
 #[inline]
@@ -171,12 +172,19 @@ pub fn new_object(args: NewObject) -> error::Result<Handle> {
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<Page>>,
-	offset: u64,
-	length: usize,
-) -> error::Result<NonNull<Page>> {
+	rwx: RWX,
+	offset: usize,
+	max_length: usize,
+) -> error::Result<(NonNull<Page>, usize)> {
 	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
-	ret(syscall!(ID_MAP_OBJECT(handle, base, offset, length)))
-		.map(|(_, v)| NonNull::new(v as *mut _).unwrap())
+	ret(syscall!(ID_MAP_OBJECT(
+		handle,
+		base,
+		rwx as usize,
+		offset,
+		max_length
+	)))
+	.map(|(s, v)| (NonNull::new(v as *mut _).unwrap(), s))
 }
 
 #[inline]

@@ -87,7 +87,7 @@ struct SetBinary {
 
 impl Object for SetBinary {
 	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
-		if let Some(object) = object.clone().memory_object(0) {
+		if let Some(object) = object.clone().memory_object() {
 			self.builder.bin.set(Some(object.into()));
 			Ticket::new_complete(Ok(0))
 		} else {
@@ -114,7 +114,7 @@ struct SetStack {
 }
 
 impl Object for SetStack {
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		let stack = self.builder.stack.take().unwrap();
 		unsafe {
 			stack.write(self.builder.stack_offset.get(), data);
@@ -123,11 +123,11 @@ impl Object for SetStack {
 		self.builder
 			.stack_offset
 			.set(self.builder.stack_offset.get() + data.len());
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }
 
-pub fn init(root: &crate::object_table::Root) {
+pub fn post_init(root: &crate::object_table::Root) {
 	let tbl = ManuallyDrop::new(Arc::new(ProcessTable) as Arc<dyn Object>);
 	root.add(&b"process"[..], Arc::downgrade(&*tbl));
 }

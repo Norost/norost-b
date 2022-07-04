@@ -27,7 +27,7 @@ use core::{
 	ptr::{self, NonNull},
 	str,
 };
-use driver_utils::io::queue::stream::Job;
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use math::{Point, Rect, Size};
 use rt::io::{Error, Handle};
 
@@ -56,20 +56,23 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let sync = root.open(b"gpu/sync").unwrap();
 	let (w, h) = {
-		let r = root.open(b"gpu/resolution").unwrap();
-		let r = r.read_vec(16).unwrap();
-		let r = str::from_utf8(&r).unwrap();
-		let (w, h) = r.split_once('x').unwrap();
-		(w.parse::<u32>().unwrap(), h.parse::<u32>().unwrap())
+		let mut b = [0; 16];
+		let r = root.open(b"gpu/resolution_binary").unwrap();
+		let l = r.read(&mut b).unwrap();
+		(
+			u32::from_le_bytes(b[..4].try_into().unwrap()),
+			u32::from_le_bytes(b[4..l].try_into().unwrap()),
+		)
 	};
 	let size = Size::new(w, h);
 
 	let shmem_size = size.x as usize * size.y as usize * 3;
 	let shmem_size = (shmem_size + 0xfff) & !0xfff;
-	let mut shmem_obj =
-		rt::io::new_object(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
-	let shmem = rt::io::map_object(shmem_obj, None, 0, shmem_size).unwrap();
-	sync.share(&rt::Object::from_raw(shmem_obj))
+	let shmem_obj = rt::Object::new(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
+	let (shmem, shmem_size) = shmem_obj
+		.map_object(None, rt::io::RWX::RW, 0, shmem_size)
+		.unwrap();
+	sync.share(&shmem_obj)
 		.expect("failed to share mem with GPU");
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };
@@ -82,8 +85,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		let mut s = alloc::string::String::with_capacity(64);
 		use core::fmt::Write;
 		let (l, h) = (rect.low(), rect.high());
-		write!(&mut s, "{},{} {},{}", l.x, l.y, h.x, h.y).unwrap();
-		sync.write(s.as_bytes()).unwrap();
+		let [lx0, lx1] = (rect.low().x as u16).to_le_bytes();
+		let [ly0, ly1] = (rect.low().y as u16).to_le_bytes();
+		let [hx0, hx1] = (rect.high().x as u16).to_le_bytes();
+		let [hy0, hy1] = (rect.high().y as u16).to_le_bytes();
+		sync.write(&[lx0, lx1, ly0, ly1, hx0, hx1, hy0, hy1])
+			.unwrap();
 	};
 	let fill = |rect: math::Rect, color: [u8; 3]| {
 		let s = rect.size().x as usize * rect.size().y as usize;
@@ -110,77 +117,92 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		fill(manager.window_rect(w, size).unwrap(), *c);
 	}
 
-	let table = root.create(b"window_manager").unwrap();
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 22 }).unwrap();
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(12));
+	root.create(b"window_manager")
+		.unwrap()
+		.share(&table.public_table())
+		.unwrap();
 
 	loop {
-		let buf = table.read_vec(1 << 20).unwrap();
-		let buf = match Job::deserialize(&buf).unwrap() {
-			Job::Create {
-				handle,
-				job_id,
-				path,
-			} => match (handle, path) {
-				(Handle::MAX, b"window") => {
-					let h = manager.new_window(size).unwrap();
+		let mut send_notif = false;
+		while let Some((handle, req)) = table.dequeue() {
+			let (job_id, response) = match req {
+				Request::Create { job_id, path } => (job_id, {
+					let mut p = [0; 8];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					path.manual_drop();
+					match (handle, &*p) {
+						(Handle::MAX, b"window") => {
+							let h = manager.new_window(size).unwrap();
+							fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+							for (w, c) in manager.window_handles().zip(&colors) {
+								fill(manager.window_rect(w, size).unwrap(), *c);
+							}
+							Response::Handle(h)
+						}
+						_ => Response::Error(Error::InvalidOperation),
+					}
+				}),
+				Request::Write { job_id, data } => (
+					job_id,
+					match handle {
+						Handle::MAX => Response::Error(Error::InvalidOperation),
+						h => {
+							let mut header = [0; 12];
+							data.copy_to(0, &mut header);
+							let display = Rect::from_size(Point::ORIGIN, size);
+							let rect = manager.window_rect(h, size).unwrap();
+							let draw = ipc_wm::DrawRect::from_bytes(&header).unwrap();
+							let draw_size = draw.size();
+							// TODO do we actually want this?
+							let draw_size = Size::new(
+								(u32::from(draw_size.x) + 1).min(rect.size().x),
+								(u32::from(draw_size.y) + 1).min(rect.size().y),
+							);
+							let draw_orig = draw.origin();
+							let draw_orig = Point::new(draw_orig.x, draw_orig.y);
+							let draw_rect = rect
+								.calc_global_pos(Rect::from_size(draw_orig, draw_size))
+								.unwrap();
+							debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
+							debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
+							assert!(
+								draw_rect.high().x * size.y as u32 + draw_rect.high().y
+									<= size.x * size.y
+							);
+							// TODO we can avoid this copy by passing shared memory buffers directly
+							// to the GPU
+							unsafe {
+								data.copy_to_raw_untrusted(
+									12,
+									shmem.as_ptr(),
+									draw.size().area() * 3,
+								);
+							}
+							let l = data.len().try_into().unwrap();
+							data.manual_drop();
+							sync_rect(draw_rect);
+							Response::Amount(l)
+						}
+					},
+				),
+				Request::Close => {
+					manager.destroy_window(handle).unwrap();
 					fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for (w, c) in manager.window_handles().zip(&colors) {
 						fill(manager.window_rect(w, size).unwrap(), *c);
 					}
-					Job::reply_create_clear(buf, job_id, h)
+					continue;
 				}
-				_ => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
-			},
-			Job::Write {
-				handle,
-				job_id,
-				data,
-			} => match handle {
-				Handle::MAX => Job::reply_error_clear(buf, job_id, Error::InvalidOperation),
-				h => {
-					let display = Rect::from_size(Point::ORIGIN, size);
-					let rect = manager.window_rect(h, size).unwrap();
-					let draw = ipc_wm::DrawRect::from_bytes(data).unwrap();
-					let draw_size = draw.size();
-					// TODO do we actually want this?
-					let draw_size = Size::new(
-						(u32::from(draw_size.x) + 1).min(rect.size().x),
-						(u32::from(draw_size.y) + 1).min(rect.size().y),
-					);
-					let draw_orig = draw.origin();
-					let draw_orig = Point::new(draw_orig.x, draw_orig.y);
-					let draw_rect = rect
-						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
-						.unwrap();
-					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
-					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
-					let pixels = draw.pixels();
-					assert!(
-						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
-					);
-					// TODO we can avoid this copy by passing shared memory buffers directly
-					// to the GPU
-					unsafe {
-						shmem
-							.as_ptr()
-							.copy_from_nonoverlapping(pixels.as_ptr(), pixels.len());
-					}
-					sync_rect(draw_rect);
-					let l = data.len().try_into().unwrap();
-					Job::reply_write_clear(buf, job_id, l)
-				}
-			},
-			Job::Close { handle } => {
-				manager.destroy_window(handle).unwrap();
-				fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-				for (w, c) in manager.window_handles().zip(&colors) {
-					fill(manager.window_rect(w, size).unwrap(), *c);
-				}
-				continue;
-			}
-			_ => todo!(),
+				_ => todo!(),
+			};
+			table.enqueue(job_id, response);
+			send_notif = true;
 		}
-		.unwrap();
-		table.write_vec(buf, 0).unwrap();
+		send_notif.then(|| table.flush());
+		table.wait();
 	}
 
 	0

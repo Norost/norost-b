@@ -5,10 +5,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc};
 use core::sync::atomic::{AtomicU16, Ordering};
 
-/// # Safety
-///
-/// This function may only be called once at boot time
-pub unsafe fn init(root: &Root) {
+pub fn post_init(root: &Root) {
 	let io = Arc::new(Io) as Arc<dyn Object>;
 	root.add(*b"portio", Arc::downgrade(&io));
 	let _ = Arc::into_raw(io);
@@ -55,31 +52,26 @@ impl Object for IoMap {
 		Ticket::new_complete(Ok(n.into()))
 	}
 
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
 		Ticket::new_complete(match length {
-			1 => Ok(Self::fetch_byte(self.head.fetch_add(1, Ordering::Relaxed))),
+			1 => Ok(Self::fetch_byte(if peek {
+				self.head.load(Ordering::Relaxed)
+			} else {
+				self.head.fetch_add(1, Ordering::Relaxed)
+			})),
 			2 => todo!(),
 			4 => todo!(),
 			_ => Err(Error::InvalidData),
 		})
 	}
 
-	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
-		Ticket::new_complete(match length {
-			1 => Ok(Self::fetch_byte(self.head.load(Ordering::Relaxed))),
-			2 => todo!(),
-			4 => todo!(),
-			_ => Err(Error::InvalidData),
-		})
-	}
-
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		match data {
 			&[a] => Self::put_byte(self.head.fetch_add(1, Ordering::Relaxed), a),
 			&[_, _] => todo!(),
 			&[_, _, _, _] => todo!(),
 			_ => return Ticket::new_complete(Err(Error::InvalidData)),
 		}
-		Ticket::new_complete(Ok(data.len()))
+		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}
 }

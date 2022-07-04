@@ -4,29 +4,35 @@ use super::PPN;
 use core::mem;
 
 pub(super) struct Chain {
-	head: Option<PPN>,
+	head: PPN,
 	count: usize,
 }
 
 impl Chain {
 	pub const fn new() -> Self {
 		Self {
-			head: None,
+			head: PPN(0),
 			count: 0,
 		}
 	}
 
 	pub fn push(&mut self, ppn: PPN) {
-		let prev = mem::replace(&mut self.head, Some(ppn));
-		unsafe { ppn.as_ptr().cast::<Option<PPN>>().write(prev) };
+		let prev = mem::replace(&mut self.head, ppn);
+		// For debugging use-after-frees
+		#[cfg(debug_assertions)]
+		unsafe {
+			ppn.as_ptr().cast::<u8>().write_bytes(0x69, 4096)
+		};
+		unsafe { ppn.as_ptr().cast::<PPN>().write(prev) };
 		self.count += 1;
 	}
 
 	pub fn pop(&mut self) -> Option<PPN> {
-		let ppn = self.head?;
-		self.head = unsafe { ppn.as_ptr().cast::<Option<PPN>>().read() };
-		self.count -= 1;
-		Some(ppn)
+		self.count.checked_sub(1).map(|c| {
+			self.count = c;
+			let next = unsafe { self.head.as_ptr().cast::<PPN>().read() };
+			mem::replace(&mut self.head, next)
+		})
 	}
 
 	pub fn count(&self) -> usize {

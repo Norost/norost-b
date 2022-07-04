@@ -131,7 +131,9 @@ name = "driver_utils"
 version = "0.1.0"
 dependencies = [
  "arena",
+ "nora_stream_table",
  "norostb_kernel",
+ "norostb_rt",
 ]
 
 [[package]]
@@ -345,6 +347,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb691a747a7ab48abc15c5b42066eaafde10dc427e3b6ee2a1cf43db04c763bd"
 
 [[package]]
+name = "litrs"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9275e0933cf8bb20f008924c0cb07a0692fe54d8064996520bf998de9eb79aa"
+dependencies = [
+ "proc-macro2",
+]
+
+[[package]]
 name = "log"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -395,6 +406,7 @@ dependencies = [
  "arena",
  "cfg-if",
  "compiler_builtins",
+ "nora_stream_table",
  "norostb_kernel",
  "pci",
  "rsdp",
@@ -423,11 +435,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "nora_stream_table"
+version = "0.1.0"
+dependencies = [
+ "norost_ipc_spec",
+]
+
+[[package]]
 name = "noraboot"
 version = "0.1.0"
 dependencies = [
  "compiler_builtins",
  "rsdp",
+]
+
+[[package]]
+name = "norost_ipc_spec"
+version = "0.1.0"
+dependencies = [
+ "norost_ipc_spec_proc",
+]
+
+[[package]]
+name = "norost_ipc_spec_proc"
+version = "0.1.0"
+dependencies = [
+ "litrs",
+ "quote",
 ]
 
 [[package]]
@@ -444,7 +478,6 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
- "nora_io_queue_rt",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",

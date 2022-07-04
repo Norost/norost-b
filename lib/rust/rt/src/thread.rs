@@ -1,6 +1,3 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use crate::time::Monotonic;
 use alloc::boxed::Box;
 use core::{mem, ptr, time::Duration};
@@ -20,17 +17,8 @@ impl Thread {
 		let stack = stack.cast::<u8>();
 
 		// Allocate TLS
-		let tls_ptr = match crate::io::create_for_thread() {
-			Ok(queue) => match crate::tls::create_for_thread(queue) {
-				Ok(tls) => tls,
-				Err(e) => {
-					// TODO free queue
-					unsafe {
-						syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
-					}
-					return Err(e);
-				}
-			},
+		let tls_ptr = match crate::tls::create_for_thread() {
+			Ok(tls) => tls,
 			Err(e) => {
 				unsafe {
 					syscall::dealloc(stack.cast(), stack_size.get()).unwrap();

@@ -46,24 +46,25 @@ fn main() -> std::io::Result<()> {
 		match cmd {
 			b"help" => {
 				writeln!(term, "Available commands:")?;
-				writeln!(term, "  help                    Show available commands")?;
+				writeln!(term, "  help                      Show available commands")?;
 				writeln!(
 					term,
-					"  ls     [path]           List tables or objects in a table"
+					"  ls       [path]           List tables or objects in a table"
 				)?;
 				writeln!(
 					term,
-					"  open   <name> <path>    Open an object and assign the handle to a variable"
+					"  open     <name> <path>    Open an object and assign the handle to a variable"
 				)?;
 				writeln!(
 					term,
-					"  create <name> <path>    Create an object and assign the handle to a variable"
+					"  create   <name> <path>    Create an object and assign the handle to a variable"
 				)?;
-				writeln!(term, "  close  <name>           Close an object handle")?;
-				writeln!(term, "  read   <name> [amount]  Read from an object")?;
-				writeln!(term, "  write  <name> <data>    Write to an object")?;
-				writeln!(term, "  vars                    List variables")?;
-				writeln!(term, "  exit   [code]           Exit this shell")?;
+				writeln!(term, "  destroy  <path>           Destroy an object")?;
+				writeln!(term, "  close    <name>           Close an object handle")?;
+				writeln!(term, "  read     <name> [amount]  Read from an object")?;
+				writeln!(term, "  write    <name> <data>    Write to an object")?;
+				writeln!(term, "  vars                      List variables")?;
+				writeln!(term, "  exit     [code]           Exit this shell")?;
 			}
 			b"ls" => {
 				let Some(path) = maybe_next_str(&mut term, &mut args)? else { continue; };
@@ -100,6 +101,13 @@ fn main() -> std::io::Result<()> {
 						vars.insert(name.into(), f);
 					}
 					Err(e) => writeln!(term, "Failed to open \"{}\": {}", path, e)?,
+				}
+			}
+			b"destroy" => {
+				let Some(path) = next_str(&mut term, &mut args)? else { continue; };
+				match fs::remove_file(path) {
+					Ok(()) => {}
+					Err(e) => writeln!(term, "Failed to destroy \"{}\": {}", path, e)?,
 				}
 			}
 			b"close" => {

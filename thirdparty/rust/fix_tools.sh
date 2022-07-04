@@ -8,7 +8,7 @@ fi
 
 cd "$1/stage2/bin" || exit
 
-for tool in rustfmt cargo-fmt
+for tool in rustfmt cargo-fmt cargo-clippy
 do
-	ln -s ../../stage2-tools/x86_64-unknown-linux-gnu/release/$tool || exit
+	ln -s ../../stage2-tools/x86_64-unknown-linux-gnu/release/$tool
 done

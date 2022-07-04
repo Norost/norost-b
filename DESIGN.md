@@ -13,19 +13,49 @@ Another is to allow high-performance applications to directly integrate drivers,
 database could directly communicate with disks, reducing overhead & latency significantly.
 
 
-## Asynchronous I/O
+## I/O
+
+There are four "levels" of API, going from ease and genericity of use to performance:
+
+| Level         | Minimal | Application agnostic | Device agnostic |
+|---------------|---------|----------------------|-----------------|
+| Synchronous   | &check; | &check;              | &check;         |
+| Asynchronous  | &cross; | &check;              | &check;         |
+| Shared memory | &cross; | &cross;              | &check;         |
+| Integrated    | &cross; | &cross;              | &cross;         |
+
+The synchronous is the simplest and easiest to use.
+
+The asynchronous API allows batching requests, increasing throughput compared
+to the synchronous API.
+
+The shared memory approach allows processes to define their own interchange
+format and mostly bypass the kernel, potentially improving performance further
+than what is possible with the default asynchronous API. It however is
+application-specific, which means a program must be aware of the specialized
+API to make use of it.
+
+The integrated approach is useful if every last bit of performance needs to be
+eked out. Drivers are integrated directly in the application, allowing the
+compiler to perform more extensive optimizations and reducing the amount of
+context and privilige switches.
+
+
+### Asynchronous I/O
 
 So far, asynchronous I/O using ring buffers seems to be the best-performing on modern
 hardware, since it reduces privilege & context switches associated with blocking I/O.
 It also scales well with increasing workloads as more work will be done between each
 poll, i.e. batch size scales automatically.
 
-Synchronous I/O is often easier to use & the right choice if the result is immediately
-needed. Since this type of I/O likely doesn't need to be very performant it is
-implemented on top of the existing asynchronous interface.
+Synchronous I/O is often easier to use & the right choice if the result is
+immediately needed. While synchronous I/O can easily be implemented on top
+of an asynchronous API, it is common enough a dedicated system call has been
+added (`do_io`). It reduces the size of simple programs, makes the runtime
+lighter and is slightly more performant.
 
 
-### Readiness vs completion
+#### Readiness vs completion
 
 There are two common ways to handle asynchronous I/O. One is based on readiness, where
 the server sends a message that an operation can be performed, and the other is based
@@ -38,7 +68,7 @@ the moment a request is sent. Since reducing latency is a great concern the I/O 
 the latter model.
 
 
-#### Owned buffers
+##### Owned buffers
 
 A subtle disadvantage of the latter model is that cancellation is not implicit: with
 a readiness-based model an operation can be "cancelled" by simply ignoring the ready

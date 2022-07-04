@@ -1,202 +1,202 @@
 use super::*;
-use crate::sync::SpinLock;
+use crate::{
+	memory::{
+		frame::{AllocateError, AllocateHints, OwnedPageFrames, PPN},
+		r#virtual::{AddressSpace, MapError, RWX},
+		Page,
+	},
+	object_table::MemoryObject,
+	sync::Mutex,
+};
 use alloc::{
 	boxed::Box,
 	sync::{Arc, Weak},
 	vec::Vec,
 };
 use arena::Arena;
-use core::{
-	mem, str,
-	sync::atomic::{AtomicU32, Ordering},
-};
-use norostb_kernel::{
-	io::{Job, SeekFrom},
-	syscall::Handle,
-};
+use core::{mem, ptr::NonNull, sync::atomic::Ordering};
+use nora_stream_table::{Buffers, ClientQueue, JobId, Request, Slice};
+use norostb_kernel::{io::SeekFrom, object::Pow2Size, syscall::Handle};
 
 pub struct StreamingTable {
-	job_id_counter: AtomicU32,
-	jobs: SpinLock<Vec<(Box<[u8]>, Option<AnyTicketWaker>)>>,
-	tickets: SpinLock<Vec<(JobId, AnyTicketWaker)>>,
-	job_handlers: SpinLock<Vec<(TicketWaker<Box<[u8]>>, usize)>>,
-	/// Objects that are being shared.
-	shared: SpinLock<Arena<Arc<dyn Object>, ()>>,
+	jobs: Mutex<Arena<AnyTicketWaker, ()>>,
+	/// Objects that are being shared. They can be taken with an `open` operation
+	///
+	/// Is `None` if sharing objects is not supported by the server.
+	shared: Option<Mutex<Arena<Arc<dyn Object>, ()>>>,
+	/// The queue shared with the server.
+	queue: Mutex<ClientQueue>,
+	/// The shared memory containing the queue.
+	queue_mem: Arc<OwnedPageFrames>,
+	/// The memory region with buffers that is being shared with the server.
+	buffer_mem: Buffers,
+	/// The notify singleton for signaling when data is available.
+	notify_singleton: Arc<Notify>,
 }
 
 /// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
-#[repr(transparent)]
-pub struct StreamingTableOwner(StreamingTable);
+pub struct StreamingTableOwner(Arc<StreamingTable>);
+
+pub enum NewStreamingTableError {
+	Alloc(AllocateError),
+	Map(MapError),
+	BlockSizeTooLarge,
+}
 
 impl StreamingTableOwner {
-	pub fn new() -> Arc<Self> {
-		Arc::new(Self(StreamingTable {
-			job_id_counter: Default::default(),
+	pub fn new(
+		allow_sharing: bool,
+		buffer_mem: Arc<dyn MemoryObject>,
+		buffer_mem_block_size: Pow2Size,
+		hints: AllocateHints,
+	) -> Result<Arc<Self>, NewStreamingTableError> {
+		let buffer_size = buffer_mem.physical_pages_len() * Page::SIZE;
+		let block_size = match u32::try_from(buffer_mem_block_size) {
+			Ok(s) if usize::try_from(s).unwrap() <= buffer_size => s,
+			Ok(_) | Err(_) => Err(NewStreamingTableError::BlockSizeTooLarge)?,
+		};
+		let queue_mem = Arc::new(
+			OwnedPageFrames::new(1.try_into().unwrap(), hints)
+				.map_err(NewStreamingTableError::Alloc)?,
+		);
+		let (queue, _) = AddressSpace::kernel_map_object(None, queue_mem.clone(), RWX::RW)
+			.map_err(NewStreamingTableError::Map)?;
+		let queue = unsafe { ClientQueue::new(queue.cast()) };
+		queue.buffer_head_ref().store(u32::MAX, Ordering::Relaxed);
+		let (buffer_mem, buffer_mem_size) =
+			AddressSpace::kernel_map_object(None, buffer_mem, RWX::RW)
+				.map_err(NewStreamingTableError::Map)?;
+		assert!(buffer_mem_size != 0, "todo");
+		Ok(Arc::new(Self(Arc::new_cyclic(|table| StreamingTable {
 			jobs: Default::default(),
-			tickets: Default::default(),
-			job_handlers: Default::default(),
-			shared: Default::default(),
-		}))
-	}
-
-	pub fn into_inner_weak(slf: &Arc<Self>) -> Weak<StreamingTable> {
-		// SAFETY: StreamingTableOwner is a transparent wrapper around
-		// StreamingTable
-		unsafe { Weak::from_raw(Weak::into_raw(Arc::downgrade(slf)).cast::<StreamingTable>()) }
+			shared: allow_sharing.then(Default::default),
+			queue: Mutex::new(queue),
+			queue_mem,
+			buffer_mem: unsafe { Buffers::new(buffer_mem.cast(), buffer_mem_size, block_size) },
+			notify_singleton: Arc::new(Notify {
+				table: table.clone(),
+				..Default::default()
+			}),
+		}))))
 	}
 }
 
 impl StreamingTable {
-	fn submit_job<T>(&self, mut job: Job, data: &[u8]) -> Ticket<T>
+	fn submit_job<T, F>(&self, handle: Handle, f: F) -> Ticket<T>
 	where
+		F: FnOnce(&mut ClientQueue, JobId) -> Request,
 		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
-
-		job.job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
-		let job_id = job.job_id;
-		let job = job.as_ref().iter().chain(data).copied().collect::<Box<_>>();
-
-		if let Some(w) = self.job_handlers.auto_lock().pop() {
-			self.tickets.auto_lock().push((job_id, ticket_waker.into()));
-			w.0.complete(Ok(job));
-		} else {
-			self.jobs.auto_lock().push((job, Some(ticket_waker.into())));
-		}
-
+		self.jobs.lock().insert_with(move |h| {
+			let mut q = self.queue.lock();
+			let r = f(&mut q, JobId::new(h.into_raw().0.try_into().unwrap()));
+			q.try_enqueue(handle, r)
+				.unwrap_or_else(|e| todo!("{:?}", e));
+			ticket_waker.into()
+		});
+		self.notify_singleton.wake_readers();
 		ticket.into()
 	}
 
-	/// Submit a job for which no response is expected, i.e. `finish_job` should *not* be called.
-	fn submit_oneway_job(&self, mut job: Job) {
-		// Perhaps not strictly necessary, but let's try to prevent potential confusion.
-		job.job_id = self.job_id_counter.fetch_add(1, Ordering::Relaxed);
-		let job = (*job.as_ref()).into();
+	fn copy_data_from(&self, queue: &mut ClientQueue, data: &[u8]) -> Slice {
+		let buf = self
+			.buffer_mem
+			.alloc(queue.buffer_head_ref(), data.len())
+			.unwrap_or_else(|| todo!("no buffers available"));
+		buf.copy_from(0, data);
+		Slice {
+			offset: buf.offset().try_into().unwrap(),
+			length: buf.len().try_into().unwrap(),
+		}
+	}
 
-		if let Some(w) = self.job_handlers.auto_lock().pop() {
-			w.0.complete(Ok(job));
-		} else {
-			self.jobs.auto_lock().push((job, None));
+	fn process_responses(self: &Arc<Self>) {
+		let mut q = self.queue.lock();
+		let mut j = self.jobs.lock();
+		while let Some((job_id, resp)) = q.dequeue() {
+			let job_id = arena::Handle::from_raw(job_id.get() as _, ());
+			let job = j.remove(job_id).unwrap_or_else(|| todo!("invalid job id"));
+			match resp.get() {
+				Ok(v) => match job {
+					AnyTicketWaker::Object(w) => w.complete(Ok(Arc::new(StreamObject {
+						table: Arc::downgrade(self),
+						handle: v as _,
+					}))),
+					AnyTicketWaker::Data(w) => {
+						let s = resp.as_slice().unwrap();
+						let buf = self.buffer_mem.get(s);
+						let mut b = Box::new_uninit_slice(buf.len());
+						buf.copy_to_uninit(0, &mut b);
+						self.buffer_mem.dealloc(q.buffer_head_ref(), s.offset);
+						w.complete(Ok(unsafe { Box::<[_]>::assume_init(b) }))
+					}
+					AnyTicketWaker::U64(w) => w.complete(Ok(v)),
+				},
+				Err(e) => job.complete_err(Error::from(e)),
+			}
 		}
 	}
 }
 
 impl Object for StreamingTableOwner {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		Ticket::new_complete(
-			str::from_utf8(path)
-				.ok()
-				.and_then(|s| s.parse::<u32>().ok())
-				.map(|h| arena::Handle::from_raw(h as usize, ()))
-				.and_then(|h| self.0.shared.auto_lock().remove(h))
-				.ok_or(Error::InvalidData),
-		)
-	}
-
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
-		if length < mem::size_of::<Job>() + 8 {
-			return Ticket::new_complete(Err(Error::InvalidData));
-		}
-		match self.0.jobs.auto_lock().pop() {
-			Some((job, waker)) => {
-				if let Some(w) = waker {
-					let id = Job::deserialize(&job).unwrap().0.job_id;
-					self.0.tickets.auto_lock().push((id, w));
-				}
-				Ticket::new_complete(Ok(job))
-			}
-			None => {
-				let (ticket, waker) = Ticket::new();
+		Ticket::new_complete(match path {
+			b"notify" => Ok(self.0.notify_singleton.clone()),
+			b"table" => Ok(self.0.clone()),
+			&[a, b, c, d] => {
+				let h = arena::Handle::from_raw(Handle::from_le_bytes([a, b, c, d]) as _, ());
 				self.0
-					.job_handlers
-					.auto_lock()
-					.push((waker, length - mem::size_of::<Job>()));
-				ticket
+					.shared
+					.as_ref()
+					.and_then(|s| s.lock().remove(h))
+					.ok_or(Error::DoesNotExist)
 			}
-		}
+			_ => Err(Error::InvalidData),
+		})
 	}
 
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
-		let Some((job, data)) = Job::deserialize(data) else {
-			return Ticket::new_complete(Err(Error::InvalidData));
-		};
-		let mut c = self.0.tickets.auto_lock();
-		let mut c = c.drain_filter(|e| e.0 == job.job_id);
-		let Some((_, tw)) = c.next() else {
-			return Ticket::new_complete(Err(Error::InvalidObject));
-		};
-		assert!(c.next().is_none());
-		match job.ty {
-			_ if job.result != 0 => tw.complete_err(Error::from(job.result)),
-			Job::OPEN | Job::OPEN_SHARE | Job::CREATE => {
-				tw.into_object().complete(Ok(if job.ty == Job::OPEN_SHARE {
-					// FIXME we don't guarantee this is the correct process
-					crate::scheduler::process::Process::current()
-						.unwrap()
-						.object_apply(job.handle, |o| o.clone())
-						.unwrap_or_else(|| todo!())
-				} else {
-					Arc::new(StreamObject {
-						handle: job.handle,
-						table: Self::into_inner_weak(&self),
-					})
-				}))
-			}
-			Job::WRITE => {
-				let Ok(len) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {
-					return Ticket::new_complete(Err(Error::InvalidData));
-				};
-				tw.into_usize().complete(Ok(len as usize))
-			}
-			Job::READ | Job::PEEK => tw.into_data().complete(Ok(data.into())),
-			Job::SEEK => {
-				let Ok(offset) = data.try_into().map(|a| u64::from_ne_bytes(a)) else {
-					return Ticket::new_complete(Err(Error::InvalidData));
-				};
-				tw.into_u64().complete(Ok(offset))
-			}
-			Job::SHARE => tw.into_u64().complete(Ok(0)),
-			_ => return Ticket::new_complete(Err(Error::InvalidOperation)),
-		}
-		Ticket::new_complete(Ok(data.len()))
+	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {
+		Some(self)
+	}
+}
+
+unsafe impl MemoryObject for StreamingTableOwner {
+	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
+		self.0.queue_mem.physical_pages(f)
+	}
+
+	fn physical_pages_len(&self) -> usize {
+		self.0.queue_mem.physical_pages_len()
 	}
 }
 
 impl Object for StreamingTable {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(
-			Job {
-				ty: Job::OPEN,
-				handle: Handle::MAX,
-				..Default::default()
-			},
-			path,
-		)
+		self.submit_job(Handle::MAX, |q, job_id| Request::Open {
+			job_id,
+			path: self.copy_data_from(q, path),
+		})
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(
-			Job {
-				ty: Job::CREATE,
-				handle: Handle::MAX,
-				..Default::default()
-			},
-			path,
-		)
+		self.submit_job(Handle::MAX, |q, job_id| Request::Create {
+			job_id,
+			path: self.copy_data_from(q, path),
+		})
 	}
 }
 
 impl Drop for StreamingTable {
 	fn drop(&mut self) {
 		// Wake any waiting tasks so they don't get stuck endlessly.
-		for task in self
-			.jobs
-			.get_mut()
-			.drain(..)
-			.flat_map(|e| e.1)
-			.chain(self.tickets.get_mut().drain(..).map(|e| e.1))
-		{
-			task.complete_err(Error::Cancelled)
+		let intr = crate::arch::interrupts_enabled();
+		for (_, task) in self.jobs.get_mut().drain() {
+			if intr {
+				task.complete_err(Error::Cancelled)
+			} else {
+				task.isr_complete_err(Error::Cancelled)
+			}
 		}
 	}
 }
@@ -207,112 +207,142 @@ struct StreamObject {
 }
 
 impl StreamObject {
-	fn submit_job<T>(&self, job: Job, data: &[u8]) -> Ticket<T>
+	fn with_table<T, F>(&self, f: F) -> Ticket<T>
 	where
-		AnyTicketWaker: From<TicketWaker<T>>,
+		F: FnOnce(Arc<StreamingTable>) -> Ticket<T>,
 	{
-		self.table.upgrade().map_or_else(
-			|| Ticket::new_complete(Err(Error::Cancelled)),
-			|tbl| tbl.submit_job(job, data),
-		)
+		self.table
+			.upgrade()
+			.map_or_else(|| Ticket::new_complete(Err(Error::Cancelled)), f)
 	}
 }
 
 impl Object for StreamObject {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(
-			Job {
-				ty: Job::OPEN,
-				handle: self.handle,
-				..Default::default()
-			},
-			path,
-		)
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::Open {
+				job_id,
+				path: tbl.copy_data_from(q, path),
+			})
+		})
 	}
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(
-			Job {
-				ty: Job::CREATE,
-				handle: self.handle,
-				..Default::default()
-			},
-			path,
-		)
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::Create {
+				job_id,
+				path: tbl.copy_data_from(q, path),
+			})
+		})
 	}
 
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
-		self.submit_job(
-			Job {
-				ty: Job::READ,
-				handle: self.handle,
-				..Default::default()
-			},
-			&(length as u64).to_ne_bytes(),
-		)
+	fn destroy(&self, path: &[u8]) -> Ticket<u64> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::Destroy {
+				job_id,
+				path: tbl.copy_data_from(q, path),
+			})
+		})
 	}
 
-	fn peek(&self, length: usize) -> Ticket<Box<[u8]>> {
-		self.submit_job(
-			Job {
-				ty: Job::PEEK,
-				handle: self.handle,
-				..Default::default()
-			},
-			&(length as u64).to_ne_bytes(),
-		)
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
+		let amount = length.try_into().unwrap_or(u32::MAX);
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |_, job_id| Request::Read {
+				job_id,
+				amount,
+				peek,
+			})
+		})
 	}
 
-	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<usize> {
-		self.submit_job(
-			Job {
-				ty: Job::WRITE,
-				handle: self.handle,
-				..Default::default()
-			},
-			data,
-		)
+	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::Write {
+				job_id,
+				data: tbl.copy_data_from(q, data),
+			})
+		})
 	}
 
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
-		let (from_anchor, from_offset) = from.into_raw();
-		self.submit_job(
-			Job {
-				ty: Job::SEEK,
-				handle: self.handle,
-				from_anchor,
-				..Default::default()
-			},
-			&from_offset.to_ne_bytes(),
-		)
+		let from = match from {
+			SeekFrom::Start(n) => nora_stream_table::SeekFrom::Start(n),
+			SeekFrom::Current(n) => nora_stream_table::SeekFrom::Current(n),
+			SeekFrom::End(n) => nora_stream_table::SeekFrom::End(n),
+		};
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |_, job_id| Request::Seek { job_id, from })
+		})
 	}
 
 	fn share(&self, share: &Arc<dyn Object>) -> Ticket<u64> {
-		match self.table.upgrade() {
-			None => Ticket::new_complete(Err(Error::Cancelled)),
-			Some(tbl) => {
-				let share = tbl.shared.auto_lock().insert(share.clone());
-				tbl.submit_job(
-					Job {
-						ty: Job::SHARE,
-						handle: self.handle,
-						..Default::default()
-					},
-					&u32::try_from(share.into_raw().0).unwrap().to_ne_bytes(),
-				)
+		self.with_table(|tbl| {
+			if let Some(shared) = tbl.shared.as_ref() {
+				tbl.submit_job(self.handle, |_, job_id| Request::Share {
+					job_id,
+					share: shared
+						.lock()
+						.insert(share.clone())
+						.into_raw()
+						.0
+						.try_into()
+						.unwrap(),
+				})
+			} else {
+				Ticket::new_complete(Err(Error::InvalidOperation))
 			}
-		}
+		})
 	}
 }
 
 impl Drop for StreamObject {
 	fn drop(&mut self) {
 		Weak::upgrade(&self.table).map(|table| {
-			table.submit_oneway_job(Job {
-				ty: Job::CLOSE,
-				handle: self.handle,
-				..Default::default()
-			});
+			table
+				.queue
+				.lock()
+				.try_enqueue(self.handle, Request::Close)
+				.unwrap_or_else(|e| todo!("{:?}", e))
 		});
+	}
+}
+
+#[derive(Default)]
+struct Notify {
+	table: Weak<StreamingTable>,
+	wait_read: Mutex<(bool, Vec<TicketWaker<Box<[u8]>>>)>,
+}
+
+impl Notify {
+	fn wake_readers(&self) {
+		let mut q = self.wait_read.lock();
+		if let Some(w) = q.1.pop() {
+			w.complete(Ok([].into()));
+		} else {
+			q.0 = true;
+		}
+	}
+}
+
+impl Object for Notify {
+	fn read(self: Arc<Self>, _length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
+		let mut q = self.wait_read.lock();
+		if mem::take(&mut q.0) {
+			Ticket::new_complete(Ok([].into()))
+		} else {
+			let (t, w) = Ticket::new();
+			q.1.push(w);
+			t
+		}
+	}
+
+	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<u64> {
+		Ticket::new_complete(if let Some(tbl) = self.table.upgrade() {
+			tbl.process_responses();
+			Ok(0)
+		} else {
+			Err(Error::DoesNotExist)
+		})
 	}
 }

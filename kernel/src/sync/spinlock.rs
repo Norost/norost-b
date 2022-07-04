@@ -1,13 +1,15 @@
-use core::cell::UnsafeCell;
-use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicU8, Ordering};
+use crate::arch::sync;
+use core::{
+	cell::UnsafeCell,
+	ops::{Deref, DerefMut},
+};
 
 /// A spinlock intended for use with interrupt service routines.
 ///
 /// This lock will disable interrupts *before* trying to acquire the lock to prevent
 /// potential deadlocks if the lock is held while an IRQ is triggered.
 pub struct SpinLock<T> {
-	lock: AtomicU8,
+	lock: sync::SpinLock,
 	value: UnsafeCell<T>,
 }
 
@@ -24,13 +26,13 @@ pub struct IsrGuard<'a, T> {
 impl<T> SpinLock<T> {
 	pub const fn new(value: T) -> Self {
 		Self {
-			lock: AtomicU8::new(0),
+			lock: Default::default(),
 			value: UnsafeCell::new(value),
 		}
 	}
 
 	/// Lock from *outside* an ISR routine. This will disable interrupts.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn lock(&self) -> Guard<T> {
 		// Ensure interrupts weren't disabled already. Re-enabling them after dropping the
@@ -40,22 +42,13 @@ impl<T> SpinLock<T> {
 			"interrupts are disabled. If this is intended, use isr_lock()"
 		);
 		crate::arch::disable_interrupts();
-		loop {
-			match self
-				.lock
-				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
-			{
-				Ok(_) => return Guard { lock: self },
-				Err(_) => unreachable!("deadlock on single-core system"),
-				#[allow(unreachable_patterns)]
-				Err(_) => core::hint::spin_loop(),
-			}
-		}
+		self.lock.lock();
+		Guard { lock: self }
 	}
 
 	/// Lock from *inside* an ISR routine. This will *not* disable interrupts, though
 	/// they should already be disabled inside an ISR.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn isr_lock(&self) -> IsrGuard<T> {
 		// Ensure interrupts aren't enabled. If they are, we're most likely not inside
@@ -64,35 +57,13 @@ impl<T> SpinLock<T> {
 			!crate::arch::interrupts_enabled(),
 			"interrupts are enabled. Are we not inside an ISR?"
 		);
-		self.lock_manual()
-	}
-
-	/// Lock without automatically re-enabling interrupts. It is up to the caller to ensure
-	/// interrupts are *disabled* before locking!
-	#[track_caller]
-	#[inline]
-	pub fn lock_manual(&self) -> IsrGuard<T> {
-		debug_assert!(
-			!crate::arch::interrupts_enabled(),
-			"interrupts are enabled. Make sure interrupts are disabled!"
-		);
-		// TODO detect double locks by same thread
-		loop {
-			match self
-				.lock
-				.compare_exchange_weak(0, 1, Ordering::Acquire, Ordering::Relaxed)
-			{
-				Ok(_) => return IsrGuard { lock: self },
-				Err(_) => unreachable!("deadlock on single-core system"),
-				#[allow(unreachable_patterns)]
-				Err(_) => core::hint::spin_loop(),
-			}
-		}
+		self.lock.lock();
+		IsrGuard { lock: self }
 	}
 
 	/// Lock and determine automatically whether interrupts need to be re-enabled when dropping the
 	/// guard.
-	#[track_caller]
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn auto_lock(&self) -> AutoGuard<T> {
 		if crate::arch::interrupts_enabled() {
@@ -103,8 +74,16 @@ impl<T> SpinLock<T> {
 	}
 
 	/// Borrow the lock mutably, which is safe since mutable references are always unique.
+	#[inline(always)]
 	pub fn get_mut(&mut self) -> &mut T {
 		self.value.get_mut()
+	}
+
+	#[cfg_attr(debug_assertions, track_caller)]
+	#[inline]
+	unsafe fn unlock(&self) {
+		ensure_interrupts_off();
+		self.lock.unlock()
 	}
 }
 
@@ -141,13 +120,7 @@ impl<T> DerefMut for Guard<'_, T> {
 
 impl<T> Drop for Guard<'_, T> {
 	fn drop(&mut self) {
-		ensure_interrupts_off();
-		debug_assert_ne!(
-			self.lock.lock.load(Ordering::Relaxed),
-			0,
-			"lock was released"
-		);
-		self.lock.lock.store(0, Ordering::Release);
+		unsafe { self.lock.unlock() }
 		crate::arch::enable_interrupts();
 	}
 }
@@ -168,13 +141,7 @@ impl<T> DerefMut for IsrGuard<'_, T> {
 
 impl<T> Drop for IsrGuard<'_, T> {
 	fn drop(&mut self) {
-		ensure_interrupts_off();
-		debug_assert_ne!(
-			self.lock.lock.load(Ordering::Relaxed),
-			0,
-			"lock was released"
-		);
-		self.lock.lock.store(0, Ordering::Release);
+		unsafe { self.lock.unlock() }
 	}
 }
 
@@ -206,7 +173,8 @@ impl<'a, T> DerefMut for AutoGuard<'a, T> {
 	}
 }
 
-#[track_caller]
+#[cfg_attr(debug_assertions, track_caller)]
+#[inline]
 fn ensure_interrupts_off() {
 	// Ensure interrupts weren't enabled in the meantime, which would lead to a potential
 	// deadlock.

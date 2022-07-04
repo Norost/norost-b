@@ -1,13 +1,11 @@
 use super::syscall::current_thread_ptr;
 use alloc::boxed::Box;
-use core::arch::{
-	asm,
-	x86_64::{_xgetbv, _xrstor64, _xsave64, _xsetbv},
-};
+use core::arch::x86_64::{_xgetbv, _xrstor64, _xsave64, _xsetbv};
 
 #[allow(dead_code)]
 const X87_STATE: u8 = 0;
 
+#[allow(dead_code)]
 const SSE_STATE: u8 = 1;
 
 #[allow(dead_code)]
@@ -47,8 +45,6 @@ const HWP_STATE: u8 = 16;
 
 #[allow(dead_code)]
 const XCOMP_BV: u8 = 63;
-
-const SUPPORT_MASK: u64 = 1 << SSE_STATE;
 
 #[derive(Default)]
 pub enum FloatStorage {
@@ -104,8 +100,10 @@ impl Xmm {
 	}
 }
 
+#[allow(dead_code)]
 struct Xcr0(u64);
 
+#[allow(dead_code)]
 impl Xcr0 {
 	fn load() -> Self {
 		unsafe { Self(_xgetbv(0)) }

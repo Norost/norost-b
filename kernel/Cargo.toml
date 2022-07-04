@@ -15,6 +15,7 @@ norostb_kernel = { path = "../lib/rust/kernel" }
 arena = { path = "../lib/rust/arena" }
 scancodes = { path = "../lib/rust/scancodes" }
 compiler_builtins = { version = "0.1", features = ["mem"] }
+nora_stream_table = { path = "../lib/rust/ipc/stream_table" }
 
 [features]
 # TODO only enable driver-portio for x86 platforms
