@@ -3,7 +3,7 @@ use crate::{
 	memory::{
 		frame,
 		frame::OwnedPageFrames,
-		r#virtual::{AddressSpace, MapError, RWX},
+		r#virtual::{self, AddressSpace, MapError, RWX},
 		Page,
 	},
 	object_table::{
@@ -271,6 +271,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 					.memory_object()
 					.ok_or(Error::InvalidOperation)
 					.and_then(|o| SubRange::new(o.clone(), range).map_err(|_| Error::InvalidData))
+					.map(|o| o as Arc<dyn Object>)
 			})
 			.ok_or(Error::InvalidObject)
 			.flatten(),
@@ -309,11 +310,17 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 						NewStreamingTableError::Map(_) => Error::CantCreateObject,
 						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
 					})
+					.map(|o| o as Arc<dyn Object>)
 				} else {
 					Err(Error::InvalidData)
 				}
 			})
-			.map_or(Err(Error::InvalidObject), |v| v),
+			.unwrap_or(Err(Error::InvalidObject)),
+		NewObject::PermissionMask { handle, rwx } => proc
+			.object_transform_new(handle, |o| {
+				r#virtual::mask_permissions_object(o.clone(), rwx).ok_or(Error::InvalidData)
+			})
+			.unwrap_or(Err(Error::InvalidObject)),
 	}
 	.map_or_else(
 		|e| Return {

@@ -85,15 +85,36 @@ impl RWX {
 	}
 
 	#[inline]
-	pub fn is_subset_of(&self, superset: RWX) -> bool {
-		match self {
-			Self::R => superset.r(),
-			Self::W => superset.w(),
-			Self::X => superset.x(),
-			Self::RW => superset.r() && superset.w(),
-			Self::RX => superset.r() && superset.x(),
-			Self::RWX => superset == Self::RWX,
-		}
+	pub fn is_subset_of(&self, superset: Self) -> bool {
+		self.intersection(superset) == Some(*self)
+	}
+
+	#[inline]
+	pub fn intersection(&self, with: Self) -> Option<Self> {
+		Self::from_flags(
+			self.r() && with.r(),
+			self.w() && with.w(),
+			self.x() && with.x(),
+		)
+		.ok()
+	}
+
+	#[inline]
+	pub fn into_raw(self) -> u8 {
+		self as _
+	}
+
+	#[inline]
+	pub fn try_from_raw(rwx: u8) -> Option<Self> {
+		Some(match rwx {
+			0b100 => Self::R,
+			0b010 => Self::W,
+			0b001 => Self::X,
+			0b110 => Self::RW,
+			0b101 => Self::RX,
+			0b111 => Self::RWX,
+			_ => return None,
+		})
 	}
 
 	#[inline]

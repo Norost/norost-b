@@ -45,3 +45,5 @@ impl Page {
 pub type Handle = u32;
 
 pub type AtomicHandle = core::sync::atomic::AtomicU32;
+
+pub use syscall::RWX;
