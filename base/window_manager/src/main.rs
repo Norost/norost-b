@@ -56,9 +56,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let sync = root.open(b"gpu/sync").unwrap();
 	let (w, h) = {
-		let mut b = [0; 16];
-		let r = root.open(b"gpu/resolution_binary").unwrap();
-		let l = r.read(&mut b).unwrap();
+		let mut b = [0; 8];
+		let l = sync
+			.get_meta(b"resolution_binary".into(), (&mut b).into())
+			.unwrap();
 		(
 			u32::from_le_bytes(b[..4].try_into().unwrap()),
 			u32::from_le_bytes(b[4..l].try_into().unwrap()),

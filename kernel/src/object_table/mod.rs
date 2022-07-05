@@ -14,7 +14,11 @@ mod ticket;
 
 pub use crate::scheduler::MemoryObject;
 
-pub use norostb_kernel::{error::Error, io::SeekFrom, syscall::Handle};
+pub use norostb_kernel::{
+	error::Error,
+	io::{SeekFrom, TinySlice},
+	syscall::Handle,
+};
 
 pub use object::*;
 pub use query::*;

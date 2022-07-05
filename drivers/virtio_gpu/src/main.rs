@@ -164,16 +164,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
 	const SYNC_HANDLE: Handle = Handle::MAX - 1;
 
-	let mut handles = driver_utils::Arena::new();
 	let mut command_buf = (NonNull::new(kernel::Page::SIZE as *mut u8).unwrap(), 0);
 
-	enum H {
-		Resolution,
-		ResolutionBinary,
-		Finished,
-	}
-
 	// Begin event loop
+	let mut tiny_buf = [0; 32];
 	loop {
 		let mut send_notif = false;
 		while let Some((handle, req)) = tbl.dequeue() {
@@ -185,52 +179,42 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
-						(Handle::MAX, b"resolution") => {
-							Response::Handle(handles.insert(H::Resolution))
-						}
-						(Handle::MAX, b"resolution_binary") => {
-							Response::Handle(handles.insert(H::ResolutionBinary))
-						}
 						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
 						_ => Response::Error(Error::InvalidOperation as _),
 					}
 				}),
-				Request::OpenMeta { .. } => todo!(),
-				Request::Read {
-					job_id,
-					amount,
-					peek,
-				} => (
-					job_id,
-					match handle {
-						Handle::MAX | SYNC_HANDLE => Response::Error(Error::InvalidOperation as _),
-						h => {
-							let buf = tbl.alloc(64).unwrap();
-							let l = match &mut handles[h] {
-								H::ResolutionBinary => {
-									buf.copy_from(0, &(width as u32).to_le_bytes());
-									buf.copy_from(4, &(height as u32).to_le_bytes());
-									8
-								}
-								H::Resolution => {
-									let (w, h) = (width.to_string(), height.to_string());
-									buf.copy_from(0, w.as_bytes());
-									buf.copy_from(w.len(), &[b'x']);
-									buf.copy_from(w.len() + 1, h.as_bytes());
-									(w.len() + 1 + h.len()).try_into().unwrap()
-								}
-								H::Finished => 0,
-							};
-							if !peek {
-								handles[h] = H::Finished;
-							}
-							Response::Data {
-								data: buf,
-								length: l,
-							}
+				Request::GetMeta { job_id, property } => {
+					let prop = property.get(&mut tiny_buf);
+					let data = property.into_inner();
+					let r = match (handle, &*prop) {
+						(_, b"resolution") => {
+							let (w, h) = (width.to_string(), height.to_string());
+							data.copy_from(0, w.as_bytes());
+							data.copy_from(w.len(), &[b'x']);
+							data.copy_from(w.len() + 1, h.as_bytes());
+							let length = (w.len() + 1 + h.len()).try_into().unwrap();
+							Response::Data { data, length }
 						}
-					},
-				),
+						(_, b"resolution_binary") => {
+							let data = tbl.alloc(8).unwrap();
+							data.copy_from(0, &(width as u32).to_le_bytes());
+							data.copy_from(4, &(height as u32).to_le_bytes());
+							Response::Data { data, length: 8 }
+						}
+						_ => {
+							data.manual_drop();
+							Response::Error(Error::DoesNotExist)
+						}
+					};
+					(job_id, r)
+				}
+				Request::SetMeta {
+					job_id,
+					property_value,
+				} => {
+					property_value.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
 				Request::Write { job_id, data } => {
 					let mut d = [0; 64];
 					let d = &mut d[..data.len()];
@@ -295,18 +279,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				),
 				Request::Close => match handle {
 					Handle::MAX | SYNC_HANDLE => continue,
-					h => {
-						handles.remove(h).unwrap();
-						continue;
-					}
+					_ => unreachable!(),
 				},
 				Request::Create { job_id, path } => {
 					path.manual_drop();
 					(job_id, Response::Error(Error::InvalidOperation as _))
 				}
-				Request::Destroy { job_id, .. } | Request::Seek { job_id, .. } => {
-					(job_id, Response::Error(Error::InvalidOperation as _))
-				}
+				Request::Read { job_id, .. }
+				| Request::Destroy { job_id, .. }
+				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
 			};
 			tbl.enqueue(job_id, response);
 			send_notif = true;

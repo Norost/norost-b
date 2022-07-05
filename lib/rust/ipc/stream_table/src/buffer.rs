@@ -61,6 +61,16 @@ impl Buffer<'_> {
 	}
 
 	#[inline]
+	pub fn copy_to_untrusted(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
+	pub fn copy_to_untrusted_uninit(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
 	pub unsafe fn copy_to_raw(&self, offset: usize, dst: *mut u8, count: usize) {
 		self.copy_to_raw_untrusted(offset, dst, count)
 	}
@@ -220,6 +230,16 @@ impl<'a> Data<'a> {
 	#[inline]
 	pub fn copy_to_uninit(&self, offset: usize, buf: &mut [MaybeUninit<u8>]) {
 		unsafe { self.copy_to_raw(offset, buf.as_mut_ptr().cast(), buf.len()) }
+	}
+
+	#[inline]
+	pub fn copy_to_untrusted(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
+	pub fn copy_to_untrusted_uninit(&self, offset: usize, buf: &mut [MaybeUninit<u8>]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr().cast(), buf.len()) }
 	}
 
 	#[inline]
