@@ -5,8 +5,11 @@ stderr = "system/log"
 [program.minish]
 path = "minish"
 file_root = ""
+#after = [ "gui_cli/write", "ps2_kbd/stream" ]
+after = [ "gui_cli/write" ]
 #stdin = "ps2_kbd/stream"
-#after = [ "ps2_kbd/stream" ]
+stdout = "gui_cli/write"
+stderr = "gui_cli/write"
 
 [program.fs_fat]
 disabled = true

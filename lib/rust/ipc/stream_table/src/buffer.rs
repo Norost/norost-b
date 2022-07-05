@@ -222,6 +222,7 @@ impl<'a> Data<'a> {
 		})
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn copy_to(&self, offset: usize, buf: &mut [u8]) {
 		unsafe { self.copy_to_raw(offset, buf.as_mut_ptr(), buf.len()) }
@@ -242,11 +243,13 @@ impl<'a> Data<'a> {
 		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr().cast(), buf.len()) }
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub unsafe fn copy_to_raw(&self, offset: usize, dst: *mut u8, count: usize) {
 		self.copy_to_raw_untrusted(offset, dst, count)
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub unsafe fn copy_to_raw_untrusted(
 		&self,
@@ -291,8 +294,13 @@ impl<'a> Data<'a> {
 	/// /  \        /  \                    /  \
 	/// D0 D1 ..   Dm  Dm+1 ..             ..  Dn-1
 	/// ```
+	#[cfg_attr(debug_assertions, track_caller)]
 	fn blocks(&self, skip: u32, mut f: impl FnMut(Buffer<'a>) -> bool) {
-		assert_eq!(skip, 0, "todo: skip blocks");
+		assert_eq!(
+			skip, 0,
+			"todo: skip blocks (BS: {})",
+			self.buffers.block_size
+		);
 		if self.len == 0 {
 			return;
 		}

@@ -302,6 +302,7 @@ dependencies = [
 name = "gui_cli"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "fontdue",
  "ipc_window_manager",
  "norostb_rt",

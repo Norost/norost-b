@@ -4,13 +4,13 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use core::{ptr::NonNull, str};
+use alloc::{string::String, vec::Vec};
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use fontdue::{
-	layout::{CoordinateSystem, Layout, TextStyle},
-	Font, FontSettings, Metrics,
+	layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle, WrapStyle},
+	Font, FontSettings,
 };
-use rt::io::{Error, Handle};
+use rt::{Error, Handle};
 
 const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
 
@@ -49,65 +49,190 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let window = root.create(b"window_manager/window").unwrap();
 
-	// Clear some area at the top so the text doesn't look ugly
-	let mut raw = Vec::new();
-	let mut draw = ipc_wm::DrawRect::new_vec(
-		&mut raw,
-		ipc_wm::Point { x: 0, y: 0 },
-		ipc_wm::Size {
-			x: 500 - 1,
-			y: 320 - 1,
-		},
-	);
-	let w = 500;
-	for y in 0..320 {
-		for x in 0..w {
-			let a = &mut draw.pixels_mut()[3 * (y * w + x)..][..3];
-			a[0] = (x * 256 / w) as _;
-			a[1] = (y * 256 / 320) as _;
-			a[2] = 255 - ((a[0] as usize + a[1] as usize) / 2) as u8;
-		}
-	}
-	window.write(&raw).unwrap();
+	let mut res = [0; 8];
+	let l = window
+		.get_meta(b"bin/resolution".into(), (&mut res).into())
+		.unwrap();
+	let width = u32::from_le_bytes(res[..4].try_into().unwrap());
+	let height = u32::from_le_bytes(res[4..l].try_into().unwrap());
+
+	window
+		.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
+		.unwrap();
+
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
+	root.create(b"gui_cli")
+		.unwrap()
+		.share(&table.public_table())
+		.unwrap();
+
+	const WRITE_HANDLE: Handle = Handle::MAX - 1;
+
+	let mut cur_line = String::new();
 
 	let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
-	layout.append(fonts, &TextStyle::new("ABC\n", 160.0, 0));
-	layout.append(fonts, &TextStyle::new("Hello, world!", 40.0, 0));
-
-	let t = rt::time::Monotonic::now();
-	for glyph in layout.glyphs().iter() {
-		if !glyph.char_data.rasterize() {
-			continue;
+	layout.reset(&LayoutSettings {
+		max_width: Some(width as _),
+		max_height: Some(height as _),
+		wrap_style: WrapStyle::Letter,
+		..Default::default()
+	});
+	let mut raw = Vec::new();
+	let mut draw_str = |s: &str, erase_from: usize, offt: usize| -> bool {
+		layout.clear();
+		layout.append(fonts, &TextStyle::new(s, 20.0, 0));
+		if layout.height() > height as f32 {
+			return true;
 		}
-		let font = &fonts[glyph.font_index];
+		for (i, glyph) in layout
+			.glyphs()
+			.iter()
+			.enumerate()
+			.skip(offt.min(erase_from))
+		{
+			if !glyph.char_data.rasterize() {
+				continue;
+			}
+			let font = &fonts[glyph.font_index];
 
-		let mut draw = ipc_wm::DrawRect::new_vec(
-			&mut raw,
-			ipc_wm::Point {
-				x: glyph.x as _,
-				y: glyph.y as _,
-			},
-			ipc_wm::Size {
-				x: (glyph.width - 1) as _,
-				y: (glyph.height - 1) as _,
-			},
-		);
+			let mut draw = ipc_wm::DrawRect::new_vec(
+				&mut raw,
+				ipc_wm::Point {
+					x: glyph.x as _,
+					y: glyph.y as _,
+				},
+				ipc_wm::Size {
+					x: (glyph.width - 1) as _,
+					y: (glyph.height - 1) as _,
+				},
+			);
 
-		let (_, covmap) = font.rasterize_config(glyph.key);
-		draw.pixels_mut()
-			.chunks_exact_mut(3)
-			.zip(covmap.iter())
-			.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));
+			if i < erase_from {
+				let (_, covmap) = font.rasterize_config(glyph.key);
+				draw.pixels_mut()
+					.chunks_exact_mut(3)
+					.zip(covmap.iter())
+					.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));
+			} else {
+				draw.pixels_mut().fill(0);
+			}
 
-		window.write(&raw).unwrap();
+			window.write(&raw).unwrap();
+		}
+		false
+	};
+
+	let mut parser = Parser {
+		string: Default::default(),
+		state: ParserState::Idle,
+	};
+	loop {
+		let mut flush = false;
+		while let Some((handle, req)) = table.dequeue() {
+			let (job_id, resp) = match req {
+				Request::Open { job_id, path } => {
+					let mut p = [0; 16];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					let resp = match &*p {
+						b"write" => Response::Handle(WRITE_HANDLE),
+						_ => Response::Error(Error::DoesNotExist),
+					};
+					(job_id, resp)
+				}
+				Request::Write { job_id, data } => {
+					let r = match handle {
+						WRITE_HANDLE => {
+							let og = parser.string.clone();
+							let mut erase_from = og.len();
+
+							let l = data.len().min(1024);
+							let mut v = Vec::with_capacity(l);
+							data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
+							unsafe { v.set_len(l) }
+							for c in v {
+								parser.add(c);
+								erase_from = erase_from.min(parser.string.len());
+							}
+
+							let len = data.len().try_into().unwrap();
+							draw_str(&og, erase_from, og.len());
+							if draw_str(&parser.string, parser.string.len(), og.len()) {
+								parser.remove_first_line();
+								window
+									.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
+									.unwrap();
+								draw_str(&parser.string, parser.string.len(), 0);
+							}
+							Response::Amount(len)
+						}
+						_ => Response::Error(Error::InvalidOperation),
+					};
+					data.manual_drop();
+					(job_id, r)
+				}
+				Request::Write { .. } => todo!(),
+				Request::Close => match handle {
+					WRITE_HANDLE => continue,
+					_ => unreachable!(),
+				},
+				e => todo!(),
+			};
+			table.enqueue(job_id, resp);
+			flush = true;
+		}
+		flush.then(|| table.flush());
+		table.wait();
 	}
-	let t = rt::time::Monotonic::now()
-		.checked_duration_since(t)
-		.unwrap();
-	rt::dbg!(t);
+}
 
-	rt::thread::sleep(core::time::Duration::MAX);
-	rt::thread::sleep(core::time::Duration::MAX);
+struct Parser {
+	string: String,
+	state: ParserState,
+}
 
-	0
+enum ParserState {
+	Idle,
+	AnsiEscape(AnsiState),
+}
+
+enum AnsiState {
+	Start,
+	BracketOpen,
+	Erase,
+}
+
+impl Parser {
+	fn add(&mut self, c: u8) {
+		match &mut self.state {
+			ParserState::Idle => match c {
+				0x1b => self.state = ParserState::AnsiEscape(AnsiState::Start),
+				0x7f => {
+					self.string.pop();
+				}
+				c => {
+					char::from_u32(c.into()).map(|c| self.string.push(c));
+				}
+			},
+			ParserState::AnsiEscape(s) => match (s, c) {
+				(s @ AnsiState::Start, b'[') => *s = AnsiState::BracketOpen,
+				(s @ AnsiState::BracketOpen, b'2') => *s = AnsiState::Erase,
+				(AnsiState::Erase, b'K') => {
+					let i = self.string.rfind('\n').map_or(0, |i| i + 1);
+					self.string.truncate(i);
+					self.state = ParserState::Idle
+				}
+				_ => {
+					self.string.push(char::REPLACEMENT_CHARACTER);
+					self.state = ParserState::Idle
+				}
+			},
+		}
+	}
+
+	fn remove_first_line(&mut self) {
+		let i = self.string.find('\n').map_or(self.string.len(), |i| i + 1);
+		self.string = self.string.split_off(i);
+	}
 }

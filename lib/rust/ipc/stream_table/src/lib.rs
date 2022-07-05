@@ -22,8 +22,8 @@ use core::{
 };
 use norost_ipc_spec::{S64, U32, U64};
 
-const REQUESTS_MASK: u32 = (1 << 8) - 1;
-const RESPONSES_MASK: u32 = (1 << 8) - 1;
+const REQUESTS_MASK: u32 = (1 << 7) - 1;
+const RESPONSES_MASK: u32 = (1 << 7) - 1;
 
 struct Queue {
 	base: NonNull<u8>,

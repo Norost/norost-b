@@ -99,12 +99,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		sync.write(&[lx0, lx1, ly0, ly1, hx0, hx1, hy0, hy1])
 			.unwrap();
 	};
-	let fill = |rect: math::Rect, color: [u8; 3]| {
+	let fill = |rect: math::Rect, color @ [r, g, b]: [u8; 3]| {
 		let s = rect.size().x as usize * rect.size().y as usize;
 		assert!(s * 3 <= shmem_size, "TODO");
-		for i in 0..s {
-			unsafe {
-				shmem.as_ptr().cast::<[u8; 3]>().add(i).write(color);
+		if r == g && g == b {
+			unsafe { shmem.as_ptr().write_bytes(r, rect.area() as usize * 3) }
+		} else {
+			for i in 0..s {
+				unsafe {
+					shmem.as_ptr().cast::<[u8; 3]>().add(i).write(color);
+				}
 			}
 		}
 		sync_rect(rect);
@@ -131,6 +135,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.share(&table.public_table())
 		.unwrap();
 
+	let mut prop_buf = [0; 511];
 	loop {
 		let mut send_notif = false;
 		while let Some((handle, req)) = table.dequeue() {
@@ -152,6 +157,44 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						_ => Response::Error(Error::InvalidOperation),
 					}
 				}),
+				Request::GetMeta { job_id, property } => {
+					let prop = property.get(&mut prop_buf);
+					let data = property.into_inner();
+					let r = match (handle, &*prop) {
+						(Handle::MAX, _) => {
+							data.manual_drop();
+							Response::Error(Error::InvalidOperation as _)
+						}
+						(h, b"bin/resolution") => {
+							let rect = manager.window_rect(h, size).unwrap();
+							data.copy_from(0, &u32::from(rect.size().x).to_le_bytes());
+							data.copy_from(4, &u32::from(rect.size().y).to_le_bytes());
+							Response::Data { data, length: 8 }
+						}
+						(_, _) => Response::Error(Error::DoesNotExist as _),
+					};
+					(job_id, r)
+				}
+				Request::SetMeta {
+					job_id,
+					property_value,
+				} => {
+					let (prop, val) = property_value.try_get(&mut prop_buf).unwrap();
+					property_value.into_inner().manual_drop();
+					let r = match (handle, &*prop) {
+						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
+						(h, b"bin/cmd/fill") => {
+							if let &[r, g, b] = &*val {
+								fill(manager.window_rect(h, size).unwrap(), [r, g, b]);
+								Response::Amount(0)
+							} else {
+								Response::Error(Error::InvalidData)
+							}
+						}
+						(_, _) => Response::Error(Error::DoesNotExist as _),
+					};
+					(job_id, r)
+				}
 				Request::Write { job_id, data } => (
 					job_id,
 					match handle {
