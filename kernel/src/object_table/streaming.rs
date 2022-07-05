@@ -289,9 +289,10 @@ impl Object for StreamObject {
 
 	fn set_meta(self: Arc<Self>, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Ticket<u64> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::GetMeta {
+			tbl.submit_job(self.handle, |q, job_id| Request::SetMeta {
 				job_id,
-				property: tbl.copy_data_from_scatter(q, &[&[property.len_u8()], property, value]),
+				property_value: tbl
+					.copy_data_from_scatter(q, &[&[property.len_u8()], property, value]),
 			})
 		})
 	}
