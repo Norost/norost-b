@@ -1,5 +1,5 @@
 use super::{AllocateError, AllocateHints, Page, PPN};
-use crate::{object_table::Object, scheduler::MemoryObject};
+use crate::{memory::r#virtual::RWX, object_table::Object, scheduler::MemoryObject};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 
@@ -56,6 +56,10 @@ unsafe impl MemoryObject for OwnedPageFrames {
 
 	fn physical_pages_len(&self) -> usize {
 		self.frames.len()
+	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::RWX
 	}
 }
 

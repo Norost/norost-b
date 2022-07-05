@@ -6,7 +6,6 @@ pub struct Monotonic {
 }
 
 impl Monotonic {
-	#[cfg(feature = "userspace")]
 	#[inline]
 	pub fn now() -> Self {
 		crate::syscall::monotonic_time()

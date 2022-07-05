@@ -1,6 +1,7 @@
 use super::{fixed_bitmap::FixedBitmap, PPNBox, Page, PageFrameIter, PPN};
 use crate::{
 	boot,
+	memory::r#virtual::RWX,
 	object_table::{Error, Object, Root, Ticket},
 	scheduler::MemoryObject,
 	sync::SpinLock,
@@ -57,6 +58,10 @@ unsafe impl MemoryObject for DmaFrame {
 
 	fn physical_pages_len(&self) -> usize {
 		self.count.try_into().unwrap()
+	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::RW
 	}
 }
 

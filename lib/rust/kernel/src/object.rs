@@ -1,4 +1,4 @@
-use crate::Handle;
+use crate::{Handle, RWX};
 use core::ops::RangeInclusive;
 
 macro_rules! impl_ {
@@ -25,6 +25,7 @@ impl_! {
 	Duplicate 2
 	SharedMemory 3
 	StreamTable 4
+	PermissionMask 5
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -109,6 +110,10 @@ pub enum NewObject {
 		buffer_mem_block_size: Pow2Size,
 		allow_sharing: bool,
 	},
+	PermissionMask {
+		handle: Handle,
+		rwx: RWX,
+	},
 }
 
 pub enum NewObjectArgs {
@@ -141,6 +146,9 @@ impl NewObject {
 					usize::from(buffer_mem_block_size.0) | usize::from(allow_sharing) << 8,
 				),
 			),
+			Self::PermissionMask { handle, rwx } => {
+				(PermissionMask, N2(handle as _, rwx.into_raw() as _))
+			}
 		};
 		(t as _, a)
 	}
@@ -160,6 +168,10 @@ impl NewObject {
 				buffer_mem: a as _,
 				buffer_mem_block_size: Pow2Size(b as _),
 				allow_sharing: b & (1 << 8) != 0,
+			},
+			PermissionMask => Self::PermissionMask {
+				handle: a as _,
+				rwx: RWX::try_from_raw((b & 7) as u8)?,
 			},
 		})
 	}

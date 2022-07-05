@@ -1,5 +1,8 @@
 use super::PCI;
-use crate::memory::frame::{PageFrameIter, PPN};
+use crate::memory::{
+	frame::{PageFrameIter, PPN},
+	r#virtual::RWX,
+};
 use crate::object_table::Object;
 use crate::object_table::{Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
@@ -41,6 +44,10 @@ unsafe impl MemoryObject for PciDevice {
 
 	fn physical_pages_len(&self) -> usize {
 		1
+	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::R
 	}
 }
 
@@ -136,6 +143,10 @@ unsafe impl MemoryObject for BarRegion {
 
 	fn physical_pages_len(&self) -> usize {
 		self.frames.len()
+	}
+
+	fn page_permissions(&self) -> RWX {
+		RWX::RW
 	}
 }
 

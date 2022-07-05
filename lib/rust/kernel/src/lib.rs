@@ -15,7 +15,6 @@
 #![deny(unused)]
 
 pub mod error;
-#[cfg(feature = "userspace")]
 #[macro_use]
 pub mod syscall;
 pub mod io;
@@ -46,3 +45,5 @@ impl Page {
 pub type Handle = u32;
 
 pub type AtomicHandle = core::sync::atomic::AtomicU32;
+
+pub use syscall::RWX;

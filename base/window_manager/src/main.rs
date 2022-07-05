@@ -72,8 +72,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let (shmem, shmem_size) = shmem_obj
 		.map_object(None, rt::io::RWX::RW, 0, shmem_size)
 		.unwrap();
-	sync.share(&shmem_obj)
-		.expect("failed to share mem with GPU");
+	sync.share(
+		&rt::Object::new(rt::io::NewObject::PermissionMask {
+			handle: shmem_obj.as_raw(),
+			rwx: rt::io::RWX::R,
+		})
+		.unwrap(),
+	)
+	.expect("failed to share mem with GPU");
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::new(gwp).unwrap();

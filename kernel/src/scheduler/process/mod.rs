@@ -125,14 +125,13 @@ impl Process {
 	}
 
 	/// Create a new object from another object.
-	pub fn object_transform_new<R, O, F>(&self, handle: Handle, f: F) -> Option<Result<Handle, R>>
+	pub fn object_transform_new<R, F>(&self, handle: Handle, f: F) -> Option<Result<Handle, R>>
 	where
-		O: Object + 'static,
-		F: FnOnce(&Arc<dyn Object>) -> Result<Arc<O>, R>,
+		F: FnOnce(&Arc<dyn Object>) -> Result<Arc<dyn Object>, R>,
 	{
 		let mut obj = self.objects.lock();
 		let res = f(obj.get(unerase_handle(handle))?);
-		Some(res.map(|o| erase_handle(obj.insert(o as Arc<dyn Object>))))
+		Some(res.map(|o| erase_handle(obj.insert(o))))
 	}
 
 	/// Spawn a new thread.

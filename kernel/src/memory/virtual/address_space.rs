@@ -16,6 +16,7 @@ pub enum MapError {
 	Overflow,
 	ZeroSize,
 	UnalignedOffset,
+	Permission,
 	Arch(crate::arch::r#virtual::MapError),
 }
 
@@ -54,6 +55,9 @@ impl AddressSpace {
 	) -> Result<(NonNull<Page>, usize), MapError> {
 		if offset % Page::SIZE != 0 {
 			return Err(MapError::UnalignedOffset);
+		}
+		if !rwx.is_subset_of(object.page_permissions()) {
+			return Err(MapError::Permission);
 		}
 
 		let (range, index) = Self::map_object_common(

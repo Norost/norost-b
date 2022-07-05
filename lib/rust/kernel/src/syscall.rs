@@ -60,6 +60,7 @@ impl fmt::Debug for DebugLossy<'_> {
 
 pub type Handle = u32;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RWX {
 	R = 0b100,
 	W = 0b010,
@@ -68,6 +69,81 @@ pub enum RWX {
 	RX = 0b101,
 	RWX = 0b111,
 }
+
+impl RWX {
+	#[inline]
+	pub fn from_flags(r: bool, w: bool, x: bool) -> Result<RWX, IncompatibleRWXFlags> {
+		match (r, w, x) {
+			(true, false, false) => Ok(Self::R),
+			(false, true, false) => Ok(Self::W),
+			(false, false, true) => Ok(Self::X),
+			(true, true, false) => Ok(Self::RW),
+			(true, false, true) => Ok(Self::RX),
+			(true, true, true) => Ok(Self::RWX),
+			_ => Err(IncompatibleRWXFlags),
+		}
+	}
+
+	#[inline]
+	pub fn is_subset_of(&self, superset: Self) -> bool {
+		self.intersection(superset) == Some(*self)
+	}
+
+	#[inline]
+	pub fn intersection(&self, with: Self) -> Option<Self> {
+		Self::from_flags(
+			self.r() && with.r(),
+			self.w() && with.w(),
+			self.x() && with.x(),
+		)
+		.ok()
+	}
+
+	#[inline]
+	pub fn into_raw(self) -> u8 {
+		self as _
+	}
+
+	#[inline]
+	pub fn try_from_raw(rwx: u8) -> Option<Self> {
+		Some(match rwx {
+			0b100 => Self::R,
+			0b010 => Self::W,
+			0b001 => Self::X,
+			0b110 => Self::RW,
+			0b101 => Self::RX,
+			0b111 => Self::RWX,
+			_ => return None,
+		})
+	}
+
+	#[inline]
+	pub fn r(&self) -> bool {
+		match self {
+			Self::R | Self::RW | Self::RX | Self::RWX => true,
+			Self::W | Self::X => false,
+		}
+	}
+
+	#[inline]
+	pub fn w(&self) -> bool {
+		match self {
+			Self::W | Self::RW | Self::RWX => true,
+			Self::R | Self::X | Self::RX => false,
+		}
+	}
+
+	#[inline]
+	pub fn x(&self) -> bool {
+		match self {
+			Self::X | Self::RX | Self::RWX => true,
+			Self::R | Self::W | Self::RW => false,
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct IncompatibleRWXFlags;
 
 #[allow(unused_macro_rules)]
 macro_rules! syscall {
