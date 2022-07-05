@@ -1,4 +1,4 @@
-use crate::io::{self, RWX};
+use crate::io::{self, TinySlice, RWX};
 use core::{
 	fmt,
 	marker::PhantomData,
@@ -70,6 +70,29 @@ impl Object {
 	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
 		io::write(self.0, data)
+	}
+
+	#[inline]
+	pub fn get_meta(
+		&self,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<u8>,
+	) -> io::Result<usize> {
+		io::get_meta(self.0, property, value)
+	}
+
+	#[inline]
+	pub fn get_meta_uninit(
+		&self,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<MaybeUninit<u8>>,
+	) -> io::Result<usize> {
+		io::get_meta_uninit(self.0, property, value)
+	}
+
+	#[inline]
+	pub fn set_meta(&self, property: &TinySlice<u8>, value: &TinySlice<u8>) -> io::Result<usize> {
+		io::set_meta(self.0, property, value)
 	}
 
 	#[inline]

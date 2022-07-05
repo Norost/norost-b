@@ -1,4 +1,4 @@
-use super::{Error, MemoryObject, Ticket};
+use super::{Error, MemoryObject, Ticket, TinySlice};
 use alloc::{boxed::Box, sync::Arc};
 
 /// A single object.
@@ -11,12 +11,6 @@ pub trait Object {
 
 	/// Open a single object based on path.
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		let _ = path;
-		not_implemented()
-	}
-
-	/// Open an object with meta-information based on path.
-	fn open_meta(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		let _ = path;
 		not_implemented()
 	}
@@ -44,6 +38,18 @@ pub trait Object {
 	}
 
 	fn destroy(&self, _path: &[u8]) -> Ticket<u64> {
+		not_implemented()
+	}
+
+	/// Get meta-information about an object.
+	fn get_meta(self: Arc<Self>, property: &TinySlice<u8>) -> Ticket<Box<[u8]>> {
+		let _ = property;
+		not_implemented()
+	}
+
+	/// Get meta-information about an object.
+	fn set_meta(self: Arc<Self>, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Ticket<u64> {
+		let _ = (property, value);
 		not_implemented()
 	}
 }

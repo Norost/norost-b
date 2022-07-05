@@ -5,7 +5,7 @@ use crate::{
 		r#virtual::{AddressSpace, MapError, RWX},
 		Page,
 	},
-	object_table::MemoryObject,
+	object_table::{MemoryObject, TinySlice},
 	sync::Mutex,
 };
 use alloc::{
@@ -100,11 +100,20 @@ impl StreamingTable {
 	}
 
 	fn copy_data_from(&self, queue: &mut ClientQueue, data: &[u8]) -> Slice {
+		self.copy_data_from_scatter(queue, &[data])
+	}
+
+	fn copy_data_from_scatter(&self, queue: &mut ClientQueue, data: &[&[u8]]) -> Slice {
+		let len = data.iter().map(|d| d.len()).sum();
 		let buf = self
 			.buffer_mem
-			.alloc(queue.buffer_head_ref(), data.len())
+			.alloc(queue.buffer_head_ref(), len)
 			.unwrap_or_else(|| todo!("no buffers available"));
-		buf.copy_from(0, data);
+		let mut offt = 0;
+		for d in data {
+			buf.copy_from(offt, d);
+			offt += d.len();
+		}
 		Slice {
 			offset: buf.offset().try_into().unwrap(),
 			length: buf.len().try_into().unwrap(),
@@ -265,6 +274,24 @@ impl Object for StreamObject {
 			tbl.submit_job(self.handle, |q, job_id| Request::Write {
 				job_id,
 				data: tbl.copy_data_from(q, data),
+			})
+		})
+	}
+
+	fn get_meta(self: Arc<Self>, property: &TinySlice<u8>) -> Ticket<Box<[u8]>> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::GetMeta {
+				job_id,
+				property: tbl.copy_data_from(q, property),
+			})
+		})
+	}
+
+	fn set_meta(self: Arc<Self>, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Ticket<u64> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::GetMeta {
+				job_id,
+				property: tbl.copy_data_from_scatter(q, &[&[property.len_u8()], property, value]),
 			})
 		})
 	}
