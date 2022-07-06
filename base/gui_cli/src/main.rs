@@ -106,6 +106,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut parser = Parser {
 		state: ParserState::Idle,
 	};
+	let mut flushed @ mut dirty = false;
 	loop {
 		let mut flush = false;
 		while let Some((handle, req)) = table.dequeue() {
@@ -129,15 +130,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							unsafe { v.set_len(l) }
 							for c in v {
 								match parser.add(c) {
-									None => {}
+									None => continue,
 									Some(Action::PushChar(c)) => rasterizer.push_char(c),
 									Some(Action::PopChar) => rasterizer.pop_char(),
 									Some(Action::NewLine) => rasterizer.new_line(),
 									Some(Action::ClearLine) => rasterizer.clear_line(),
 								}
+								dirty = true;
 							}
-
-							draw(&mut rasterizer);
 
 							let len = data.len().try_into().unwrap();
 							Response::Amount(len)
@@ -157,8 +157,22 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			table.enqueue(job_id, resp);
 			flush = true;
 		}
-		flush.then(|| table.flush());
-		table.wait();
+		if flush {
+			table.flush();
+			flushed = true;
+		} else if flushed {
+			// TODO lazy hack, add some kind of table.wait_until instead (i.e. use
+			// async I/O queue).
+			for i in 0..10 {
+				rt::thread::yield_now();
+			}
+			flushed = false;
+		} else if dirty {
+			draw(&mut rasterizer);
+			dirty = false;
+		} else {
+			table.wait();
+		}
 	}
 }
 
