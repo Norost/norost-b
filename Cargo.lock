@@ -120,6 +120,7 @@ name = "driver_scancode_to_char"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "nora_io_queue_rt",
  "norostb_kernel",
  "norostb_rt",
  "norostb_rt_alloc",

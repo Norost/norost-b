@@ -131,6 +131,23 @@ impl Request {
 	}
 
 	#[inline(always)]
+	pub fn get_meta_uninit(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<MaybeUninit<u8>>,
+	) -> Self {
+		Self {
+			ty: Self::GET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_mut_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
 	pub fn set_meta(
 		user_data: u64,
 		handle: Handle,

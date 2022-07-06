@@ -126,6 +126,11 @@ impl StreamTable {
 		self.queue.borrow_mut().try_enqueue(job_id, r).unwrap();
 	}
 
+	#[inline(always)]
+	pub fn notifier(&self) -> &rt::Object {
+		&self.notify
+	}
+
 	pub fn wait(&self) {
 		self.notify.read(&mut []).unwrap();
 	}

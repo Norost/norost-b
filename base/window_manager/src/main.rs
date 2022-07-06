@@ -129,7 +129,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	}
 
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 22 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(12));
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
 	root.create(b"window_manager")
 		.unwrap()
 		.share(&table.public_table())
