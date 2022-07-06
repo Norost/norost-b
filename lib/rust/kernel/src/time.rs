@@ -43,6 +43,11 @@ impl Monotonic {
 			.map(Into::into)
 			.map(Duration::from_nanos)
 	}
+
+	#[inline]
+	pub fn duration_since(&self, earlier: Monotonic) -> Duration {
+		self.checked_duration_since(earlier).unwrap_or_default()
+	}
 }
 
 impl fmt::Debug for Monotonic {

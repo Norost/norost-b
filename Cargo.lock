@@ -304,6 +304,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "fontdue",
+ "hashbrown",
  "ipc_window_manager",
  "norostb_rt",
  "norostb_rt_alloc",

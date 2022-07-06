@@ -8,6 +8,7 @@ rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 ipc_wm = { package = "ipc_window_manager", path = "../../lib/rust/ipc/window_manager" }
 fontdue = "0.7"
+hashbrown = "0.11"
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"
