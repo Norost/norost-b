@@ -246,6 +246,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 					continue;
 				}
+				Request::Open { .. } => todo!(),
 				_ => todo!(),
 			};
 			table.enqueue(job_id, response);

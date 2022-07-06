@@ -1,0 +1,19 @@
+[package]
+name = "image_viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.jpeg]
+package = "jpeg-decoder"
+#git = "https://github.com/image-rs/jpeg-decoder"
+path = "../../../../rust/image/jpeg-decoder"
+default-features = false
+features = ["platform_independent"]
+
+[dependencies.ipc_wm]
+package = "ipc_window_manager"
+path = "../../lib/rust/ipc/window_manager"

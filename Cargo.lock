@@ -321,6 +321,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "image_viewer"
+version = "0.1.0"
+dependencies = [
+ "ipc_window_manager",
+ "jpeg-decoder",
+ "norostb_rt",
+]
+
+[[package]]
 name = "init"
 version = "0.1.0"
 dependencies = [
@@ -342,6 +351,10 @@ dependencies = [
  "norostb_rt",
  "norostb_rt_alloc",
 ]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.2.6"
 
 [[package]]
 name = "libc"

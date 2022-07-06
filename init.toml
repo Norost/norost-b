@@ -23,6 +23,11 @@ path = "gui_cli"
 after = [ "window_manager" ]
 file_root = ""
 
+[program.image_viewer]
+path = "image_viewer"
+after = [ "window_manager" ]
+file_root = ""
+
 [program.virtio_blk]
 disabled = true
 path = "virtio-blk"
