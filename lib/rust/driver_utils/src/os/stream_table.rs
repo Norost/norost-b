@@ -204,10 +204,8 @@ pub struct Data<'a> {
 
 impl<'a> Data<'a> {
 	pub fn manual_drop(self) {
-		self.table.buffers.dealloc(
-			self.table.queue.borrow().buffer_head_ref(),
-			self.offset().try_into().unwrap(),
-		);
+		self.data
+			.manual_drop(self.table.queue.borrow().buffer_head_ref());
 	}
 }
 

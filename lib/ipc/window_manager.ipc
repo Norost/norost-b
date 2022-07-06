@@ -1,0 +1,25 @@
+@name norost.WindowManager
+@version 0
+@abi 0
+
+struct Transfer {
+	offset: u32
+	x: u32
+	y: u32
+	width: u16
+	height: u16
+	stride: u16
+}
+
+struct Rgb8 {
+	r: u8
+	g: u8
+	b: u8
+}
+
+struct Rgba8 {
+	r: u8
+	g: u8
+	b: u8
+	a: u8
+}

@@ -281,6 +281,40 @@ impl<'a> Data<'a> {
 		self.len.try_into().unwrap()
 	}
 
+	// FIXME make Drop trait work in match
+	pub fn manual_drop(self, head: &'a AtomicU32) {
+		if self.len == 0 {
+			return;
+		}
+		let (mut l, mut o, mut n) = (self.len, self.offset, [0; 4]);
+		loop {
+			let bo = o;
+			let b = self.buffers.get_buf(bo);
+			let to = self.buffers.block_size / 4;
+			for i in 0..to {
+				if l <= self.buffers.block_size {
+					if i > 0 {
+						b.copy_to(i as usize * 4, &mut n);
+						o = u32::from_le_bytes(n);
+						self.buffers.dealloc(head, o);
+					}
+					self.buffers.dealloc(head, bo);
+					return;
+				} else {
+					b.copy_to(i as usize * 4, &mut n);
+					o = u32::from_le_bytes(n);
+					l -= self.buffers.block_size;
+					if i != to - 1 {
+						self.buffers.dealloc(head, o);
+					}
+				}
+			}
+			// Account for scatter-gather array block
+			self.buffers.dealloc(head, bo);
+			l += self.buffers.block_size;
+		}
+	}
+
 	/// ```
 	/// D0
 	///
