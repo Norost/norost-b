@@ -15,22 +15,31 @@ fn main() {
 	.unwrap();
 	let f = |a, b| {
 		let v = u32::from_le_bytes(res[a..b].try_into().unwrap());
+		dbg!(v);
 		v.try_into().unwrap()
 	};
+	let (w, h) = (f(0, 4), f(4, 8));
 	let mut img = jpeg::Decoder::new(Cursor::new(EXAMPLE));
-	let (w, h) = img.scale(f(0, 4), f(4, 8)).unwrap();
-	dbg!(w, h);
+	let (img_w, img_h) = img.scale(f(0, 4), f(4, 8)).unwrap();
 	dbg!(img.info());
 	let img = img.decode().unwrap();
 
 	let mut raw = Vec::new();
-	ipc_wm::DrawRect::new_vec(
+	let mut draw = ipc_wm::DrawRect::new_vec(
 		&mut raw,
 		ipc_wm::Point { x: 0, y: 0 },
-		ipc_wm::Size { x: w - 1, y: h - 1 },
-	)
-	.pixels_mut()
-	.copy_from_slice(&img);
+		ipc_wm::Size { x: w, y: h - 1 },
+	);
+
+	for y in 0..usize::from(h) {
+		for x in 0..usize::from(w) {
+			let sx = x * usize::from(img_w) / usize::from(w);
+			let sy = y * usize::from(img_h) / usize::from(h);
+			let f = &img[(sy * usize::from(img_w) + sx) * 3..][..3];
+			let t = &mut draw.pixels_mut()[(y * usize::from(w) + x) * 3..][..3];
+			t.copy_from_slice(f);
+		}
+	}
 	window.write_all(&raw).unwrap();
 
 	loop {

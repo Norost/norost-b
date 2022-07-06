@@ -85,8 +85,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::new(gwp).unwrap();
 	let w0 = manager.new_window(size).unwrap();
-	let w1 = manager.new_window(size).unwrap();
-	let w2 = manager.new_window(size).unwrap();
 
 	let sync_rect = |rect: math::Rect| {
 		let mut s = alloc::string::String::with_capacity(64);
