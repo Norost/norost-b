@@ -1,16 +1,20 @@
 #![no_std]
 #![feature(alloc_error_handler)]
+#![feature(new_uninit)]
 #![feature(start)]
 
 extern crate alloc;
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use core::{ptr::NonNull, str};
+mod rasterizer;
+
+use alloc::{boxed::Box, string::String, vec::Vec};
+use core::ptr::NonNull;
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use fontdue::{
-	layout::{CoordinateSystem, Layout, TextStyle},
-	Font, FontSettings, Metrics,
+	layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle, WrapStyle},
+	Font, FontSettings,
 };
-use rt::io::{Error, Handle};
+use rt::{Error, Handle};
 
 const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
 
@@ -20,10 +24,8 @@ static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
 
 #[cfg(not(test))]
 #[alloc_error_handler]
-fn alloc_error(_: core::alloc::Layout) -> ! {
-	// FIXME the runtime allocates memory by default to write things, so... crap
-	// We can run in similar trouble with the I/O queue. Some way to submit I/O requests
-	// without going through an queue may be useful.
+fn alloc_error(layout: core::alloc::Layout) -> ! {
+	let _ = rt::io::stderr().map(|o| writeln!(o, "allocation error for {:?}", layout));
 	rt::exit(129)
 }
 
@@ -46,68 +48,186 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		},
 	)
 	.unwrap()];
+	let font = Font::from_bytes(
+		FONT,
+		FontSettings {
+			scale: 160.0,
+			..Default::default()
+		},
+	)
+	.unwrap();
+	let mut rasterizer = rasterizer::Rasterizer::new(font, 20);
 
 	let window = root.create(b"window_manager/window").unwrap();
 
-	// Clear some area at the top so the text doesn't look ugly
-	let mut raw = Vec::new();
-	let mut draw = ipc_wm::DrawRect::new_vec(
-		&mut raw,
-		ipc_wm::Point { x: 0, y: 0 },
-		ipc_wm::Size {
-			x: 500 - 1,
-			y: 320 - 1,
-		},
-	);
-	let w = 500;
-	for y in 0..320 {
-		for x in 0..w {
-			let a = &mut draw.pixels_mut()[3 * (y * w + x)..][..3];
-			a[0] = (x * 256 / w) as _;
-			a[1] = (y * 256 / 320) as _;
-			a[2] = 255 - ((a[0] as usize + a[1] as usize) / 2) as u8;
-		}
-	}
-	window.write(&raw).unwrap();
+	let mut res = [0; 8];
+	let l = window
+		.get_meta(b"bin/resolution".into(), (&mut res).into())
+		.unwrap();
+	let width = u32::from_le_bytes(res[..4].try_into().unwrap());
+	let height = u32::from_le_bytes(res[4..l].try_into().unwrap());
 
-	let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
-	layout.append(fonts, &TextStyle::new("ABC\n", 160.0, 0));
-	layout.append(fonts, &TextStyle::new("Hello, world!", 40.0, 0));
+	let mut fb = Vec::<[u8; 3]>::new();
+	fb.resize(width as usize * height as usize, [0; 3]);
+	let fb = Box::into_raw(fb.into_boxed_slice()) as *mut [u8; 3];
+	let mut fb = unsafe { rasterizer::FrameBuffer::new(NonNull::new_unchecked(fb), width, height) };
 
-	let t = rt::time::Monotonic::now();
-	for glyph in layout.glyphs().iter() {
-		if !glyph.char_data.rasterize() {
-			continue;
-		}
-		let font = &fonts[glyph.font_index];
-
+	let mut draw = |rasterizer: &mut rasterizer::Rasterizer| {
+		fb.as_mut().fill(0);
+		rasterizer.render_all(&mut fb);
+		let mut raw = Vec::new();
 		let mut draw = ipc_wm::DrawRect::new_vec(
 			&mut raw,
-			ipc_wm::Point {
-				x: glyph.x as _,
-				y: glyph.y as _,
-			},
+			ipc_wm::Point { x: 0, y: 0 },
 			ipc_wm::Size {
-				x: (glyph.width - 1) as _,
-				y: (glyph.height - 1) as _,
+				x: (width - 1) as _,
+				y: (height - 1) as _,
 			},
 		);
-
-		let (_, covmap) = font.rasterize_config(glyph.key);
-		draw.pixels_mut()
-			.chunks_exact_mut(3)
-			.zip(covmap.iter())
-			.for_each(|(w, &r)| w.copy_from_slice(&[r, r, r]));
-
+		draw.pixels_mut().copy_from_slice(fb.as_ref());
 		window.write(&raw).unwrap();
-	}
-	let t = rt::time::Monotonic::now()
-		.checked_duration_since(t)
+	};
+
+	window
+		.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
 		.unwrap();
-	rt::dbg!(t);
 
-	rt::thread::sleep(core::time::Duration::MAX);
-	rt::thread::sleep(core::time::Duration::MAX);
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
+	root.create(b"gui_cli")
+		.unwrap()
+		.share(&table.public_table())
+		.unwrap();
 
-	0
+	const WRITE_HANDLE: Handle = Handle::MAX - 1;
+
+	let mut cur_line = String::new();
+
+	let mut parser = Parser {
+		state: ParserState::Idle,
+	};
+	let mut flushed @ mut dirty = false;
+	loop {
+		let mut flush = false;
+		while let Some((handle, req)) = table.dequeue() {
+			let (job_id, resp) = match req {
+				Request::Open { job_id, path } => {
+					let mut p = [0; 16];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					let resp = match &*p {
+						b"write" => Response::Handle(WRITE_HANDLE),
+						_ => Response::Error(Error::DoesNotExist),
+					};
+					(job_id, resp)
+				}
+				Request::Write { job_id, data } => {
+					let r = match handle {
+						WRITE_HANDLE => {
+							let l = data.len().min(1024);
+							let mut v = Vec::with_capacity(l);
+							data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
+							unsafe { v.set_len(l) }
+							for c in v {
+								match parser.add(c) {
+									None => continue,
+									Some(Action::PushChar(c)) => rasterizer.push_char(c),
+									Some(Action::PopChar) => rasterizer.pop_char(),
+									Some(Action::NewLine) => rasterizer.new_line(),
+									Some(Action::ClearLine) => rasterizer.clear_line(),
+								}
+								dirty = true;
+							}
+
+							let len = data.len().try_into().unwrap();
+							Response::Amount(len)
+						}
+						_ => Response::Error(Error::InvalidOperation),
+					};
+					data.manual_drop();
+					(job_id, r)
+				}
+				Request::Write { .. } => todo!(),
+				Request::Close => match handle {
+					WRITE_HANDLE => continue,
+					_ => unreachable!(),
+				},
+				e => todo!(),
+			};
+			table.enqueue(job_id, resp);
+			flush = true;
+		}
+		if flush {
+			table.flush();
+			flushed = true;
+		} else if flushed {
+			// TODO lazy hack, add some kind of table.wait_until instead (i.e. use
+			// async I/O queue).
+			for i in 0..10 {
+				rt::thread::yield_now();
+			}
+			flushed = false;
+		} else if dirty {
+			draw(&mut rasterizer);
+			dirty = false;
+		} else {
+			table.wait();
+		}
+	}
+}
+
+struct Parser {
+	state: ParserState,
+}
+
+enum ParserState {
+	Idle,
+	AnsiEscape(AnsiState),
+}
+
+enum AnsiState {
+	Start,
+	BracketOpen,
+	Erase,
+}
+
+enum Action {
+	PushChar(char),
+	PopChar,
+	NewLine,
+	ClearLine,
+}
+
+impl Parser {
+	fn add(&mut self, c: u8) -> Option<Action> {
+		match &mut self.state {
+			ParserState::Idle => match c {
+				0x1b => {
+					self.state = ParserState::AnsiEscape(AnsiState::Start);
+					None
+				}
+				0x7f => Some(Action::PopChar),
+				b'\n' => Some(Action::NewLine),
+				c => char::from_u32(c.into()).map(Action::PushChar),
+			},
+			ParserState::AnsiEscape(s) => match (s, c) {
+				(s @ AnsiState::Start, b'[') => {
+					*s = AnsiState::BracketOpen;
+					None
+				}
+				(s @ AnsiState::BracketOpen, b'2') => {
+					*s = AnsiState::Erase;
+					None
+				}
+				(AnsiState::Erase, b'K') => {
+					self.state = ParserState::Idle;
+					Some(Action::ClearLine)
+				}
+				_ => {
+					self.state = ParserState::Idle;
+					Some(Action::PushChar(char::REPLACEMENT_CHARACTER))
+				}
+			},
+		}
+	}
 }

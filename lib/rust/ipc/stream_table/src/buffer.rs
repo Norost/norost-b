@@ -61,6 +61,16 @@ impl Buffer<'_> {
 	}
 
 	#[inline]
+	pub fn copy_to_untrusted(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
+	pub fn copy_to_untrusted_uninit(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
 	pub unsafe fn copy_to_raw(&self, offset: usize, dst: *mut u8, count: usize) {
 		self.copy_to_raw_untrusted(offset, dst, count)
 	}
@@ -212,6 +222,7 @@ impl<'a> Data<'a> {
 		})
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub fn copy_to(&self, offset: usize, buf: &mut [u8]) {
 		unsafe { self.copy_to_raw(offset, buf.as_mut_ptr(), buf.len()) }
@@ -223,10 +234,22 @@ impl<'a> Data<'a> {
 	}
 
 	#[inline]
+	pub fn copy_to_untrusted(&self, offset: usize, buf: &mut [u8]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr(), buf.len()) }
+	}
+
+	#[inline]
+	pub fn copy_to_untrusted_uninit(&self, offset: usize, buf: &mut [MaybeUninit<u8>]) {
+		unsafe { self.copy_to_raw_untrusted(offset, buf.as_mut_ptr().cast(), buf.len()) }
+	}
+
+	#[cfg_attr(debug_assertions, track_caller)]
+	#[inline]
 	pub unsafe fn copy_to_raw(&self, offset: usize, dst: *mut u8, count: usize) {
 		self.copy_to_raw_untrusted(offset, dst, count)
 	}
 
+	#[cfg_attr(debug_assertions, track_caller)]
 	#[inline]
 	pub unsafe fn copy_to_raw_untrusted(
 		&self,
@@ -258,6 +281,40 @@ impl<'a> Data<'a> {
 		self.len.try_into().unwrap()
 	}
 
+	// FIXME make Drop trait work in match
+	pub fn manual_drop(self, head: &'a AtomicU32) {
+		if self.len == 0 {
+			return;
+		}
+		let (mut l, mut o, mut n) = (self.len, self.offset, [0; 4]);
+		loop {
+			let bo = o;
+			let b = self.buffers.get_buf(bo);
+			let to = self.buffers.block_size / 4;
+			for i in 0..to {
+				if l <= self.buffers.block_size {
+					if i > 0 {
+						b.copy_to(i as usize * 4, &mut n);
+						o = u32::from_le_bytes(n);
+						self.buffers.dealloc(head, o);
+					}
+					self.buffers.dealloc(head, bo);
+					return;
+				} else {
+					b.copy_to(i as usize * 4, &mut n);
+					o = u32::from_le_bytes(n);
+					l -= self.buffers.block_size;
+					if i != to - 1 {
+						self.buffers.dealloc(head, o);
+					}
+				}
+			}
+			// Account for scatter-gather array block
+			self.buffers.dealloc(head, bo);
+			l += self.buffers.block_size;
+		}
+	}
+
 	/// ```
 	/// D0
 	///
@@ -271,8 +328,13 @@ impl<'a> Data<'a> {
 	/// /  \        /  \                    /  \
 	/// D0 D1 ..   Dm  Dm+1 ..             ..  Dn-1
 	/// ```
+	#[cfg_attr(debug_assertions, track_caller)]
 	fn blocks(&self, skip: u32, mut f: impl FnMut(Buffer<'a>) -> bool) {
-		assert_eq!(skip, 0, "todo: skip blocks");
+		assert_eq!(
+			skip, 0,
+			"todo: skip blocks (BS: {})",
+			self.buffers.block_size
+		);
 		if self.len == 0 {
 			return;
 		}

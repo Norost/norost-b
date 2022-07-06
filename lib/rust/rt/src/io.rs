@@ -1,6 +1,6 @@
 pub use norostb_kernel::{
 	error::{Error, Result},
-	io::SeekFrom,
+	io::{SeekFrom, TinySlice},
 	object::{NewObject, Pow2Size},
 	syscall::RWX,
 	Handle,
@@ -128,6 +128,41 @@ pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
 	syscall::do_io(DoIo {
 		handle,
 		op: DoIoOp::Write { data },
+	})
+	.map(|v| v as _)
+}
+
+#[inline(always)]
+pub fn get_meta(
+	handle: Handle,
+	property: &TinySlice<u8>,
+	value: &mut TinySlice<u8>,
+) -> Result<usize> {
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::GetMeta { property, value },
+	})
+	.map(|v| v as _)
+}
+
+#[inline(always)]
+pub fn get_meta_uninit(
+	handle: Handle,
+	property: &TinySlice<u8>,
+	value: &mut TinySlice<MaybeUninit<u8>>,
+) -> Result<usize> {
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::GetMetaUninit { property, value },
+	})
+	.map(|v| v as _)
+}
+
+#[inline(always)]
+pub fn set_meta(handle: Handle, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Result<usize> {
+	syscall::do_io(DoIo {
+		handle,
+		op: DoIoOp::SetMeta { property, value },
 	})
 	.map(|v| v as _)
 }

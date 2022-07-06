@@ -11,8 +11,9 @@ use core::{
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 	time::Duration,
 };
-use driver_utils::io::queue::stream::Job;
-use norostb_kernel::error::Error;
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
+use nora_io_queue_rt::Queue;
+use norostb_kernel::{error::Error, object::Pow2Size, RWX};
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -34,12 +35,20 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
 	let mut args = rt::args::Args::new().skip(1);
-	let table = args.next().expect("expected table path");
+	let table_name = args.next().expect("expected table path");
 	let input = args.next().expect("expected input object path");
 
-	// Create a table
 	let root = rt::io::file_root().unwrap();
-	let table = rt::Object::create(&root, table).unwrap().into_raw();
+
+	// Create a stream table
+	let table = {
+		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+		StreamTable::new(&buf, Pow2Size(5))
+	};
+	root.create(table_name)
+		.unwrap()
+		.share(&table.public_table())
+		.unwrap();
 
 	// Open input
 	let input = rt::Object::open(&root, input).unwrap().into_raw();
@@ -49,9 +58,20 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let pending_read = Cell::new(None);
 	let shifts = Cell::new(0);
 
+	// Create async I/O queue
+	let queue = Queue::new(
+		nora_io_queue_rt::Pow2Size::P6,
+		nora_io_queue_rt::Pow2Size::P6,
+	)
+	.unwrap();
+
 	let do_read = || async {
 		use scancodes::{Event, ScanCode};
-		let mut buf = rt::io::read(input, Vec::new(), 4).await.unwrap();
+		let mut buf = queue
+			.submit_read(input, Vec::new(), 4)
+			.unwrap()
+			.await
+			.unwrap();
 		assert_eq!(buf.len(), 4, "incomplete scancode");
 		let chr = match Event::try_from(<[u8; 4]>::try_from(&buf[..]).unwrap()).unwrap() {
 			Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
@@ -93,8 +113,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		if let Some(chr) = chr {
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
-				Job::reply_read(&mut buf, job_id, false, |v| Ok(v.push(chr))).unwrap();
-				rt::io::write(table, buf, 0).await.unwrap();
+				let data = table.alloc(1).expect("out of buffers");
+				data.copy_from(0, &[chr]);
+				table.enqueue(job_id, Response::Data { data, length: 1 });
+				table.flush();
 				return true;
 			} else {
 				char_buf.borrow_mut().push_back(chr);
@@ -104,36 +126,37 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	let do_job = || async {
-		let mut data = rt::io::read(table, Vec::new(), 512).await.unwrap();
-		match Job::deserialize(&data).unwrap() {
-			Job::Open {
-				job_id,
-				handle,
-				path,
-			} => {
-				if handle == rt::Handle::MAX && path == b"stream" {
-					data.clear();
-					Job::reply_open(&mut data, job_id, readers.borrow_mut().insert(()))
+		queue
+			.submit_read(table.notifier().as_raw(), Vec::new(), 0)
+			.unwrap()
+			.await
+			.unwrap();
+		let mut tiny_buf = [0; 16];
+		let (handle, req) = table.dequeue().unwrap();
+		let (job_id, resp) = match req {
+			Request::Open { job_id, path } => {
+				let l = tiny_buf.len();
+				let p = &mut tiny_buf[..l.min(path.len())];
+				path.copy_to(0, p);
+				path.manual_drop();
+				if handle == rt::Handle::MAX && p == b"stream" {
+					(job_id, Response::Handle(readers.borrow_mut().insert(())))
 				} else {
-					data.clear();
-					Job::reply_error(&mut data, job_id, Error::InvalidObject)
+					(job_id, Response::Error(Error::InvalidObject))
 				}
-				.unwrap();
 			}
-			Job::Close { handle } => {
+			Request::Close => {
 				readers.borrow_mut().remove(handle).unwrap();
 				// The kernel does not expect a response
 				return true;
 			}
-			Job::Read {
-				peek,
+			Request::Read {
 				job_id,
-				handle: _,
-				length,
+				amount,
+				peek,
 			} => {
-				data.clear();
 				if peek {
-					Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
+					(job_id, Response::Error(Error::InvalidOperation))
 				} else {
 					let mut char_buf = char_buf.borrow_mut();
 					if char_buf.is_empty() {
@@ -143,26 +166,22 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						pending_read.set(Some(job_id));
 						return false;
 					} else {
-						Job::reply_read(&mut data, job_id, false, |v| {
-							for _ in 0..length {
-								if let Some(c) = char_buf.pop_front() {
-									v.push(c);
-								} else {
-									break;
-								}
-							}
-							Ok(())
-						})
-						.unwrap();
+						let l = tiny_buf.len();
+						let mut b = &mut tiny_buf[..l.min(char_buf.len())];
+						for w in b.iter_mut() {
+							*w = char_buf.pop_front().unwrap();
+						}
+						let data = table.alloc(b.len()).expect("out of buffers");
+						data.copy_from(0, b);
+						let length = l.try_into().unwrap();
+						(job_id, Response::Data { data, length })
 					}
 				}
 			}
-			Job::Write { job_id, .. } | Job::Create { job_id, .. } | Job::Seek { job_id, .. } => {
-				data.clear();
-				Job::reply_error(&mut data, job_id, Error::InvalidOperation).unwrap();
-			}
+			_ => todo!(),
 		};
-		rt::io::write(table, data, 0).await.unwrap();
+		table.enqueue(job_id, resp);
+		table.flush();
 		true
 	};
 
@@ -208,6 +227,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 		}
-		rt::io::poll_queue_and_wait(Duration::MAX);
+		queue.poll();
+		queue.wait(Duration::MAX);
+		queue.process();
 	}
 }

@@ -60,6 +60,11 @@ impl Size {
 	pub const fn into_vector(self) -> Vector {
 		Vector::new(self.x as _, self.y as _)
 	}
+
+	#[inline]
+	pub const fn area(self) -> u64 {
+		self.x as u64 * self.y as u64
+	}
 }
 
 macro_rules! impl_op {

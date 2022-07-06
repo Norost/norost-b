@@ -48,6 +48,11 @@ impl Rect {
 		Size::new(x as _, y as _)
 	}
 
+	#[inline]
+	pub fn area(&self) -> u64 {
+		self.size().area()
+	}
+
 	#[inline(always)]
 	pub const fn x(&self) -> RangeInclusive<u32> {
 		self.low.x..=self.high.x

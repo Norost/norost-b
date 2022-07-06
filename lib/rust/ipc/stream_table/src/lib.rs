@@ -22,8 +22,8 @@ use core::{
 };
 use norost_ipc_spec::{S64, U32, U64};
 
-const REQUESTS_MASK: u32 = (1 << 8) - 1;
-const RESPONSES_MASK: u32 = (1 << 8) - 1;
+const REQUESTS_MASK: u32 = (1 << 7) - 1;
+const RESPONSES_MASK: u32 = (1 << 7) - 1;
 
 struct Queue {
 	base: NonNull<u8>,
@@ -155,9 +155,13 @@ impl ServerQueue {
 						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
-					T::OpenMeta => R::OpenMeta {
+					T::GetMeta => R::GetMeta {
 						job_id,
-						path: Slice::from_raw(args.slice()),
+						property: Slice::from_raw(args.slice()),
+					},
+					T::SetMeta => R::SetMeta {
+						job_id,
+						property_value: Slice::from_raw(args.slice()),
 					},
 					T::Close => R::Close,
 					T::Create => R::Create {
@@ -232,8 +236,14 @@ impl ClientQueue {
 				v.set_amount(U32::new(amount)),
 			),
 			R::Write { job_id, data } => (job_id, T::Write, v.set_slice(data.into_raw())),
+			R::GetMeta { job_id, property } => {
+				(job_id, T::GetMeta, v.set_slice(property.into_raw()))
+			}
+			R::SetMeta {
+				job_id,
+				property_value,
+			} => (job_id, T::SetMeta, v.set_slice(property_value.into_raw())),
 			R::Open { job_id, path } => (job_id, T::Open, v.set_slice(path.into_raw())),
-			R::OpenMeta { job_id, path } => (job_id, T::OpenMeta, v.set_slice(path.into_raw())),
 			R::Close => (JobId::default(), T::Close, ()),
 			R::Create { job_id, path } => (job_id, T::Create, v.set_slice(path.into_raw())),
 			R::Destroy { job_id, path } => (job_id, T::Destroy, v.set_slice(path.into_raw())),
@@ -262,6 +272,11 @@ impl ClientQueue {
 		(server_head != (self.request_tail - Wrapping(REQUESTS_MASK + 1)).0)
 			.then(|| self.enqueue(handle, request))
 			.ok_or(Full)
+	}
+
+	#[inline]
+	pub fn requests_enqueued(&self) -> u32 {
+		(self.request_tail - Wrapping(self.base.request_head_ref().load(Ordering::Relaxed))).0
 	}
 
 	#[inline]
@@ -299,11 +314,15 @@ pub enum Request {
 		job_id: JobId,
 		data: Slice,
 	},
-	Open {
+	GetMeta {
 		job_id: JobId,
-		path: Slice,
+		property: Slice,
 	},
-	OpenMeta {
+	SetMeta {
+		job_id: JobId,
+		property_value: Slice,
+	},
+	Open {
 		job_id: JobId,
 		path: Slice,
 	},

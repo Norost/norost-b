@@ -1,7 +1,12 @@
 #![no_std]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused)]
 
 use core::{mem::MaybeUninit, time::Duration};
-use norostb_kernel::{io, syscall};
+use norostb_kernel::{
+	io::{self, TinySlice},
+	syscall,
+};
 
 pub use norostb_kernel::{
 	error,
@@ -132,10 +137,15 @@ impl Queue {
 				.enqueue_request(match request {
 					Request::Read { buffer } => io::Request::read_uninit(user_data, handle, buffer),
 					Request::Write { buffer } => io::Request::write(user_data, handle, buffer),
+					Request::GetMeta { property, value } => {
+						io::Request::get_meta_uninit(user_data, handle, property, value)
+					}
+					Request::SetMeta { property, value } => {
+						io::Request::set_meta(user_data, handle, property, value)
+					}
 					Request::Open { path } => io::Request::open(user_data, handle, path),
 					Request::Create { path } => io::Request::create(user_data, handle, path),
 					Request::Seek { from } => io::Request::seek(user_data, handle, from),
-					Request::Poll => io::Request::poll(user_data, handle),
 					Request::Close => {
 						expect_response = false;
 						io::Request::close(user_data, handle)
@@ -182,7 +192,7 @@ impl Drop for Queue {
 	}
 }
 
-/// Any references have a static lifetime as it is the only way to safely guarantee a buffer
+/// All references have a static lifetime as it is the only way to safely guarantee a buffer
 /// lives long enough for the kernel to write to it.
 pub enum Request {
 	Read {
@@ -190,6 +200,14 @@ pub enum Request {
 	},
 	Write {
 		buffer: &'static [u8],
+	},
+	GetMeta {
+		property: &'static TinySlice<u8>,
+		value: &'static mut TinySlice<MaybeUninit<u8>>,
+	},
+	SetMeta {
+		property: &'static TinySlice<u8>,
+		value: &'static TinySlice<u8>,
 	},
 	Open {
 		path: &'static [u8],
@@ -200,7 +218,6 @@ pub enum Request {
 	Seek {
 		from: SeekFrom,
 	},
-	Poll,
 	Close,
 	Peek {
 		buffer: &'static mut [MaybeUninit<u8>],

@@ -5,7 +5,7 @@ use crate::{
 		r#virtual::{AddressSpace, MapError, RWX},
 		Page,
 	},
-	object_table::MemoryObject,
+	object_table::{MemoryObject, TinySlice},
 	sync::Mutex,
 };
 use alloc::{
@@ -100,11 +100,20 @@ impl StreamingTable {
 	}
 
 	fn copy_data_from(&self, queue: &mut ClientQueue, data: &[u8]) -> Slice {
+		self.copy_data_from_scatter(queue, &[data])
+	}
+
+	fn copy_data_from_scatter(&self, queue: &mut ClientQueue, data: &[&[u8]]) -> Slice {
+		let len = data.iter().map(|d| d.len()).sum();
 		let buf = self
 			.buffer_mem
-			.alloc(queue.buffer_head_ref(), data.len())
+			.alloc(queue.buffer_head_ref(), len)
 			.unwrap_or_else(|| todo!("no buffers available"));
-		buf.copy_from(0, data);
+		let mut offt = 0;
+		for d in data {
+			buf.copy_from(offt, d);
+			offt += d.len();
+		}
 		Slice {
 			offset: buf.offset().try_into().unwrap(),
 			length: buf.len().try_into().unwrap(),
@@ -136,6 +145,10 @@ impl StreamingTable {
 				Err(e) => job.complete_err(Error::from(e)),
 			}
 		}
+	}
+
+	fn requests_enqueued(&self) -> u32 {
+		self.queue.lock().requests_enqueued()
 	}
 }
 
@@ -269,6 +282,25 @@ impl Object for StreamObject {
 		})
 	}
 
+	fn get_meta(self: Arc<Self>, property: &TinySlice<u8>) -> Ticket<Box<[u8]>> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::GetMeta {
+				job_id,
+				property: tbl.copy_data_from(q, property),
+			})
+		})
+	}
+
+	fn set_meta(self: Arc<Self>, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Ticket<u64> {
+		self.with_table(|tbl| {
+			tbl.submit_job(self.handle, |q, job_id| Request::SetMeta {
+				job_id,
+				property_value: tbl
+					.copy_data_from_scatter(q, &[&[property.len_u8()], property, value]),
+			})
+		})
+	}
+
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
 		let from = match from {
 			SeekFrom::Start(n) => nora_stream_table::SeekFrom::Start(n),
@@ -315,30 +347,31 @@ impl Drop for StreamObject {
 #[derive(Default)]
 struct Notify {
 	table: Weak<StreamingTable>,
-	wait_read: Mutex<(bool, Vec<TicketWaker<Box<[u8]>>>)>,
+	wait_read: Mutex<Vec<TicketWaker<Box<[u8]>>>>,
 }
 
 impl Notify {
 	fn wake_readers(&self) {
 		let mut q = self.wait_read.lock();
-		if let Some(w) = q.1.pop() {
+		if let Some(w) = q.pop() {
 			w.complete(Ok([].into()));
-		} else {
-			q.0 = true;
 		}
 	}
 }
 
 impl Object for Notify {
 	fn read(self: Arc<Self>, _length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
-		let mut q = self.wait_read.lock();
-		if mem::take(&mut q.0) {
-			Ticket::new_complete(Ok([].into()))
+		Ticket::new_complete(if let Some(tbl) = self.table.upgrade() {
+			if tbl.requests_enqueued() != 0 {
+				Ok([].into())
+			} else {
+				let (t, w) = Ticket::new();
+				self.wait_read.lock().push(w);
+				return t;
+			}
 		} else {
-			let (t, w) = Ticket::new();
-			q.1.push(w);
-			t
-		}
+			Err(Error::DoesNotExist)
+		})
 	}
 
 	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<u64> {

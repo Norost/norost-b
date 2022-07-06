@@ -8,6 +8,7 @@ use crate::{
 	},
 	object_table::{
 		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTableOwner, SubRange,
+		TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
@@ -167,7 +168,7 @@ extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _
 
 // Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
 #[cfg(target_pointer_width = "64")]
-extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, _: usize, _: usize) -> Return {
+extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
 	use super::block_on;
 	let handle = unerase_handle(handle as _);
 	debug!("do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
@@ -196,14 +197,37 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, _: usize, _: u
 					value: r.try_into().unwrap(),
 				})
 			}
-			Request::OPEN | Request::OPEN_META | Request::CREATE => {
+			Request::GET_META => {
+				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+				block_on(o.clone().get_meta(prop)).map_or_else(Return::error, |r| {
+					let l = usize::from(value_len).min(r.len());
+					unsafe { (b as *mut u8).copy_from_nonoverlapping(r.as_ptr(), l) }
+					Return {
+						status: 0,
+						value: l.try_into().unwrap(),
+					}
+				})
+			}
+			Request::SET_META => {
+				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+				let value = unsafe { TinySlice::from_raw_parts(b as *const u8, value_len) };
+				block_on(o.clone().set_meta(prop, value)).map_or_else(Return::error, |r| Return {
+					status: 0,
+					value: {
+						debug_assert_eq!(r & !1, 0, "meta result is not boolean");
+						r.try_into().unwrap()
+					},
+				})
+			}
+			Request::OPEN | Request::CREATE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
 				let o = o.clone();
-				block_on(match ty {
-					Request::OPEN => o.open(r),
-					Request::OPEN_META => o.open_meta(r),
-					Request::CREATE => o.create(r),
-					_ => unreachable!(),
+				block_on(if ty == Request::OPEN {
+					o.open(r)
+				} else {
+					o.create(r)
 				})
 				.map_or_else(Return::error, |o| ins(objects, o))
 			}

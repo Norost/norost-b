@@ -11,9 +11,13 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use core::mem::{self, MaybeUninit};
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::{
+	mem::{self, MaybeUninit},
+	ops::{Deref, DerefMut},
+	ptr::NonNull,
+	slice,
+	sync::atomic::{AtomicU32, Ordering},
+};
 
 // We cast pointers to u64, so if pointers are 128 bits or larger things may break.
 const _: usize = 8 - mem::size_of::<usize>();
@@ -45,13 +49,14 @@ impl Request {
 	pub const READ: u8 = 0;
 	pub const PEEK: u8 = 1;
 	pub const WRITE: u8 = 2;
-	pub const OPEN: u8 = 3;
-	pub const OPEN_META: u8 = 4;
-	pub const CREATE: u8 = 5;
-	pub const DESTROY: u8 = 6;
-	pub const SEEK: u8 = 7;
-	pub const CLOSE: u8 = 8;
-	pub const SHARE: u8 = 9;
+	pub const GET_META: u8 = 3;
+	pub const SET_META: u8 = 4;
+	pub const OPEN: u8 = 5;
+	pub const CREATE: u8 = 6;
+	pub const DESTROY: u8 = 7;
+	pub const SEEK: u8 = 8;
+	pub const CLOSE: u8 = 9;
+	pub const SHARE: u8 = 10;
 
 	#[inline(always)]
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
@@ -109,20 +114,60 @@ impl Request {
 	}
 
 	#[inline(always)]
-	pub fn open(user_data: u64, handle: Handle, path: &[u8]) -> Self {
+	pub fn get_meta(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<u8>,
+	) -> Self {
 		Self {
-			ty: Self::OPEN,
+			ty: Self::GET_META,
 			handle,
-			arguments_64: [path.as_ptr() as u64, path.len() as u64],
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_mut_ptr() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
 	#[inline(always)]
-	pub fn open_meta(user_data: u64, handle: Handle, path: &[u8]) -> Self {
+	pub fn get_meta_uninit(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<MaybeUninit<u8>>,
+	) -> Self {
 		Self {
-			ty: Self::OPEN_META,
+			ty: Self::GET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_mut_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn set_meta(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &TinySlice<u8>,
+	) -> Self {
+		Self {
+			ty: Self::SET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn open(user_data: u64, handle: Handle, path: &[u8]) -> Self {
+		Self {
+			ty: Self::OPEN,
 			handle,
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
@@ -186,6 +231,81 @@ impl Request {
 	}
 }
 
+pub struct TinySlice<T>([T]);
+
+impl<T> TinySlice<T> {
+	#[inline]
+	pub unsafe fn from_raw_parts<'a>(base: *const T, len: u8) -> &'a Self {
+		unsafe { &*(slice::from_raw_parts(base, len.into()) as *const [T] as *const Self) }
+	}
+
+	#[inline]
+	pub unsafe fn from_raw_parts_mut<'a>(base: *mut T, len: u8) -> &'a mut Self {
+		unsafe { &mut *(slice::from_raw_parts_mut(base, len.into()) as *mut [T] as *mut Self) }
+	}
+}
+
+impl<T> TryFrom<&[T]> for &TinySlice<T> {
+	type Error = TooLarge;
+
+	fn try_from(s: &[T]) -> Result<Self, Self::Error> {
+		Ok(unsafe { &*(s.as_ref() as *const [T] as *const TinySlice<T>) })
+	}
+}
+
+impl<T> TryFrom<&mut [T]> for &mut TinySlice<T> {
+	type Error = TooLarge;
+
+	fn try_from(s: &mut [T]) -> Result<Self, Self::Error> {
+		Ok(unsafe { &mut *(s.as_mut() as *mut [T] as *mut TinySlice<T>) })
+	}
+}
+
+// generic const exprs pls
+macro_rules! arr_to_ts {
+	($n:literal) => {
+		impl<T> From<&[T; $n]> for &TinySlice<T> {
+			fn from(s: &[T; $n]) -> Self {
+				unsafe { &*(s.as_ref() as *const [T] as *const TinySlice<T>) }
+			}
+		}
+
+		impl<T> From<&mut [T; $n]> for &mut TinySlice<T> {
+			fn from(s: &mut [T; $n]) -> Self {
+				unsafe { &mut *(s.as_mut() as *mut [T] as *mut TinySlice<T>) }
+			}
+		}
+	};
+	{ $($nn:literal)+ } => { $(arr_to_ts!($nn);)+ };
+}
+arr_to_ts! {
+	0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+}
+
+impl<T> TinySlice<T> {
+	#[inline]
+	pub fn len_u8(&self) -> u8 {
+		self.0.len() as _
+	}
+}
+
+impl<T> Deref for TinySlice<T> {
+	type Target = [T];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<T> DerefMut for TinySlice<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+#[derive(Debug)]
+pub struct TooLarge;
+
 pub struct DoIo<'a> {
 	pub handle: Handle,
 	pub op: DoIoOp<'a>,
@@ -204,8 +324,21 @@ pub enum DoIoOp<'a> {
 	Write { data: &'a [u8] },
 	/// Open an object at the given location.
 	Open { path: &'a [u8] },
-	/// Open an object with meta-information at the given location.
-	OpenMeta { path: &'a [u8] },
+	/// Get meta-information about an object.
+	GetMeta {
+		property: &'a TinySlice<u8>,
+		value: &'a mut TinySlice<u8>,
+	},
+	/// Get meta-information about an object.
+	GetMetaUninit {
+		property: &'a TinySlice<u8>,
+		value: &'a mut TinySlice<MaybeUninit<u8>>,
+	},
+	/// Set meta-information about an object.
+	SetMeta {
+		property: &'a TinySlice<u8>,
+		value: &'a TinySlice<u8>,
+	},
 	/// Create an object at the given location.
 	Create { path: &'a [u8] },
 	/// Destroy an object at the given location.
@@ -230,8 +363,34 @@ impl DoIo<'_> {
 			DoIoOp::Peek { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
 			DoIoOp::PeekUninit { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
 			DoIoOp::Write { data } => (R::WRITE, h, N2(data.as_ptr() as _, data.len())),
+			DoIoOp::GetMeta { property, value } => (
+				R::GET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_mut_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
+			DoIoOp::GetMetaUninit { property, value } => (
+				R::GET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_mut_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
+			DoIoOp::SetMeta { property, value } => (
+				R::SET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
 			DoIoOp::Open { path } => (R::OPEN, h, N2(path.as_ptr() as _, path.len())),
-			DoIoOp::OpenMeta { path } => (R::OPEN_META, h, N2(path.as_ptr() as _, path.len())),
 			DoIoOp::Create { path } => (R::CREATE, h, N2(path.as_ptr() as _, path.len())),
 			DoIoOp::Destroy { path } => (R::DESTROY, h, N2(path.as_ptr() as _, path.len())),
 			DoIoOp::Seek { from } => {
@@ -249,6 +408,7 @@ pub(crate) enum RawDoIo {
 	N0,
 	N1(usize),
 	N2(usize, usize),
+	N3(usize, usize, usize),
 }
 
 impl Default for Request {

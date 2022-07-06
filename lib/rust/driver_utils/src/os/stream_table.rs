@@ -71,11 +71,18 @@ impl StreamTable {
 				job_id,
 				data: self.get_owned_buf(data),
 			},
-			R::Open { job_id, path } => Request::Open {
+			R::GetMeta { job_id, property } => Request::GetMeta {
 				job_id,
-				path: self.get_owned_buf(path),
+				property: Property(self.get_owned_buf(property)),
 			},
-			R::OpenMeta { job_id, path } => Request::OpenMeta {
+			R::SetMeta {
+				job_id,
+				property_value,
+			} => Request::SetMeta {
+				job_id,
+				property_value: PropertyValue(self.get_owned_buf(property_value)),
+			},
+			R::Open { job_id, path } => Request::Open {
 				job_id,
 				path: self.get_owned_buf(path),
 			},
@@ -119,6 +126,11 @@ impl StreamTable {
 		self.queue.borrow_mut().try_enqueue(job_id, r).unwrap();
 	}
 
+	#[inline(always)]
+	pub fn notifier(&self) -> &rt::Object {
+		&self.notify
+	}
+
 	pub fn wait(&self) {
 		self.notify.read(&mut []).unwrap();
 	}
@@ -151,11 +163,15 @@ pub enum Request<'a> {
 		job_id: JobId,
 		data: Data<'a>,
 	},
-	Open {
+	GetMeta {
 		job_id: JobId,
-		path: Data<'a>,
+		property: Property<'a>,
 	},
-	OpenMeta {
+	SetMeta {
+		job_id: JobId,
+		property_value: PropertyValue<'a>,
+	},
+	Open {
 		job_id: JobId,
 		path: Data<'a>,
 	},
@@ -193,10 +209,8 @@ pub struct Data<'a> {
 
 impl<'a> Data<'a> {
 	pub fn manual_drop(self) {
-		self.table.buffers.dealloc(
-			self.table.queue.borrow().buffer_head_ref(),
-			self.offset().try_into().unwrap(),
-		);
+		self.data
+			.manual_drop(self.table.queue.borrow().buffer_head_ref());
 	}
 }
 
@@ -217,3 +231,53 @@ impl<'a> Drop for Data<'a> {
 	}
 }
 */
+
+pub struct Property<'a>(Data<'a>);
+
+impl<'a> Property<'a> {
+	#[inline]
+	pub fn get<'b>(&self, buf: &'b mut [u8]) -> &'b mut [u8] {
+		let l = buf.len();
+		let buf = &mut buf[..self.0.len().min(l)];
+		self.0.copy_to_untrusted(0, buf);
+		buf
+	}
+
+	pub fn manual_drop(self) {
+		self.0.manual_drop()
+	}
+
+	#[inline(always)]
+	pub fn into_inner(self) -> Data<'a> {
+		self.0
+	}
+}
+
+pub struct PropertyValue<'a>(Data<'a>);
+
+impl<'a> PropertyValue<'a> {
+	#[inline]
+	pub fn try_get<'b>(
+		&self,
+		buf: &'b mut [u8],
+	) -> Result<(&'b mut [u8], &'b mut [u8]), InvalidPropertyValue> {
+		let l = buf.len();
+		let buf = &mut buf[..self.0.len().min(l)];
+		self.0.copy_to_untrusted(0, buf);
+		buf.split_first_mut()
+			.and_then(|(&mut l, b)| (usize::from(l) <= b.len()).then(|| b.split_at_mut(l.into())))
+			.ok_or(InvalidPropertyValue)
+	}
+
+	pub fn manual_drop(self) {
+		self.0.manual_drop()
+	}
+
+	#[inline(always)]
+	pub fn into_inner(self) -> Data<'a> {
+		self.0
+	}
+}
+
+#[derive(Debug)]
+pub struct InvalidPropertyValue;
