@@ -275,6 +275,11 @@ impl ClientQueue {
 	}
 
 	#[inline]
+	pub fn requests_enqueued(&self) -> u32 {
+		(self.request_tail - Wrapping(self.base.request_head_ref().load(Ordering::Relaxed))).0
+	}
+
+	#[inline]
 	pub fn dequeue(&mut self) -> Option<(JobId, AnyResponse)> {
 		let index = self.base.response_tail_ref().load(Ordering::Acquire);
 		(index != self.response_head.0).then(|| {

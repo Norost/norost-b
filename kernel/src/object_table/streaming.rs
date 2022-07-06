@@ -146,6 +146,10 @@ impl StreamingTable {
 			}
 		}
 	}
+
+	fn requests_enqueued(&self) -> u32 {
+		self.queue.lock().requests_enqueued()
+	}
 }
 
 impl Object for StreamingTableOwner {
@@ -343,30 +347,31 @@ impl Drop for StreamObject {
 #[derive(Default)]
 struct Notify {
 	table: Weak<StreamingTable>,
-	wait_read: Mutex<(bool, Vec<TicketWaker<Box<[u8]>>>)>,
+	wait_read: Mutex<Vec<TicketWaker<Box<[u8]>>>>,
 }
 
 impl Notify {
 	fn wake_readers(&self) {
 		let mut q = self.wait_read.lock();
-		if let Some(w) = q.1.pop() {
+		if let Some(w) = q.pop() {
 			w.complete(Ok([].into()));
-		} else {
-			q.0 = true;
 		}
 	}
 }
 
 impl Object for Notify {
 	fn read(self: Arc<Self>, _length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
-		let mut q = self.wait_read.lock();
-		if mem::take(&mut q.0) {
-			Ticket::new_complete(Ok([].into()))
+		Ticket::new_complete(if let Some(tbl) = self.table.upgrade() {
+			if tbl.requests_enqueued() != 0 {
+				Ok([].into())
+			} else {
+				let (t, w) = Ticket::new();
+				self.wait_read.lock().push(w);
+				return t;
+			}
 		} else {
-			let (t, w) = Ticket::new();
-			q.1.push(w);
-			t
-		}
+			Err(Error::DoesNotExist)
+		})
 	}
 
 	fn write(self: Arc<Self>, _data: &[u8]) -> Ticket<u64> {
