@@ -1,7 +1,7 @@
 #![no_std]
 
 mod raw {
-	norost_ipc_spec::compile!(core::include_str!("../../../../ipc/window_manager.ipc"));
+	norost_ipc_spec::compile!(include_str!("../../../../ipc/gpu.ipc"));
 }
 
 use norost_ipc_spec::Data;
@@ -57,58 +57,33 @@ impl SizeInclusive {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Flush {
+	pub offset: u64,
+	pub stride: u32,
 	pub origin: Point,
 	pub size: SizeInclusive,
 }
 
 impl Flush {
 	#[inline]
-	pub fn decode(raw: [u8; 12]) -> Self {
+	pub fn decode(raw: [u8; raw::Flush::BITS as usize / 8]) -> Self {
 		let f = raw::Flush::from_raw(&raw, 0);
 		Self {
+			offset: f.offset(),
+			stride: f.stride(),
 			origin: Point::from_raw(f.origin()),
 			size: SizeInclusive::from_raw(f.size()),
 		}
 	}
 
 	#[inline]
-	pub fn encode(self) -> [u8; 12] {
+	pub fn encode(self) -> [u8; raw::Flush::BITS as usize / 8] {
 		let mut f = raw::Flush::default();
+		f.set_offset(self.offset);
+		f.set_stride(self.stride);
 		f.set_origin(self.origin.to_raw());
 		f.set_size(self.size.to_raw());
-		let mut r = [0; 12];
+		let mut r = [0; raw::Flush::BITS as usize / 8];
 		f.to_raw(&mut r, 0);
-		r
-	}
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum Event {
-	Resize(Resolution),
-}
-
-impl Event {
-	#[inline]
-	pub fn decode(raw: [u8; 9]) -> Self {
-		let e = raw::Event::from_raw(&raw, 0);
-		match e.ty() {
-			raw::EventType::Resize => Self::Resize(Resolution::from_raw(e.args().resize())),
-		}
-	}
-
-	#[inline]
-	pub fn encode(self) -> [u8; 9] {
-		let mut e = raw::Event::default();
-		match self {
-			Self::Resize(r) => {
-				e.set_ty(raw::EventType::Resize);
-				let mut a = raw::EventArgs::default();
-				a.set_resize(r.to_raw());
-				e.set_args(a);
-			}
-		}
-		let mut r = [0; 9];
-		e.to_raw(&mut r, 0);
 		r
 	}
 }

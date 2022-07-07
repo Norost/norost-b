@@ -1,0 +1,32 @@
+@name norost.Gpu
+@version 0
+@abi 0
+
+struct Flush {
+	offset: u64
+	stride: u32
+	origin: Point
+	size: SizeInclusive
+}
+
+struct Point {
+	x: u32
+	y: u32
+}
+
+struct Resolution {
+	x: u32
+	y: u32
+}
+
+struct SizeInclusive {
+	x: u16
+	y: u16
+}
+
+struct Rgb8 {
+	r: u8
+	g: u8
+	b: u8
+}
+
