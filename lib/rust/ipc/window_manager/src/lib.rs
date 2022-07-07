@@ -86,3 +86,65 @@ impl Flush {
 		r
 	}
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum Event {
+	Resize(Resolution),
+}
+
+impl Event {
+	#[inline]
+	pub fn decode(raw: [u8; 9]) -> Self {
+		let e = raw::Event::from_raw(&raw, 0);
+		match e.ty() {
+			raw::EventType::Resize => Self::Resize(Resolution::from_raw(e.args().resize())),
+		}
+	}
+
+	#[inline]
+	pub fn encode(self) -> [u8; 9] {
+		let mut e = raw::Event::default();
+		match self {
+			Self::Resize(r) => {
+				e.set_ty(raw::EventType::Resize);
+				let mut a = raw::EventArgs::default();
+				a.set_resize(r.to_raw());
+				e.set_args(a);
+			}
+		}
+		let mut r = [0; 9];
+		e.to_raw(&mut r, 0);
+		r
+	}
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Resolution {
+	pub x: u32,
+	pub y: u32,
+}
+
+impl Resolution {
+	fn from_raw(r: raw::Resolution) -> Self {
+		Self { x: r.x(), y: r.y() }
+	}
+
+	fn to_raw(&self) -> raw::Resolution {
+		let mut e = raw::Resolution::default();
+		e.set_x(self.x);
+		e.set_y(self.y);
+		e
+	}
+
+	#[inline]
+	pub fn decode(raw: [u8; 8]) -> Self {
+		Self::from_raw(raw::Resolution::from_raw(&raw, 0))
+	}
+
+	#[inline]
+	pub fn encode(self) -> [u8; 8] {
+		let mut r = [0; 8];
+		self.to_raw().to_raw(&mut r, 0);
+		r
+	}
+}

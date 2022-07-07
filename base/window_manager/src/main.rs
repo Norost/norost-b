@@ -25,10 +25,11 @@ mod workspace;
 
 use alloc::vec::Vec;
 use core::{
+	cell::RefCell,
 	ptr::{self, NonNull},
 	str,
 };
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
+use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use math::{Point, Rect, Size};
 use rt::io::{Error, Handle};
 
@@ -86,7 +87,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };
-	let mut manager = manager::Manager::new(gwp).unwrap();
+	let mut manager = manager::Manager::<Client>::new(gwp).unwrap();
 
 	let sync_rect = |rect: math::Rect| {
 		let mut s = alloc::string::String::with_capacity(64);
@@ -124,11 +125,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	fill(shmem, Rect::from_size(Point::ORIGIN, size), [255, 255, 255]);
 	fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-	for (w, c) in manager.window_handles().zip(&colors) {
+	for ((w, _), c) in manager.windows().zip(&colors) {
 		fill(shmem, manager.window_rect(w, size).unwrap(), *c);
 	}
 
-	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 22 }).unwrap();
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
 	root.create(b"window_manager")
 		.unwrap()
@@ -147,10 +148,26 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
-							let h = manager.new_window(size, FrameBuffer::EMPTY).unwrap();
+							let h = manager.new_window(size, Default::default()).unwrap();
 							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-							for (w, c) in manager.window_handles().zip(&colors) {
-								fill(shmem, manager.window_rect(w, size).unwrap(), *c);
+							for ((w, ww), c) in manager.windows().zip(&colors) {
+								let rect = manager.window_rect(w, size).unwrap();
+								fill(shmem, rect, *c);
+								let evt = ipc_wm::Resolution {
+									x: rect.size().x,
+									y: rect.size().y,
+								};
+								let mut ue = ww.user_data.unread_events.borrow_mut();
+								ue.resize = Some(evt);
+								let evt = ipc_wm::Event::Resize(evt).encode();
+								let length = evt.len().try_into().unwrap();
+								for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
+									ue.resize = None;
+									let data = table.alloc(evt.len()).expect("out of buffers");
+									data.copy_from(0, &evt);
+									table.enqueue(id, Response::Data { data, length });
+									send_notif = true;
+								}
 							}
 							Response::Handle(h)
 						}
@@ -195,6 +212,31 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					};
 					(job_id, r)
 				}
+				Request::Read {
+					job_id,
+					amount: _,
+					peek: _,
+				} => (
+					job_id,
+					match handle {
+						Handle::MAX => Response::Error(Error::InvalidOperation),
+						h => {
+							let w = &mut manager.window_mut(handle).unwrap().user_data;
+							if let Some(evt) = w.unread_events.get_mut().pop() {
+								let evt = evt.encode();
+								let data = table.alloc(evt.len()).expect("out of buffers");
+								data.copy_from(0, &evt);
+								Response::Data {
+									data,
+									length: evt.len() as _,
+								}
+							} else {
+								w.event_listeners.get_mut().push(job_id);
+								continue;
+							}
+						}
+					},
+				),
 				Request::Write { job_id, data } => (
 					job_id,
 					match handle {
@@ -227,6 +269,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							// to the GPU
 							window
 								.user_data
+								.framebuffer
 								.copy_to_untrusted(0, &mut shmem[..draw_rect.area() as usize * 3]);
 							let l = data.len().try_into().unwrap();
 							data.manual_drop();
@@ -238,8 +281,24 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-					for (w, c) in manager.window_handles().zip(&colors) {
-						fill(shmem, manager.window_rect(w, size).unwrap(), *c);
+					for ((w, ww), c) in manager.windows().zip(&colors) {
+						let rect = manager.window_rect(w, size).unwrap();
+						fill(shmem, rect, *c);
+						let evt = ipc_wm::Resolution {
+							x: rect.size().x,
+							y: rect.size().y,
+						};
+						let mut ue = ww.user_data.unread_events.borrow_mut();
+						ue.resize = Some(evt);
+						let evt = ipc_wm::Event::Resize(evt).encode();
+						let length = evt.len().try_into().unwrap();
+						for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
+							ue.resize = None;
+							let data = table.alloc(evt.len()).expect("out of buffers");
+							data.copy_from(0, &evt);
+							table.enqueue(id, Response::Data { data, length });
+							send_notif = true;
+						}
 					}
 					continue;
 				}
@@ -248,8 +307,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let r = match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),
 						h => {
-							let fb = &mut manager.window_mut(handle).unwrap().user_data;
-							*fb = FrameBuffer::wrap(&share);
+							manager.window_mut(handle).unwrap().user_data.framebuffer =
+								FrameBuffer::wrap(&share);
 							Response::Amount(0)
 						}
 					};
@@ -271,11 +330,6 @@ struct FrameBuffer {
 }
 
 impl FrameBuffer {
-	const EMPTY: Self = Self {
-		base: NonNull::dangling(),
-		size: 0,
-	};
-
 	fn wrap(obj: &rt::Object) -> Self {
 		let (base, size) = obj.map_object(None, rt::io::RWX::R, 0, usize::MAX).unwrap();
 		Self { base, size }
@@ -305,5 +359,38 @@ impl Drop for FrameBuffer {
 				let _ = rt::mem::dealloc(self.base, self.size);
 			}
 		}
+	}
+}
+
+impl Default for FrameBuffer {
+	fn default() -> Self {
+		Self {
+			base: NonNull::dangling(),
+			size: 0,
+		}
+	}
+}
+
+#[derive(Default)]
+struct Client {
+	framebuffer: FrameBuffer,
+	unread_events: RefCell<Events>,
+	event_listeners: RefCell<Vec<JobId>>,
+}
+
+#[derive(Default)]
+struct Events {
+	resize: Option<ipc_wm::Resolution>,
+}
+
+impl Events {
+	fn push(&mut self, e: ipc_wm::Event) {
+		match e {
+			ipc_wm::Event::Resize(r) => self.resize = Some(r),
+		}
+	}
+
+	fn pop(&mut self) -> Option<ipc_wm::Event> {
+		self.resize.take().map(ipc_wm::Event::Resize)
 	}
 }

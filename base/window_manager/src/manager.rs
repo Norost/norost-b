@@ -70,9 +70,12 @@ impl<U> Manager<U> {
 		self.windows.get_mut(handle)
 	}
 
-	#[inline(always)]
-	pub fn window_handles(&self) -> impl Iterator<Item = Handle> + '_ {
-		self.windows.iter().map(|(h, _)| h)
+	pub fn windows(&self) -> impl Iterator<Item = (Handle, &Window<U>)> + '_ {
+		self.windows.iter()
+	}
+
+	pub fn windows_mut(&mut self) -> impl Iterator<Item = (Handle, &mut Window<U>)> + '_ {
+		self.windows.iter_mut()
 	}
 }
 
