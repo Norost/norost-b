@@ -1,6 +1,6 @@
 use crate::workspace::Path;
 
-pub struct Window {
+pub struct Window<U> {
 	/// Node path in bitmap format.
 	///
 	/// The lower 8 bits indicate the workspace ID. Each bit after indicates left or right in
@@ -8,11 +8,12 @@ pub struct Window {
 	///
 	/// 24 bits allows up to 24 levels of windows which ought to be plenty.
 	path: u32,
+	pub user_data: U,
 }
 
-impl Window {
-	pub fn new(workspace: u8, path: Path) -> Self {
-		let mut s = Self { path: 0 };
+impl<U> Window<U> {
+	pub fn new(workspace: u8, path: Path, user_data: U) -> Self {
+		let mut s = Self { path: 0, user_data };
 		s.set_path(workspace, path);
 		s
 	}

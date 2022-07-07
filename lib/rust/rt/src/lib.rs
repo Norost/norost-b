@@ -55,6 +55,7 @@ macro_rules! dbg {
 pub mod args;
 mod globals;
 pub mod io;
+pub mod mem;
 pub mod process;
 pub mod sync;
 pub mod table;
@@ -63,6 +64,7 @@ pub mod tls;
 
 use core::ptr::NonNull;
 
+pub use io::RWX;
 pub use norostb_kernel::{error::Error, time, AtomicHandle, Handle};
 pub use process::Process;
 pub use table::{NewObject, Object, RefObject};

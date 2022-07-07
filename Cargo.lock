@@ -343,6 +343,9 @@ dependencies = [
 [[package]]
 name = "ipc_window_manager"
 version = "0.1.0"
+dependencies = [
+ "norost_ipc_spec",
+]
 
 [[package]]
 name = "jail"

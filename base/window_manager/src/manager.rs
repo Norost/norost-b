@@ -6,14 +6,14 @@ use crate::{
 use alloc::boxed::Box;
 use driver_utils::{Arena, Handle};
 
-pub struct Manager {
-	windows: Arena<Window>,
+pub struct Manager<U> {
+	windows: Arena<Window<U>>,
 	workspaces: Box<[Workspace]>,
 	current_workspace: u8,
 	global_window_params: GlobalWindowParams,
 }
 
-impl Manager {
+impl<U> Manager<U> {
 	pub fn new(global_window_params: GlobalWindowParams) -> Result<Self, NewManagerError> {
 		let ws = Workspace::new().map_err(NewManagerError::NewWorkspace)?;
 		Ok(Self {
@@ -24,7 +24,7 @@ impl Manager {
 		})
 	}
 
-	pub fn new_window(&mut self, total_size: Size) -> Result<Handle, ()> {
+	pub fn new_window(&mut self, total_size: Size, user_data: U) -> Result<Handle, ()> {
 		let mut update = None;
 		let res = self.windows.insert_with(|handle| {
 			let p;
@@ -37,7 +37,7 @@ impl Manager {
 					total_size,
 				)
 				.unwrap_or_else(|e| todo!("{:?}", e));
-			Window::new(self.current_workspace, p)
+			Window::new(self.current_workspace, p, user_data)
 		});
 		update.map(|(handle, path)| self.windows[handle].set_path(self.current_workspace, path));
 		Ok(res)
@@ -60,6 +60,14 @@ impl Manager {
 				let d = Vector::ONE * self.global_window_params.border_width;
 				Rect::from_points(rect.low() + d, rect.high() - d)
 			})
+	}
+
+	pub fn window(&self, handle: Handle) -> Option<&Window<U>> {
+		self.windows.get(handle)
+	}
+
+	pub fn window_mut(&mut self, handle: Handle) -> Option<&mut Window<U>> {
+		self.windows.get_mut(handle)
 	}
 
 	#[inline(always)]

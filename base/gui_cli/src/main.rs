@@ -67,25 +67,33 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let width = u32::from_le_bytes(res[..4].try_into().unwrap());
 	let height = u32::from_le_bytes(res[4..l].try_into().unwrap());
 
-	let mut fb = Vec::<[u8; 3]>::new();
-	fb.resize(width as usize * height as usize, [0; 3]);
-	let fb = Box::into_raw(fb.into_boxed_slice()) as *mut [u8; 3];
-	let mut fb = unsafe { rasterizer::FrameBuffer::new(NonNull::new_unchecked(fb), width, height) };
+	let (fb, _) = {
+		let size = width as usize * height as usize * 3;
+		let fb = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
+		window
+			.share(
+				&rt::Object::new(rt::NewObject::PermissionMask {
+					handle: fb.as_raw(),
+					rwx: rt::io::RWX::R,
+				})
+				.unwrap(),
+			)
+			.unwrap();
+		fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
+	};
+	let mut fb = unsafe { rasterizer::FrameBuffer::new(fb.cast(), width, height) };
 
 	let mut draw = |rasterizer: &mut rasterizer::Rasterizer| {
 		fb.as_mut().fill(0);
 		rasterizer.render_all(&mut fb);
-		let mut raw = Vec::new();
-		let mut draw = ipc_wm::DrawRect::new_vec(
-			&mut raw,
-			ipc_wm::Point { x: 0, y: 0 },
-			ipc_wm::Size {
+		let draw = ipc_wm::Flush {
+			origin: ipc_wm::Point { x: 0, y: 0 },
+			size: ipc_wm::SizeInclusive {
 				x: (width - 1) as _,
 				y: (height - 1) as _,
 			},
-		);
-		draw.pixels_mut().copy_from_slice(fb.as_ref());
-		window.write(&raw).unwrap();
+		};
+		window.write(&draw.encode()).unwrap();
 	};
 
 	window

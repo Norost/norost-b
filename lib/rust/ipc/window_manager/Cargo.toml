@@ -2,3 +2,6 @@
 name = "ipc_window_manager"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies.norost_ipc_spec]
+path = "../../../../../../compilers/norost_ipc_spec/spec"

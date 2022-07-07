@@ -113,7 +113,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	// Allocate draw buffer
-	let (width, height) = (2560, 1440);
+	let (width, height) = (1920, 1080);
 	let (fb, fb_phys, fb_size) =
 		driver_utils::dma::alloc_dma((width * height * 4).try_into().unwrap()).unwrap();
 	let fb = unsafe {

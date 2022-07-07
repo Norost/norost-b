@@ -2,13 +2,19 @@
 @version 0
 @abi 0
 
-struct Transfer {
-	offset: u32
+struct Flush {
+	origin: Point
+	size: SizeInclusive
+}
+
+struct Point {
 	x: u32
 	y: u32
-	width: u16
-	height: u16
-	stride: u16
+}
+
+struct SizeInclusive {
+	x: u16
+	y: u16
 }
 
 struct Rgb8 {

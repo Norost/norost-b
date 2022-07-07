@@ -2,6 +2,12 @@
 
 extern crate alloc;
 
+mod raw {
+	norost_ipc_spec::compile!(core::include_str!("../../../../ipc/window_manager.ipc"));
+}
+
+use norost_ipc_spec::Data;
+
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -12,42 +18,40 @@ pub struct Point {
 }
 
 impl Point {
-	fn from_raw(r: [u8; 8]) -> Self {
-		Self {
-			x: u32::from_le_bytes(r[..4].try_into().unwrap()),
-			y: u32::from_le_bytes(r[4..].try_into().unwrap()),
-		}
+	#[inline]
+	fn from_raw(p: raw::Point) -> Self {
+		Self { x: p.x(), y: p.y() }
 	}
 
-	fn to_raw(&self) -> [u8; 8] {
-		let mut r = [0; 8];
-		r[..4].copy_from_slice(&self.x.to_le_bytes());
-		r[4..].copy_from_slice(&self.y.to_le_bytes());
-		r
+	#[inline]
+	fn to_raw(&self) -> raw::Point {
+		let mut p = raw::Point::default();
+		p.set_x(self.x);
+		p.set_y(self.y);
+		p
 	}
 }
 
 /// Each component is encoded as the size minus 1, e.g. `16` is encoded as `15`,
 /// `65536` is encoded as `65535` (`0xffff`).
 #[derive(Clone, Copy, Debug)]
-pub struct Size {
+pub struct SizeInclusive {
 	pub x: u16,
 	pub y: u16,
 }
 
-impl Size {
-	fn from_raw(r: [u8; 4]) -> Self {
-		Self {
-			x: u16::from_le_bytes(r[..2].try_into().unwrap()),
-			y: u16::from_le_bytes(r[2..].try_into().unwrap()),
-		}
+impl SizeInclusive {
+	#[inline]
+	fn from_raw(p: raw::SizeInclusive) -> Self {
+		Self { x: p.x(), y: p.y() }
 	}
 
-	fn to_raw(&self) -> [u8; 4] {
-		let mut r = [0; 4];
-		r[..2].copy_from_slice(&self.x.to_le_bytes());
-		r[2..].copy_from_slice(&self.y.to_le_bytes());
-		r
+	#[inline]
+	fn to_raw(&self) -> raw::SizeInclusive {
+		let mut p = raw::SizeInclusive::default();
+		p.set_x(self.x);
+		p.set_y(self.y);
+		p
 	}
 
 	#[inline]
@@ -56,61 +60,29 @@ impl Size {
 	}
 }
 
-pub struct DrawRect<'a, T>
-where
-	T: AsRef<[u8]> + 'a,
-{
-	raw: T,
-	_marker: PhantomData<&'a mut T>,
+#[derive(Clone, Copy, Debug)]
+pub struct Flush {
+	pub origin: Point,
+	pub size: SizeInclusive,
 }
 
-impl<'a, T> DrawRect<'a, T>
-where
-	T: AsRef<[u8]> + 'a,
-{
-	pub fn from_bytes(raw: T) -> Option<Self> {
-		(12 + Self::get_size(raw.as_ref())?.area() * 3 >= raw.as_ref().len()).then(|| Self {
-			raw,
-			_marker: PhantomData,
-		})
-	}
-
-	pub fn origin(&self) -> Point {
-		Point::from_raw(self.raw.as_ref()[..8].try_into().unwrap())
-	}
-
-	pub fn size(&self) -> Size {
-		Self::get_size(self.raw.as_ref()).unwrap()
-	}
-
-	pub fn pixels(&self) -> &[u8] {
-		&self.raw.as_ref()[12..12 + self.size().area() * 3]
-	}
-
-	fn get_size(raw: &[u8]) -> Option<Size> {
-		Some(Size::from_raw(raw.get(8..12)?.try_into().unwrap()))
-	}
-}
-
-impl<'a, T> DrawRect<'a, T>
-where
-	T: AsRef<[u8]> + AsMut<[u8]> + 'a,
-{
-	pub fn pixels_mut(&mut self) -> &mut [u8] {
-		let s = self.size().area();
-		&mut self.raw.as_mut()[12..12 + s * 3]
-	}
-}
-
-impl<'a> DrawRect<'a, &'a mut Vec<u8>> {
-	pub fn new_vec(raw: &'a mut Vec<u8>, origin: Point, size: Size) -> Self {
-		raw.clear();
-		raw.resize(12 + size.area() * 3, 0);
-		raw[8..12].copy_from_slice(&size.to_raw());
-		raw[..8].copy_from_slice(&origin.to_raw());
+impl Flush {
+	#[inline]
+	pub fn decode(raw: [u8; 12]) -> Self {
+		let f = raw::Flush::from_raw(&raw, 0);
 		Self {
-			raw: &mut *raw,
-			_marker: PhantomData,
+			origin: Point::from_raw(f.origin()),
+			size: SizeInclusive::from_raw(f.size()),
 		}
+	}
+
+	#[inline]
+	pub fn encode(self) -> [u8; 12] {
+		let mut f = raw::Flush::default();
+		f.set_origin(self.origin.to_raw());
+		f.set_size(self.size.to_raw());
+		let mut r = [0; 12];
+		f.to_raw(&mut r, 0);
+		r
 	}
 }

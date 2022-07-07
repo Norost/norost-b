@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(test), no_std)]
 #![feature(alloc_error_handler)]
+#![feature(core_intrinsics)]
 #![feature(start)]
 
 extern crate alloc;
@@ -81,10 +82,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.unwrap(),
 	)
 	.expect("failed to share mem with GPU");
+	// SAFETY: only we can write to this slice. The other side can go figure.
+	let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
 
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::new(gwp).unwrap();
-	let w0 = manager.new_window(size).unwrap();
 
 	let sync_rect = |rect: math::Rect| {
 		let mut s = alloc::string::String::with_capacity(64);
@@ -97,16 +99,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		sync.write(&[lx0, lx1, ly0, ly1, hx0, hx1, hy0, hy1])
 			.unwrap();
 	};
-	let fill = |rect: math::Rect, color @ [r, g, b]: [u8; 3]| {
-		let s = rect.size().x as usize * rect.size().y as usize;
-		assert!(s * 3 <= shmem_size, "TODO");
-		if r == g && g == b {
-			unsafe { shmem.as_ptr().write_bytes(r, rect.area() as usize * 3) }
-		} else {
-			for i in 0..s {
-				unsafe {
-					shmem.as_ptr().cast::<[u8; 3]>().add(i).write(color);
-				}
+	let mut fill = |shmem: &mut [u8], rect: math::Rect, color: [u8; 3]| {
+		let t = rect.size();
+		assert!(t.x <= size.x && t.y <= size.y, "rect out of bounds");
+		assert!(t.area() * 3 <= shmem.len() as u64, "shmem too small");
+		for y in 0..t.y {
+			for x in 0..t.x {
+				let i = y * t.x + x;
+				let s = &mut shmem[i as usize * 3..][..3];
+				s.copy_from_slice(&color);
 			}
 		}
 		sync_rect(rect);
@@ -121,9 +122,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		[255, 0, 255],
 	];
 
-	fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+	fill(shmem, Rect::from_size(Point::ORIGIN, size), [255, 255, 255]);
+	fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 	for (w, c) in manager.window_handles().zip(&colors) {
-		fill(manager.window_rect(w, size).unwrap(), *c);
+		fill(shmem, manager.window_rect(w, size).unwrap(), *c);
 	}
 
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 22 }).unwrap();
@@ -145,10 +147,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
-							let h = manager.new_window(size).unwrap();
-							fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+							let h = manager.new_window(size, FrameBuffer::EMPTY).unwrap();
+							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							for (w, c) in manager.window_handles().zip(&colors) {
-								fill(manager.window_rect(w, size).unwrap(), *c);
+								fill(shmem, manager.window_rect(w, size).unwrap(), *c);
 							}
 							Response::Handle(h)
 						}
@@ -183,7 +185,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/cmd/fill") => {
 							if let &[r, g, b] = &*val {
-								fill(manager.window_rect(h, size).unwrap(), [r, g, b]);
+								fill(shmem, manager.window_rect(h, size).unwrap(), [r, g, b]);
 								Response::Amount(0)
 							} else {
 								Response::Error(Error::InvalidData)
@@ -198,18 +200,19 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),
 						h => {
+							let window = manager.window(handle).unwrap();
 							let mut header = [0; 12];
 							data.copy_to(0, &mut header);
 							let display = Rect::from_size(Point::ORIGIN, size);
 							let rect = manager.window_rect(h, size).unwrap();
-							let draw = ipc_wm::DrawRect::from_bytes(&header).unwrap();
-							let draw_size = draw.size();
+							let draw = ipc_wm::Flush::decode(header);
+							let draw_size = draw.size;
 							// TODO do we actually want this?
 							let draw_size = Size::new(
 								(u32::from(draw_size.x) + 1).min(rect.size().x),
 								(u32::from(draw_size.y) + 1).min(rect.size().y),
 							);
-							let draw_orig = draw.origin();
+							let draw_orig = draw.origin;
 							let draw_orig = Point::new(draw_orig.x, draw_orig.y);
 							let draw_rect = rect
 								.calc_global_pos(Rect::from_size(draw_orig, draw_size))
@@ -222,13 +225,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							);
 							// TODO we can avoid this copy by passing shared memory buffers directly
 							// to the GPU
-							unsafe {
-								data.copy_to_raw_untrusted(
-									12,
-									shmem.as_ptr(),
-									draw.size().area() * 3,
-								);
-							}
+							window
+								.user_data
+								.copy_to_untrusted(0, &mut shmem[..draw_rect.area() as usize * 3]);
 							let l = data.len().try_into().unwrap();
 							data.manual_drop();
 							sync_rect(draw_rect);
@@ -238,13 +237,24 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				),
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
-					fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for (w, c) in manager.window_handles().zip(&colors) {
-						fill(manager.window_rect(w, size).unwrap(), *c);
+						fill(shmem, manager.window_rect(w, size).unwrap(), *c);
 					}
 					continue;
 				}
 				Request::Open { .. } => todo!(),
+				Request::Share { job_id, share } => {
+					let r = match handle {
+						Handle::MAX => Response::Error(Error::InvalidOperation),
+						h => {
+							let fb = &mut manager.window_mut(handle).unwrap().user_data;
+							*fb = FrameBuffer::wrap(&share);
+							Response::Amount(0)
+						}
+					};
+					(job_id, r)
+				}
 				_ => todo!(),
 			};
 			table.enqueue(job_id, response);
@@ -253,6 +263,47 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		send_notif.then(|| table.flush());
 		table.wait();
 	}
+}
 
-	0
+struct FrameBuffer {
+	base: NonNull<u8>,
+	size: usize,
+}
+
+impl FrameBuffer {
+	const EMPTY: Self = Self {
+		base: NonNull::dangling(),
+		size: 0,
+	};
+
+	fn wrap(obj: &rt::Object) -> Self {
+		let (base, size) = obj.map_object(None, rt::io::RWX::R, 0, usize::MAX).unwrap();
+		Self { base, size }
+	}
+
+	fn copy_to_untrusted(&self, offset: usize, out: &mut [u8]) {
+		assert!(
+			offset < self.size && offset + out.len() <= self.size,
+			"out of bounds"
+		);
+		unsafe {
+			core::intrinsics::volatile_copy_nonoverlapping_memory(
+				out.as_mut_ptr(),
+				self.base.as_ptr().add(offset),
+				out.len(),
+			);
+		}
+	}
+}
+
+impl Drop for FrameBuffer {
+	fn drop(&mut self) {
+		if self.size > 0 {
+			// SAFETY: we have unique ownership of the memory.
+			unsafe {
+				// Assume nothing bad will happen
+				let _ = rt::mem::dealloc(self.base, self.size);
+			}
+		}
+	}
 }

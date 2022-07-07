@@ -305,9 +305,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 		NewObject::Duplicate { handle } => proc
 			.duplicate_object_handle(handle)
 			.ok_or(Error::InvalidObject),
-		NewObject::SharedMemory { size } => (size % Page::SIZE == 0)
-			.then(|| NonZeroUsize::new(size / Page::SIZE))
-			.flatten()
+		NewObject::SharedMemory { size } => NonZeroUsize::new((size + Page::MASK) / Page::SIZE)
 			.ok_or(Error::InvalidData)
 			.and_then(|s| {
 				OwnedPageFrames::new(s, proc.allocate_hints(0 as _)).map_err(|e| match e {

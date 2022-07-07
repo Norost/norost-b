@@ -20,7 +20,6 @@ use core::{
 	ptr::{self, NonNull},
 	sync::atomic::{AtomicU32, Ordering},
 };
-use norost_ipc_spec::{S64, U32, U64};
 
 const REQUESTS_MASK: u32 = (1 << 7) - 1;
 const RESPONSES_MASK: u32 = (1 << 7) - 1;
@@ -100,11 +99,11 @@ impl ServerQueue {
 	fn enqueue(&mut self, job_id: JobId, response: Response) {
 		let mut v = raw::ResponseValue::default();
 		match response {
-			Response::Error(e) => v.set_error(S64::new(e)),
-			Response::Position(p) => v.set_position(U64::new(p)),
-			Response::Handle(h) => v.set_handle(U32::new(h)),
-			Response::Amount(a) => v.set_amount(U32::new(a)),
-			Response::Raw(a) => v.set_raw(U64::new(a)),
+			Response::Error(e) => v.set_error(e),
+			Response::Position(p) => v.set_position(p),
+			Response::Handle(h) => v.set_handle(h),
+			Response::Amount(a) => v.set_amount(a),
+			Response::Raw(a) => v.set_raw(a),
 			Response::Slice(s) => v.set_slice(s.into_raw()),
 		};
 		let mut r = raw::Response::default();
@@ -140,11 +139,11 @@ impl ServerQueue {
 			type R = Request;
 			type S = SeekFrom;
 			(
-				handle.get(),
+				handle,
 				match r.ty().unwrap() {
 					t @ T::Read | t @ T::Peek => R::Read {
 						job_id,
-						amount: args.amount().get(),
+						amount: args.amount(),
 						peek: t == T::Peek,
 					},
 					T::Write => R::Write {
@@ -174,19 +173,19 @@ impl ServerQueue {
 					},
 					T::SeekStart => R::Seek {
 						job_id,
-						from: S::Start(args.offset_u().get()),
+						from: S::Start(args.offset_u()),
 					},
 					T::SeekCurrent => R::Seek {
 						job_id,
-						from: S::Current(args.offset_s().get()),
+						from: S::Current(args.offset_s()),
 					},
 					T::SeekEnd => R::Seek {
 						job_id,
-						from: S::End(args.offset_s().get() as _),
+						from: S::End(args.offset_s() as _),
 					},
 					T::Share => R::Share {
 						job_id,
-						share: args.share().get(),
+						share: args.share(),
 					},
 				},
 			)
@@ -233,7 +232,7 @@ impl ClientQueue {
 			} => (
 				job_id,
 				if peek { T::Peek } else { T::Read },
-				v.set_amount(U32::new(amount)),
+				v.set_amount(amount),
 			),
 			R::Write { job_id, data } => (job_id, T::Write, v.set_slice(data.into_raw())),
 			R::GetMeta { job_id, property } => {
@@ -248,16 +247,16 @@ impl ClientQueue {
 			R::Create { job_id, path } => (job_id, T::Create, v.set_slice(path.into_raw())),
 			R::Destroy { job_id, path } => (job_id, T::Destroy, v.set_slice(path.into_raw())),
 			R::Seek { job_id, from } => match from {
-				SeekFrom::Start(f) => (job_id, T::SeekStart, v.set_offset_u(U64::new(f))),
-				SeekFrom::Current(f) => (job_id, T::SeekCurrent, v.set_offset_s(S64::new(f))),
-				SeekFrom::End(f) => (job_id, T::SeekEnd, v.set_offset_s(S64::new(f))),
+				SeekFrom::Start(f) => (job_id, T::SeekStart, v.set_offset_u(f)),
+				SeekFrom::Current(f) => (job_id, T::SeekCurrent, v.set_offset_s(f)),
+				SeekFrom::End(f) => (job_id, T::SeekEnd, v.set_offset_s(f)),
 			},
-			R::Share { job_id, share } => (job_id, T::Share, v.set_share(U32::new(share))),
+			R::Share { job_id, share } => (job_id, T::Share, v.set_share(share)),
 		};
 		let mut r = raw::Request::default();
 		r.set_ty(ty);
 		r.set_id(job_id);
-		r.set_handle(U32::new(handle));
+		r.set_handle(handle);
 		r.set_args(v);
 		unsafe { ptr::write_volatile(self.base.request_ptr(self.request_tail.0), r) }
 		self.request_tail += 1;
@@ -288,7 +287,7 @@ impl ClientQueue {
 			self.base
 				.response_head_ref()
 				.store(self.response_head.0, Ordering::Relaxed);
-			(r.id(), AnyResponse(r.value().raw().get()))
+			(r.id(), AnyResponse(r.value().raw()))
 		})
 	}
 
@@ -379,15 +378,15 @@ pub struct Slice {
 impl Slice {
 	fn from_raw(raw: raw::Slice) -> Self {
 		Self {
-			offset: raw.offset().get(),
-			length: raw.length().get(),
+			offset: raw.offset(),
+			length: raw.length(),
 		}
 	}
 
 	fn into_raw(self) -> raw::Slice {
 		let mut s = raw::Slice::default();
-		s.set_offset(U32::new(self.offset));
-		s.set_length(U32::new(self.length));
+		s.set_offset(self.offset);
+		s.set_length(self.length);
 		s
 	}
 }
