@@ -339,7 +339,8 @@ impl Drop for StreamObject {
 				.queue
 				.lock()
 				.try_enqueue(self.handle, Request::Close)
-				.unwrap_or_else(|e| todo!("{:?}", e))
+				.unwrap_or_else(|e| todo!("{:?}", e));
+			table.notify_singleton.wake_readers();
 		});
 	}
 }

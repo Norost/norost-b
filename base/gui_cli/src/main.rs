@@ -157,7 +157,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				Request::Write { .. } => todo!(),
 				Request::Close => match handle {
-					WRITE_HANDLE => continue,
+					// Exit
+					WRITE_HANDLE => return 0,
 					_ => unreachable!(),
 				},
 				e => todo!(),
