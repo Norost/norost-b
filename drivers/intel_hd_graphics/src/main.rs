@@ -395,7 +395,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				let stride = (stride + 63) & !63;
 				let config = plane::Config {
 					base: GraphicsAddress(0),
-					format: plane::PixelFormat::RGBX8888,
+					// FIXME this doesn't work.
+					//format: plane::PixelFormat::RGBX8888,
+					format: plane::PixelFormat::BGRX8888,
 					stride,
 				};
 
@@ -434,6 +436,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						displayport::Port::A,
 						displayport::PortClock::None,
 					);
+
+					//pipe::configure(&mut control, pipe::Pipe::A, &mode);
 
 					// FIXME don't hardcode port clock, configure it properly instead
 					backlight::enable_panel(&mut control);
@@ -597,7 +601,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							if let Ok(d) = d.try_into() {
 								let cmd = ipc_gpu::Flush::decode(d);
 								unsafe {
-									display_fb.copy_from_raw_untrusted_rgb24_to_rgbx32(
+									display_fb.copy_from_raw_untrusted_rgb24_to_bgrx32(
 										command_buf.0.as_ptr().add(cmd.offset as _).cast(),
 										cmd.stride as _,
 										cmd.origin.x as _,
@@ -656,7 +660,7 @@ struct DisplayFrameBuffer {
 }
 
 impl DisplayFrameBuffer {
-	unsafe fn copy_from_raw_untrusted_rgb24_to_rgbx32(
+	unsafe fn copy_from_raw_untrusted_rgb24_to_bgrx32(
 		&mut self,
 		mut src: *const [u8; 3],
 		stride: u16,
@@ -676,15 +680,15 @@ impl DisplayFrameBuffer {
 		let pre_end = dst.add((h - 1) * f(self.stride));
 		let end = pre_end.add(f(self.stride));
 		while dst != pre_end {
-			Self::copy_untrusted_row_rgb24_to_rgbx32(dst, src, w, false);
+			Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, false);
 			src = src.add(stride);
 			dst = dst.add(f(self.stride));
 		}
-		Self::copy_untrusted_row_rgb24_to_rgbx32(dst, src, w, true);
+		Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, true);
 	}
 
 	#[inline]
-	unsafe fn copy_untrusted_row_rgb24_to_rgbx32(
+	unsafe fn copy_untrusted_row_rgb24_to_bgrx32(
 		mut dst: *mut i32,
 		mut src: *const [u8; 3],
 		w: usize,
@@ -698,7 +702,7 @@ impl DisplayFrameBuffer {
 			while dst != end {
 				let E(a, c) = read_unaligned_untrusted(src.cast::<E>());
 				let [a, b] = a.to_le_bytes();
-				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([a, b, c, 0]));
+				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([c, b, a, 0]));
 				src = src.add(1);
 				dst = dst.add(1);
 			}
@@ -706,7 +710,7 @@ impl DisplayFrameBuffer {
 			// Align 16
 			while dst as usize & 0b1111 != 0 {
 				let v = read_unaligned_untrusted(src.cast::<i32>());
-				x86_64::_mm_stream_si32(dst, v);
+				x86_64::_mm_stream_si32(dst, v.to_be() >> 8);
 				src = src.add(1);
 				dst = dst.add(1);
 			}
@@ -716,7 +720,7 @@ impl DisplayFrameBuffer {
 			if last && end_16 == end {
 				end_16 = end_16.sub(4);
 			}
-			let shuf = x86_64::_mm_set_epi8(-1, 11, 10, 9, -1, 8, 7, 6, -1, 5, 4, 3, -1, 2, 1, 0);
+			let shuf = x86_64::_mm_set_epi8(-1, 9, 10, 11, -1, 6, 7, 8, -1, 3, 4, 5, -1, 0, 1, 2);
 			while dst != end_16 {
 				let v = read_unaligned_untrusted(src.cast::<x86_64::__m128i>());
 				let v = x86_64::_mm_shuffle_epi8(v, shuf);
@@ -729,7 +733,7 @@ impl DisplayFrameBuffer {
 			while dst != end {
 				let E(a, c) = read_unaligned_untrusted(src.cast::<E>());
 				let [a, b] = a.to_le_bytes();
-				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([a, b, c, 0]));
+				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([c, b, a, 0]));
 				src = src.add(1);
 				dst = dst.add(1);
 			}
