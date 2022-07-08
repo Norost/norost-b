@@ -13,13 +13,12 @@
 
 #![no_std]
 #![feature(alloc_error_handler)]
+#![feature(core_intrinsics)]
 #![feature(start)]
 #![feature(inline_const)]
 #![feature(slice_as_chunks)]
 
 extern crate alloc;
-
-use core::time::Duration;
 
 macro_rules! reg {
 	(@INTERNAL $fn:ident $setfn:ident [$bit:literal] $ty:ty) => {
@@ -240,6 +239,11 @@ mod vga;
 mod watermark;
 
 use alloc::vec::Vec;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64;
+use core::ptr::NonNull;
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
+use rt::{Error, Handle};
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -279,8 +283,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Find suitable device
 	let (path, model) = {
 		let it = root.open(b"pci/info").unwrap();
+		let mut e = [0; 32];
 		loop {
-			let mut e = it.read_vec(32).unwrap();
+			let l = it.read(&mut e).unwrap();
+			let e = &e[..l];
 			if e.is_empty() {
 				log!("no suitable Intel HD Graphics device found");
 				return 1;
@@ -290,8 +296,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			let (v, d) = id.split_once(':').unwrap();
 			let f = |s| u16::from_str_radix(s, 16).unwrap();
 			if let Some(model) = Model::try_from_pci_id(f(v), f(d)) {
-				e.resize(loc.len(), 0);
-				e.splice(0..0, *b"pci/");
+				let e = ["pci/", loc]
+					.iter()
+					.flat_map(|c| c.bytes())
+					.collect::<Vec<_>>();
 				break (e, model);
 			}
 		}
@@ -302,26 +310,27 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let dev = root.open(&path).unwrap();
 	let ioport = root.open(b"portio/map").expect("can't access I/O ports");
 
-	let pci_config = kernel::syscall::map_object(dev.as_raw(), None, 0, usize::MAX).unwrap();
+	let (pci_config, _) = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
+	let (width, height);
+	let mut display_fb;
 	{
 		let h = pci.get(0, 0, 0).unwrap();
 		log!("{:?}", h);
 		match h {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					kernel::syscall::map_object(dev.as_raw(), None, (bar + 1).into(), usize::MAX)
+					assert!(bar < 6);
+					let mut s = *b"bar0";
+					s[3] += bar;
+					dev.open(&s)
 						.unwrap()
+						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
+						.unwrap()
+						.0
 				};
-				/*
-				let dma_alloc = |size, _align| -> Result<_, ()> {
-					let (d, _) = syscall::alloc_dma(None, size).unwrap();
-					let a = syscall::physical_address(d).unwrap();
-					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
-				};
-				*/
 
 				let control = map_bar(0);
 				let memory = map_bar(2);
@@ -380,12 +389,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 				pll::compute_sdvo(mode.pixel_clock);
 
-				let (width, height) = (mode.horizontal.active + 1, mode.vertical.active + 1);
+				(width, height) = (mode.horizontal.active + 1, mode.vertical.active + 1);
 
 				let stride = width * 4;
 				let stride = (stride + 63) & !63;
 				let config = plane::Config {
 					base: GraphicsAddress(0),
+					// FIXME this doesn't work.
+					//format: plane::PixelFormat::RGBX8888,
 					format: plane::PixelFormat::BGRX8888,
 					stride,
 				};
@@ -425,6 +436,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						displayport::Port::A,
 						displayport::PortClock::None,
 					);
+
+					//pipe::configure(&mut control, pipe::Pipe::A, &mode);
 
 					// FIXME don't hardcode port clock, configure it properly instead
 					backlight::enable_panel(&mut control);
@@ -486,8 +499,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 
 				// Funny colors GO
-				let stride = usize::from(stride) / 4;
 				for y in 0..height {
+					let stride = usize::from(stride) / 4;
 					for x in 0..width {
 						let (x, y) = (usize::from(x), usize::from(y));
 						let r = x * 256 / usize::from(width);
@@ -495,19 +508,239 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let b = 255 - (r + g) / 2;
 						let bgrx = [b as u8, g as u8, r as u8, 0];
 						unsafe {
-							core::arch::x86_64::_mm_stream_si32(
+							x86_64::_mm_stream_si32(
 								memory.cast::<i32>().as_ptr().add(y * stride + x),
 								i32::from_ne_bytes(bgrx),
 							);
 						}
 					}
 				}
+
+				let base = memory.cast().try_into().unwrap();
+				let stride = stride / 4;
+				display_fb = DisplayFrameBuffer {
+					base,
+					width,
+					height,
+					stride,
+				};
 			}
 			_ => unreachable!(),
 		}
 	};
 
-	log!("stop");
-	rt::thread::sleep(core::time::Duration::MAX);
-	0
+	let table = {
+		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+		let tbl = StreamTable::new(&buf, rt::io::Pow2Size(5));
+		root.create(b"gpu")
+			.unwrap()
+			.share(&tbl.public_table())
+			.unwrap();
+		tbl
+	};
+
+	const SYNC_HANDLE: Handle = Handle::MAX - 1;
+
+	let mut command_buf = (NonNull::<u8>::dangling(), 0);
+
+	let mut tiny_buf = [0; 511];
+	loop {
+		let mut flush = false;
+		while let Some((handle, req)) = table.dequeue() {
+			let (job_id, resp) = match req {
+				Request::Open { job_id, path } => (job_id, {
+					let mut p = [0; 64];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					path.manual_drop();
+					match (handle, &*p) {
+						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
+						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
+						_ => Response::Error(Error::InvalidOperation as _),
+					}
+				}),
+				Request::GetMeta { job_id, property } => {
+					let prop = property.get(&mut tiny_buf);
+					let data = property.into_inner();
+					let r = match (handle, &*prop) {
+						(_, b"bin/resolution") => {
+							let r = ipc_gpu::Resolution {
+								x: width as _,
+								y: height as _,
+							}
+							.encode();
+							let data = table.alloc(r.len()).unwrap();
+							data.copy_from(0, &r);
+							Response::Data {
+								data,
+								length: r.len() as _,
+							}
+						}
+						_ => {
+							data.manual_drop();
+							Response::Error(Error::DoesNotExist)
+						}
+					};
+					(job_id, r)
+				}
+				Request::SetMeta {
+					job_id,
+					property_value,
+				} => {
+					property_value.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
+				Request::Write { job_id, data } => {
+					let mut d = [0; 64];
+					let d = &mut d[..data.len()];
+					data.copy_to(0, d);
+					data.manual_drop();
+					let r = match handle {
+						// Blit a specific area
+						SYNC_HANDLE => {
+							if let Ok(d) = d.try_into() {
+								let cmd = ipc_gpu::Flush::decode(d);
+								unsafe {
+									display_fb.copy_from_raw_untrusted_rgb24_to_bgrx32(
+										command_buf.0.as_ptr().add(cmd.offset as _).cast(),
+										cmd.stride as _,
+										cmd.origin.x as _,
+										cmd.origin.y as _,
+										cmd.size.x,
+										cmd.size.y,
+									);
+								}
+								Response::Amount(d.len().try_into().unwrap())
+							} else {
+								Response::Error(Error::InvalidData as _)
+							}
+						}
+						_ => Response::Error(Error::InvalidOperation as _),
+					};
+					(job_id, r)
+				}
+				Request::Share { job_id, share } => (
+					job_id,
+					match handle {
+						SYNC_HANDLE => match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
+							Err(e) => Response::Error(e as _),
+							Ok((buf, size)) => {
+								command_buf = (buf, size);
+								Response::Amount(0)
+							}
+						},
+						_ => Response::Error(Error::InvalidOperation as _),
+					},
+				),
+				Request::Close => match handle {
+					Handle::MAX | SYNC_HANDLE => continue,
+					_ => unreachable!(),
+				},
+				Request::Create { job_id, path } => {
+					path.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
+				Request::Read { job_id, .. }
+				| Request::Destroy { job_id, .. }
+				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
+			};
+			flush = true;
+			table.enqueue(job_id, resp);
+		}
+		flush.then(|| table.flush());
+		table.wait();
+	}
+}
+
+struct DisplayFrameBuffer {
+	base: NonNull<i32>,
+	width: u16,
+	height: u16,
+	stride: u16,
+}
+
+impl DisplayFrameBuffer {
+	unsafe fn copy_from_raw_untrusted_rgb24_to_bgrx32(
+		&mut self,
+		mut src: *const [u8; 3],
+		stride: u16,
+		x: u16,
+		y: u16,
+		w: u16,
+		h: u16,
+	) {
+		if w == 0 || h == 0 {
+			return;
+		}
+		let f = usize::from;
+		let (stride, x, y, w, h) = (f(stride), f(x), f(y), f(w), f(h));
+		assert!(x < f(self.width) && x + w <= f(self.width));
+		assert!(y < f(self.height) && y + h <= f(self.height));
+		let mut dst = self.base.as_ptr().add(x).add(y * f(self.stride));
+		let pre_end = dst.add((h - 1) * f(self.stride));
+		let end = pre_end.add(f(self.stride));
+		while dst != pre_end {
+			Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, false);
+			src = src.add(stride);
+			dst = dst.add(f(self.stride));
+		}
+		Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, true);
+	}
+
+	#[inline]
+	unsafe fn copy_untrusted_row_rgb24_to_bgrx32(
+		mut dst: *mut i32,
+		mut src: *const [u8; 3],
+		w: usize,
+		last: bool,
+	) {
+		#[repr(C)]
+		struct E(u16, u8);
+		let end = dst.add(w);
+		// Special-case w <= 4 so the much more common loop is simpler & faster
+		if w <= 4 {
+			while dst != end {
+				let E(a, c) = read_unaligned_untrusted(src.cast::<E>());
+				let [a, b] = a.to_le_bytes();
+				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([c, b, a, 0]));
+				src = src.add(1);
+				dst = dst.add(1);
+			}
+		} else {
+			// Align 16
+			while dst as usize & 0b1111 != 0 {
+				let v = read_unaligned_untrusted(src.cast::<i32>());
+				x86_64::_mm_stream_si32(dst, v.to_be() >> 8);
+				src = src.add(1);
+				dst = dst.add(1);
+			}
+			// Loop 16
+			let mut end_16 = (end as usize & !0b1111) as *mut i32;
+			// Be careful with out of bounds reads
+			if last && end_16 == end {
+				end_16 = end_16.sub(4);
+			}
+			let shuf = x86_64::_mm_set_epi8(-1, 9, 10, 11, -1, 6, 7, 8, -1, 3, 4, 5, -1, 0, 1, 2);
+			while dst != end_16 {
+				let v = read_unaligned_untrusted(src.cast::<x86_64::__m128i>());
+				let v = x86_64::_mm_shuffle_epi8(v, shuf);
+				x86_64::_mm_stream_si128(dst.cast(), v);
+				src = src.add(4);
+				dst = dst.add(4);
+			}
+			// Copy remaining bytes (up to 16)
+			// Be careful again
+			while dst != end {
+				let E(a, c) = read_unaligned_untrusted(src.cast::<E>());
+				let [a, b] = a.to_le_bytes();
+				x86_64::_mm_stream_si32(dst, i32::from_le_bytes([c, b, a, 0]));
+				src = src.add(1);
+				dst = dst.add(1);
+			}
+		}
+	}
+}
+
+unsafe fn read_unaligned_untrusted<T>(ptr: *const T) -> T {
+	core::intrinsics::unaligned_volatile_load(ptr)
 }

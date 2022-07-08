@@ -109,7 +109,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "endian",
- "norostb_kernel",
+ "ipc_gpu",
  "norostb_rt",
  "norostb_rt_alloc",
  "pci",
@@ -154,6 +154,7 @@ name = "driver_virtio_gpu"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "ipc_gpu",
  "norostb_kernel",
  "norostb_rt",
  "norostb_rt_alloc",
@@ -338,6 +339,13 @@ dependencies = [
  "serde",
  "serde_derive",
  "toml",
+]
+
+[[package]]
+name = "ipc_gpu"
+version = "0.1.0"
+dependencies = [
+ "norost_ipc_spec",
 ]
 
 [[package]]
@@ -797,6 +805,7 @@ name = "window_manager"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "ipc_gpu",
  "ipc_window_manager",
  "norostb_rt",
  "norostb_rt_alloc",

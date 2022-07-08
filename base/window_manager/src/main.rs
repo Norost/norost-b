@@ -57,17 +57,14 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let sync = root.open(b"gpu/sync").unwrap();
-	let (w, h) = {
+	let res = {
 		let mut b = [0; 8];
 		let l = sync
-			.get_meta(b"resolution_binary".into(), (&mut b).into())
+			.get_meta(b"bin/resolution".into(), (&mut b).into())
 			.unwrap();
-		(
-			u32::from_le_bytes(b[..4].try_into().unwrap()),
-			u32::from_le_bytes(b[4..l].try_into().unwrap()),
-		)
+		ipc_gpu::Resolution::decode(b)
 	};
-	let size = Size::new(w, h);
+	let size = Size::new(res.x, res.y);
 
 	let shmem_size = size.x as usize * size.y as usize * 3;
 	let shmem_size = (shmem_size + 0xfff) & !0xfff;
@@ -90,15 +87,22 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut manager = manager::Manager::<Client>::new(gwp).unwrap();
 
 	let sync_rect = |rect: math::Rect| {
-		let mut s = alloc::string::String::with_capacity(64);
-		use core::fmt::Write;
-		let (l, h) = (rect.low(), rect.high());
-		let [lx0, lx1] = (rect.low().x as u16).to_le_bytes();
-		let [ly0, ly1] = (rect.low().y as u16).to_le_bytes();
-		let [hx0, hx1] = (rect.high().x as u16).to_le_bytes();
-		let [hy0, hy1] = (rect.high().y as u16).to_le_bytes();
-		sync.write(&[lx0, lx1, ly0, ly1, hx0, hx1, hy0, hy1])
-			.unwrap();
+		sync.write(
+			&ipc_gpu::Flush {
+				offset: 0,
+				stride: rect.size().x,
+				origin: ipc_gpu::Point {
+					x: rect.low().x,
+					y: rect.low().y,
+				},
+				size: ipc_gpu::SizeInclusive {
+					x: rect.size().x as _,
+					y: rect.size().y as _,
+				},
+			}
+			.encode(),
+		)
+		.unwrap();
 	};
 	let mut fill = |shmem: &mut [u8], rect: math::Rect, color: [u8; 3]| {
 		let t = rect.size();
@@ -123,12 +127,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		[255, 0, 255],
 	];
 
-	fill(shmem, Rect::from_size(Point::ORIGIN, size), [255, 255, 255]);
-	fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-	for ((w, _), c) in manager.windows().zip(&colors) {
-		fill(shmem, manager.window_rect(w, size).unwrap(), *c);
-	}
-
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
 	root.create(b"window_manager")
@@ -152,7 +150,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							for ((w, ww), c) in manager.windows().zip(&colors) {
 								let rect = manager.window_rect(w, size).unwrap();
-								fill(shmem, rect, *c);
 								let evt = ipc_wm::Resolution {
 									x: rect.size().x,
 									y: rect.size().y,
@@ -283,7 +280,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for ((w, ww), c) in manager.windows().zip(&colors) {
 						let rect = manager.window_rect(w, size).unwrap();
-						fill(shmem, rect, *c);
 						let evt = ipc_wm::Resolution {
 							x: rect.size().x,
 							y: rect.size().y,

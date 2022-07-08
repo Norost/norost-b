@@ -12,3 +12,6 @@ ipc_wm = { package = "ipc_window_manager", path = "../../lib/rust/ipc/window_man
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
+
+[dependencies.ipc_gpu]
+path = "../../lib/rust/ipc/gpu"

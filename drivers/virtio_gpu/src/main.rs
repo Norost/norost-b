@@ -195,11 +195,18 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							let length = (w.len() + 1 + h.len()).try_into().unwrap();
 							Response::Data { data, length }
 						}
-						(_, b"resolution_binary") => {
-							let data = tbl.alloc(8).unwrap();
-							data.copy_from(0, &(width as u32).to_le_bytes());
-							data.copy_from(4, &(height as u32).to_le_bytes());
-							Response::Data { data, length: 8 }
+						(_, b"bin/resolution") => {
+							let r = ipc_gpu::Resolution {
+								x: width as _,
+								y: height as _,
+							}
+							.encode();
+							let data = tbl.alloc(r.len()).unwrap();
+							data.copy_from(0, &r);
+							Response::Data {
+								data,
+								length: r.len() as _,
+							}
 						}
 						_ => {
 							data.manual_drop();
@@ -223,13 +230,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let r = match handle {
 						// Blit a specific area
 						SYNC_HANDLE => {
-							if let &mut [xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1] = d {
-								let f = |l, h| u32::from(u16::from_le_bytes([l, h]));
-								let (x0, y0) = (f(xl0, xl1), f(yl0, yl1));
-								let (x1, y1) = (f(xh0, xh1), f(yh0, yh1));
-								let (xl, yl) = (x0.min(x1), y0.min(y1));
-								let (xh, yh) = (x0.max(x1), y0.max(y1));
-								let r = Rect::new(xl, yl, xh - xl + 1, yh - yl + 1);
+							if let Ok(d) = d.try_into() {
+								let cmd = ipc_gpu::Flush::decode(d);
+								assert_eq!(cmd.offset, 0, "todo: offset");
+								assert_eq!(cmd.stride, u32::from(cmd.size.x), "todo: stride");
+								let r = Rect::new(
+									cmd.origin.x,
+									cmd.origin.y,
+									cmd.size.x.into(),
+									cmd.size.y.into(),
+								);
 								let area = r.height() as usize * r.width() as usize;
 								assert!(area * 4 <= fb.size());
 								assert!(area * 3 <= command_buf.1);
