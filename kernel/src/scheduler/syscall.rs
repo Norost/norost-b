@@ -1,24 +1,50 @@
-use crate::memory::{
-	frame,
-	frame::OwnedPageFrames,
-	r#virtual::{AddressSpace, RWX},
-	Page,
-};
-use crate::scheduler;
-use crate::scheduler::{process::Process, syscall::frame::DMAFrame, Thread};
 use crate::time::Monotonic;
+use crate::{
+	memory::{
+		frame,
+		frame::OwnedPageFrames,
+		r#virtual::{self, AddressSpace, MapError, RWX},
+		Page,
+	},
+	object_table::{
+		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTableOwner, SubRange,
+		TinySlice,
+	},
+	scheduler::{self, process::Process, Thread},
+	util::{erase_handle, unerase_handle},
+};
 use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 use core::time::Duration;
-use norostb_kernel::{error::Error, object::NewObjectType};
+use norostb_kernel::{error::Error, io::Request, object::NewObject};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Return {
 	pub status: usize,
 	pub value: usize,
+}
+
+impl Return {
+	const INVALID_OBJECT: Self = Self::error(Error::InvalidObject);
+	const INVALID_OPERATION: Self = Self::error(Error::InvalidObject);
+	const INVALID_DATA: Self = Self::error(Error::InvalidData);
+
+	const fn error(error: Error) -> Self {
+		Self {
+			status: error as _,
+			value: 0,
+		}
+	}
+
+	const fn handle(handle: Handle) -> Self {
+		Self {
+			status: 0,
+			value: handle as _,
+		}
+	}
 }
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
@@ -29,10 +55,10 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	alloc,
 	dealloc,
 	monotonic_time,
-	alloc_dma,
-	physical_address,
 	undefined,
 	undefined,
+	undefined,
+	do_io,
 	has_single_owner,
 	new_object,
 	map_object,
@@ -44,7 +70,7 @@ static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
 	wait_thread,
 	exit,
 	undefined,
-	duplicate_handle,
+	undefined,
 	spawn_thread,
 	create_io_rings,
 	submit_io,
@@ -64,16 +90,16 @@ fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 }
 
 extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("alloc {:#x} {} {:#b}", base, size, rwx);
+	debug!("alloc {:#x} {} {:#03b}", base, size, rwx);
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
-			status: 1,
+			status: Error::InvalidData as _,
 			value: 0,
 		};
 	};
 	let Some(rwx) = raw_to_rwx(rwx) else {
 		return Return {
-			status: 1,
+			status: Error::InvalidData as _,
 			value: 0,
 		};
 	};
@@ -85,7 +111,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 			proc.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
 				.map_or(
 					Return {
-						status: usize::MAX,
+						status: Error::Unknown as _,
 						value: 0,
 					},
 					|base| Return {
@@ -95,63 +121,43 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 				)
 		}
 		Err(_) => Return {
-			status: usize::MAX - 1,
+			status: Error::CantCreateObject as _,
 			value: 0,
 		},
 	}
 }
 
-extern "C" fn dealloc(
-	base: usize,
-	size: usize,
-	flags: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("dealloc");
-	let dealloc_partial_start = flags & 1 > 0;
-	let dealloc_partial_end = flags & 2 > 0;
-
-	// Round up base & size depending on flags.
-	let (base, size) = if dealloc_partial_start {
-		(base & !Page::MASK, (size + base) & Page::MASK)
-	} else {
-		(
-			(base + Page::MASK) & !Page::MASK,
-			size - (Page::SIZE.wrapping_sub(base) & Page::MASK),
-		)
+extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("dealloc {:#x} {}", base, size);
+	if base & Page::MASK != 0 || size & Page::MASK != 0 {
+		return Return {
+			status: Error::InvalidData as _,
+			value: 0,
+		};
+	}
+	let Some(base) = NonNull::new(base as *mut _) else {
+		return Return {
+			status: 0,
+			value: 0,
+		};
 	};
-
-	let (base, size) = if dealloc_partial_end {
-		(base, (size + Page::MASK) & !Page::MASK)
-	} else {
-		(base, size & !Page::MASK)
-	};
-
 	let Some(count) = NonZeroUsize::new(size / Page::MASK) else {
 		return Return {
 			status: 0,
 			value: 0,
 		};
 	};
-	let Some(base) = NonNull::new(base as *mut _) else {
-		return Return {
-			status: usize::MAX,
-			value: 0,
-		}
-	};
 	Process::current()
 		.unwrap()
 		.unmap_memory_object(base, count)
 		.map_or(
 			Return {
-				status: usize::MAX - 1,
+				status: Error::Unknown as _,
 				value: 0,
 			},
 			|_| Return {
-				status: 0,
-				value: size,
+				status: size,
+				value: base.as_ptr() as usize,
 			},
 		)
 }
@@ -160,50 +166,96 @@ extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _
 	get_mono_time()
 }
 
-extern "C" fn alloc_dma(
-	base: usize,
-	size: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("alloc_dma");
-	let rwx = RWX::RW;
-	let base = NonNull::new(base as *mut _);
-	let count = (size + Page::MASK) / Page::SIZE;
-	let frame = DMAFrame::new(count.try_into().unwrap()).unwrap();
-	Process::current()
-		.unwrap()
-		.map_memory_object(base, Box::new(frame), rwx)
-		.map_or(
-			Return {
-				status: usize::MAX,
+// Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
+#[cfg(target_pointer_width = "64")]
+extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
+	use super::block_on;
+	let handle = unerase_handle(handle as _);
+	debug!("do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
+	Process::current().unwrap().objects_operate(|objects| {
+		let Some(o) = objects.get(handle) else { return Return::INVALID_OBJECT };
+		let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
+		let return_u64 = |r| Return {
+			status: 0,
+			value: r as _,
+		};
+		let ins = |l: &mut arena::Arena<_, _>, o| Return::handle(erase_handle(l.insert(o)));
+		match ty {
+			Request::READ | Request::PEEK => block_on(o.clone().read(b, ty == Request::PEEK))
+				.map_or_else(Return::error, |r| {
+					assert!(r.len() <= b, "object returned too much data");
+					unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
+					Return {
+						status: 0,
+						value: r.len(),
+					}
+				}),
+			Request::WRITE => {
+				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+				block_on(o.clone().write(r)).map_or_else(Return::error, |r| Return {
+					status: 0,
+					value: r.try_into().unwrap(),
+				})
+			}
+			Request::GET_META => {
+				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+				block_on(o.clone().get_meta(prop)).map_or_else(Return::error, |r| {
+					let l = usize::from(value_len).min(r.len());
+					unsafe { (b as *mut u8).copy_from_nonoverlapping(r.as_ptr(), l) }
+					Return {
+						status: 0,
+						value: l.try_into().unwrap(),
+					}
+				})
+			}
+			Request::SET_META => {
+				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+				let value = unsafe { TinySlice::from_raw_parts(b as *const u8, value_len) };
+				block_on(o.clone().set_meta(prop, value)).map_or_else(Return::error, |r| Return {
+					status: 0,
+					value: {
+						debug_assert_eq!(r & !1, 0, "meta result is not boolean");
+						r.try_into().unwrap()
+					},
+				})
+			}
+			Request::OPEN | Request::CREATE => {
+				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+				let o = o.clone();
+				block_on(if ty == Request::OPEN {
+					o.open(r)
+				} else {
+					o.create(r)
+				})
+				.map_or_else(Return::error, |o| ins(objects, o))
+			}
+			Request::DESTROY => {
+				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+				block_on(o.clone().destroy(r)).map_or_else(Return::error, return_u64)
+			}
+			Request::SEEK => a
+				.try_into()
+				.ok()
+				.and_then(|a| SeekFrom::try_from_raw(a, b as _).ok())
+				.map_or(Return::INVALID_DATA, |s| {
+					block_on(o.seek(s)).map_or_else(Return::error, return_u64)
+				}),
+			Request::CLOSE => Return {
+				status: objects
+					.remove(handle)
+					.map_or(Error::InvalidObject as _, |_| 0),
 				value: 0,
 			},
-			|base| Return {
-				status: count * Page::SIZE,
-				value: base.as_ptr() as usize,
-			},
-		)
-}
-
-extern "C" fn physical_address(
-	address: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("physical_address");
-	let address = NonNull::new(address as *mut _).unwrap();
-	let value = Process::current()
-		.unwrap()
-		.get_physical_address(address)
-		.unwrap()
-		.0;
-	Return { status: 0, value }
+			Request::SHARE => objects
+				.get(unerase_handle(a as _))
+				.map_or(Return::INVALID_OBJECT, |s| {
+					block_on(o.share(s)).map_or_else(Return::error, return_u64)
+				}),
+			_ => Return::INVALID_OPERATION,
+		}
+	})
 }
 
 extern "C" fn has_single_owner(
@@ -226,32 +278,71 @@ extern "C" fn has_single_owner(
 		})
 }
 
-extern "C" fn new_object(ty: usize, a0: usize, a1: usize, _: usize, _: usize, _: usize) -> Return {
-	let Some(ty) = NewObjectType::try_from_raw(ty) else {
+extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: usize) -> Return {
+	debug!("new_object {} {:#x} {:#x} {:#x}", ty, a, b, c);
+	let Some(args) = NewObject::try_from_args(ty, a, b, c) else {
 		return Return {
 			status: Error::InvalidData as _,
 			value: 0,
-		};
+		}
 	};
 	let proc = Process::current().unwrap();
-	match ty {
-		NewObjectType::MemoryMap => {
-			let f = |a| NonNull::new(a as *mut _);
-			let (Some(start), Some(end)) = (f(a0), f(a1)) else {
-				return Return {
-					status: Error::InvalidData as _,
-					value: 0,
-				};
-			};
-			proc.create_memory_map(start..=end)
-				.ok_or(Error::InvalidData)
-		}
-		NewObjectType::Root => proc
-			.add_object(Arc::new(crate::object_table::Root::new()))
+	let hints = proc.allocate_hints(0 as _);
+	match args {
+		NewObject::SubRange { handle, range } => proc
+			.object_transform_new(handle, |o| {
+				o.clone()
+					.memory_object()
+					.ok_or(Error::InvalidOperation)
+					.and_then(|o| SubRange::new(o.clone(), range).map_err(|_| Error::InvalidData))
+					.map(|o| o as Arc<dyn Object>)
+			})
+			.ok_or(Error::InvalidObject)
+			.flatten(),
+		NewObject::Root => proc
+			.add_object(Arc::new(Root::new()))
 			.map_err(|e| match e {}),
-		NewObjectType::Duplicate => proc
-			.duplicate_object_handle(a0 as u32)
+		NewObject::Duplicate { handle } => proc
+			.duplicate_object_handle(handle)
 			.ok_or(Error::InvalidObject),
+		NewObject::SharedMemory { size } => NonZeroUsize::new((size + Page::MASK) / Page::SIZE)
+			.ok_or(Error::InvalidData)
+			.and_then(|s| {
+				OwnedPageFrames::new(s, proc.allocate_hints(0 as _)).map_err(|e| match e {
+					frame::AllocateError::OutOfFrames => Error::CantCreateObject,
+				})
+			})
+			.map(|o| Arc::new(o) as Arc<dyn Object>)
+			.and_then(|o| proc.add_object(o).map_err(|e| match e {})),
+		NewObject::StreamTable {
+			buffer_mem,
+			buffer_mem_block_size,
+			allow_sharing,
+		} => proc
+			.object_transform_new(buffer_mem, |buffer_mem| {
+				if let Some(buffer_mem) = buffer_mem.clone().memory_object() {
+					StreamingTableOwner::new(
+						allow_sharing,
+						buffer_mem,
+						buffer_mem_block_size,
+						hints,
+					)
+					.map_err(|e| match e {
+						NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
+						NewStreamingTableError::Map(_) => Error::CantCreateObject,
+						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
+					})
+					.map(|o| o as Arc<dyn Object>)
+				} else {
+					Err(Error::InvalidData)
+				}
+			})
+			.unwrap_or(Err(Error::InvalidObject)),
+		NewObject::PermissionMask { handle, rwx } => proc
+			.object_transform_new(handle, |o| {
+				r#virtual::mask_permissions_object(o.clone(), rwx).ok_or(Error::InvalidData)
+			})
+			.unwrap_or(Err(Error::InvalidObject)),
 	}
 	.map_or_else(
 		|e| Return {
@@ -268,60 +359,45 @@ extern "C" fn new_object(ty: usize, a0: usize, a1: usize, _: usize, _: usize, _:
 extern "C" fn map_object(
 	handle: usize,
 	base: usize,
-	offset_l: usize,
-	offset_h_or_length: usize,
-	length_or_rwx: usize,
 	rwx: usize,
+	offset: usize,
+	max_length: usize,
+	_: usize,
 ) -> Return {
-	debug!("map_object");
-	let (offset, _length, _rwx) = match mem::size_of_val(&offset_l) {
-		4 => (
-			(offset_h_or_length as u64) << 32 | offset_l as u64,
-			length_or_rwx,
-			rwx,
-		),
-		8 | 16 => (offset_l as u64, offset_h_or_length, length_or_rwx),
-		s => unreachable!("unsupported usize size of {}", s),
+	debug!(
+		"map_object {:?} {:#x} {:03b} {} {}",
+		unerase_handle(handle as _),
+		base,
+		rwx,
+		offset,
+		max_length
+	);
+	let Ok(rwx) = RWX::from_flags(rwx & 4 != 0, rwx & 2 != 0, rwx & 1 != 0) else {
+		return Return::INVALID_DATA;
 	};
-	let handle = handle as u32;
-	let base = NonNull::new(base as *mut _);
 	Process::current()
 		.unwrap()
-		.map_memory_object_2(handle, base, offset, RWX::RW)
-		.map_or(
-			Return {
-				status: 1,
-				value: 0,
-			},
-			|base| Return {
-				status: 0,
-				value: base.as_ptr() as usize,
-			},
+		.map_memory_object_2(
+			handle as Handle,
+			NonNull::new(base as _),
+			rwx,
+			offset,
+			max_length,
 		)
-}
-
-extern "C" fn duplicate_handle(
-	handle: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("duplicate_handle");
-	let handle = handle as u32;
-
-	Process::current()
-		.unwrap()
-		.duplicate_object_handle(handle)
-		.map_or(
-			Return {
-				status: 1,
+		.map_or_else(
+			|e| Return {
+				status: (match e {
+					MapError::Overflow
+					| MapError::ZeroSize
+					| MapError::Permission
+					| MapError::UnalignedOffset => Error::InvalidData,
+					MapError::Arch(e) => todo!("{:?}", e),
+				}) as _,
 				value: 0,
 			},
-			|handle| Return {
-				status: 0,
-				value: handle.try_into().unwrap(),
+			|(base, length)| Return {
+				status: length,
+				value: base.as_ptr() as usize,
 			},
 		)
 }
@@ -537,7 +613,9 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 	debug!("exit");
 	#[derive(Clone, Copy)]
 	struct D(*const Process, i32);
-	let d = D(Arc::into_raw(Process::current().unwrap()), code as i32);
+	let proc = Process::current().unwrap();
+	proc.prepare_destroy();
+	let d = D(Arc::into_raw(proc), code as i32);
 	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
 	extern "C" fn destroy_process(data: *const ()) -> ! {

@@ -1,6 +1,3 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use crate::sync::{Mutex, MutexGuard};
 use alloc::{
 	alloc::AllocError,

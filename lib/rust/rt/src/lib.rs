@@ -22,12 +22,40 @@
 #![feature(new_uninit)]
 #![feature(ptr_metadata)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![deny(unused)]
 
+#[cfg(not(feature = "rustc-dep-of-std"))]
+extern crate alloc;
+#[allow(unused_extern_crates)]
 extern crate compiler_builtins;
+
+// Shamelessly copied from stdlib.
+#[macro_export]
+macro_rules! dbg {
+    () => {{
+        let _ = $crate::io::stderr().map(|o| writeln!(o, "[{}:{}]", file!(), line!()));
+    }};
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+				let _ = $crate::io::stderr().map(|o| {
+					writeln!(o, "[{}:{}] {} = {:#?}", file!(), line!(), stringify!($val), &tmp)
+				});
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::dbg!($val)),+,)
+    };
+}
 
 pub mod args;
 mod globals;
 pub mod io;
+pub mod mem;
 pub mod process;
 pub mod sync;
 pub mod table;
@@ -36,6 +64,7 @@ pub mod tls;
 
 use core::ptr::NonNull;
 
+pub use io::RWX;
 pub use norostb_kernel::{error::Error, time, AtomicHandle, Handle};
 pub use process::Process;
 pub use table::{NewObject, Object, RefObject};
@@ -57,7 +86,6 @@ cfg_if::cfg_if! {
 unsafe extern "C" fn rt_start(arguments: Option<NonNull<u8>>) -> ! {
 	unsafe {
 		tls::init();
-		io::init(arguments);
 		args::init(arguments);
 	}
 	// SAFETY: we can't actually guarantee safety due to weak linkage.

@@ -4,7 +4,7 @@ use crate::{
 		r#virtual::{PPN, RWX},
 		Page,
 	},
-	{object_table::MemoryMap, scheduler::MemoryObject, sync::SpinLock},
+	{scheduler::MemoryObject, sync::SpinLock},
 };
 use alloc::{sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
@@ -15,6 +15,8 @@ use core::ptr::NonNull;
 pub enum MapError {
 	Overflow,
 	ZeroSize,
+	UnalignedOffset,
+	Permission,
 	Arch(crate::arch::r#virtual::MapError),
 }
 
@@ -47,13 +49,23 @@ impl AddressSpace {
 		base: Option<NonNull<Page>>,
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
+		mut offset: usize,
+		mut max_length: usize,
 		hint_color: u8,
-	) -> Result<NonNull<Page>, MapError> {
+	) -> Result<(NonNull<Page>, usize), MapError> {
+		if offset % Page::SIZE != 0 {
+			return Err(MapError::UnalignedOffset);
+		}
+		if !rwx.is_subset_of(object.page_permissions()) {
+			return Err(MapError::Permission);
+		}
+
 		let (range, index) = Self::map_object_common(
 			&self.objects,
 			NonNull::new(Page::SIZE as _).unwrap(),
 			base,
 			&*object,
+			max_length,
 		)?;
 
 		unsafe {
@@ -62,12 +74,23 @@ impl AddressSpace {
 					.map(range.start().as_ptr() as *const _, rwx, hint_color);
 			object.physical_pages(&mut |p| {
 				for &p in p.iter() {
-					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+					if let Some(o) = offset.checked_sub(Page::SIZE) {
+						offset = o;
+					} else if let Some(l) = max_length.checked_sub(Page::SIZE) {
+						max_length = l;
+						f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
+					} else {
+						return false;
+					}
 				}
+				true
 			});
 		};
 		self.objects.insert(index, (range.clone(), object));
-		Ok(*range.start())
+		Ok((
+			*range.start(),
+			range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1,
+		))
 	}
 
 	/// Map a frame in kernel-space.
@@ -75,7 +98,7 @@ impl AddressSpace {
 		base: Option<NonNull<Page>>,
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
-	) -> Result<NonNull<Page>, MapError> {
+	) -> Result<(NonNull<Page>, usize), MapError> {
 		// FIXME this will deadlock because there is now a circular dependency
 		// on the heap allocator
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
@@ -88,6 +111,7 @@ impl AddressSpace {
 			NonNull::new(0xffff_a000_0000_0000usize as _).unwrap(),
 			base,
 			&*object,
+			usize::MAX,
 		)?;
 
 		unsafe {
@@ -97,10 +121,14 @@ impl AddressSpace {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))
 				}
+				true
 			});
 		};
 		objects.insert(index, (range.clone(), object));
-		Ok(*range.start())
+		Ok((
+			*range.start(),
+			range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1,
+		))
 	}
 
 	fn map_object_common(
@@ -108,7 +136,9 @@ impl AddressSpace {
 		default: NonNull<Page>,
 		base: Option<NonNull<Page>>,
 		object: &dyn MemoryObject,
+		max_length: usize,
 	) -> Result<(RangeInclusive<NonNull<Page>>, usize), MapError> {
+		let max_length = max_length / Page::SIZE;
 		let frames_len = object.physical_pages_len();
 		let count = NonZeroUsize::new(frames_len).ok_or(MapError::ZeroSize)?;
 		let (base, index) = match base {
@@ -118,7 +148,7 @@ impl AddressSpace {
 		// FIXME we need to ensure the range doesn't overlap with any other range.
 		let end = base
 			.as_ptr()
-			.wrapping_add(count.get())
+			.wrapping_add(count.get().min(max_length))
 			.cast::<u8>()
 			.wrapping_sub(1)
 			.cast();
@@ -172,68 +202,18 @@ impl AddressSpace {
 			.wrapping_sub(1)
 			.cast();
 		let unmap_range = base..=NonNull::new(end).unwrap();
+		// TODO it may be beneficial to tell the MemoryObject which
+		// specific ranges are unused.
+		// It may also make sense to special-case regular memory.
 		if &unmap_range == range {
 			Ok(Some(objects.remove(i).1))
+		} else if unmap_range.end() == range.end() {
+			let end = unsafe { NonNull::new_unchecked(unmap_range.start().as_ptr().byte_sub(1)) };
+			objects[i].0 = *range.start()..=end;
+			Ok(None)
 		} else {
-			todo!("partial unmap");
+			todo!("partial unmap {:?} != {:?}", unmap_range, range);
 		}
-	}
-
-	/// Create a [`MemoryMap`] from an address range.
-	///
-	/// There may not be any holes in the given range.
-	pub fn create_memory_map(&mut self, range: RangeInclusive<NonNull<Page>>) -> Option<MemoryMap> {
-		let (s, e) = (range.start().as_ptr(), range.end().as_ptr());
-		if !s.is_aligned() || !e.wrapping_byte_add(1).is_aligned() || s > e {
-			// TODO return an error instead of just None.
-			return None;
-		}
-		let mut it = self.objects.iter();
-		let mut obj = Vec::new();
-		// TODO use binary search to find start and end
-		let (start_offset, mut last_end, has_end) = 'l: loop {
-			for (r, o) in &mut it {
-				if r.contains(range.start()) {
-					obj.push(o.clone());
-					break 'l (
-						// FIXME r.start() may not correspond with object start
-						r.start().as_ptr() as usize - range.start().as_ptr() as usize,
-						r.end().as_ptr(),
-						r.contains(r.end()),
-					);
-				}
-			}
-			return None;
-		};
-		if !has_end {
-			'g: loop {
-				for (r, o) in &mut it {
-					if last_end.wrapping_add(1) != r.start().as_ptr() {
-						return None;
-					}
-					last_end = r.end().as_ptr();
-					obj.push(o.clone());
-					if r.contains(range.end()) {
-						// FIXME ditto but end
-						break 'g;
-					}
-				}
-				return None;
-			}
-		}
-		let total_size = range.end().as_ptr() as usize - range.start().as_ptr() as usize + 1;
-		debug_assert_eq!(start_offset % Page::SIZE, 0);
-		debug_assert_eq!(total_size % Page::SIZE, 0);
-		Some(MemoryMap::new(
-			obj.into(),
-			start_offset / Page::SIZE,
-			total_size / Page::SIZE,
-		))
-	}
-
-	/// Map a virtual address to a physical address.
-	pub fn get_physical_address(&self, address: NonNull<()>) -> Option<(usize, RWX)> {
-		self.mmu_address_space.get_physical_address(address)
 	}
 
 	/// Find a range of free address space.

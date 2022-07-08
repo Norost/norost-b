@@ -85,6 +85,7 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 	assert_eq!(config.stride & 63, 0, "stride must be a multiple of 64");
 
 	let mut ctl = plane.load_primary_control(control);
+	//ctl.set_pixel_format(config.format);
 	ctl.set_enable(true);
 	plane.store_primary_control(control, ctl);
 
@@ -104,8 +105,8 @@ pub unsafe fn enable(control: &mut Control, plane: Plane, config: Config) {
 
 	let mut ctl = plane.load_primary_control(control);
 	ctl.set_enable(true);
-	ctl.set_gamma_enable(false);
 	ctl.set_pixel_format(config.format);
+	ctl.set_gamma_enable(false);
 	ctl.set_pipe_csc_enable(false);
 	ctl.set_rotate_180(false);
 	ctl.set_tiled_surface(false);

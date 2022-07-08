@@ -187,6 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				// The kernel does not expect a response.
 				continue;
 			}
+			Job::Share { .. } => todo!(),
 		};
 		tbl.write(&buf).unwrap();
 	}

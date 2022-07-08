@@ -18,7 +18,7 @@ impl Object for PciTable {
 			})),
 			_ => path_to_bdf(path)
 				.and_then(|(bus, dev, func)| {
-					let pci = super::PCI.auto_lock();
+					let pci = super::PCI.lock();
 					pci.as_ref()
 						.unwrap()
 						.get(bus, dev, func)
@@ -35,11 +35,15 @@ struct Query {
 }
 
 impl Query {
-	fn next(&self) -> Option<((u16, u16), (u8, u8, u8))> {
-		let pci = super::PCI.auto_lock();
+	fn next(&self, mut peek: bool) -> Option<((u16, u16), (u8, u8, u8))> {
+		let pci = super::PCI.lock();
 		let pci = pci.as_ref().unwrap();
 		loop {
-			let i = self.index.fetch_add(1, Ordering::Relaxed);
+			let i = if peek {
+				self.index.load(Ordering::Relaxed)
+			} else {
+				self.index.fetch_add(1, Ordering::Relaxed)
+			};
 			if i >= 0x100 << 8 {
 				break;
 			}
@@ -47,18 +51,20 @@ impl Query {
 			if let Some(d) = pci.get(bus, dev, func) {
 				return Some(((d.vendor_id(), d.device_id()), (bus, dev, func)));
 			}
+			// Avoid getting stuck in an infinite loop.
+			peek = false;
 		}
 		None
 	}
 }
 
 impl Object for Query {
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
 		// bb:dd.f
 		Ticket::new_complete(if length < 2 + 1 + 2 + 1 + 1 {
 			Err(Error::Unknown)
 		} else {
-			Ok(self.next().map_or([].into(), |(_, (b, d, f))| {
+			Ok(self.next(peek).map_or([].into(), |(_, (b, d, f))| {
 				bdf_to_string(b, d, f).into_bytes().into()
 			}))
 		})
@@ -70,11 +76,11 @@ struct Info {
 }
 
 impl Object for Info {
-	fn read(&self, length: usize) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
 		// bb:dd.f vvvv:dddd
 		Ticket::new_complete(if length < (2 + 1 + 2 + 1 + 1) + 1 + (4 + 1 + 4) {
 			Err(Error::Unknown)
-		} else if let Some(((v, d), (bus, dev, func))) = self.query.next() {
+		} else if let Some(((v, d), (bus, dev, func))) = self.query.next(peek) {
 			Ok(
 				(bdf_to_string(bus, dev, func) + " " + &vendor_device_id_to_str(v, d))
 					.into_bytes()

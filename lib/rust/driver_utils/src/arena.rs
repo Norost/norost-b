@@ -20,6 +20,11 @@ impl<T> Arena<T> {
 		Self::convert_from_handle(self.inner.insert(value)).expect("index out of bounds")
 	}
 
+	pub fn insert_with(&mut self, f: impl FnOnce(Handle) -> T) -> Handle {
+		let f = |h| f(Self::convert_from_handle(h).expect("index out of bounds"));
+		Self::convert_from_handle(self.inner.insert_with(f)).unwrap()
+	}
+
 	pub fn remove(&mut self, handle: Handle) -> Option<T> {
 		self.inner.remove(Self::convert_to_handle(handle)?)
 	}
@@ -32,8 +37,28 @@ impl<T> Arena<T> {
 		self.inner.get_mut(Self::convert_to_handle(handle)?)
 	}
 
+	#[inline(always)]
 	pub fn len(&self) -> usize {
 		self.inner.len()
+	}
+
+	#[inline(always)]
+	pub fn is_empty(&self) -> bool {
+		self.inner.is_empty()
+	}
+
+	#[inline(always)]
+	pub fn iter(&self) -> impl Iterator<Item = (Handle, &T)> {
+		self.inner
+			.iter()
+			.map(|(h, v)| (Self::convert_from_handle(h).unwrap(), v))
+	}
+
+	#[inline(always)]
+	pub fn iter_mut(&mut self) -> impl Iterator<Item = (Handle, &mut T)> {
+		self.inner
+			.iter_mut()
+			.map(|(h, v)| (Self::convert_from_handle(h).unwrap(), v))
 	}
 
 	fn convert_to_handle(handle: Handle) -> Option<::arena::Handle<()>> {

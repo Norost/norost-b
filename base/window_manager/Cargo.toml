@@ -6,8 +6,12 @@ edition = "2021"
 [dependencies]
 rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
+ipc_wm = { package = "ipc_window_manager", path = "../../lib/rust/ipc/window_manager" }
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
+
+[dependencies.ipc_gpu]
+path = "../../lib/rust/ipc/gpu"

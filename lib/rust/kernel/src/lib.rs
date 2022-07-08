@@ -8,12 +8,13 @@
 #![feature(allow_internal_unsafe)]
 #![feature(asm_sym)]
 #![feature(core_intrinsics)]
+#![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(optimize_attribute)]
 #![feature(slice_ptr_get)]
+#![deny(unused)]
 
 pub mod error;
-#[cfg(feature = "userspace")]
 #[macro_use]
 pub mod syscall;
 pub mod io;
@@ -33,8 +34,16 @@ impl Page {
 	pub fn min_pages_for_bytes(bytes: usize) -> usize {
 		(bytes + Self::MASK) / Self::SIZE
 	}
+
+	/// Return the minimum amount of pages to cover the given amount of bytes in bytes.
+	#[inline]
+	pub fn align_size(bytes: usize) -> usize {
+		(bytes + Self::MASK) & !Self::MASK
+	}
 }
 
 pub type Handle = u32;
 
 pub type AtomicHandle = core::sync::atomic::AtomicU32;
+
+pub use syscall::RWX;

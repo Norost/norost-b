@@ -182,6 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			Job::Create { job_id, .. } => {
 				Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation).unwrap()
 			}
+			Job::Share { .. } => todo!(),
 		};
 
 		tbl.write(&buf).unwrap();

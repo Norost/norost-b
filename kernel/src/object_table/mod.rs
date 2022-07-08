@@ -5,24 +5,24 @@
 //! Objects can be searched/filtered with tags. Individual objects are addressed by unique
 //! integer IDs.
 
-mod memory_map;
 mod object;
 mod query;
 mod root;
 mod streaming;
+mod subrange;
 mod ticket;
 
-use crate::scheduler::MemoryObject;
+pub use crate::scheduler::MemoryObject;
 
 pub use norostb_kernel::{
 	error::Error,
-	io::{JobId, SeekFrom},
+	io::{SeekFrom, TinySlice},
 	syscall::Handle,
 };
 
-pub use memory_map::MemoryMap;
 pub use object::*;
 pub use query::*;
 pub use root::Root;
-pub use streaming::{StreamingTable, StreamingTableOwner};
+pub use streaming::{NewStreamingTableError, StreamingTable, StreamingTableOwner};
+pub use subrange::SubRange;
 pub use ticket::*;

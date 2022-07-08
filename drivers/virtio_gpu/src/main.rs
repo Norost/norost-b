@@ -4,9 +4,9 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::io::queue::stream::Job;
+use driver_utils::os::stream_table::{Data, Request, Response};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 
@@ -43,12 +43,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 	let it = root.open(b"pci/info").unwrap();
 	let dev = loop {
-		let e = it.read_vec(32).unwrap();
-		if e.is_empty() {
+		let mut r = [0; 32];
+		let l = it.read(&mut r).unwrap();
+		if l == 0 {
 			log!("no VirtIO GPU device found");
 			return 1;
 		}
-		let s = str::from_utf8(&e).unwrap();
+		let s = str::from_utf8(&r[..l]).unwrap();
 		let (loc, id) = s.split_once(' ').unwrap();
 		if id == "1af4:1050" {
 			let mut path = Vec::from(*b"pci/");
@@ -58,12 +59,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 	let dev = root.open(&dev).unwrap();
 	let poll = dev.open(b"poll").unwrap();
-	let pci = kernel::syscall::map_object(dev.as_raw(), None, 0, usize::MAX).unwrap();
+	let pci = dev
+		.map_object(None, rt::io::RWX::R, 0, usize::MAX)
+		.unwrap()
+		.0;
 	let pci = unsafe { pci::Pci::new(pci.cast(), 0, 0, &[]) };
 
-	let dma_alloc = |size, _align| -> Result<_, ()> {
-		let (d, _) = kernel::syscall::alloc_dma(None, size).unwrap();
-		let a = kernel::syscall::physical_address(d).unwrap();
+	let dma_alloc = |size: usize, _align| -> Result<_, ()> {
+		let (d, a, _) = driver_utils::dma::alloc_dma(size.try_into().unwrap()).unwrap();
 		Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 	};
 
@@ -72,8 +75,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		match h {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					kernel::syscall::map_object(dev.as_raw(), None, (bar + 1).into(), usize::MAX)
+					assert!(bar < 6);
+					let mut s = *b"bar0";
+					s[3] += bar;
+					dev.open(&s)
 						.unwrap()
+						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
+						.unwrap()
+						.0
 						.cast()
 				};
 
@@ -89,32 +98,24 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	// Allocate buffers for virtio queue requests
-	let (buf, buf_size) =
-		kernel::syscall::alloc_dma(None, 256).expect("failed to allocate framebuffer buffer");
-	let buf_phys = kernel::syscall::physical_address(buf).unwrap();
+	let (buf, buf_phys, buf_size) = driver_utils::dma::alloc_dma(256.try_into().unwrap()).unwrap();
 	let mut buf = unsafe {
-		virtio::PhysMap::new(
-			buf.cast(),
-			virtio::PhysAddr::new(buf_phys.try_into().unwrap()),
-			buf_size.get(),
-		)
+		virtio::PhysMap::new(buf.cast(), virtio::PhysAddr::new(buf_phys), buf_size.get())
 	};
-	let (buf2, buf2_size) =
-		kernel::syscall::alloc_dma(None, 256).expect("failed to allocate framebuffer buffer");
-	let buf2_phys = kernel::syscall::physical_address(buf2).unwrap();
+	let (buf2, buf2_phys, buf2_size) =
+		driver_utils::dma::alloc_dma(256.try_into().unwrap()).unwrap();
 	let buf2 = unsafe {
 		virtio::PhysMap::new(
 			buf2.cast(),
-			virtio::PhysAddr::new(buf2_phys.try_into().unwrap()),
+			virtio::PhysAddr::new(buf2_phys),
 			buf2_size.get(),
 		)
 	};
 
 	// Allocate draw buffer
-	let (width, height) = (432, 243);
-	let (fb, fb_size) = kernel::syscall::alloc_dma(None, width * height * 4)
-		.expect("failed to allocate framebuffer buffer");
-	let fb_phys = kernel::syscall::physical_address(fb).unwrap();
+	let (width, height) = (1920, 1080);
+	let (fb, fb_phys, fb_size) =
+		driver_utils::dma::alloc_dma((width * height * 4).try_into().unwrap()).unwrap();
 	let fb = unsafe {
 		virtio::PhysMap::new(
 			fb.cast(),
@@ -146,122 +147,162 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	// Wrap framebuffer for sharing
-	let fb_share = rt::Object::new(rt::NewObject::MemoryMap {
-		range: fb.virt()..=NonNull::new(fb.virt().as_ptr().wrapping_add(fb.size() - 1)).unwrap(),
-	})
-	.unwrap()
-	.into_raw();
-
 	dev.draw(id, rect, &mut buf).expect("failed to draw");
 
 	// Create table
-	let tbl = rt::io::file_root().unwrap().create(table_name).unwrap();
+	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 4096 }).unwrap();
+	let mut tbl =
+		driver_utils::os::stream_table::StreamTable::new(&tbl_buf, 64.try_into().unwrap());
+
+	rt::io::file_root()
+		.unwrap()
+		.create(table_name)
+		.unwrap()
+		.share(&tbl.public_table())
+		.unwrap();
 
 	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
-	const SYNC_HANDLE: Handle = 0xffff_fffe;
+	const SYNC_HANDLE: Handle = Handle::MAX - 1;
 
-	let mut handles = driver_utils::Arena::new();
-
-	enum H {
-		Resolution,
-	}
+	let mut command_buf = (NonNull::new(kernel::Page::SIZE as *mut u8).unwrap(), 0);
 
 	// Begin event loop
+	let mut tiny_buf = [0; 32];
 	loop {
-		let data = tbl.read_vec(64).unwrap();
-		let resp = match Job::deserialize(&data).unwrap() {
-			Job::Open {
-				job_id,
-				handle,
-				path,
-			} => match (handle, path) {
-				(Handle::MAX, b"framebuffer") => {
-					Job::reply_open_share_clear(data, job_id, fb_share)
-				}
-				(Handle::MAX, b"sync") => Job::reply_open_clear(data, job_id, SYNC_HANDLE),
-				(Handle::MAX, b"resolution") => {
-					let handle = handles.insert(H::Resolution);
-					Job::reply_open_clear(data, job_id, handle)
-				}
-				(Handle::MAX, _) => Job::reply_error_clear(data, job_id, Error::DoesNotExist),
-				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
-			},
-			Job::Read {
-				job_id,
-				handle,
-				length,
-				peek,
-			} => match handle {
-				Handle::MAX | SYNC_HANDLE => {
-					Job::reply_error_clear(data, job_id, Error::InvalidOperation)
-				}
-				h => match &mut handles[h] {
-					H::Resolution => Job::reply_read_clear(data, job_id, peek, |b| {
-						use alloc::string::ToString;
-						let (w, h) = (width.to_string(), height.to_string());
-						b.extend_from_slice(w.as_bytes());
-						b.push(b'x');
-						b.extend_from_slice(h.as_bytes());
-						Ok(())
-					}),
-				},
-			},
-			Job::Write {
-				job_id,
-				handle,
-				data: d,
-			} => match (handle, d) {
-				// Blit the entire screen
-				(SYNC_HANDLE, &[]) => {
-					dev.draw(id, rect, &mut buf).expect("failed to draw");
-					Job::reply_write_clear(data, job_id, 0)
-				}
-				// Blit a specific area
-				(SYNC_HANDLE, s) => {
-					if let Some(r) = (|| {
-						let s = str::from_utf8(d).ok()?;
-						let f = |n: &str| n.parse::<u32>().ok();
-						let (l, h) = s.split_once(' ')?;
-						let (xl, yl) = l.split_once(',')?;
-						let (xh, yh) = h.split_once(',')?;
-						let (x0, y0, x1, y1) = (f(xl)?, f(yl)?, f(xh)?, f(yh)?);
-						let (xl, yl) = (x0.min(x1), y0.min(y1));
-						let (xh, yh) = (x0.max(x1), y0.max(y1));
-						Some(Rect::new(xl, yl, xh - xl, yh - yl))
-					})() {
-						dev.draw(id, r, &mut buf).expect("failed to draw");
-						let l = s.len().try_into().unwrap();
-						Job::reply_write_clear(data, job_id, l)
-					} else {
-						Job::reply_error_clear(data, job_id, Error::InvalidData)
+		let mut send_notif = false;
+		while let Some((handle, req)) = tbl.dequeue() {
+			let (job_id, response) = match req {
+				Request::Open { job_id, path } => (job_id, {
+					let mut p = [0; 64];
+					let p = &mut p[..path.len()];
+					path.copy_to(0, p);
+					path.manual_drop();
+					match (handle, &*p) {
+						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
+						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
+						_ => Response::Error(Error::InvalidOperation as _),
 					}
+				}),
+				Request::GetMeta { job_id, property } => {
+					let prop = property.get(&mut tiny_buf);
+					let data = property.into_inner();
+					let r = match (handle, &*prop) {
+						(_, b"resolution") => {
+							let (w, h) = (width.to_string(), height.to_string());
+							data.copy_from(0, w.as_bytes());
+							data.copy_from(w.len(), &[b'x']);
+							data.copy_from(w.len() + 1, h.as_bytes());
+							let length = (w.len() + 1 + h.len()).try_into().unwrap();
+							Response::Data { data, length }
+						}
+						(_, b"bin/resolution") => {
+							let r = ipc_gpu::Resolution {
+								x: width as _,
+								y: height as _,
+							}
+							.encode();
+							let data = tbl.alloc(r.len()).unwrap();
+							data.copy_from(0, &r);
+							Response::Data {
+								data,
+								length: r.len() as _,
+							}
+						}
+						_ => {
+							data.manual_drop();
+							Response::Error(Error::DoesNotExist)
+						}
+					};
+					(job_id, r)
 				}
-				/* TODO binary modifier
-				// Blit a specific area
-				(SYNC_HANDLE, &[xl0, xl1, yl0, yl1, xh0, xh1, yh0, yh1]) => {
-					let f = |l, h| u16::from_le_bytes([l, h]).into();
-					let (x0, y0, x1, y1) = (f(xl0, xl1), f(yl0, yl1), f(xh0, xh1), f(yh0, yh1));
-					let (xl, yl) = (x0.min(x1), y0.min(y1));
-					let (xh, yh) = (x0.max(x1), y0.max(y1));
-					let r = Rect::new(xl, yl, xh - xl, yh - yl);
-					dev.draw(id, r, &mut buf).expect("failed to draw");
-					let l = d.len().try_into().unwrap();
-					Job::reply_write_clear(data, job_id, l)
+				Request::SetMeta {
+					job_id,
+					property_value,
+				} => {
+					property_value.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
 				}
-				*/
-				_ => Job::reply_error_clear(data, job_id, Error::InvalidOperation),
-			},
-			Job::Close { handle } => match handle {
-				Handle::MAX | SYNC_HANDLE => continue,
-				h => {
-					handles.remove(h).unwrap();
-					continue;
+				Request::Write { job_id, data } => {
+					let mut d = [0; 64];
+					let d = &mut d[..data.len()];
+					data.copy_to(0, d);
+					data.manual_drop();
+					let r = match handle {
+						// Blit a specific area
+						SYNC_HANDLE => {
+							if let Ok(d) = d.try_into() {
+								let cmd = ipc_gpu::Flush::decode(d);
+								assert_eq!(cmd.offset, 0, "todo: offset");
+								assert_eq!(cmd.stride, u32::from(cmd.size.x), "todo: stride");
+								let r = Rect::new(
+									cmd.origin.x,
+									cmd.origin.y,
+									cmd.size.x.into(),
+									cmd.size.y.into(),
+								);
+								let area = r.height() as usize * r.width() as usize;
+								assert!(area * 4 <= fb.size());
+								assert!(area * 3 <= command_buf.1);
+								unsafe {
+									fb.virt().as_ptr().write_bytes(200, fb.size());
+									for (fy, ty) in (0..r.height()).map(|h| (h, h)) {
+										for (fx, tx) in (0..r.width()).map(|w| (w, w)) {
+											let fi = fy as usize * r.width() as usize + fx as usize;
+											// QEMU uses the stride of the *host* for the *guest*
+											// memory too. Don't ask me why, this is documented literally
+											// nowhere.
+											// This, by the way, is the *only* reason we're forced to
+											// allocate a framebuffer matching the host size.
+											let ti = ty as usize * width as usize + tx as usize;
+											let [r, g, b] =
+												*command_buf.0.as_ptr().cast::<[u8; 3]>().add(fi);
+											fb.virt()
+												.as_ptr()
+												.cast::<[u8; 4]>()
+												.add(ti)
+												.write([r, g, b, 0]);
+										}
+									}
+								}
+								dev.draw(id, r, &mut buf).expect("failed to draw");
+								Response::Amount(d.len().try_into().unwrap())
+							} else {
+								Response::Error(Error::InvalidData as _)
+							}
+						}
+						_ => Response::Error(Error::InvalidOperation as _),
+					};
+					(job_id, r)
 				}
-			},
-			_ => todo!(),
+				Request::Share { job_id, share } => (
+					job_id,
+					match handle {
+						SYNC_HANDLE => match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
+							Err(e) => Response::Error(e as _),
+							Ok((buf, size)) => {
+								command_buf = (buf.cast(), size);
+								Response::Amount(0)
+							}
+						},
+						_ => Response::Error(Error::InvalidOperation as _),
+					},
+				),
+				Request::Close => match handle {
+					Handle::MAX | SYNC_HANDLE => continue,
+					_ => unreachable!(),
+				},
+				Request::Create { job_id, path } => {
+					path.manual_drop();
+					(job_id, Response::Error(Error::InvalidOperation as _))
+				}
+				Request::Read { job_id, .. }
+				| Request::Destroy { job_id, .. }
+				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
+			};
+			tbl.enqueue(job_id, response);
+			send_notif = true;
 		}
-		.unwrap();
-		tbl.write_vec(resp, 0).unwrap();
+		send_notif.then(|| tbl.flush());
+		tbl.wait();
 	}
 }

@@ -25,6 +25,11 @@ members = [
 	"lib/rust/rt_alloc",
 	"lib/rust/io_queue",
 	"lib/rust/io_queue_rt",
+	"lib/rust/ipc/gpu",
+	"lib/rust/ipc/window_manager",
+	"lib/rust/ipc/stream_table",
+	"base/gui_cli",
+	"base/image_viewer",
 	"base/init",
 	"base/jail",
 	"base/minish",
@@ -42,11 +47,19 @@ panic = "abort"
 lto = "fat"
 strip = "symbols"
 
+[profile.dev.package.nora]
+opt-level = 's'
+
 [profile.dev.package.noraboot]
 opt-level = 'z'
 
 [profile.dev.package.init]
 opt-level = 's'
+
+[profile.release.package.nora]
+codegen-units = 1
+opt-level = 's'
+strip = "symbols"
 
 [profile.release.package.noraboot]
 codegen-units = 1

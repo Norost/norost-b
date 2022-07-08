@@ -31,7 +31,7 @@ where
 	enable_apic();
 }
 
-pub fn post_init() {
+pub fn post_init_acpi() {
 	// Calibrate & enable timer
 	calibrate_timer(Duration::from_millis(10));
 	let t = local_apic::get().lvt_timer.get();

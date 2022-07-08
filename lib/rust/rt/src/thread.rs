@@ -1,6 +1,3 @@
-#[cfg(not(feature = "rustc-dep-of-std"))]
-extern crate alloc;
-
 use crate::time::Monotonic;
 use alloc::boxed::Box;
 use core::{mem, ptr, time::Duration};
@@ -20,20 +17,11 @@ impl Thread {
 		let stack = stack.cast::<u8>();
 
 		// Allocate TLS
-		let tls_ptr = match crate::io::create_for_thread() {
-			Ok(queue) => match crate::tls::create_for_thread(queue) {
-				Ok(tls) => tls,
-				Err(e) => {
-					// TODO free queue
-					unsafe {
-						syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
-					}
-					return Err(e);
-				}
-			},
+		let tls_ptr = match crate::tls::create_for_thread() {
+			Ok(tls) => tls,
 			Err(e) => {
 				unsafe {
-					syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+					syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
 				}
 				return Err(e);
 			}
@@ -107,15 +95,16 @@ impl Thread {
 		unsafe extern "C" fn start() -> ! {
 			#[cfg(target_arch = "x86_64")]
 			unsafe {
-				core::arch::asm!("
-					mov rdi, [rsp - 8 * 1]
-					mov rsi, [rsp - 8 * 2]
-					mov rdx, [rsp - 8 * 3]
-					mov rcx, [rsp - 8 * 4]
-                    mov r9, [rsp - 8 * 5]
-					mov r8, rax
-					jmp {main}
-					",
+				core::arch::asm!(
+					"mov rdi, [rsp - 8 * 1]",
+					"mov rsi, [rsp - 8 * 2]",
+					"mov rdx, [rsp - 8 * 3]",
+					"mov rcx, [rsp - 8 * 4]",
+					"mov r9, [rsp - 8 * 5]",
+					"mov r8, rax",
+					// The stack must be 16-byte aligned *before* calling, so don't
+					// use a jmp here.
+					"call {main}",
 					main = sym main,
 					options(noreturn),
 				);
@@ -126,7 +115,7 @@ impl Thread {
 		unsafe {
 			syscall::spawn_thread(start, stack_top as *const ())
 				.map_err(|_| {
-					syscall::dealloc(stack.cast(), stack_size.get(), false, false).unwrap();
+					syscall::dealloc(stack.cast(), stack_size.get()).unwrap();
 					error::Error::Unknown
 				})
 				.map(Self)

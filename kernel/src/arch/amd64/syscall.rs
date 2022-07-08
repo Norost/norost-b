@@ -1,4 +1,4 @@
-use super::msr;
+use super::{float::FloatStorage, msr};
 use crate::memory::{frame, Page};
 use crate::scheduler::process::Process;
 use crate::scheduler::syscall;
@@ -8,7 +8,7 @@ use alloc::{
 	sync::{Arc, Weak},
 };
 use core::arch::asm;
-use core::cell::Cell;
+use core::cell::{Cell, UnsafeCell};
 use core::ptr::{self, NonNull};
 
 pub unsafe fn init(tss: &'static super::tss::TSS) {
@@ -136,6 +136,7 @@ macro_rules! gs_store {
 	}};
 }
 
+/// Copy thread state to the CPU local data.
 pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 	unsafe {
 		unref_current_thread();
@@ -144,6 +145,9 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 		msr::wrmsr(msr::FS_BASE, thread.arch_specific.fs.get());
 		msr::wrmsr(msr::KERNEL_GS_BASE, thread.arch_specific.gs.get());
 
+		// Load float / vector registers
+		(&mut *thread.arch_specific.float.get()).restore();
+
 		// Set reference to new thread.
 		let user_stack = thread
 			.user_stack
@@ -151,7 +155,7 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 			.map_or_else(ptr::null_mut, NonNull::as_ptr);
 		gs_store!(user_stack_ptr = user_stack);
 		gs_store!(kernel_stack_ptr = thread.kernel_stack.get().as_ptr());
-		gs_load!(tss).set_rsp(0, thread.kernel_stack_top.as_ptr().cast());
+		gs_load!(tss).set_rsp(0, thread.kernel_stack_top().as_ptr().cast());
 		gs_store!(process = thread.process().map_or_else(ptr::null, Arc::as_ptr));
 		gs_store!(thread = Arc::into_raw(thread));
 	}
@@ -177,6 +181,9 @@ pub(super) unsafe fn save_current_thread_state() {
 			// Save fs, gs
 			thread.arch_specific.fs.set(msr::rdmsr(msr::FS_BASE));
 			thread.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
+
+			// Save float / vector registers
+			(&mut *thread.arch_specific.float.get()).save();
 		}
 	}
 }
@@ -185,6 +192,7 @@ pub(super) unsafe fn save_current_thread_state() {
 pub struct ThreadData {
 	fs: Cell<u64>,
 	gs: Cell<u64>,
+	pub(super) float: UnsafeCell<FloatStorage>,
 }
 
 #[naked]
@@ -206,6 +214,9 @@ unsafe extern "C" fn handler() {
 			"push rsi",
 			"push rcx",
 
+			// Ensure stack is aligned to 16 bytes before call
+			"sub rsp, 8",
+
 			// Check if the syscall ID is valid
 			"cmp rax, {syscall_count}",
 			"jae 1f",
@@ -215,6 +226,8 @@ unsafe extern "C" fn handler() {
 			"mov rcx, r10", // r10 is used as 4th parameter
 			"call rax",
 			"2:",
+
+			"add rsp, 8",
 
 			"pop rcx",
 			"pop rsi",

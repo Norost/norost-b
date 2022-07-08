@@ -1,9 +1,8 @@
 pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
 pub const ID_MONOTONIC_TIME: usize = 2;
-pub const ID_ALLOC_DMA: usize = 3;
-pub const ID_PHYSICAL_ADDRESS: usize = 4;
 
+pub const ID_DO_IO: usize = 6;
 pub const ID_HAS_SINGLE_OWNER: usize = 7;
 pub const ID_NEW_OBJECT: usize = 8;
 pub const ID_MAP_OBJECT: usize = 9;
@@ -20,17 +19,19 @@ pub const ID_PROCESS_IO_QUEUE: usize = 21;
 pub const ID_WAIT_IO_QUEUE: usize = 22;
 
 use crate::{
-	error,
-	object::{NewObject, NewObjectType},
+	error, io,
+	object::{NewObject, NewObjectArgs},
 	time::Monotonic,
 	Page,
 };
-use core::arch::asm;
-use core::fmt;
-use core::num::NonZeroUsize;
-use core::ptr::{self, NonNull};
-use core::str;
-use core::time::Duration;
+use core::{
+	arch::asm,
+	fmt,
+	num::NonZeroUsize,
+	ptr::{self, NonNull},
+	str,
+	time::Duration,
+};
 
 pub struct ExitStatus(pub u32);
 
@@ -59,6 +60,7 @@ impl fmt::Debug for DebugLossy<'_> {
 
 pub type Handle = u32;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RWX {
 	R = 0b100,
 	W = 0b010,
@@ -68,6 +70,82 @@ pub enum RWX {
 	RWX = 0b111,
 }
 
+impl RWX {
+	#[inline]
+	pub fn from_flags(r: bool, w: bool, x: bool) -> Result<RWX, IncompatibleRWXFlags> {
+		match (r, w, x) {
+			(true, false, false) => Ok(Self::R),
+			(false, true, false) => Ok(Self::W),
+			(false, false, true) => Ok(Self::X),
+			(true, true, false) => Ok(Self::RW),
+			(true, false, true) => Ok(Self::RX),
+			(true, true, true) => Ok(Self::RWX),
+			_ => Err(IncompatibleRWXFlags),
+		}
+	}
+
+	#[inline]
+	pub fn is_subset_of(&self, superset: Self) -> bool {
+		self.intersection(superset) == Some(*self)
+	}
+
+	#[inline]
+	pub fn intersection(&self, with: Self) -> Option<Self> {
+		Self::from_flags(
+			self.r() && with.r(),
+			self.w() && with.w(),
+			self.x() && with.x(),
+		)
+		.ok()
+	}
+
+	#[inline]
+	pub fn into_raw(self) -> u8 {
+		self as _
+	}
+
+	#[inline]
+	pub fn try_from_raw(rwx: u8) -> Option<Self> {
+		Some(match rwx {
+			0b100 => Self::R,
+			0b010 => Self::W,
+			0b001 => Self::X,
+			0b110 => Self::RW,
+			0b101 => Self::RX,
+			0b111 => Self::RWX,
+			_ => return None,
+		})
+	}
+
+	#[inline]
+	pub fn r(&self) -> bool {
+		match self {
+			Self::R | Self::RW | Self::RX | Self::RWX => true,
+			Self::W | Self::X => false,
+		}
+	}
+
+	#[inline]
+	pub fn w(&self) -> bool {
+		match self {
+			Self::W | Self::RW | Self::RWX => true,
+			Self::R | Self::X | Self::RX => false,
+		}
+	}
+
+	#[inline]
+	pub fn x(&self) -> bool {
+		match self {
+			Self::X | Self::RX | Self::RWX => true,
+			Self::R | Self::W | Self::RW => false,
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct IncompatibleRWXFlags;
+
+#[allow(unused_macro_rules)]
 macro_rules! syscall {
 	(@INTERNAL $id:ident [$(in($reg:tt) $val:expr),*]) => {
 		unsafe {
@@ -100,6 +178,14 @@ macro_rules! syscall {
 		// Use r10 instead of rcx as the latter gets overwritten by the syscall instruction
 		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4])
 	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5])
+	};
+	($id:ident($a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr, $a6:expr)) => {
+		// Ditto
+		syscall!(@INTERNAL $id [in("rdi") $a1, in("rsi") $a2, in("rdx") $a3, in("r10") $a4, in("r8") $a5, in("r9") $a6])
+	};
 }
 
 #[inline]
@@ -108,24 +194,22 @@ pub fn alloc(
 	size: usize,
 	rwx: RWX,
 ) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
+	let base = base.map_or_else(ptr::null_mut, NonNull::as_ptr);
 	ret(syscall!(ID_ALLOC(base, size, rwx as usize))).map(|(status, value)| {
-		(
-			NonNull::new(value as *mut _).unwrap(),
-			NonZeroUsize::new(status).unwrap(),
-		)
+		// SAFETY: the kernel always returns a non-zero status (size) and value (base ptr).
+		// If the kernel is buggy we're screwed anyways.
+		unsafe {
+			(
+				NonNull::new_unchecked(value as *mut _),
+				NonZeroUsize::new_unchecked(status),
+			)
+		}
 	})
 }
 
 #[inline]
-pub unsafe fn dealloc(
-	base: NonNull<Page>,
-	size: usize,
-	dealloc_partial_start: bool,
-	dealloc_partial_end: bool,
-) -> error::Result<()> {
-	let flags = (dealloc_partial_end as usize) << 1 | (dealloc_partial_start as usize);
-	ret(syscall!(ID_DEALLOC(base.as_ptr(), size, flags))).map(|_| ())
+pub unsafe fn dealloc(base: NonNull<Page>, size: usize) -> error::Result<()> {
+	ret(syscall!(ID_DEALLOC(base.as_ptr(), size))).map(|_| ())
 }
 
 #[inline]
@@ -134,41 +218,29 @@ pub fn monotonic_time() -> Monotonic {
 }
 
 #[inline]
-pub fn alloc_dma(
-	base: Option<NonNull<Page>>,
-	size: usize,
-) -> error::Result<(NonNull<Page>, NonZeroUsize)> {
-	ret(syscall!(ID_ALLOC_DMA(
-		base.map_or_else(ptr::null_mut, NonNull::as_ptr),
-		size
-	)))
-	.map(|(status, value)| {
-		(
-			NonNull::new(value as *mut _).unwrap(),
-			NonZeroUsize::new(status).unwrap(),
-		)
+pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
+	let (ty, h, a) = request.into_args();
+	let h = usize::try_from(h).unwrap();
+	let ty = usize::from(ty);
+	#[cfg(target_pointer_width = "64")]
+	ret(match a {
+		io::RawDoIo::N0 => syscall!(ID_DO_IO(ty, h)),
+		io::RawDoIo::N1(a) => syscall!(ID_DO_IO(ty, h, a)),
+		io::RawDoIo::N2(a, b) => syscall!(ID_DO_IO(ty, h, a, b)),
+		io::RawDoIo::N3(a, b, c) => syscall!(ID_DO_IO(ty, h, a, b, c)),
 	})
-}
-
-#[inline]
-pub fn physical_address(base: NonNull<Page>) -> error::Result<usize> {
-	ret(syscall!(ID_PHYSICAL_ADDRESS(base.as_ptr()))).map(|(_, v)| v)
+	.map(|(_, v)| v as u64)
 }
 
 #[inline]
 pub fn new_object(args: NewObject) -> error::Result<Handle> {
+	use NewObjectArgs::*;
+	let (ty, args) = args.into_args();
 	ret(match args {
-		NewObject::MemoryMap { range } => {
-			syscall!(ID_NEW_OBJECT(
-				NewObjectType::MemoryMap as usize,
-				range.start().as_ptr(),
-				range.end().as_ptr()
-			))
-		}
-		NewObject::Root => syscall!(ID_NEW_OBJECT(NewObjectType::Root as usize)),
-		NewObject::Duplicate { handle } => {
-			syscall!(ID_NEW_OBJECT(NewObjectType::Duplicate as usize, handle))
-		}
+		N0 => syscall!(ID_NEW_OBJECT(ty)),
+		N1(a) => syscall!(ID_NEW_OBJECT(ty, a)),
+		N2(a, b) => syscall!(ID_NEW_OBJECT(ty, a, b)),
+		N3(a, b, c) => syscall!(ID_NEW_OBJECT(ty, a, b, c)),
 	})
 	.map(|(_, h)| h as u32)
 }
@@ -177,12 +249,19 @@ pub fn new_object(args: NewObject) -> error::Result<Handle> {
 pub fn map_object(
 	handle: Handle,
 	base: Option<NonNull<Page>>,
-	offset: u64,
-	length: usize,
-) -> error::Result<NonNull<Page>> {
+	rwx: RWX,
+	offset: usize,
+	max_length: usize,
+) -> error::Result<(NonNull<Page>, usize)> {
 	let base = base.map_or_else(core::ptr::null_mut, NonNull::as_ptr);
-	ret(syscall!(ID_MAP_OBJECT(handle, base, offset, length)))
-		.map(|(_, v)| NonNull::new(v as *mut _).unwrap())
+	ret(syscall!(ID_MAP_OBJECT(
+		handle,
+		base,
+		rwx as usize,
+		offset,
+		max_length
+	)))
+	.map(|(s, v)| (NonNull::new(v as *mut _).unwrap(), s))
 }
 
 #[inline]

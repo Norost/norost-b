@@ -15,3 +15,6 @@ rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
+
+[dependencies.ipc_gpu]
+path = "../../lib/rust/ipc/gpu"

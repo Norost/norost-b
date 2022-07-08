@@ -1,0 +1,50 @@
+@name norost.WindowManager
+@version 0
+@abi 0
+
+struct Flush {
+	origin: Point
+	size: SizeInclusive
+}
+
+struct Event {
+	ty: EventType
+	_reserved: u8
+	args: EventArgs
+}
+
+enum EventType {
+	Resize
+}
+
+union EventArgs {
+	resize: Resolution
+}
+
+struct Point {
+	x: u32
+	y: u32
+}
+
+struct Resolution {
+	x: u32
+	y: u32
+}
+
+struct SizeInclusive {
+	x: u16
+	y: u16
+}
+
+struct Rgb8 {
+	r: u8
+	g: u8
+	b: u8
+}
+
+struct Rgba8 {
+	r: u8
+	g: u8
+	b: u8
+	a: u8
+}

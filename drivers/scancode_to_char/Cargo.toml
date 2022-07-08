@@ -8,6 +8,7 @@ norostb_kernel = { path = "../../lib/rust/kernel" }
 scancodes = { path = "../../lib/rust/scancodes" }
 rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
+nora_io_queue_rt = { path = "../../lib/rust/io_queue_rt" }
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"

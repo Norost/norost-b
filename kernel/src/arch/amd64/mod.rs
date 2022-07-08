@@ -4,9 +4,11 @@ mod emulate;
 mod gdt;
 #[macro_use]
 pub mod idt;
+mod float;
 pub mod msr;
 mod multiboot;
 pub mod scheduler;
+pub mod sync;
 mod syscall;
 mod tss;
 pub mod r#virtual;
@@ -163,7 +165,8 @@ pub unsafe fn init() {
 		IDT.set(3, wrap_idt!(rip handle_breakpoint));
 		IDT.set(4, wrap_idt!(rip handle_overflow));
 		IDT.set(5, wrap_idt!(rip handle_bound_range_exceeded));
-		IDT.set(7, wrap_idt!(rip handle_device_not_available));
+		// 6 is handled by emulate::handle_invalid_opcode
+		// 7 is handled by float::handle_device_not_available
 		IDT.set(8, wrap_idt!(error rip handle_double_fault [1]));
 		// 9 does not exist
 		IDT.set(10, wrap_idt!(error rip handle_invalid_tss));
@@ -192,9 +195,11 @@ pub unsafe fn init() {
 		syscall::init(&TSS);
 
 		let features = cpuid::Features::new();
-		cpuid::try_enable_fsgsbase(&features);
+		cpuid::try_enable_features(&features);
 
 		r#virtual::init();
+
+		float::init();
 	}
 }
 
@@ -203,6 +208,7 @@ extern "C" fn handle_timer() -> ! {
 	debug_assert!(!interrupts_enabled());
 	apic::local_apic::get().eoi.set(0);
 	unsafe { syscall::save_current_thread_state() };
+	cpuid::mark_task_switch();
 	// SAFETY: we just saved the thread's state.
 	unsafe { crate::scheduler::next_thread() }
 }
@@ -238,12 +244,6 @@ extern "C" fn handle_overflow(rip: *const ()) {
 
 extern "C" fn handle_bound_range_exceeded(rip: *const ()) {
 	fatal!("Bound range exceeded (wtf?)!");
-	fatal!("  RIP:     {:p}", rip);
-	halt();
-}
-
-extern "C" fn handle_device_not_available(rip: *const ()) {
-	fatal!("Device missing!");
 	fatal!("  RIP:     {:p}", rip);
 	halt();
 }
@@ -379,7 +379,7 @@ pub macro run_on_local_cpu_stack_noreturn($f: path, $data: expr) {
 	const _: extern "C" fn(*const ()) -> ! = $f;
 	let data: *const () = $data;
 	unsafe {
-		asm!(
+		core::arch::asm!(
 			"cli",
 			"push rbp",
 			"mov  rbp, rsp",

@@ -1,6 +1,7 @@
 //! # Async I/O queue with runtime.
 
 #![no_std]
+#![deny(unused)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[cfg(not(feature = "rustc-dep-of-std"))]
@@ -16,7 +17,7 @@ use core::{
 	future::Future,
 	mem::{self, MaybeUninit},
 	pin::Pin,
-	task::{Context, Poll as TPoll, Waker},
+	task::{Context, Poll, Waker},
 	time::Duration,
 };
 use nora_io_queue::{self as q, Request};
@@ -214,11 +215,6 @@ impl Queue {
 			.map(|fut| Seek { fut })
 	}
 
-	pub fn submit_poll(&self, handle: Handle) -> Result<Poll<'_>, Full> {
-		self.submit_no_buffer(handle, Request::Poll)
-			.map(|fut| Poll { fut })
-	}
-
 	pub fn submit_close(&self, handle: Handle) -> Result<(), Full> {
 		self.inner
 			.borrow_mut()
@@ -316,7 +312,7 @@ impl Future for BufferFuture<'_> {
 	type Output = (Vec<u8>, error::Result<u64>);
 
 	/// Check if the read request has finished.
-	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		let queue = match self.queue.get() {
 			Some(q) => q,
 			None => panic!("poll after ready"),
@@ -327,7 +323,7 @@ impl Future for BufferFuture<'_> {
 		match mem::replace(&mut t.1, BufferFutureState::Cancelled) {
 			BufferFutureState::Inflight => {
 				t.1 = BufferFutureState::InflightWithWaker(cx.waker().clone());
-				TPoll::Pending
+				Poll::Pending
 			}
 			BufferFutureState::InflightWithWaker(waker) => {
 				t.1 = BufferFutureState::InflightWithWaker(if waker.will_wake(cx.waker()) {
@@ -335,13 +331,13 @@ impl Future for BufferFuture<'_> {
 				} else {
 					cx.waker().clone()
 				});
-				TPoll::Pending
+				Poll::Pending
 			}
 			BufferFutureState::Finished(res) => {
 				let (vec, _) = inflight.remove(i).unwrap();
 				queue.ready_responses.set(queue.ready_responses.get() - 1);
 				self.queue.set(None);
-				TPoll::Ready((vec, res))
+				Poll::Ready((vec, res))
 			}
 			BufferFutureState::Cancelled => unreachable!(),
 		}
@@ -369,7 +365,7 @@ impl Future for Read<'_> {
 	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
 
 	/// Check if the read request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut)
 			.poll(cx)
 			.map(|(mut vec, r)| match r {
@@ -392,7 +388,7 @@ impl Future for Write<'_> {
 	type Output = Result<(Vec<u8>, usize), (Vec<u8>, error::Error)>;
 
 	/// Check if the write request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
 			Ok(len) => Ok((vec, len as usize)),
 			Err(e) => Err((vec, e)),
@@ -409,7 +405,7 @@ impl Future for Open<'_> {
 	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
 
 	/// Check if the open request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
 			Ok(h) => Ok((vec, h as Handle)),
 			Err(e) => Err((vec, e)),
@@ -426,7 +422,7 @@ impl Future for Create<'_> {
 	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
 
 	/// Check if the create request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
 			Ok(h) => Ok((vec, h as Handle)),
 			Err(e) => Err((vec, e)),
@@ -443,7 +439,7 @@ impl Future for Query<'_> {
 	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
 
 	/// Check if the query request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
 			Ok(h) => Ok((vec, h as Handle)),
 			Err(e) => Err((vec, e)),
@@ -460,7 +456,7 @@ impl Future for QueryNext<'_> {
 	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
 
 	/// Check if the query request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
 			Ok(_) => Ok(vec),
 			Err(e) => Err((vec, e)),
@@ -477,21 +473,7 @@ impl Future for Seek<'_> {
 	type Output = Result<u64, error::Error>;
 
 	/// Check if the seek request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
-	}
-}
-
-/// A pending poll request.
-pub struct Poll<'a> {
-	fut: BufferFuture<'a>,
-}
-
-impl Future for Poll<'_> {
-	type Output = Result<u64, error::Error>;
-
-	/// Check if the poll request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
 	}
 }
@@ -505,7 +487,7 @@ impl Future for Peek<'_> {
 	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
 
 	/// Check if the peek request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut)
 			.poll(cx)
 			.map(|(mut vec, r)| match r {
@@ -528,7 +510,7 @@ impl Future for Share<'_> {
 	type Output = Result<u64, error::Error>;
 
 	/// Check if the share request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> TPoll<Self::Output> {
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
 	}
 }

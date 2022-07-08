@@ -374,11 +374,8 @@ impl<'a> Device<'a> {
 		let res_id = resource.0.get();
 		self.control_request(buffer, TransferToHost2D::new(res_id, 0, rect, Some(0)))
 			.unwrap();
-		self.control_request(
-			buffer,
-			Flush::new(res_id.try_into().unwrap(), rect, Some(0)),
-		)
-		.unwrap();
+		self.control_request(buffer, Flush::new(res_id, rect, Some(0)))
+			.unwrap();
 		Ok(())
 	}
 

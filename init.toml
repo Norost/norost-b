@@ -5,8 +5,10 @@ stderr = "system/log"
 [program.minish]
 path = "minish"
 file_root = ""
-#stdin = "ps2_kbd/stream"
-#after = [ "ps2_kbd/stream" ]
+after = [ "gui_cli", "ps2_kbd/stream" ]
+stdin = "ps2_kbd/stream"
+stdout = "gui_cli/write"
+stderr = "gui_cli/write"
 
 [program.fs_fat]
 disabled = true
@@ -14,6 +16,16 @@ path = "fs-fat"
 args = [ "file", "disk/data" ]
 target = "file"
 after = [ "disk/data" ]
+file_root = ""
+
+[program.gui_cli]
+path = "gui_cli"
+after = [ "window_manager" ]
+file_root = ""
+
+[program.image_viewer]
+path = "image_viewer"
+after = [ "window_manager" ]
 file_root = ""
 
 [program.virtio_blk]
@@ -24,6 +36,7 @@ target = "disk"
 file_root = ""
 
 [program.virtio_gpu]
+disabled = true
 path = "virtio-gpu"
 args = [ "gpu" ]
 target = "net"
@@ -44,18 +57,16 @@ file_root = "file"
 net_root = "net"
 
 [program.scancode_to_char]
-disabled = true
 path = "scancode_to_char"
 args = [ "ps2_kbd", "ps2_keyboard/scancodes" ]
 after = [ "ps2_keyboard/scancodes" ]
 file_root = ""
 
 [program.intel_hd_graphics]
-disabled = true
 path = "intel_hd_graphics"
 file_root = ""
 
 [program.window_manager]
 path = "window_manager"
-after = [ "gpu/framebuffer" ]
-file_root = "gpu"
+after = [ "gpu/sync" ]
+file_root = ""

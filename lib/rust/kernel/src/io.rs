@@ -11,9 +11,13 @@
 // member in both the request and response ring, which saves a tiny bit of space in user
 // programs on some platforms (e.g. 1 byte on x86 for LEA rd, [rs] vs LEA rd, [rs + off8])
 
-use core::mem::{self, MaybeUninit};
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::{
+	mem::{self, MaybeUninit},
+	ops::{Deref, DerefMut},
+	ptr::NonNull,
+	slice,
+	sync::atomic::{AtomicU32, Ordering},
+};
 
 // We cast pointers to u64, so if pointers are 128 bits or larger things may break.
 const _: usize = 8 - mem::size_of::<usize>();
@@ -33,8 +37,8 @@ pub struct Request {
 	pub ty: u8,
 	/// Storage for 8-bit arguments.
 	pub arguments_8: [u8; 3],
-	/// Storage for 32-bit arguments.
-	pub arguments_32: [u32; 1],
+	/// Handle to object to perform the operation on.
+	pub handle: Handle,
 	/// Storage for 64-bit arguments. This storage is also used for pointers.
 	pub arguments_64: [u64; 2],
 	/// User data which will be returned with the response.
@@ -43,124 +47,368 @@ pub struct Request {
 
 impl Request {
 	pub const READ: u8 = 0;
-	pub const WRITE: u8 = 1;
-	pub const OPEN: u8 = 2;
-	pub const CREATE: u8 = 3;
+	pub const PEEK: u8 = 1;
+	pub const WRITE: u8 = 2;
+	pub const GET_META: u8 = 3;
+	pub const SET_META: u8 = 4;
+	pub const OPEN: u8 = 5;
+	pub const CREATE: u8 = 6;
+	pub const DESTROY: u8 = 7;
 	pub const SEEK: u8 = 8;
-	pub const POLL: u8 = 9;
-	pub const CLOSE: u8 = 10;
-	pub const PEEK: u8 = 11;
-	pub const SHARE: u8 = 12;
+	pub const CLOSE: u8 = 9;
+	pub const SHARE: u8 = 10;
 
+	#[inline(always)]
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
 		Self {
 			ty: Self::READ,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn read_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
 		Self {
 			ty: Self::READ,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
+	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			handle,
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
+		Self {
+			ty: Self::PEEK,
+			handle,
+			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
 	pub fn write(user_data: u64, handle: Handle, buf: &[u8]) -> Self {
 		Self {
 			ty: Self::WRITE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
+	pub fn get_meta(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<u8>,
+	) -> Self {
+		Self {
+			ty: Self::GET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_mut_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn get_meta_uninit(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &mut TinySlice<MaybeUninit<u8>>,
+	) -> Self {
+		Self {
+			ty: Self::GET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_mut_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
+	pub fn set_meta(
+		user_data: u64,
+		handle: Handle,
+		property: &TinySlice<u8>,
+		value: &TinySlice<u8>,
+	) -> Self {
+		Self {
+			ty: Self::SET_META,
+			handle,
+			arguments_8: [property.len_u8(), value.len_u8(), 0],
+			arguments_64: [property.as_ptr() as u64, value.as_ptr() as u64],
+			user_data,
+			..Default::default()
+		}
+	}
+
+	#[inline(always)]
 	pub fn open(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::OPEN,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn create(user_data: u64, handle: Handle, path: &[u8]) -> Self {
 		Self {
 			ty: Self::CREATE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [path.as_ptr() as u64, path.len() as u64],
 			user_data,
 			..Default::default()
 		}
 	}
 
+	#[inline(always)]
 	pub fn seek(user_data: u64, handle: Handle, from: SeekFrom) -> Self {
 		let (t, n) = from.into_raw();
 		Self {
 			ty: Self::SEEK,
+			handle,
 			arguments_8: [t, 0, 0],
-			arguments_32: [handle],
 			arguments_64: [n, 0],
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn poll(user_data: u64, handle: Handle) -> Self {
-		Self {
-			ty: Self::POLL,
-			arguments_32: [handle],
-			user_data,
-			..Default::default()
-		}
-	}
-
+	#[inline(always)]
 	pub fn close(user_data: u64, handle: Handle) -> Self {
 		Self {
 			ty: Self::CLOSE,
-			arguments_32: [handle],
+			handle,
 			user_data,
 			..Default::default()
 		}
 	}
 
-	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
-		Self {
-			ty: Self::PEEK,
-			arguments_32: [handle],
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
-		Self {
-			ty: Self::PEEK,
-			arguments_32: [handle],
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
+	#[inline(always)]
 	pub fn share(user_data: u64, handle: Handle, share: Handle) -> Self {
 		Self {
 			ty: Self::SHARE,
-			arguments_32: [handle],
+			handle,
 			arguments_64: [share.into(), 0],
 			user_data,
 			..Default::default()
 		}
 	}
+
+	#[inline(always)]
+	pub fn destroy(user_data: u64, handle: Handle) -> Self {
+		Self {
+			ty: Self::DESTROY,
+			handle,
+			user_data,
+			..Default::default()
+		}
+	}
+}
+
+pub struct TinySlice<T>([T]);
+
+impl<T> TinySlice<T> {
+	#[inline]
+	pub unsafe fn from_raw_parts<'a>(base: *const T, len: u8) -> &'a Self {
+		unsafe { &*(slice::from_raw_parts(base, len.into()) as *const [T] as *const Self) }
+	}
+
+	#[inline]
+	pub unsafe fn from_raw_parts_mut<'a>(base: *mut T, len: u8) -> &'a mut Self {
+		unsafe { &mut *(slice::from_raw_parts_mut(base, len.into()) as *mut [T] as *mut Self) }
+	}
+}
+
+impl<T> TryFrom<&[T]> for &TinySlice<T> {
+	type Error = TooLarge;
+
+	fn try_from(s: &[T]) -> Result<Self, Self::Error> {
+		Ok(unsafe { &*(s.as_ref() as *const [T] as *const TinySlice<T>) })
+	}
+}
+
+impl<T> TryFrom<&mut [T]> for &mut TinySlice<T> {
+	type Error = TooLarge;
+
+	fn try_from(s: &mut [T]) -> Result<Self, Self::Error> {
+		Ok(unsafe { &mut *(s.as_mut() as *mut [T] as *mut TinySlice<T>) })
+	}
+}
+
+// generic const exprs pls
+macro_rules! arr_to_ts {
+	($n:literal) => {
+		impl<T> From<&[T; $n]> for &TinySlice<T> {
+			fn from(s: &[T; $n]) -> Self {
+				unsafe { &*(s.as_ref() as *const [T] as *const TinySlice<T>) }
+			}
+		}
+
+		impl<T> From<&mut [T; $n]> for &mut TinySlice<T> {
+			fn from(s: &mut [T; $n]) -> Self {
+				unsafe { &mut *(s.as_mut() as *mut [T] as *mut TinySlice<T>) }
+			}
+		}
+	};
+	{ $($nn:literal)+ } => { $(arr_to_ts!($nn);)+ };
+}
+arr_to_ts! {
+	0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+}
+
+impl<T> TinySlice<T> {
+	#[inline]
+	pub fn len_u8(&self) -> u8 {
+		self.0.len() as _
+	}
+}
+
+impl<T> Deref for TinySlice<T> {
+	type Target = [T];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl<T> DerefMut for TinySlice<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+#[derive(Debug)]
+pub struct TooLarge;
+
+pub struct DoIo<'a> {
+	pub handle: Handle,
+	pub op: DoIoOp<'a>,
+}
+
+pub enum DoIoOp<'a> {
+	/// Read data from an object.
+	Read { buf: &'a mut [u8] },
+	/// Read data from an object.
+	ReadUninit { buf: &'a mut [MaybeUninit<u8>] },
+	/// Read data from an object without discarding it on the server side.
+	Peek { buf: &'a mut [u8] },
+	/// Read data from an object without discarding it on the server side.
+	PeekUninit { buf: &'a mut [MaybeUninit<u8>] },
+	/// Write data to an object.
+	Write { data: &'a [u8] },
+	/// Open an object at the given location.
+	Open { path: &'a [u8] },
+	/// Get meta-information about an object.
+	GetMeta {
+		property: &'a TinySlice<u8>,
+		value: &'a mut TinySlice<u8>,
+	},
+	/// Get meta-information about an object.
+	GetMetaUninit {
+		property: &'a TinySlice<u8>,
+		value: &'a mut TinySlice<MaybeUninit<u8>>,
+	},
+	/// Set meta-information about an object.
+	SetMeta {
+		property: &'a TinySlice<u8>,
+		value: &'a TinySlice<u8>,
+	},
+	/// Create an object at the given location.
+	Create { path: &'a [u8] },
+	/// Destroy an object at the given location.
+	Destroy { path: &'a [u8] },
+	/// Set the seek head.
+	Seek { from: SeekFrom },
+	/// Close a handle to an object.
+	Close,
+	/// Share an object.
+	Share { share: Handle },
+}
+
+impl DoIo<'_> {
+	#[inline]
+	pub(crate) fn into_args(self) -> (u8, Handle, RawDoIo) {
+		use RawDoIo::*;
+		type R = Request;
+		let h = self.handle;
+		match self.op {
+			DoIoOp::Read { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::ReadUninit { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::Peek { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::PeekUninit { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
+			DoIoOp::Write { data } => (R::WRITE, h, N2(data.as_ptr() as _, data.len())),
+			DoIoOp::GetMeta { property, value } => (
+				R::GET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_mut_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
+			DoIoOp::GetMetaUninit { property, value } => (
+				R::GET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_mut_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
+			DoIoOp::SetMeta { property, value } => (
+				R::SET_META,
+				h,
+				N3(
+					property.as_ptr() as _,
+					value.as_ptr() as _,
+					property.len() | value.len() << 8,
+				),
+			),
+			DoIoOp::Open { path } => (R::OPEN, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Create { path } => (R::CREATE, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Destroy { path } => (R::DESTROY, h, N2(path.as_ptr() as _, path.len())),
+			DoIoOp::Seek { from } => {
+				let (t, o) = from.into_raw();
+				#[cfg(target_pointer_width = "64")]
+				(R::SEEK, h, N2(t.into(), o as _))
+			}
+			DoIoOp::Close => return (R::CLOSE, h, N0),
+			DoIoOp::Share { share } => (R::SHARE, h, N1(share as _)),
+		}
+	}
+}
+
+pub(crate) enum RawDoIo {
+	N0,
+	N1(usize),
+	N2(usize, usize),
+	N3(usize, usize, usize),
 }
 
 impl Default for Request {
@@ -168,7 +416,7 @@ impl Default for Request {
 		Self {
 			ty: u8::MAX,
 			arguments_8: [0; 3],
-			arguments_32: [0; 1],
+			handle: Default::default(),
 			arguments_64: [0; 2],
 			user_data: 0,
 		}
@@ -513,55 +761,6 @@ impl SeekFrom {
 		}
 	}
 }
-
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-pub struct Job {
-	pub ty: u8,
-	pub from_anchor: u8,
-	pub result: i16,
-	pub job_id: JobId,
-
-	pub handle: Handle,
-}
-
-impl Job {
-	pub const OPEN: u8 = 0;
-	pub const READ: u8 = 1;
-	pub const WRITE: u8 = 2;
-	pub const CREATE: u8 = 4;
-	pub const SEEK: u8 = 6;
-	pub const CLOSE: u8 = 7;
-	pub const PEEK: u8 = 8;
-	pub const OPEN_SHARE: u8 = Self::OPEN | 1 << 7;
-
-	#[inline]
-	pub fn deserialize(data: &[u8]) -> Option<(Self, &[u8])> {
-		(mem::size_of::<Self>() <= data.len()).then(|| {
-			// SAFETY: data is large enough
-			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
-			(job, &data[mem::size_of::<Self>()..])
-		})
-	}
-
-	#[inline]
-	pub fn deserialize_mut(data: &mut [u8]) -> Option<(Self, &mut [u8])> {
-		(mem::size_of::<Self>() <= data.len()).then(|| {
-			// SAFETY: data is large enough
-			let job = unsafe { data.as_ptr().cast::<Self>().read_unaligned() };
-			(job, &mut data[mem::size_of::<Self>()..])
-		})
-	}
-}
-
-impl AsRef<[u8; mem::size_of::<Self>()]> for Job {
-	fn as_ref(&self) -> &[u8; mem::size_of::<Self>()] {
-		// SAFETY: there are no gaps in Job
-		unsafe { &*(self as *const _ as *const _) }
-	}
-}
-
-pub type JobId = u32;
 
 #[cfg(test)]
 mod test {

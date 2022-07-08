@@ -6,7 +6,6 @@ mod buf_block;
 mod cache_seek;
 #[cfg(feature = "std")]
 pub mod monitor;
-pub mod queue;
 
 #[cfg(feature = "std")]
 pub use buf_block::BufBlock;
