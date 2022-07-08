@@ -109,7 +109,7 @@ version = "0.1.0"
 dependencies = [
  "driver_utils",
  "endian",
- "norostb_kernel",
+ "ipc_gpu",
  "norostb_rt",
  "norostb_rt_alloc",
  "pci",
