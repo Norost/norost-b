@@ -127,12 +127,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		[255, 0, 255],
 	];
 
-	fill(shmem, Rect::from_size(Point::ORIGIN, size), [255, 255, 255]);
-	fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-	for ((w, _), c) in manager.windows().zip(&colors) {
-		fill(shmem, manager.window_rect(w, size).unwrap(), *c);
-	}
-
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
 	root.create(b"window_manager")
@@ -156,7 +150,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							for ((w, ww), c) in manager.windows().zip(&colors) {
 								let rect = manager.window_rect(w, size).unwrap();
-								fill(shmem, rect, *c);
 								let evt = ipc_wm::Resolution {
 									x: rect.size().x,
 									y: rect.size().y,
@@ -287,7 +280,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for ((w, ww), c) in manager.windows().zip(&colors) {
 						let rect = manager.window_rect(w, size).unwrap();
-						fill(shmem, rect, *c);
 						let evt = ipc_wm::Resolution {
 							x: rect.size().x,
 							y: rect.size().y,
