@@ -1,5 +1,7 @@
 # Norost B Operating System
 
+![Rust FTW](https://static.salt-inc.org/norost/norost-v0.2a.jpg)
+
 Norost B is an object-oriented OS built around a microkernel. It is mainly focused on
 isolating processes from the rest of the system to improve security, portability &and;
 scaling.
