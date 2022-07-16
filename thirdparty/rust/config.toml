@@ -1,6 +1,9 @@
 profile = "user"
 changelog-seen = 2
 
+[llvm]
+download-ci-llvm = false
+
 [build]
 host = ["x86_64-unknown-linux-gnu"]
 target = [
@@ -9,6 +12,8 @@ target = [
 	"x86_64-unknown-none-norostbkernel",
 	"i686-unknown-none-norostbkernel"
 ]
+extended = true
+tools = ["cargo", "cargo-fmt", "clippy", "rustfmt", "analysis", "lld-wrapper"]
 
 [rust]
 incremental = true

@@ -1,0 +1,11 @@
+= Building the Rust toolchain
+
+If you use a a Linux system, `make` should suffice.
+
+If not, edit `config.toml` to use the appriopriate host.
+For Linux this is `x86_64-unknown-linux-gnu`.
+Check the appropriate target triple for your platform.
+
+NOTE: `x.py dist` is broken due to a dependency on the `libc` crate, which isn't configured yet
+for this target.
+Relevant issue: https://github.com/rust-lang/rust/issues/81431.

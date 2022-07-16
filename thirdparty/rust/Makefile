@@ -1,51 +1,36 @@
-include ../../common.mk
-
-#RUST_VERSION = 1.58.1
-RUST_VERSION = nightly
-
+URL = https://git.sr.ht/~demindiro/rust
 RUSTC_HOST = x86_64-unknown-linux-gnu
+OUTPUT = rust/build/$(RUSTC_HOST)/stage2/
+TOOLS = $(OUTPUT)bin/
 
-JOBS ?= $(shell nproc)
+all: build link fix_tools
 
-build: rust
+build: $(OUTPUT)
 
-rust: # rust-$(RUST_VERSION)
-	@echo Check the README for build instructions
-	@exit 1
-	cd $< && ./x.py setup# library/std
-	exit 5
-	cd $< && ./x.py setup \
-		--target $(RUSTC_TARGET)
-	exit 4
-	cd $< && ./x.py build \
-		--stage 0 \
-		--target $(RUSTC_TARGET) \
-		library/std
-	exit 3
-	cd $< && ./x.py \
-		--target $(RUSTC_TARGET) \
-		--release \
-		--features "panic-unwind compiler-builtins-c compiler-builtins-mem"
+link: $(OUTPUT)
+	rustup toolchain link dev-x86_64-unknown-norostb $(OUTPUT)
 
-rust-$(RUST_VERSION): rust-$(RUST_VERSION).tar.gz
-	tar xzvf $<
-	mv rustc-$(RUST_VERSION)-src $@
+fix_tools: | $(TOOLS)rustfmt $(TOOLS)cargo-fmt $(TOOLS)cargo-clippy
 
-rust-$(RUST_VERSION).tar.gz:
-	curl https://static.rust-lang.org/dist/rustc-$(RUST_VERSION)-src.tar.gz -o $@
+clean:
+	cd rust && ./x.py clean
+
+clean-all:
+	rm -rf rust/
 
 
-clean: clean-build clean-unpacked
+$(TOOLS)rustfmt $(TOOLS)cargo-fmt $(TOOLS)cargo-clippy:
+	ln -s ../../stage2-tools/$(RUSTC_HOST)/release/$(patsubst $(TOOLS)%,%,$@) $@
 
-distclean: clean-build clean-archives clean-unpacked clean-all
+$(OUTPUT): rust/config.toml
+	cd rust && ./x.py build
 
-clean-build:
-	rm -rf $(BUILD)
+rust/config.toml: rust/
+	cp config.toml $<config.toml
 
-clean-archives:
-	rm -f rust-$(RUST_VERSION).tar.gz
+rust/:
+	git clone --depth 1 $(URL) $@
+	cd $@ && ./x.py setup library
 
-clean-unpacked:
-	rm -rf rust-$(RUST_VERSION)
 
-clean-all-local: clean-build clean-unpacked
+.PHONY: all build clean clean-all fix_tools link
