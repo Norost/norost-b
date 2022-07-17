@@ -1,0 +1,252 @@
+= Nora kernel documentation
+
+== System calls
+
+.All system calls
+|===
+| ID | Name 5+| Arguments 2+| Returns
+
+| 0
+| <<syscall_alloc,Allocate>>
+| base | size | permissions | |
+| |
+
+| 1
+| <<syscall_unmap,Unmap>>
+| base | size | | |
+| |
+
+| 2
+| <<syscall_new_object,New object>>
+| type | arg 0 | arg 1 | arg 2 |
+| |
+
+| 3
+| <<syscall_map_object,Map object>>
+| handle | base | rwx | offset | max length
+| |
+
+| 4
+| <<syscall_do_io,Do I/O>>
+| operation | handle | arg 0 | arg 1 | arg 2
+| |
+
+| 5
+| <<syscall_poll_io_queue,Poll I/O queue>>
+| base | | | |
+| |
+
+| 6
+| <<syscall_wait_io_queue,Wait I/O queue>>
+| base | timeout | (timeout h) | |
+| |
+
+| 7
+| <<syscall_monotonic_time,Monotonic time>>
+| | | | |
+| |
+
+| 8
+| <<sycall_sleep,Sleep>>
+| timeout | (timeout h) | | |
+| |
+
+| 9
+| <<syscall_exit,Exit>>
+| code | | | |
+| |
+
+| 10
+| <<syscall_spawn_thread,Spawn thread>>
+| start | stack | | |
+| |
+
+| 11
+| <<syscall_wait_thread,Wait thread>>
+| handle | | | |
+| |
+
+| 12
+| <<syscall_exit_thread,Exit thread>>
+| | | | |
+| |
+
+| 13
+| <<syscall_create_io_queue,Create I/O queue>>
+| base | request buffer p2size | response buffer p2size | |
+| |
+
+| 14
+| <<syscall_destroy_io_queue,Destroy I/O queue>>
+| base | | | |
+| |
+
+|===
+
+=== Allocate [[syscall_alloc]]
+
+Allocate a region of private memory.
+
+=== Unmap [[syscall_unmap]]
+
+Unmap a region of memory.
+
+=== New object [[syscall_new_object]]
+
+Create a new object
+
+.All object types & corresponding arguments
+|===
+| Type 3+| Arguments | Description
+
+| Subrange
+| handle
+| start
+| end
+| Create a wrapper around a subrange of a memory object.
+
+| Root
+|
+|
+|
+| Create a new root object, which holds a string-reference map to objects.
+
+| Duplicate
+| handle
+|
+|
+| Duplicate a handle to an object.
+
+| SharedMemory
+| size
+|
+|
+| Allocate a region of memory for sharing with other processes.
+
+| StreamTable
+| buffer base
+| buffer block p2size
+| allow sharing
+| Create a StreamTable.
+
+| PermissionMask
+| handle
+| rwx
+|
+| Restrict the permissions which can be used when mapping a memory object.
+
+|===
+
+=== Map object [[syscall_map_object]]
+
+Map a memory object.
+
+=== Do I/O [[syscall_do_io]]
+
+Perform a synchronous I/O operation.
+
+.All operations & arguments
+|===
+| Operation 3+| Arguments
+
+| Read
+| buffer base
+| buffer size
+|
+
+| Peek
+| buffer base
+| buffer size
+|
+
+| Write
+| data base
+| data size
+|
+
+| GetMeta
+| property base
+| value base
+| property length (bits 7:0) and value length (bits 15:8)
+
+| SetMeta
+| property base
+| value base
+| property length (bits 7:0) and value length (bits 15:8)
+
+| Open
+| path base
+| path size
+|
+
+| Create
+| path base
+| path size
+|
+
+| Destroy
+| path base
+| path size
+|
+
+| Seek
+| from
+| offset
+|
+
+| Close
+|
+|
+|
+
+| Share
+| handle
+|
+|
+
+|===
+
+=== Poll I/O queue [[syscall_poll_io_queue]]
+
+Poll an I/O queue.
+
+=== Wait I/O queue [[syscall_wait_io_queue]]
+
+Sleep until a response is available in an I/O queue or the timeout expires.
+
+=== Monotonic time [[syscall_monotonic_time]]
+
+Get the current monotonic time.
+
+NOTE: The delta corresponds to real time but the start time is arbitrary and unspecified.
+
+=== Sleep [[syscall_sleep]]
+
+Sleep for at least the given timeout.
+
+CAUTION: Current kernels have a bug where sleep may return immediately or end early.
+
+=== Exit [[syscall_exit]]
+
+Exit the process.
+This terminates all threads.
+
+=== Spawn thread [[syscall_spawn_thread]]
+
+Create a new thread.
+
+=== Wait thread [[syscall_wait_thread]]
+
+Wait until a thread finishes.
+
+=== Exit thread [[syscall_exit_thread]]
+
+Exit from the current thread.
+
+=== Create I/O queue [[syscall_create_io_queue]]
+
+Create a new I/O queue.
+
+=== Destroy I/O queue [[syscall_destroy_io_queue]]
+
+Destroy an I/O queue.

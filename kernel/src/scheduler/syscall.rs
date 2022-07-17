@@ -1,5 +1,6 @@
 use crate::time::Monotonic;
 use crate::{
+	arch,
 	memory::{
 		frame,
 		frame::OwnedPageFrames,
@@ -49,33 +50,33 @@ impl Return {
 
 type Syscall = extern "C" fn(usize, usize, usize, usize, usize, usize) -> Return;
 
-pub const SYSCALLS_LEN: usize = 23;
+pub const SYSCALLS_LEN: usize = 15;
+
+/// Helper type to ensure the syscall table is aligned to a cache boundary, which
+/// improves efficiency when using the first 8 syscalls (which all fit inside a single
+/// cache line).
+#[repr(align(64))]
+#[repr(C)]
+struct SyscallTable([Syscall; SYSCALLS_LEN]);
+
 #[export_name = "syscall_table"]
-static SYSCALLS: [Syscall; SYSCALLS_LEN] = [
+static SYSCALLS: SyscallTable = SyscallTable([
 	alloc,
 	dealloc,
-	monotonic_time,
-	undefined,
-	undefined,
-	undefined,
-	do_io,
-	has_single_owner,
 	new_object,
 	map_object,
+	do_io,
+	poll_io_queue,
+	wait_io_queue,
+	monotonic_time,
 	sleep,
-	undefined,
-	undefined,
-	destroy_io_queue,
-	kill_thread,
-	wait_thread,
 	exit,
-	undefined,
-	undefined,
 	spawn_thread,
-	create_io_rings,
-	submit_io,
-	wait_io,
-];
+	wait_thread,
+	exit_thread,
+	create_io_queue,
+	destroy_io_queue,
+]);
 
 fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 	Some(match rwx {
@@ -258,26 +259,6 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 	})
 }
 
-extern "C" fn has_single_owner(
-	handle: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	Process::current()
-		.unwrap()
-		.object_apply(handle as u32, |o| Return {
-			status: 0,
-			value: (Arc::strong_count(o) == 1).into(),
-		})
-		.unwrap_or(Return {
-			status: Error::InvalidObject as _,
-			value: 0,
-		})
-}
-
 extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: usize) -> Return {
 	debug!("new_object {} {:#x} {:#x} {:#x}", ty, a, b, c);
 	let Some(args) = NewObject::try_from_args(ty, a, b, c) else {
@@ -441,7 +422,7 @@ extern "C" fn spawn_thread(
 		)
 }
 
-extern "C" fn create_io_rings(
+extern "C" fn create_io_queue(
 	base: usize,
 	request_p2size: usize,
 	response_p2size: usize,
@@ -501,8 +482,15 @@ extern "C" fn destroy_io_queue(
 	)
 }
 
-extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("submit_io");
+extern "C" fn poll_io_queue(
+	base: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+	_: usize,
+) -> Return {
+	debug!("poll_io_queue {:#x}", base);
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
@@ -515,7 +503,7 @@ extern "C" fn submit_io(base: usize, _: usize, _: usize, _: usize, _: usize, _: 
 	)
 }
 
-extern "C" fn wait_io(
+extern "C" fn wait_io_queue(
 	base: usize,
 	timeout_l: usize,
 	timeout_h: usize,
@@ -523,7 +511,7 @@ extern "C" fn wait_io(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("wait_io");
+	debug!("wait_io_queue");
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
@@ -541,30 +529,15 @@ extern "C" fn wait_io(
 		)
 }
 
-extern "C" fn kill_thread(
-	handle: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-	_: usize,
-) -> Return {
-	debug!("kill_thread");
-	// To keep things simple & safe, always switch to the CPU local stack & start running
-	// the next thread, even if it isn't the most efficient way to do things.
-	let Some(thread) = Process::current().unwrap().remove_thread(handle as u32) else {
-		return Return {
-			status: usize::MAX,
-			value: 0,
-		};
-	};
-	let thread = Arc::into_raw(thread);
-	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_thread, thread.cast());
+extern "C" fn exit_thread(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	debug!("exit_thread");
+	let thread = Arc::into_raw(Thread::current().unwrap());
+	arch::run_on_local_cpu_stack_noreturn!(destroy_thread, thread.cast());
 
 	extern "C" fn destroy_thread(data: *const ()) -> ! {
 		let thread = unsafe { Arc::from_raw(data.cast::<Thread>()) };
 
-		crate::arch::amd64::clear_current_thread();
+		arch::amd64::clear_current_thread();
 
 		unsafe {
 			AddressSpace::activate_default();
@@ -616,13 +589,13 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 	let proc = Process::current().unwrap();
 	proc.prepare_destroy();
 	let d = D(Arc::into_raw(proc), code as i32);
-	crate::arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
+	arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
 	extern "C" fn destroy_process(data: *const ()) -> ! {
 		let D(process, _code) = unsafe { data.cast::<D>().read() };
 		let process = unsafe { Arc::from_raw(process) };
 
-		crate::arch::amd64::clear_current_thread();
+		arch::amd64::clear_current_thread();
 
 		unsafe {
 			AddressSpace::activate_default();
@@ -636,14 +609,6 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 
 		// SAFETY: there is no thread state to save.
 		unsafe { scheduler::next_thread() }
-	}
-}
-
-extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("undefined");
-	Return {
-		status: usize::MAX,
-		value: 0,
 	}
 }
 

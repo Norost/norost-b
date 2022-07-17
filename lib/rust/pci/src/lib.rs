@@ -874,7 +874,7 @@ impl Pci {
 	/// If the bus + device + function are out of the MMIO range.
 	pub fn get(&self, bus: u8, device: u8, function: u8) -> Option<Header> {
 		let h = self.get_unchecked(bus, device, function);
-		if h.common().vendor_id.get() == 0xffff.into() {
+		if h.common().vendor_id.get() == 0xffff {
 			None
 		} else {
 			Some(h)
@@ -1120,7 +1120,7 @@ impl<'a> Iterator for IterPci<'a> {
 
 		self.bus += 1;
 		let h = self.pci.get_unchecked(0, 0, self.bus);
-		if h.common().vendor_id.get() != 0xffff.into() {
+		if h.common().vendor_id.get() != 0xffff {
 			self.bus = 0xff;
 			None
 		} else {
@@ -1164,7 +1164,7 @@ impl<'a> Iterator for IterDevice<'a> {
 			None
 		} else {
 			let h = self.pci.get_unchecked(self.bus, self.device, self.function);
-			if h.common().vendor_id.get() == 0xffff.into() {
+			if h.common().vendor_id.get() == 0xffff {
 				self.function = 0xff;
 				None
 			} else {

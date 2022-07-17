@@ -100,3 +100,18 @@ size of the kernel itself a separate bootloader is used. This loader passes a ve
 easy to parse info structure to the kernel. It handles identity-mapping, loading of
 the kernel ELF binary & can pass any drivers to the kernel. It also tells the kernel
 which memory regions are free & useable as regular volatile RAM.
+
+
+## Thread API
+
+### Killing threads
+
+There is no way to kill threads nor will a way ever be provided.
+Killing threads abruptly is risky since it may leave resources in a locked state.
+These resources cannot ever be unlocked since the contents will be in an undefined state.
+
+If you must signal that a thread must exit, use a flag or channel of sorts.
+
+Further reading:
+* https://internals.rust-lang.org/t/thread-cancel-support/3056/14
+* https://reddit.com/r/rust/comments/nwbtsz/help_understanding_how_to_start_and_stop_threads/

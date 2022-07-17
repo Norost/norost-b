@@ -1,22 +1,22 @@
+// Syscall IDs are assigned such that the 8 most commonly used ones appear first
+// (8 * 8 = 64 = 1 cache line)
+
 pub const ID_ALLOC: usize = 0;
 pub const ID_DEALLOC: usize = 1;
-pub const ID_MONOTONIC_TIME: usize = 2;
+pub const ID_NEW_OBJECT: usize = 2;
+pub const ID_MAP_OBJECT: usize = 3;
+pub const ID_DO_IO: usize = 4;
+pub const ID_POLL_IO_QUEUE: usize = 5;
+pub const ID_WAIT_IO_QUEUE: usize = 6;
+pub const ID_MONOTONIC_TIME: usize = 7;
 
-pub const ID_DO_IO: usize = 6;
-pub const ID_HAS_SINGLE_OWNER: usize = 7;
-pub const ID_NEW_OBJECT: usize = 8;
-pub const ID_MAP_OBJECT: usize = 9;
-pub const ID_SLEEP: usize = 10;
-
-pub const ID_DESTROY_IO_QUEUE: usize = 13;
-pub const ID_KILL_THREAD: usize = 14;
-pub const ID_WAIT_THREAD: usize = 15;
-pub const ID_EXIT: usize = 16;
-
-pub const ID_SPAWN_THREAD: usize = 19;
-pub const ID_CREATE_IO_QUEUE: usize = 20;
-pub const ID_PROCESS_IO_QUEUE: usize = 21;
-pub const ID_WAIT_IO_QUEUE: usize = 22;
+pub const ID_SLEEP: usize = 8;
+pub const ID_EXIT: usize = 9;
+pub const ID_SPAWN_THREAD: usize = 10;
+pub const ID_WAIT_THREAD: usize = 11;
+pub const ID_EXIT_THREAD: usize = 12;
+pub const ID_CREATE_IO_QUEUE: usize = 13;
+pub const ID_DESTROY_IO_QUEUE: usize = 14;
 
 use crate::{
 	error, io,
@@ -304,7 +304,7 @@ pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> error::Result<()> {
 
 #[inline]
 pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic> {
-	ret(syscall!(ID_PROCESS_IO_QUEUE(
+	ret(syscall!(ID_POLL_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
 	.map(sys_to_mono)
@@ -321,8 +321,8 @@ pub fn wait_io_queue(base: Option<NonNull<Page>>, timeout: Duration) -> error::R
 }
 
 #[inline]
-pub fn kill_thread(handle: Handle) -> error::Result<()> {
-	ret(syscall!(ID_KILL_THREAD(handle))).map(|_| ())
+pub fn exit_thread() -> error::Result<()> {
+	ret(syscall!(ID_EXIT_THREAD())).map(|_| ())
 }
 
 #[inline]

@@ -153,15 +153,6 @@ impl Process {
 		self.threads.lock().get(unerase_handle(handle)).cloned()
 	}
 
-	/// Remove a thread.
-	pub fn remove_thread(&self, handle: Handle) -> Option<Arc<Thread>> {
-		let handle = arena::Handle::from_raw(
-			(handle & 0xff_ffff).try_into().unwrap(),
-			(handle >> 24) as u8,
-		);
-		self.threads.lock().remove(handle)
-	}
-
 	/// Create an [`AllocateHints`] structure for the given virtual address.
 	pub fn allocate_hints(&self, address: *const u8) -> AllocateHints {
 		AllocateHints {

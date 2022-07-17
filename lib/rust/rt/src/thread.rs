@@ -53,7 +53,6 @@ impl Thread {
 			meta: usize,
 			stack_base: *const (),
 			stack_size: usize,
-			handle: Handle,
 			tls_ptr: *mut (),
 		) -> ! {
 			let meta = unsafe { mem::transmute(meta) };
@@ -74,18 +73,13 @@ impl Thread {
 				core::arch::asm!(
 					// Deallocate stack
 					"syscall",
-					// Kill current thread
-					"mov eax, {kill_thread}",
-					"mov rdi, r12",
+					// Exit current thread
+					"mov eax, {exit_thread}",
 					"syscall",
-					kill_thread = const syscall::ID_KILL_THREAD,
+					exit_thread = const syscall::ID_EXIT_THREAD,
 					in("eax") syscall::ID_DEALLOC,
 					in("rdi") stack_base,
 					in("rsi") stack_size,
-					in("rdx") 0,
-					// Rust is retarded and doesn't let us specify clobbers with out
-					// so we have to avoid rax, rdx, rcx and r11 manually *sigh*
-					in("r12") handle,
 					options(noreturn, nostack),
 				);
 			}
@@ -100,8 +94,7 @@ impl Thread {
 					"mov rsi, [rsp - 8 * 2]",
 					"mov rdx, [rsp - 8 * 3]",
 					"mov rcx, [rsp - 8 * 4]",
-					"mov r9, [rsp - 8 * 5]",
-					"mov r8, rax",
+					"mov r8, [rsp - 8 * 5]",
 					// The stack must be 16-byte aligned *before* calling, so don't
 					// use a jmp here.
 					"call {main}",

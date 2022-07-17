@@ -1,6 +1,7 @@
 #![no_std]
+#![deny(unsafe_code)]
 
-use core::{fmt, ops::*};
+use core::{fmt, num::*, ops::*};
 
 macro_rules! ety {
 	($name:ident, $ty:ty, $trait:ident.$fn:ident, $traitas:ident.$fnas:ident) => {
@@ -46,27 +47,21 @@ macro_rules! ety {
 			}
 		}
 	};
-	($ty:ty, $name:ident, $from:ident, $to:ident) => {
+	(tyonly $ty:ty, $name:ident, $to:ident) => {
 		#[allow(non_camel_case_types)]
-		#[derive(Clone, Copy, Default, PartialEq, Eq)]
+		#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 		#[repr(transparent)]
 		pub struct $name($ty);
 
-		impl $name {
-			pub const fn new(value: $ty) -> Self {
-				Self(value.$to())
+		impl PartialEq<$ty> for $name {
+			fn eq(&self, rhs: &$ty) -> bool {
+				<$ty>::from(*self).eq(rhs)
 			}
 		}
 
-		impl From<$ty> for $name {
-			fn from(value: $ty) -> Self {
-				Self(value.$to())
-			}
-		}
-
-		impl From<$name> for $ty {
-			fn from(value: $name) -> Self {
-				Self::$from(value.0)
+		impl PartialEq<$name> for $ty {
+			fn eq(&self, rhs: &$name) -> bool {
+				self.eq(&<$ty>::from(*rhs))
 			}
 		}
 
@@ -93,6 +88,34 @@ macro_rules! ety {
 				<$ty>::from(self.0).fmt(f)
 			}
 		}
+	};
+	($ty:ty, $name:ident, $to:ident) => {
+		ety!(tyonly $ty, $name, $to);
+
+		impl $name {
+			pub const fn new(value: $ty) -> Self {
+				Self(value.$to())
+			}
+		}
+
+		impl From<$ty> for $name {
+			fn from(value: $ty) -> Self {
+				Self(value.$to())
+			}
+		}
+
+		impl From<$name> for $ty {
+			fn from(value: $name) -> Self {
+				value.0.$to()
+			}
+		}
+
+		impl Default for $name {
+			#[inline(always)]
+			fn default() -> Self {
+				Self(0)
+			}
+		}
 
 		ety!($name, $ty, Add.add, AddAssign.add_assign);
 		ety!($name, $ty, Sub.sub, SubAssign.sub_assign);
@@ -111,22 +134,75 @@ macro_rules! ety {
 			}
 		}
 	};
+	(nz $zty:ident, $ty:ty, $name:ident, $to:ident) => {
+		ety!(tyonly $ty, $name, $to);
+
+		impl $name {
+			pub const fn new(value: $ty) -> Self {
+				Self(match <$ty>::new(value.get().$to()) {
+					Some(v) => v,
+					_ => unreachable!(),
+				})
+			}
+
+			pub const fn get(&self) -> $zty {
+				$zty(self.0.get())
+			}
+		}
+
+		impl From<$ty> for $name {
+			fn from(value: $ty) -> Self {
+				Self(<$ty>::new(value.get().$to()).unwrap())
+			}
+		}
+
+		impl From<$name> for $ty {
+			fn from(value: $name) -> Self {
+				Self::new(value.0.get().$to()).unwrap()
+			}
+		}
+	};
 	(be $ty:ty, $name:ident) => {
-		ety!($ty, $name, from_be, to_be);
+		ety!($ty, $name, to_be);
 	};
 	(le $ty:ty, $name:ident) => {
-		ety!($ty, $name, from_le, to_le);
+		ety!($ty, $name, to_le);
+	};
+	(nz be $zty:ident, $ty:ty, $name:ident) => {
+		ety!(nz $zty, $ty, $name, to_be);
+	};
+	(nz le $zty:ident, $ty:ty, $name:ident) => {
+		ety!(nz $zty, $ty, $name, to_le);
 	};
 }
 
-ety!(be u8, u8be);
 ety!(be u16, u16be);
 ety!(be u32, u32be);
 ety!(be u64, u64be);
-ety!(le u8, u8le);
 ety!(le u16, u16le);
 ety!(le u32, u32le);
 ety!(le u64, u64le);
+
+ety!(be i16, i16be);
+ety!(be i32, i32be);
+ety!(be i64, i64be);
+ety!(le i16, i16le);
+ety!(le i32, i32le);
+ety!(le i64, i64le);
+
+ety!(nz be u16be, NonZeroU16, NonZeroU16be);
+ety!(nz be u32be, NonZeroU32, NonZeroU32be);
+ety!(nz be u64be, NonZeroU64, NonZeroU64be);
+ety!(nz le u16le, NonZeroU16, NonZeroU16le);
+ety!(nz le u32le, NonZeroU32, NonZeroU32le);
+ety!(nz le u64le, NonZeroU64, NonZeroU64le);
+
+ety!(nz be i16be, NonZeroI16, NonZeroI16be);
+ety!(nz be i32be, NonZeroI32, NonZeroI32be);
+ety!(nz be i64be, NonZeroI64, NonZeroI64be);
+ety!(nz le i16le, NonZeroI16, NonZeroI16le);
+ety!(nz le i32le, NonZeroI32, NonZeroI32le);
+ety!(nz le i64le, NonZeroI64, NonZeroI64le);
 
 #[cfg(test)]
 mod test {
@@ -138,5 +214,9 @@ mod test {
 		assert_eq!(u32le::from(5) + u32le::from(7), 12.into());
 		assert_eq!(u32le::from(5) + 7, 12.into());
 		assert_eq!(5 + u32le::from(7), 12);
+
+		assert_eq!(u32be::from(5) + u32be::from(7), 12.into());
+		assert_eq!(u32be::from(5) + 7, 12.into());
+		assert_eq!(5 + u32be::from(7), 12);
 	}
 }
