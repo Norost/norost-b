@@ -1,0 +1,21 @@
+[package]
+name = "norost_async_std"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.async_completion]
+path = "../async_completion"
+
+[dependencies.io_queue_rt]
+package = "nora_io_queue_rt"
+path = "../io_queue_rt"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../rt"
+
+[dependencies.no-std-net]
+version = "0.6"
+
+[dependencies.futures-lite]
+version = "1.12"

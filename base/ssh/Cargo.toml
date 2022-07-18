@@ -1,0 +1,18 @@
+[package]
+name = "ssh"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+futures = "0.3"
+p256 = "0.11"
+ecdsa = "0.14"
+async-trait = "0.1"
+
+[dependencies.async_std]
+package = "norost_async_std"
+path = "../../lib/rust/async_std"
+
+[dependencies.nora_ssh]
+git = "https://github.com/Demindiro/nora_ssh"
