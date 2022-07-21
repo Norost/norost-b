@@ -1,8 +1,30 @@
-use crate::{io, queue};
-use core::{marker::PhantomData, mem, ops::Deref};
+use crate::{
+	io::{self, Buf},
+	queue,
+};
+use core::{marker::PhantomData, mem, mem::ManuallyDrop, ops::Deref};
 
 #[repr(transparent)]
 pub struct AsyncObject(rt::Handle);
+
+impl AsyncObject {
+	pub fn into_raw(self) -> rt::Handle {
+		ManuallyDrop::new(self).0
+	}
+
+	pub fn as_raw(&self) -> rt::Handle {
+		self.0
+	}
+
+	pub fn from_raw(handle: rt::Handle) -> Self {
+		Self(handle)
+	}
+
+	pub async fn open<B: Buf>(&self, path: B) -> (io::Result<Self>, B) {
+		let (res, b) = queue::submit(|q, b| q.submit_open(self.0, b), path).await;
+		(res.map(Self), b)
+	}
+}
 
 impl From<rt::Object> for AsyncObject {
 	fn from(obj: rt::Object) -> Self {
@@ -29,7 +51,7 @@ impl<B: io::Buf> io::Write<B> for AsyncObject {
 macro_rules! impl_wrap {
 	($ty:ident read) => {
 		impl<B: crate::io::BufMut> crate::io::Read<B> for $ty {
-			type Future = <AsyncObject as crate::io::Read<B>>::Future;
+			type Future = <$crate::object::AsyncObject as crate::io::Read<B>>::Future;
 
 			fn read(&self, buf: B) -> Self::Future {
 				self.0.read(buf)
@@ -38,7 +60,7 @@ macro_rules! impl_wrap {
 	};
 	($ty:ident write) => {
 		impl<B: crate::io::Buf> crate::io::Write<B> for $ty {
-			type Future = <AsyncObject as crate::io::Write<B>>::Future;
+			type Future = <$crate::object::AsyncObject as crate::io::Write<B>>::Future;
 
 			fn write(&self, buf: B) -> Self::Future {
 				self.0.write(buf)

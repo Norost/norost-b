@@ -76,7 +76,7 @@ impl Queue {
 		let i = inflight.insert(BufferFutureState::Inflight);
 		// SAFETY: The buffer will live at least as long as the BufferFuture,
 		// even if it is mem::forgot()ten
-		let buf = unsafe { extend_lifetime_mut(buf_as_slice_mut(&mut buffer)) };
+		let buf = unsafe { extend_lifetime_mut(buf_as_slice_total_mut(&mut buffer)) };
 		let res = self
 			.inner
 			.borrow_mut()
@@ -114,7 +114,7 @@ impl Queue {
 		let i = inflight.insert(BufferFutureState::Inflight);
 		// SAFETY: The buffer will live at least as long as the BufferFuture,
 		// even if it is mem::forgot()ten
-		let buf = unsafe { extend_lifetime(buf_as_slice(&buffer)) };
+		let buf = unsafe { extend_lifetime(buf_as_slice_init(&buffer)) };
 		let res = self
 			.inner
 			.borrow_mut()
@@ -249,12 +249,12 @@ unsafe fn extend_lifetime_mut<'a, T: ?Sized>(t: &'a mut T) -> &'static mut T {
 	unsafe { mem::transmute(t) }
 }
 
-fn buf_as_slice<B: Buf>(buf: &B) -> &[u8] {
+fn buf_as_slice_init<B: Buf>(buf: &B) -> &[u8] {
 	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
-	unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.bytes_total()) }
+	unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.bytes_init()) }
 }
 
-fn buf_as_slice_mut<B: BufMut>(buf: &mut B) -> &mut [MaybeUninit<u8>] {
+fn buf_as_slice_total_mut<B: BufMut>(buf: &mut B) -> &mut [MaybeUninit<u8>] {
 	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
 	unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), buf.bytes_total()) }
 }

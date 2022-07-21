@@ -203,6 +203,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 		}
-		async_std::queue::wait(Duration::MAX)
+		async_std::queue::wait(Duration::MAX);
 	}
 }

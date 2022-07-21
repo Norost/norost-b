@@ -304,9 +304,10 @@ dependencies = [
 name = "driver_virtio_net"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "driver_utils",
  "futures",
- "norostb_kernel",
+ "norost_async_std",
  "norostb_rt",
  "pci",
  "smoltcp",
@@ -349,15 +350,6 @@ dependencies = [
 [[package]]
 name = "endian"
 version = "0.1.0"
-
-[[package]]
-name = "fastrand"
-version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3fcf0cee53519c866c09b5de1f6c56ff9d647101f81c1964fa632e148896cdf"
-dependencies = [
- "instant",
-]
 
 [[package]]
 name = "fatfs"
@@ -442,13 +434,8 @@ version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7694489acd39452c77daa48516b894c153f192c3578d5a839b62c58099fcbf48"
 dependencies = [
- "fastrand",
  "futures-core",
- "futures-io",
- "memchr",
- "parking",
  "pin-project-lite",
- "waker-fn",
 ]
 
 [[package]]
@@ -592,15 +579,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0c10553d664a4d0bcff9f4215d0aac67a639cc68ef660840afe309b807bc9f5"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "instant"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]
@@ -781,10 +759,13 @@ name = "norost_async_std"
 version = "0.1.0"
 dependencies = [
  "async_completion",
+ "futures-core",
  "futures-lite",
+ "futures-task",
  "no-std-net",
  "nora_io_queue_rt",
  "norostb_rt",
+ "pin-project",
 ]
 
 [[package]]
@@ -863,17 +844,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "parking"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
-
-[[package]]
 name = "pci"
 version = "0.1.0"
 dependencies = [
  "endian",
  "volatile",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78203e83c48cffbe01e4a2d35d566ca4de445d79a85372fc64e378bfc812a260"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "710faf75e1b33345361201d36d04e98ac1ed8909151a017ed384700836104c74"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1132,7 +1127,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "mhttp",
- "norostb_rt",
+ "norost_async_std",
 ]
 
 [[package]]
@@ -1282,12 +1277,6 @@ dependencies = [
 [[package]]
 name = "volatile"
 version = "0.1.0"
-
-[[package]]
-name = "waker-fn"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "wasi"

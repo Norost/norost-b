@@ -152,7 +152,6 @@ impl PacketHeader {
 	const GSO_ECN: u8 = 0x80;
 }
 
-#[repr(align(2048))]
 #[repr(C)]
 pub struct Packet {
 	header: PacketHeader,
@@ -314,14 +313,14 @@ impl<'a> Device<'a> {
 	///
 	/// # Safety
 	///
-	/// `data_phys` must point to a valid memory region.
+	/// `data` must remain valid for the duration of the transmission.
+	/// `data_phys` must point to the same memory region as `data`.
 	pub unsafe fn send<'s>(
 		&'s mut self,
-		data: &mut Packet,
+		mut data: NonNull<Packet>,
 		data_phys: PhysRegion,
-		wait: impl FnMut(),
 	) -> Result<(), SendError> {
-		data.header = PacketHeader {
+		data.as_mut().header = PacketHeader {
 			flags: 0,
 			gso_type: PacketHeader::GSO_NONE,
 			csum_start: 0.into(),
@@ -341,9 +340,12 @@ impl<'a> Device<'a> {
 
 		self.notify.send(self.tx_queue.notify_offset());
 
-		self.tx_queue.wait_for_used(|_, _| (), wait);
-
 		Ok(())
+	}
+
+	/// Collect buffers for sent packets.
+	pub fn collect_sent(&mut self, mut f: impl FnMut(PhysRegion)) -> usize {
+		self.tx_queue.collect_used(|_, r| f(r))
 	}
 
 	/// Receive a number of Ethernet packets, if any are available
@@ -367,12 +369,16 @@ impl<'a> Device<'a> {
 	}
 
 	/// Insert a buffer for the device to write RX data to
-	pub fn insert_buffer<'s>(
+	///
+	/// # Safety
+	///
+	/// `data` and `data_phys` must be valid.
+	pub unsafe fn insert_buffer<'s>(
 		&'s mut self,
-		data: &mut Packet,
+		mut data: NonNull<Packet>,
 		data_phys: PhysAddr,
 	) -> Result<(), Full> {
-		data.header = PacketHeader {
+		data.as_mut().header = PacketHeader {
 			flags: 12,
 			gso_type: 34,
 			csum_start: 5678.into(),

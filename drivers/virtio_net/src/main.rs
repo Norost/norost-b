@@ -1,21 +1,33 @@
+#![no_std]
 #![feature(if_let_guard)]
 #![feature(never_type)]
-#![feature(norostb)]
+#![feature(start)]
 #![feature(type_alias_impl_trait)]
 
 mod dev;
 mod tcp;
 mod udp;
 
-use core::{future::Future, pin::Pin, str, task::Poll, time::Duration};
-use driver_utils::io::queue::stream::Job;
+extern crate alloc;
+
+use alloc::{format, vec::Vec};
+
+use async_std::{
+	io::{Read, Write},
+	net::Ipv6Addr,
+	object::{AsyncObject, RefAsyncObject},
+};
+use core::{
+	future::Future,
+	pin::Pin,
+	str::{self, FromStr},
+	task::Poll,
+	time::Duration,
+};
+use driver_utils::os::stream_table::{Data, JobId, Request, Response, StreamTable};
 use futures::stream::{FuturesUnordered, StreamExt};
-use norostb_kernel::syscall;
-use norostb_rt::{self as rt, Error};
+use rt::Error;
 use smoltcp::wire;
-use std::os::norostb::prelude::*;
-use std::str::FromStr;
-use std::{fs, io::Write};
 use tcp::{TcpConnection, TcpListener};
 use udp::UdpSocket;
 
@@ -25,33 +37,40 @@ enum Socket {
 	Udp(UdpSocket),
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let table_name = std::env::args()
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+	main();
+	0
+}
+
+fn main() {
+	let file_root = rt::io::file_root().unwrap().as_raw();
+	let table_name = rt::args::Args::new()
 		.skip(1)
 		.next()
-		.ok_or("expected table name")?;
+		.expect("expected table name");
 
 	let dev_handle = {
 		let s = b" 1af4:1000";
-		let mut it = fs::read_dir("pci/info").unwrap().map(Result::unwrap);
+		let mut it = rt::io::open(file_root, b"pci/info").unwrap();
+		let mut buf = [0; 64];
 		loop {
-			let dev = it.next().unwrap().path().into_os_string().into_vec();
+			let l = rt::io::read(it, &mut buf).unwrap();
+			assert!(l != 0, "device not found");
+			let dev = &buf[..l];
 			if dev.ends_with(s) {
 				let mut path = Vec::from(*b"pci/");
 				path.extend(&dev[..7]);
-				break fs::File::open(std::ffi::OsString::from_vec(path))
-					.unwrap()
-					.into_handle();
+				break rt::io::open(file_root, &path).unwrap();
 			}
 		}
 	};
-	let poll_handle = rt::io::block_on(rt::io::open(dev_handle, (*b"poll").into(), 0))
-		.unwrap()
-		.1;
+	let poll_handle = rt::io::open(dev_handle, b"poll").unwrap();
+	let poll_handle = AsyncObject::from_raw(poll_handle);
 
-	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
+	let pci_config = rt::io::map_object(dev_handle, None, rt::RWX::R, 0, usize::MAX).unwrap();
 
-	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
+	let pci = unsafe { pci::Pci::new(pci_config.0.cast(), 0, 0, &[]) };
 
 	let dev = pci.get(0, 0, 0).unwrap();
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
@@ -61,13 +80,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		match dev {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
+					assert!(bar < 6);
+					let mut s = *b"bar0";
+					s[3] += bar;
+					rt::RefObject::from_raw(dev_handle)
+						.open(&s)
 						.unwrap()
+						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
+						.unwrap()
+						.0
 						.cast()
 				};
-				let dma_alloc = |size, _align| -> Result<_, ()> {
-					let (d, _) = syscall::alloc_dma(None, size).unwrap();
-					let a = syscall::physical_address(d).unwrap();
+				let dma_alloc = |size: usize, _align| -> Result<_, ()> {
+					let (d, a, _) = driver_utils::dma::alloc_dma(size.try_into().unwrap()).unwrap();
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
 
@@ -100,85 +125,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	// Get an IP address using DHCP
 	let dhcp = iface.add_socket(socket::Dhcpv4Socket::new());
 
-	// Register new table of Streaming type
-	let tbl = rt::io::file_root()
-		.unwrap()
-		.create(table_name.as_bytes())
-		.unwrap();
-
-	#[derive(Clone, Copy)]
-	enum Protocol {
-		Udp,
-		Tcp,
-	}
-
-	let new_job = |mut v: Vec<u8>| {
-		v.clear();
-		rt::io::read(tbl.as_raw(), v, 2048)
-	};
-	let (_, resps_size) = rt::io::queue_size();
-	let mut jobs = (0..resps_size.size() / 2)
-		.map(|_| new_job(Vec::new()))
-		.collect::<FuturesUnordered<_>>();
-	assert!(!jobs.is_empty(), "queue is too small");
-
 	let mut alloc_port = 50_000u16;
 	let mut alloc_port = || {
 		alloc_port = alloc_port.wrapping_add(1).max(50_000);
 		alloc_port
 	};
 
-	enum Query {
-		Root(QueryRoot),
-		SourceAddr(wire::Ipv6Address, Protocol),
-	}
-
-	enum QueryRoot {
-		Default,
-		Global,
-		IpAddr(usize),
-	}
-
-	enum Object {
-		Socket(Socket),
-		Query(Option<Query>),
-	}
-	let mut objects = driver_utils::Arena::new();
-	let mut connecting_tcp_sockets = Vec::<(TcpConnection, _, _)>::new();
-	let mut accepted_tcp_sockets = Vec::<(TcpConnection, _, _)>::new();
+	let mut connecting_tcp_sockets = Vec::<(TcpConnection, _)>::new();
+	let mut accepted_tcp_sockets = Vec::<(TcpConnection, _)>::new();
 	let mut accepting_tcp_sockets = Vec::new();
 	let mut closing_tcp_sockets = Vec::<TcpConnection>::new();
 
-	let mut poll_job = rt::io::poll(poll_handle);
+	let mut table = Table::new(table_name);
+	let mut table_notify = RefAsyncObject::from(table.table.notifier()).read(());
+
+	let mut poll_job = poll_handle.read(());
+
+	struct PendingRead {
+		handle: rt::Handle,
+		job_id: JobId,
+		data: alloc::boxed::Box<[u8]>,
+	}
+	// FIXME avoid closing before finishing.
+	let mut pending_writes = Vec::<PendingRead>::new();
 
 	let mut t;
-	let mut i = 0u64;
+	let mut buf = [0; 2048];
 	loop {
-		if i % (512 * 60) == 0 {
-			dbg!(connecting_tcp_sockets.len());
+		// Finish pending reads
+		for i in (0..pending_writes.len()).rev() {
+			let p = &mut pending_writes[i];
+			match &mut table.objects[p.handle] {
+				Object::Socket(Socket::TcpConnection(sock)) => {
+					if let Some(r) = sock.write_all(&p.data, &mut iface) {
+						r.unwrap();
+						table.amount(p.job_id, p.data.len() as _);
+						pending_writes.swap_remove(i);
+					}
+				}
+				Object::Socket(Socket::Udp(_)) => todo!(),
+				_ => unreachable!(),
+			}
 		}
-		i += 1;
+
 		// Advance TCP connection state.
 		for i in (0..connecting_tcp_sockets.len()).rev() {
-			let (sock, _, _) = &connecting_tcp_sockets[i];
+			let (sock, _) = &connecting_tcp_sockets[i];
 			if sock.ready(&mut iface) {
-				let (sock, job_id, buf) = connecting_tcp_sockets.swap_remove(i);
-				let handle = objects.insert(Object::Socket(Socket::TcpConnection(sock)));
-				let buf = Job::reply_create_clear(buf, job_id, handle).unwrap();
-				tbl.write(&buf).unwrap();
-				jobs.push(new_job(buf));
+				let (sock, job_id) = connecting_tcp_sockets.swap_remove(i);
+				table.insert(job_id, Object::Socket(Socket::TcpConnection(sock)));
 			} else if !sock.active(&mut iface) {
 				todo!()
 			}
 		}
 		for i in (0..accepted_tcp_sockets.len()).rev() {
-			let (sock, _, _) = &accepted_tcp_sockets[i];
+			let (sock, _) = &accepted_tcp_sockets[i];
 			if sock.ready(&mut iface) {
-				let (sock, job_id, buf) = accepted_tcp_sockets.swap_remove(i);
-				let handle = objects.insert(Object::Socket(Socket::TcpConnection(sock)));
-				let buf = Job::reply_create_clear(buf, job_id, handle).unwrap();
-				tbl.write(&buf).unwrap();
-				jobs.push(new_job(buf));
+				let (sock, job_id) = accepted_tcp_sockets.swap_remove(i);
+				table.insert(job_id, Object::Socket(Socket::TcpConnection(sock)));
 			} else if !sock.active(&mut iface) {
 				// Try again
 				todo!()
@@ -195,30 +199,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 		// Accept incoming TCP connections.
 		for i in (0..accepting_tcp_sockets.len()).rev() {
-			let (handle, _, _) = &accepting_tcp_sockets[i];
-			let c = match &mut objects[*handle] {
+			let (handle, _) = &accepting_tcp_sockets[i];
+			let c = match &mut table.objects[*handle] {
 				Object::Socket(Socket::TcpListener(l)) => l.accept(&mut iface),
 				_ => unreachable!(),
 			};
 			if let Some(sock) = c {
-				let (_, job_id, buf) = accepting_tcp_sockets.swap_remove(i);
-				accepted_tcp_sockets.push((sock, job_id, buf));
+				let (_, job_id) = accepting_tcp_sockets.swap_remove(i);
+				accepted_tcp_sockets.push((sock, job_id));
 			}
 		}
 
 		let w = driver_utils::task::waker::dummy();
 		let mut cx = core::task::Context::from_waker(&w);
 
-		let mut next_job = jobs.select_next_some();
-		if let Poll::Ready(buf) = Pin::new(&mut next_job).poll(&mut cx) {
-			let buf = buf.unwrap();
-			let reply = match Job::deserialize(&buf).unwrap() {
-				Job::Open {
-					handle,
-					job_id,
-					path,
-				} => {
-					let path = str::from_utf8(path).unwrap();
+		// Handle incoming requests
+		while let Some((handle, req)) = table.table.dequeue() {
+			match req {
+				Request::Open { job_id, path } => {
+					let l = path.len();
+					path.copy_to(0, &mut buf[..l]);
+					path.manual_drop();
+					let path = str::from_utf8(&buf[..l]).unwrap();
 					if path == "" || path.bytes().last() == Some(b'/') {
 						// Query
 						assert_eq!(handle, driver_utils::Handle::MAX, "TODO");
@@ -232,15 +234,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							(addr, None, _) | (addr, Some(""), None) if let Ok(addr) = wire::IpAddress::from_str(addr) => todo!(),
 							path => todo!("{:?}", path),
 						};
-						let handle = objects.insert(Object::Query(Some(query)));
-						Job::reply_open_clear(buf, job_id, handle).unwrap()
+						table.insert(job_id, Object::Query(Some(query)));
 					} else {
 						// Open
 						assert_ne!(handle, driver_utils::Handle::MAX, "TODO");
-						match &mut objects[handle] {
+						match &mut table.objects[handle] {
 							Object::Socket(Socket::TcpListener(_)) => match path {
 								"accept" => {
-									accepting_tcp_sockets.push((handle, job_id, buf));
+									accepting_tcp_sockets.push((handle, job_id));
 									continue;
 								}
 								_ => todo!(),
@@ -251,99 +252,99 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						}
 					}
 				}
-				Job::Create {
-					handle,
-					job_id,
-					path,
-				} => {
-					assert_eq!(handle, driver_utils::Handle::MAX, "TODO");
-					let s = str::from_utf8(path).unwrap();
-					let mut parts = s.split('/');
-					let source = match parts.next().unwrap() {
-						"default" => iface.ip_addrs()[0].address(),
-						source => {
-							let source = std::net::Ipv6Addr::from_str(source).unwrap();
-							if let Some(source) = source.to_ipv4() {
-								wire::IpAddress::Ipv4(wire::Ipv4Address(source.octets()))
-							} else {
-								wire::IpAddress::Ipv6(wire::Ipv6Address(source.octets()))
-							}
-						}
-					};
-					let handle = objects.insert(Object::Socket(match parts.next().unwrap() {
-						// protocol
-						"tcp" => {
-							match parts.next().unwrap() {
-								// type
-								"listen" => {
-									let port = parts.next().unwrap().parse().unwrap();
-									let source = wire::IpEndpoint { addr: source, port };
-									Socket::TcpListener(TcpListener::new(&mut iface, source))
-								}
-								"connect" => {
-									let dest = parts.next().unwrap();
-									let dest = std::net::Ipv6Addr::from_str(dest).unwrap();
-									let dest = dest.to_ipv4().map_or(
-										wire::IpAddress::Ipv6(wire::Ipv6Address(dest.octets())),
-										|dest| {
-											wire::IpAddress::Ipv4(wire::Ipv4Address(dest.octets()))
-										},
-									);
-									let port = parts.next().unwrap().parse().unwrap();
-									let source = wire::IpEndpoint {
-										addr: source,
-										port: alloc_port(),
-									};
-									let dest = wire::IpEndpoint { addr: dest, port };
-
-									connecting_tcp_sockets.push((
-										TcpConnection::new(&mut iface, source, dest),
-										job_id,
-										buf,
-									));
-									continue;
-								}
-								"active" => todo!(),
-								_ => todo!(),
-							}
-						}
-						"udp" => Socket::Udp(UdpSocket::new(&mut iface)),
-						_ => todo!(),
-					}));
-
-					assert!(parts.next().is_none());
-
-					Job::reply_create_clear(buf, job_id, handle).unwrap()
-				}
-				Job::Read {
-					peek,
-					handle,
-					job_id,
-					length,
-				} => {
-					let len = (length as usize).min(2000);
-					match &mut objects[handle] {
-						Object::Socket(Socket::TcpListener(_)) => todo!(),
-						Object::Socket(Socket::TcpConnection(sock)) => {
-							Job::reply_read_clear(buf, job_id, peek, |data| {
-								let og_len = data.len();
-								data.resize(og_len + len, 0);
-								let r = if peek {
-									sock.peek(&mut data[og_len..], &mut iface)
+				Request::Create { job_id, path } => {
+					if handle == rt::Handle::MAX {
+						path.copy_to(0, &mut buf[..path.len()]);
+						let path = str::from_utf8(&buf[..path.len()]).unwrap();
+						let mut parts = path.split('/');
+						let source = match parts.next().unwrap() {
+							"default" => iface.ip_addrs()[0].address(),
+							source => {
+								let source = Ipv6Addr::from_str(source).unwrap();
+								if let Some(source) = source.to_ipv4() {
+									wire::IpAddress::Ipv4(wire::Ipv4Address(source.octets()))
 								} else {
-									sock.read(&mut data[og_len..], &mut iface)
-								};
-								match r {
-									Ok(l) => Ok(data.resize(og_len + l, 0)),
-									Err(smoltcp::Error::Illegal)
-									| Err(smoltcp::Error::Finished) => Err(()),
-									Err(e) => todo!("handle {:?}", e),
+									wire::IpAddress::Ipv6(wire::Ipv6Address(source.octets()))
 								}
-							})
-							.or_else(|(buf, ())| {
-								Job::reply_error_clear(buf, job_id, Error::Unknown)
-							})
-							.unwrap()
+							}
+						};
+						table.insert(
+							job_id,
+							Object::Socket(match parts.next().unwrap() {
+								// protocol
+								"tcp" => {
+									match parts.next().unwrap() {
+										// type
+										"listen" => {
+											let port = parts.next().unwrap().parse().unwrap();
+											let source = wire::IpEndpoint { addr: source, port };
+											Socket::TcpListener(TcpListener::new(
+												&mut iface, source,
+											))
+										}
+										"connect" => {
+											let dest = parts.next().unwrap();
+											let dest = Ipv6Addr::from_str(dest).unwrap();
+											let dest = dest.to_ipv4().map_or(
+												wire::IpAddress::Ipv6(wire::Ipv6Address(
+													dest.octets(),
+												)),
+												|dest| {
+													wire::IpAddress::Ipv4(wire::Ipv4Address(
+														dest.octets(),
+													))
+												},
+											);
+											let port = parts.next().unwrap().parse().unwrap();
+											let source = wire::IpEndpoint {
+												addr: source,
+												port: alloc_port(),
+											};
+											let dest = wire::IpEndpoint { addr: dest, port };
+
+											connecting_tcp_sockets.push((
+												TcpConnection::new(&mut iface, source, dest),
+												job_id,
+											));
+											continue;
+										}
+										"active" => todo!(),
+										_ => todo!(),
+									}
+								}
+								"udp" => Socket::Udp(UdpSocket::new(&mut iface)),
+								_ => todo!(),
+							}),
+						);
+
+						assert!(parts.next().is_none());
+					} else {
+						table.error(job_id, Error::InvalidOperation);
+					}
+				}
+				Request::Read {
+					peek,
+					job_id,
+					amount,
+				} => {
+					let len = (amount as usize).min(2048);
+					match &mut table.objects[handle] {
+						Object::Socket(Socket::TcpListener(_)) => {
+							table.error(job_id, Error::InvalidOperation)
+						}
+						Object::Socket(Socket::TcpConnection(sock)) => {
+							let r = if peek {
+								sock.peek(&mut buf[..len], &mut iface)
+							} else {
+								sock.read(&mut buf[..len], &mut iface)
+							};
+							match r {
+								Ok(len) => table.data(job_id, &buf[..len]),
+								Err(smoltcp::Error::Illegal) | Err(smoltcp::Error::Finished) => {
+									table.error(job_id, Error::Unknown)
+								}
+								Err(e) => todo!("handle {:?}", e),
+							}
 						}
 						Object::Socket(Socket::Udp(_sock)) => {
 							todo!("udp remote address")
@@ -353,17 +354,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 								if !peek {
 									*q = QueryRoot::Global;
 								}
-								Job::reply_read_clear(buf, job_id, peek, |v| {
-									Ok(v.extend(b"default"))
-								})
-								.unwrap()
+								table.data(job_id, b"default")
 							}
 							Some(Query::Root(q @ QueryRoot::Global)) => {
 								if !peek {
 									*q = QueryRoot::IpAddr(0);
 								}
-								Job::reply_read_clear(buf, job_id, peek, |v| Ok(v.extend(b"::")))
-									.unwrap()
+								table.data(job_id, b"::")
 							}
 							Some(Query::Root(QueryRoot::IpAddr(i))) => {
 								let ip = into_ip6(iface.ip_addrs()[*i].address());
@@ -373,47 +370,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 										*q = None;
 									}
 								}
-								Job::reply_read_clear(buf, job_id, peek, |v| {
-									write!(v, "{}", ip).map_err(|_| ())
-								})
-								.unwrap()
+								table.data(job_id, format!("{}", ip).as_bytes())
 							}
 							Some(Query::SourceAddr(addr, p @ Protocol::Tcp)) => {
+								let addr = *addr;
 								if !peek {
 									*p = Protocol::Udp;
 								}
-								Job::reply_read_clear(buf, job_id, peek, |v| {
-									write!(v, "{}/tcp", addr).map_err(|_| ())
-								})
-								.unwrap()
+								table.data(job_id, format!("{}/tcp", addr).as_bytes())
 							}
 							Some(Query::SourceAddr(addr, Protocol::Udp)) => {
-								let r = Job::reply_read_clear(buf, job_id, peek, |v| {
-									write!(v, "{}/udp", addr).map_err(|_| ())
-								})
-								.unwrap();
+								let addr = *addr;
 								if !peek {
 									*q = None;
 								}
-								r
+								table.data(job_id, format!("{}/udp", addr).as_bytes())
 							}
-							None => Job::reply_read_clear(buf, job_id, peek, |_| Ok(())).unwrap(),
+							None => table.data(job_id, &[]),
 						},
 					}
 				}
-				Job::Write {
-					handle,
-					job_id,
-					data,
-				} => match &mut objects[handle] {
+				Request::Write { job_id, data } => match &mut table.objects[handle] {
 					Object::Socket(Socket::TcpListener(_)) => todo!(),
 					Object::Socket(Socket::TcpConnection(sock)) => {
-						match sock.write(data, &mut iface) {
-							Ok(l) => Job::reply_write_clear(buf, job_id, u64::try_from(l).unwrap())
-								.unwrap(),
-							Err(smoltcp::Error::Illegal) => {
-								Job::reply_error_clear(buf, job_id, Error::Unknown).unwrap()
+						data.copy_to(0, &mut buf[..data.len()]);
+						match sock.write(&buf[..data.len()], &mut iface) {
+							Ok(l) if l == 0 => {
+								pending_writes.push(PendingRead {
+									handle,
+									job_id,
+									data: buf.into(),
+								});
 							}
+							Ok(l) => table.amount(job_id, l),
+							Err(smoltcp::Error::Illegal) => table.error(job_id, Error::Unknown),
 							Err(e) => todo!("handle {:?}", e),
 						}
 					}
@@ -422,8 +412,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					}
 					Object::Query(_) => todo!(),
 				},
-				Job::Close { handle } => {
-					match objects.remove(handle).unwrap() {
+				Request::Close => {
+					match table.objects.remove(handle).unwrap() {
 						Object::Socket(Socket::TcpListener(_)) => todo!(),
 						Object::Socket(Socket::TcpConnection(mut sock)) => {
 							sock.close(&mut iface);
@@ -432,16 +422,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						Object::Socket(Socket::Udp(sock)) => sock.close(&mut iface),
 						Object::Query(_) => {}
 					}
-					jobs.push(new_job(buf));
 					continue;
 				}
-				Job::Seek { job_id, .. } => {
-					Job::reply_error_clear(buf, job_id, Error::InvalidOperation).unwrap()
-				}
-			};
-			tbl.write(&reply).unwrap();
-			jobs.push(new_job(reply));
+				Request::Seek { job_id, .. } => table.error(job_id, Error::InvalidOperation),
+				Request::GetMeta { .. } => todo!(),
+				Request::SetMeta { .. } => todo!(),
+				Request::Destroy { .. } => todo!(),
+				Request::Share { .. } => todo!(),
+			}
 		}
+		table.flush();
 
 		let dhcp = iface.get_socket::<socket::Dhcpv4Socket>(dhcp);
 		if let Some(s) = dhcp.poll() {
@@ -454,20 +444,107 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		}
 
 		if Pin::new(&mut poll_job).poll(&mut cx).is_ready() {
-			poll_job = rt::io::poll(poll_handle);
+			iface.device_mut().process();
+			poll_job = poll_handle.read(());
 			continue;
 		}
-		t = rt::io::poll_queue();
+		if Pin::new(&mut table_notify).poll(&mut cx).is_ready() {
+			table_notify = RefAsyncObject::from(table.table.notifier()).read(());
+		}
+		t = async_std::queue::poll();
 		if let Some(delay) = iface.poll_delay(time::Instant::from_micros(t.as_micros() as i64)) {
 			let delay = delay.into();
 			if delay != Duration::ZERO {
-				t = rt::io::poll_queue_and_wait(delay);
+				t = async_std::queue::wait(delay);
 			}
 		}
 
 		iface
 			.poll(time::Instant::from_micros(t.as_micros() as i64))
 			.unwrap();
+	}
+}
+
+#[derive(Clone, Copy)]
+enum Protocol {
+	Udp,
+	Tcp,
+}
+
+enum Query {
+	Root(QueryRoot),
+	SourceAddr(wire::Ipv6Address, Protocol),
+}
+
+enum QueryRoot {
+	Default,
+	Global,
+	IpAddr(usize),
+}
+
+enum Object {
+	Socket(Socket),
+	Query(Option<Query>),
+}
+
+struct Table {
+	table: StreamTable,
+	objects: driver_utils::Arena<Object>,
+	dirty: bool,
+}
+
+impl Table {
+	fn new(table_name: &[u8]) -> Self {
+		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 18 }).unwrap();
+		let table = StreamTable::new(&buf, rt::io::Pow2Size(9));
+		rt::io::file_root()
+			.unwrap()
+			.create(table_name)
+			.unwrap()
+			.share(&table.public_table())
+			.unwrap();
+		Self {
+			table,
+			objects: Default::default(),
+			dirty: false,
+		}
+	}
+
+	fn insert(&mut self, job_id: JobId, object: Object) {
+		let h = self.objects.insert(object);
+		self.table.enqueue(job_id, Response::Handle(h));
+		self.dirty = true;
+	}
+
+	fn error(&mut self, job_id: JobId, error: Error) {
+		self.table.enqueue(job_id, Response::Error(error));
+		self.dirty = true;
+	}
+
+	fn data(&mut self, job_id: JobId, data: &[u8]) {
+		let b = self.table.alloc(data.len()).expect("out of buffers");
+		b.copy_from(0, &data);
+		self.table.enqueue(
+			job_id,
+			Response::Data {
+				data: b,
+				length: data.len().try_into().unwrap(),
+			},
+		);
+		self.dirty = true;
+	}
+
+	fn amount(&mut self, job_id: JobId, amount: usize) {
+		self.table
+			.enqueue(job_id, Response::Amount(amount.try_into().unwrap()));
+		self.dirty = true;
+	}
+
+	fn flush(&mut self) {
+		if self.dirty {
+			self.table.flush();
+			self.dirty = false;
+		}
 	}
 }
 

@@ -161,6 +161,20 @@ unsafe impl Buf for &'static [u8] {
 	}
 }
 
+unsafe impl<const N: usize> Buf for &'static [u8; N] {
+	fn as_ptr(&self) -> *const u8 {
+		*self as _
+	}
+
+	fn bytes_init(&self) -> usize {
+		self.len()
+	}
+
+	fn bytes_total(&self) -> usize {
+		self.len()
+	}
+}
+
 unsafe impl Buf for &'static str {
 	fn as_ptr(&self) -> *const u8 {
 		(*self).as_ptr()
