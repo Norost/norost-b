@@ -3,6 +3,7 @@ use core::{
 	intrinsics, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, sync::atomic::AtomicU32,
 };
 
+#[derive(Clone, Copy)]
 pub struct Buffer<'a> {
 	base: NonNull<u8>,
 	size: u32,
@@ -129,13 +130,18 @@ impl Buffers {
 	}
 
 	#[inline]
+	pub fn alloc_empty<'a>(&'a self) -> Data<'a> {
+		Data {
+			buffers: self,
+			offset: 0,
+			len: 0,
+		}
+	}
+
+	#[inline]
 	pub fn alloc<'a>(&'a self, head: &AtomicU32, size: usize) -> Option<Data<'a>> {
 		if size == 0 {
-			return Some(Data {
-				buffers: self,
-				offset: 0,
-				len: 0,
-			});
+			return Some(self.alloc_empty());
 		}
 
 		if size <= self.block_size as usize {
@@ -212,14 +218,16 @@ impl<'a> Data<'a> {
 		let bs = self.buffers.block_size as usize;
 		let skip = (offset / bs).try_into().unwrap();
 		offset %= bs;
-		self.blocks(skip, |b| {
+		for b in self.blocks().skip(skip) {
 			let c = count.min(bs - offset);
-			b.copy_from_raw_untrusted(offset, src, c);
+			b.1.copy_from_raw_untrusted(offset, src, c);
 			src = src.add(c);
 			offset = 0;
 			count -= c;
-			count > 0
-		})
+			if count == 0 {
+				break;
+			}
+		}
 	}
 
 	#[cfg_attr(debug_assertions, track_caller)]
@@ -261,14 +269,16 @@ impl<'a> Data<'a> {
 		let bs = self.buffers.block_size as usize;
 		let skip = (offset / bs).try_into().unwrap();
 		offset %= bs;
-		self.blocks(skip, |b| {
+		for b in self.blocks().skip(skip) {
 			let c = count.min(bs - offset);
-			b.copy_to_raw_untrusted(offset, dst, c);
+			b.1.copy_to_raw_untrusted(offset, dst, c);
 			dst = dst.add(c);
 			offset = 0;
 			count -= c;
-			count > 0
-		})
+			if count == 0 {
+				break;
+			}
+		}
 	}
 
 	#[inline]
@@ -328,40 +338,90 @@ impl<'a> Data<'a> {
 	/// /  \        /  \                    /  \
 	/// D0 D1 ..   Dm  Dm+1 ..             ..  Dn-1
 	/// ```
-	#[cfg_attr(debug_assertions, track_caller)]
-	fn blocks(&self, skip: u32, mut f: impl FnMut(Buffer<'a>) -> bool) {
-		assert_eq!(
-			skip, 0,
-			"todo: skip blocks (BS: {})",
-			self.buffers.block_size
-		);
-		if self.len == 0 {
-			return;
+	pub fn blocks(&self) -> DataIter<'_, 'a> {
+		DataIter {
+			buffers: self.buffers,
+			offset: self.offset,
+			count: self.len.div_ceil(self.buffers.block_size),
+			// Even if len is 0 it's fine to take any buffer as long as we never actually use it
+			cur_buf: self.buffers.get_buf(self.offset),
+			cur_i: 0,
+			_marker: PhantomData,
 		}
-		let (mut l, mut o, mut n) = (self.len, self.offset, [0; 4]);
+	}
+}
+
+pub struct DataIter<'a, 'b: 'a> {
+	buffers: &'b Buffers,
+	offset: u32,
+	count: u32,
+	cur_buf: Buffer<'b>,
+	cur_i: u32,
+	_marker: PhantomData<&'a Data<'b>>,
+}
+
+// TODO implement efficient skip()
+//
+// While it should optimize fine for now, it won't if (when) we reuse this code for untrusted
+// processes and need to use copy_to_untrusted.
+impl<'a, 'b: 'a> Iterator for DataIter<'a, 'b> {
+	type Item = (u32, Buffer<'b>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.count == 0 {
+			return None;
+		}
+
+		// Looping makes it easier to deal with scatter list blocks
 		loop {
-			let b = self.buffers.get_buf(o);
 			let to = self.buffers.block_size / 4;
-			for i in 0..to {
-				if l <= self.buffers.block_size {
-					if i > 0 {
-						b.copy_to(i as usize * 4, &mut n);
-						o = u32::from_le_bytes(n);
-					}
-					f(self.buffers.get_buf(o));
-					return;
-				} else {
-					b.copy_to(i as usize * 4, &mut n);
-					o = u32::from_le_bytes(n);
-					l -= self.buffers.block_size;
-					if i != to - 1 && !f(self.buffers.get_buf(o)) {
-						return;
-					}
+			if self.count == 1 {
+				// Return the last block
+				// Check if the current block is the one to return, otherwise return an entry
+				//
+				//   L----->D               L------>L
+				//  / \            vs      / \     / \
+				// D   D                  D   D   D   D
+				if self.cur_i > 0 {
+					debug_assert!(self.cur_i < to);
+					let mut n = [0; 4];
+					self.cur_buf.copy_to(self.cur_i as usize * 4, &mut n);
+					self.offset = u32::from_le_bytes(n);
+					self.cur_buf = self.buffers.get_buf(self.offset);
 				}
-			}
-			// Account for scatter-gather array block
-			l += self.buffers.block_size;
+				self.count -= 1;
+				return Some((self.offset, self.cur_buf));
+			} else {
+				// We're not at the last block yet.
+				debug_assert!(self.cur_i < to);
+				let mut n = [0; 4];
+				self.cur_buf.copy_to(self.cur_i as usize * 4, &mut n);
+				self.offset = u32::from_le_bytes(n);
+				let b = self.buffers.get_buf(self.offset);
+				// If this block is
+				// - Not the last block
+				// - The last entry in the current block
+				// It is part of the chain and must not be returned as a data block
+				if self.cur_i == to - 1 {
+					self.cur_buf = b;
+					self.cur_i = 0;
+				} else {
+					self.cur_i += 1;
+					self.count -= 1;
+					return Some((self.offset, b));
+				}
+			};
 		}
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		(self.len(), Some(self.len()))
+	}
+}
+
+impl<'a, 'b: 'a> ExactSizeIterator for DataIter<'a, 'b> {
+	fn len(&self) -> usize {
+		self.count.try_into().unwrap()
 	}
 }
 

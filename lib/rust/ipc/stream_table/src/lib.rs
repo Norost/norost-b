@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(core_intrinsics)]
 #![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
+#![feature(int_roundings)]
 #![cfg_attr(not(debug_assertions), deny(unused))]
 
 mod raw {
