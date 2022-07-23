@@ -219,10 +219,6 @@ impl<'a> BackingStorage<'a> {
 	}
 }
 
-/// A handle to a resource
-#[derive(Clone, Copy)]
-pub struct Resource(NonZeroU32);
-
 /// MSI-X interrupt vectors mappings per queue.
 pub struct Msix {
 	pub control: Option<u16>,
@@ -284,154 +280,179 @@ impl<'a> Device<'a> {
 
 	pub unsafe fn init_scanout(
 		&mut self,
-		format: Format,
+		scanout_id: u32,
+		resource_id: NonZeroU32,
 		rect: Rect,
-		backend: BackingStorage<'static>,
 		buffer: &mut PhysMap,
-	) -> Result<Resource, InitScanoutError> {
-		let res_id = 1;
-		let scan_id = 0;
-
-		self.create_resource_2d(
-			NonZeroU32::new(res_id).unwrap(),
-			rect,
-			format,
-			backend,
-			buffer,
-		);
-
-		// Attach scanout
-		self.control_request(buffer, SetScanout::new(scan_id, res_id, rect, Some(0)))
-			.unwrap();
-
-		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	) -> Result<ControlOpToken, InitScanoutError> {
+		let cmd = SetScanout::new(scanout_id, resource_id.get(), rect, Some(0));
+		self.control_request(buffer, cmd).map_err(|_| todo!())
 	}
 
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
 	pub unsafe fn init_cursor(
 		&mut self,
+		scanout_id: u32,
+		resource_id: NonZeroU32,
 		x: u32,
 		y: u32,
-		format: Format,
-		backend: BackingStorage<'static>,
 		buffer: &mut PhysMap,
-	) -> Result<Resource, InitCursorError> {
-		let res_id = 2;
-		let scan_id = 0;
-
-		let rect = Rect::new(0, 0, 64, 64);
-		self.create_resource_2d(
-			NonZeroU32::new(res_id).unwrap(),
-			rect,
-			format,
-			backend,
-			buffer,
-		);
-
-		let pos = CursorPosition::new(scan_id, x, y);
-		self.cursor_request(buffer, UpdateCursor::new(pos, res_id, 0, 0, Some(0)))
-			.unwrap();
-
-		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	) -> Result<CursorOpToken, InitCursorError> {
+		let pos = CursorPosition::new(scanout_id, x, y);
+		let cmd = UpdateCursor::new(pos, resource_id.get(), 0, 0, Some(0));
+		self.cursor_request(buffer, cmd).map_err(|_| todo!())
 	}
 
-	pub fn update_cursor(
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
+	pub unsafe fn update_cursor(
 		&mut self,
-		resource: Resource,
+		scanout_id: u32,
+		resource_id: NonZeroU32,
 		hot_x: u32,
 		hot_y: u32,
 		buffer: &mut PhysMap,
-	) -> Result<Resource, UpdateCursorError> {
-		let res_id = resource.0.get();
-		let scan_id = 0;
-		let pos = CursorPosition::new(scan_id, 0, 0);
-		self.cursor_request(
-			buffer,
-			UpdateCursor::new(pos, res_id, hot_x, hot_y, Some(0)),
-		)
-		.unwrap();
-		Ok(Resource(NonZeroU32::new(res_id).unwrap()))
+	) -> Result<CursorOpToken, UpdateCursorError> {
+		let pos = CursorPosition::new(scanout_id, 0, 0);
+		let cmd = UpdateCursor::new(pos, resource_id.get(), hot_x, hot_y, Some(0));
+		self.cursor_request(buffer, cmd).map_err(|_| todo!())
 	}
 
-	pub fn move_cursor(
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
+	pub unsafe fn move_cursor(
 		&mut self,
+		scanout_id: u32,
 		x: u32,
 		y: u32,
 		buffer: &mut PhysMap,
-	) -> Result<(), MoveCursorError> {
-		let scan_id = 0;
-		let pos = CursorPosition::new(scan_id, x, y);
-		self.cursor_request(buffer, MoveCursor::new(pos, Some(0)))
-			.unwrap();
-		Ok(())
+	) -> Result<CursorOpToken, MoveCursorError> {
+		let pos = CursorPosition::new(scanout_id, x, y);
+		let cmd = MoveCursor::new(pos, Some(0));
+		self.cursor_request(buffer, cmd).map_err(|_| todo!())
 	}
 
-	pub fn draw(
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
+	pub unsafe fn transfer(
 		&mut self,
-		resource: Resource,
+		resource_id: NonZeroU32,
 		rect: Rect,
 		buffer: &mut PhysMap,
-	) -> Result<(), DrawError> {
-		let res_id = resource.0.get();
-		self.control_request(buffer, TransferToHost2D::new(res_id, 0, rect, Some(0)))
-			.unwrap();
-		self.control_request(buffer, Flush::new(res_id, rect, Some(0)))
-			.unwrap();
-		Ok(())
+	) -> Result<ControlOpToken, DrawError> {
+		let cmd = TransferToHost2D::new(resource_id.get(), 0, rect, Some(0));
+		self.control_request(buffer, cmd).map_err(|_| todo!())
+	}
+
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
+	pub unsafe fn flush(
+		&mut self,
+		resource_id: NonZeroU32,
+		rect: Rect,
+		buffer: &mut PhysMap,
+	) -> Result<ControlOpToken, DrawError> {
+		let cmd = Flush::new(resource_id.get(), rect, Some(0));
+		self.control_request(buffer, cmd).map_err(|_| todo!())
 	}
 
 	/// # Panics
 	///
 	/// `buffer` is smaller than [`ControlHeader`].
-	fn create_resource_2d(
+	///
+	/// # Safety
+	///
+	/// `buffer` must remain valid for the duration of the operation.
+	pub unsafe fn create_resource_2d(
 		&mut self,
-		id: NonZeroU32,
+		resource_id: NonZeroU32,
 		rect: Rect,
 		format: Format,
+		buffer: &mut PhysMap,
+	) -> Result<ControlOpToken, ()> {
+		let cmd = Create2D::new(
+			resource_id.get(),
+			format,
+			rect.width(),
+			rect.height(),
+			Some(0),
+		);
+		self.control_request(buffer, cmd).map_err(|_| todo!())
+	}
+
+	pub unsafe fn attach_resource_2d(
+		&mut self,
+		resource_id: NonZeroU32,
 		mut backend: BackingStorage,
 		buffer: &mut PhysMap,
-	) {
-		backend.set_resource_id(id.get());
-		self.control_request(
-			buffer,
-			Create2D::new(id.get(), format, rect.width(), rect.height(), Some(0)),
-		)
-		.unwrap();
+	) -> Result<ControlOpToken, ()> {
+		backend.set_resource_id(resource_id.get());
 		self.control_request_raw(
 			buffer,
 			backend.storage.phys(),
 			backend.total_size().try_into().unwrap(),
 		)
-		.unwrap();
+		.map_err(|_| todo!())
 	}
 
 	/// Send a request to the control queue.
-	fn control_request<T: Copy>(&mut self, buf: &mut PhysMap, data: T) -> Result<(), ()> {
-		Self::request(&mut self.controlq, &self.notify, 0, buf, data)
+	///
+	/// # Safety
+	///
+	/// `data` must remain valid for the duration of the operation.
+	unsafe fn control_request<T: Copy>(
+		&mut self,
+		buf: &mut PhysMap,
+		data: T,
+	) -> Result<ControlOpToken, ()> {
+		Self::request(&mut self.controlq, &self.notify, 0, buf, data).map(ControlOpToken)
 	}
 
 	/// Send a request to the control queue.
-	fn cursor_request<T: Copy>(&mut self, buf: &mut PhysMap, data: T) -> Result<(), ()> {
-		Self::request(&mut self.cursorq, &self.notify, 1, buf, data)
+	///
+	/// # Safety
+	///
+	/// `data` must remain valid for the duration of the operation.
+	unsafe fn cursor_request<T: Copy>(
+		&mut self,
+		buf: &mut PhysMap,
+		data: T,
+	) -> Result<CursorOpToken, ()> {
+		Self::request(&mut self.cursorq, &self.notify, 1, buf, data).map(CursorOpToken)
 	}
 
 	/// Send a request with raw data to the control queue.
-	fn control_request_raw(
+	///
+	/// # Safety
+	///
+	/// `data` must remain valid for the duration of the operation.
+	unsafe fn control_request_raw(
 		&mut self,
 		buf: &mut PhysMap,
 		data: PhysAddr,
 		len: u32,
-	) -> Result<(), ()> {
-		Self::request_raw(&mut self.controlq, &self.notify, 0, buf, data, len)
+	) -> Result<ControlOpToken, ()> {
+		Self::request_raw(&mut self.controlq, &self.notify, 0, buf, data, len).map(ControlOpToken)
 	}
 
 	/// Send a request to a queue.
-	fn request<T: Copy>(
+	///
+	/// # Safety
+	///
+	/// `data` must remain valid for the duration of the operation.
+	unsafe fn request<T: Copy>(
 		queue: &mut Queue<'_>,
 		notify: &Notify<'_>,
 		queue_id: u16,
 		buf: &mut PhysMap,
 		data: T,
-	) -> Result<(), ()> {
+	) -> Result<virtio::queue::Token, ()> {
 		let (mut resp, mut data_buf) = buf.split_at(mem::size_of::<ControlHeader>());
 		data_buf.write(&data);
 		Self::request_raw(
@@ -445,14 +466,18 @@ impl<'a> Device<'a> {
 	}
 
 	/// Send a request with raw data to a queue.
-	fn request_raw(
+	///
+	/// # Safety
+	///
+	/// `data` must remain valid for the duration of the operation.
+	unsafe fn request_raw(
 		queue: &mut Queue<'_>,
 		notify: &Notify<'_>,
 		queue_id: u16,
 		resp: &mut PhysMap,
 		data: PhysAddr,
 		len: u32,
-	) -> Result<(), ()> {
+	) -> Result<virtio::queue::Token, ()> {
 		resp.write(&ControlHeader::new(0, None));
 
 		let data = [
@@ -463,15 +488,32 @@ impl<'a> Device<'a> {
 				true,
 			),
 		];
-		queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = queue
+			.send(data.iter().copied())
 			.expect("failed to send data");
 		notify.send(queue_id);
-		queue.wait_for_used(|_, _| (), || ());
 
-		Ok(())
+		Ok(tk)
+	}
+
+	/// Check for finished operations in the control queue.
+	pub fn poll_control_queue(&mut self, mut f: impl FnMut(ControlOpToken)) -> usize {
+		self.controlq.collect_used(|t, _| f(ControlOpToken(t)))
+	}
+
+	/// Check for finished operations in the cursor queue.
+	pub fn poll_cursor_queue(&mut self, mut f: impl FnMut(CursorOpToken)) -> usize {
+		self.cursorq.collect_used(|t, _| f(CursorOpToken(t)))
 	}
 }
+
+/// A token for an active control queue operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ControlOpToken(virtio::queue::Token);
+
+/// A token for an active cursor queue operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CursorOpToken(virtio::queue::Token);
 
 #[derive(Debug)]
 pub enum SetupError<DmaError> {

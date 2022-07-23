@@ -145,7 +145,7 @@ impl<'a> BlockDevice<'a> {
 		let blk_cfg = unsafe { dev.device.cast::<Config>() };
 
 		// Set up queue.
-		let queue = queue::Queue::<'a>::new(dev.common, 0, 8, msix.queue, dma_alloc).map_err(
+		let queue = queue::Queue::<'a>::new(dev.common, 0, 16, msix.queue, dma_alloc).map_err(
 			|e| match e {
 				queue::NewQueueError::DmaError(e) => SetupError::DmaError(e),
 			},
@@ -168,70 +168,48 @@ impl<'a> BlockDevice<'a> {
 		})
 	}
 
-	/// Write out sectors
+	/// Write out sectors.
 	///
 	/// # Safety
 	///
-	/// The physical region must be valid.
+	/// The physical region must be valid for the duration of the operation.
 	pub unsafe fn write<'s>(
 		&'s mut self,
-		data: PhysRegion,
+		data: impl ExactSizeIterator<Item = PhysRegion>,
 		sector_start: u64,
-		wait: impl FnMut(),
-	) -> Result<(), WriteError> {
-		unsafe {
-			self.request_header_status.as_ptr().write((
-				RequestHeader {
-					typ: RequestHeader::WRITE.into(),
-					reserved: 0.into(),
-					sector: sector_start.into(),
-				},
-				RequestStatus { status: 111 },
-			));
-		}
-
-		let data = [
-			(
-				self.request_header_status_phys
-					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 0)).unwrap(),
-				mem::size_of::<RequestHeader>().try_into().unwrap(),
-				false,
-			),
-			(data.base, data.size, false),
-			(
-				self.request_header_status_phys
-					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
-				mem::size_of::<RequestStatus>().try_into().unwrap(),
-				true,
-			),
-		];
-
-		self.queue
-			.send(data.iter().copied(), None, |_, _| ())
-			.expect("Failed to send data");
-
-		self.flush();
-
-		self.queue.wait_for_used(|_, _| (), wait);
-
-		Ok(())
+	) -> Result<OpToken, WriteError> {
+		unsafe { self.do_op(data, sector_start, false).map_err(|()| todo!()) }
 	}
 
 	/// Read in sectors
 	///
 	/// # Safety
 	///
-	/// The physical region must be valid.
-	pub unsafe fn read<'s>(
-		&'s mut self,
-		data: PhysRegion,
+	/// The physical regions must be valid for the duration of the operation.
+	/// The regions must each have a size that is a multiple of 512.
+	pub unsafe fn read(
+		&mut self,
+		data: impl ExactSizeIterator<Item = PhysRegion>,
 		sector_start: u64,
-		wait: impl FnMut(),
-	) -> Result<(), WriteError> {
+	) -> Result<OpToken, WriteError> {
+		unsafe { self.do_op(data, sector_start, true).map_err(|()| todo!()) }
+	}
+
+	unsafe fn do_op(
+		&mut self,
+		data: impl ExactSizeIterator<Item = PhysRegion>,
+		sector_start: u64,
+		read: bool,
+	) -> Result<OpToken, ()> {
 		unsafe {
 			self.request_header_status.as_ptr().write((
 				RequestHeader {
-					typ: RequestHeader::READ.into(),
+					typ: if read {
+						RequestHeader::READ
+					} else {
+						RequestHeader::WRITE
+					}
+					.into(),
 					reserved: 0.into(),
 					sector: sector_start.into(),
 				},
@@ -239,31 +217,34 @@ impl<'a> BlockDevice<'a> {
 			));
 		}
 
-		let data = [
-			(
-				self.request_header_status_phys
-					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 0)).unwrap(),
-				mem::size_of::<RequestHeader>().try_into().unwrap(),
-				false,
-			),
-			(data.base, data.size, true),
-			(
-				self.request_header_status_phys
-					+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
-				mem::size_of::<RequestStatus>().try_into().unwrap(),
-				true,
-			),
-		];
+		let header = (
+			self.request_header_status_phys
+				+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 0)).unwrap(),
+			mem::size_of::<RequestHeader>().try_into().unwrap(),
+			false,
+		);
+		let data = data.map(|d| (d.base, d.size, true));
+		let footer = (
+			self.request_header_status_phys
+				+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
+			mem::size_of::<RequestStatus>().try_into().unwrap(),
+			true,
+		);
+		let data = [header].into_iter().chain(data).chain([footer]);
 
-		self.queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = self
+			.queue
+			.send(ExactSizeIterStub(data))
 			.expect("Failed to send data");
 
 		self.flush();
 
-		self.queue.wait_for_used(|_, _| (), wait);
+		Ok(OpToken(tk))
+	}
 
-		Ok(())
+	/// Check for finished operations.
+	pub fn poll_finished(&mut self, mut f: impl FnMut(OpToken)) -> usize {
+		self.queue.collect_used(|t, _| f(OpToken(t)))
 	}
 
 	pub fn flush(&self) {
@@ -299,3 +280,27 @@ impl fmt::Debug for WriteError {
 		Ok(())
 	}
 }
+
+struct ExactSizeIterStub<I: Iterator>(I);
+
+impl<I: Iterator> Iterator for ExactSizeIterStub<I> {
+	type Item = I::Item;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.next()
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.0.size_hint()
+	}
+}
+
+impl<I: Iterator> ExactSizeIterator for ExactSizeIterStub<I> {
+	fn len(&self) -> usize {
+		self.size_hint().1.expect("overflow")
+	}
+}
+
+/// A token for an active operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OpToken(queue::Token);

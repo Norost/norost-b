@@ -319,7 +319,7 @@ impl<'a> Device<'a> {
 		&'s mut self,
 		mut data: NonNull<Packet>,
 		data_phys: PhysRegion,
-	) -> Result<(), SendError> {
+	) -> Result<TxToken, SendError> {
 		data.as_mut().header = PacketHeader {
 			flags: 0,
 			gso_type: PacketHeader::GSO_NONE,
@@ -334,26 +334,27 @@ impl<'a> Device<'a> {
 
 		let data = [(data_phys.base, data_phys.size, false)];
 
-		self.tx_queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = self
+			.tx_queue
+			.send(data.iter().copied())
 			.expect("Failed to send data");
 
 		self.notify.send(self.tx_queue.notify_offset());
 
-		Ok(())
+		Ok(TxToken(tk))
 	}
 
-	/// Collect buffers for sent packets.
-	pub fn collect_sent(&mut self, mut f: impl FnMut(PhysRegion)) -> usize {
-		self.tx_queue.collect_used(|_, r| f(r))
+	/// Collect tokens for sent packets.
+	pub fn collect_sent(&mut self, mut f: impl FnMut(TxToken, PhysRegion)) -> usize {
+		self.tx_queue.collect_used(|tk, p| f(TxToken(tk), p))
 	}
 
 	/// Receive a number of Ethernet packets, if any are available
 	pub unsafe fn receive<'s>(
 		&'s mut self,
-		callback: impl FnMut(u16, PhysRegion),
+		mut f: impl FnMut(RxToken, PhysRegion),
 	) -> Result<usize, ReceiveError> {
-		Ok(self.rx_queue.collect_used(callback))
+		Ok(self.rx_queue.collect_used(|tk, p| f(RxToken(tk), p)))
 	}
 
 	#[inline]
@@ -377,7 +378,7 @@ impl<'a> Device<'a> {
 		&'s mut self,
 		mut data: NonNull<Packet>,
 		data_phys: PhysAddr,
-	) -> Result<(), Full> {
+	) -> Result<RxToken, Full> {
 		data.as_mut().header = PacketHeader {
 			flags: 12,
 			gso_type: 34,
@@ -390,13 +391,14 @@ impl<'a> Device<'a> {
 
 		let data = [(data_phys, Packet::MAX_SIZE.try_into().unwrap(), true)];
 
-		self.rx_queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = self
+			.rx_queue
+			.send(data.iter().copied())
 			.expect("Failed to send data");
 
 		self.notify.send(self.rx_queue.notify_offset());
 
-		Ok(())
+		Ok(RxToken(tk))
 	}
 }
 
@@ -405,6 +407,14 @@ impl Drop for Device<'_> {
 		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
+
+/// A token for an active receive operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RxToken(virtio::queue::Token);
+
+/// A token for an active transmit operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TxToken(virtio::queue::Token);
 
 #[derive(Debug)]
 pub enum SetupError<DmaError> {

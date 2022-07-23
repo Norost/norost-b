@@ -92,7 +92,7 @@ impl<'d> Dev<'d> {
 				|phys: PhysAddr| (u64::from(phys.0) - dma_phys) / mem::size_of::<Packet>() as u64;
 
 			let mut map = s.tx_avail_map;
-			s.virtio.collect_sent(|r| {
+			s.virtio.collect_sent(|_, r| {
 				let i = calc_i(r.base);
 				debug_assert_eq!(map & 1 << i, 0);
 				map |= 1 << i;

@@ -44,7 +44,7 @@ fn start(_: isize, _: *const *const u8) -> isize {
 }
 
 fn main() {
-	let file_root = rt::io::file_root().unwrap().as_raw();
+	let file_root = rt::io::file_root().unwrap();
 	let table_name = rt::args::Args::new()
 		.skip(1)
 		.next()
@@ -52,16 +52,16 @@ fn main() {
 
 	let dev_handle = {
 		let s = b" 1af4:1000";
-		let mut it = rt::io::open(file_root, b"pci/info").unwrap();
+		let it = file_root.open(b"pci/info").unwrap();
 		let mut buf = [0; 64];
 		loop {
-			let l = rt::io::read(it, &mut buf).unwrap();
+			let l = it.read(&mut buf).unwrap();
 			assert!(l != 0, "device not found");
 			let dev = &buf[..l];
 			if dev.ends_with(s) {
 				let mut path = Vec::from(*b"pci/");
 				path.extend(&dev[..7]);
-				break rt::io::open(file_root, &path).unwrap();
+				break file_root.open(&path).unwrap().into_raw();
 			}
 		}
 	};
@@ -501,7 +501,7 @@ impl Table {
 			.unwrap()
 			.create(table_name)
 			.unwrap()
-			.share(&table.public_table())
+			.share(&table.public())
 			.unwrap();
 		Self {
 			table,
