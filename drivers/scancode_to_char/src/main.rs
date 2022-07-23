@@ -33,7 +33,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 	root.create(table_name)
 		.unwrap()
-		.share(&table.public_table())
+		.share(table.public())
 		.unwrap();
 
 	// Open input
@@ -122,7 +122,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 			Request::Close => {
-				readers.borrow_mut().remove(handle).unwrap();
+				if handle != rt::Handle::MAX {
+					// TODO we should have some kind of global refcount to see if we
+					// should exit
+					readers.borrow_mut().remove(handle).unwrap();
+				}
 				// The kernel does not expect a response
 				return true;
 			}

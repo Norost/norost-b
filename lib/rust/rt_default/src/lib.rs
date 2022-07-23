@@ -21,6 +21,6 @@ fn alloc_error(layout: core::alloc::Layout) -> ! {
 
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-	let _ = rt::io::stderr().map(|o| writeln!(o, "{:?}", info));
+	let _ = rt::io::stderr().map(|o| writeln!(o, "{}", info));
 	rt::exit(128)
 }

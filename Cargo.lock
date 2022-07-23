@@ -279,7 +279,7 @@ name = "driver_virtio_block"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
- "norostb_kernel",
+ "norost_rt_default",
  "norostb_rt",
  "pci",
  "virtio",

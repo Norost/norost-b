@@ -1,34 +1,49 @@
-#![feature(norostb)]
+#![no_std]
+#![feature(start)]
 
-use driver_utils::io::queue::stream::Job;
-use norostb_kernel::syscall;
-use norostb_rt as rt;
-use std::fs;
-use std::os::norostb::prelude::*;
+extern crate alloc;
+
+use alloc::vec::Vec;
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
+use rt::{io::Pow2Size, Handle};
+use rt_default as _;
 use virtio_block::Sector;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let table_name = std::env::args()
+const SECTOR_SIZE: u32 = Sector::SIZE as _;
+
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+	main()
+}
+
+fn main() -> ! {
+	let file_root = rt::io::file_root().expect("no file root");
+	let table_name = rt::args::Args::new()
 		.skip(1)
 		.next()
-		.ok_or("expected table name")?;
+		.expect("expected table name");
 
 	let dev_handle = {
 		let s = b" 1af4:1001";
-		let mut it = fs::read_dir("pci/info").unwrap().map(Result::unwrap);
+		let mut it = file_root.open(b"pci/info").unwrap();
+		let mut buf = [0; 64];
 		loop {
-			let dev = it.next().unwrap().path().into_os_string().into_vec();
+			let l = it.read(&mut buf).unwrap();
+			assert!(l != 0, "device not found");
+			let dev = &buf[..l];
 			if dev.ends_with(s) {
 				let mut path = Vec::from(*b"pci/");
 				path.extend(&dev[..7]);
-				break fs::File::open(std::ffi::OsString::from_vec(path))
-					.unwrap()
-					.into_handle();
+				break file_root.open(&path).unwrap();
 			}
 		}
 	};
-	let poll = rt::RefObject::from_raw(dev_handle).open(b"poll").unwrap();
-	let pci_config = syscall::map_object(dev_handle, None, 0, usize::MAX).unwrap();
+
+	let poll = dev_handle.open(b"poll").unwrap();
+	let pci_config = dev_handle
+		.map_object(None, rt::RWX::R, 0, usize::MAX)
+		.unwrap()
+		.0;
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -37,13 +52,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		match h {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
-					syscall::map_object(dev_handle, None, (bar + 1).into(), usize::MAX)
+					assert!(bar < 6);
+					let mut s = *b"bar0";
+					s[3] += bar;
+					dev_handle
+						.open(&s)
 						.unwrap()
+						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
+						.unwrap()
+						.0
 						.cast()
 				};
-				let dma_alloc = |size, _align| -> Result<_, ()> {
-					let (d, _) = syscall::alloc_dma(None, size).unwrap();
-					let a = syscall::physical_address(d).unwrap();
+				let dma_alloc = |size: usize, _align| -> Result<_, ()> {
+					let (d, a, _) = driver_utils::dma::alloc_dma(size.try_into().unwrap()).unwrap();
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
 
@@ -56,135 +77,134 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Register new table of Streaming type
-	let tbl = rt::io::file_root()
-		.unwrap()
-		.create(table_name.as_bytes())
-		.unwrap();
-
-	let (sectors, _) = syscall::alloc_dma(None, 4096).unwrap();
-	let sectors_phys = virtio::PhysRegion {
-		base: virtio::PhysAddr::new(
-			syscall::physical_address(sectors)
-				.unwrap()
-				.try_into()
-				.unwrap(),
-		),
-		size: 4096,
-	};
-	let sectors = unsafe {
-		core::slice::from_raw_parts_mut(sectors.cast::<Sector>().as_ptr(), 4096 / Sector::SIZE)
+	let (tbl, dma_phys) = {
+		let (dma, dma_phys) =
+			driver_utils::dma::alloc_dma_object((1 << 16).try_into().unwrap()).unwrap();
+		let tbl = StreamTable::new(&dma, Pow2Size(9));
+		file_root
+			.create(table_name)
+			.unwrap()
+			.share(tbl.public())
+			.unwrap();
+		(tbl, dma_phys)
 	};
 
 	let mut data_handles = driver_utils::Arena::new();
 
-	let mut buf = Vec::new();
-
 	loop {
-		// Wait for events from the table
-		buf.resize(4096, 0);
-		let n = tbl.read(&mut buf).unwrap();
-		buf.resize(n, 0);
+		let wait = || poll.read(&mut []).unwrap();
 
-		let wait = || {
-			poll.poll().unwrap();
-		};
-
-		buf = match Job::deserialize(&buf).unwrap() {
-			Job::Open {
-				handle,
-				job_id,
-				path,
-			} => match (handle, path) {
-				(Handle::MAX, b"data") => {
-					Job::reply_open_clear(buf, job_id, data_handles.insert(0))
+		let mut flush = false;
+		while let Some((handle, req)) = tbl.dequeue() {
+			let (job_id, resp) = match req {
+				Request::Open { job_id, path } => {
+					let r = if handle == Handle::MAX {
+						if path.len() == 4 && {
+							let mut buf = [0; 4];
+							path.copy_to(0, &mut buf);
+							buf == *b"data"
+						} {
+							Response::Handle(data_handles.insert(0))
+						} else {
+							Response::Error(rt::Error::InvalidData)
+						}
+					} else {
+						Response::Error(rt::Error::InvalidOperation)
+					};
+					path.manual_drop();
+					(job_id, r)
 				}
-				(Handle::MAX, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidData),
-				(_, _) => Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation),
-			}
-			.unwrap(),
-			Job::Read {
-				peek,
-				handle,
-				job_id,
-				length,
-			} => {
-				let offset = data_handles[handle];
-				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
-				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
-				let offset = u16::try_from(offset).unwrap();
+				Request::Read {
+					peek,
+					job_id,
+					amount,
+				} => {
+					(
+						job_id,
+						if handle == Handle::MAX {
+							Response::Error(rt::Error::InvalidOperation)
+						} else {
+							// TODO how do we with unaligned reads/writes?
+							assert!(amount % SECTOR_SIZE == 0);
+							let amount = amount.min(1 << 13);
+							let offset = data_handles[handle];
 
-				unsafe {
-					dev.read(sectors_phys, sector, wait).unwrap();
+							let data = tbl
+								.alloc(amount.try_into().unwrap())
+								.expect("out of buffers");
+							let sectors = data.blocks().map(|b| virtio::PhysRegion {
+								base: virtio::PhysAddr::new(dma_phys + u64::from(b.0) * 512),
+								size: 512,
+							});
+
+							let tk = unsafe { dev.read(sectors, offset).unwrap() };
+							// TODO proper async
+							while dev.poll_finished(|t| assert_eq!(t, tk)) != 1 {
+								wait();
+							}
+
+							if !peek {
+								data_handles[handle] += u64::from(amount / SECTOR_SIZE);
+							}
+
+							Response::Data {
+								data,
+								length: amount.try_into().unwrap(),
+							}
+						},
+					)
 				}
+				Request::Write { job_id, data } => {
+					// TODO ditto
+					assert!(data.len() % Sector::SIZE == 0);
+					let offset = data_handles[handle];
 
-				Job::reply_read_clear(buf, job_id, peek, |d| {
-					let len = (length as usize).min(
-						(Sector::slice_as_u8(sectors).len() - usize::from(offset))
-							.try_into()
-							.unwrap(),
-					);
+					let sectors = data.blocks().map(|b| virtio::PhysRegion {
+						base: virtio::PhysAddr::new(dma_phys + u64::from(b.0) * 512),
+						size: 512,
+					});
 
-					if !peek {
-						data_handles[handle] = u64::from(offset) + u64::try_from(len).unwrap();
+					let tk = unsafe { dev.write(sectors, offset).unwrap() };
+					// TODO proper async
+					while dev.poll_finished(|t| assert_eq!(t, tk)) != 1 {
+						wait();
 					}
+					let len = data.len();
 
-					let offset = usize::from(offset);
-					d.extend(&Sector::slice_as_u8(&sectors)[offset..][..len]);
+					data.manual_drop();
 
-					Ok(())
-				})
-				.unwrap()
-			}
-			Job::Write {
-				handle,
-				job_id,
-				data,
-			} => {
-				let offset = data_handles[handle];
-				let sector = offset / u64::try_from(Sector::SIZE).unwrap();
-				let offset = offset % u64::try_from(Sector::SIZE).unwrap();
-				let offset = u16::try_from(offset).unwrap();
+					data_handles[handle] += u64::try_from(len / Sector::SIZE).unwrap();
 
-				unsafe {
-					dev.read(sectors_phys, sector, wait).unwrap();
+					(job_id, Response::Amount(len.try_into().unwrap()))
 				}
-
-				Sector::slice_as_u8_mut(sectors)[offset.into()..][..data.len()]
-					.copy_from_slice(data);
-
-				unsafe {
-					dev.write(sectors_phys, sector, wait).unwrap();
+				Request::Seek { job_id, from } => {
+					let offset = match from {
+						rt::io::SeekFrom::Start(n) => n,
+						_ => todo!(),
+					};
+					// TODO ditto
+					assert!(offset % u64::from(SECTOR_SIZE) == 0);
+					data_handles[handle] = offset / u64::from(SECTOR_SIZE);
+					(job_id, Response::Position(offset))
 				}
-
-				data_handles[handle] = u64::from(offset) + u64::try_from(data.len()).unwrap();
-
-				let l = data.len();
-				Job::reply_write_clear(buf, job_id, l.try_into().unwrap()).unwrap()
-			}
-			Job::Seek {
-				handle,
-				job_id,
-				from,
-			} => {
-				use norostb_kernel::io::SeekFrom;
-				let offset = match from {
-					SeekFrom::Start(n) => n,
-					_ => todo!(),
-				};
-				data_handles[handle] = offset;
-				Job::reply_seek_clear(buf, job_id, offset).unwrap()
-			}
-			Job::Close { handle } => {
-				data_handles.remove(handle);
-				// The kernel does not expect a response.
-				continue;
-			}
-			Job::Create { job_id, .. } => {
-				Job::reply_error_clear(buf, job_id, rt::Error::InvalidOperation).unwrap()
-			}
-			Job::Share { .. } => todo!(),
-		};
-
-		tbl.write(&buf).unwrap();
+				Request::Close => {
+					data_handles.remove(handle);
+					// The kernel does not expect a response.
+					continue;
+				}
+				Request::Create { job_id, path } => {
+					path.manual_drop();
+					(job_id, Response::Error(rt::Error::InvalidOperation))
+				}
+				Request::Share { .. } => todo!(),
+				Request::GetMeta { .. } => todo!(),
+				Request::SetMeta { .. } => todo!(),
+				Request::Destroy { .. } => todo!(),
+			};
+			tbl.enqueue(job_id, resp);
+			flush = true;
+		}
+		flush.then(|| tbl.flush());
+		tbl.wait();
 	}
 }

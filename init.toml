@@ -11,7 +11,6 @@ stdout = "gui_cli/write"
 stderr = "gui_cli/write"
 
 [program.fs_fat]
-disabled = true
 path = "fs-fat"
 args = [ "file", "disk/data" ]
 target = "file"
@@ -29,7 +28,6 @@ after = [ "window_manager" ]
 file_root = ""
 
 [program.virtio_blk]
-disabled = true
 path = "virtio-blk"
 args = [ "disk" ]
 target = "disk"
@@ -49,10 +47,8 @@ file_root = ""
 
 [program.static_http_server]
 path = "static_http_server"
-#after = [ "file", "net" ]
-#file_root = "file"
-after = [ "drivers", "net" ]
-file_root = "drivers"
+after = [ "file", "net" ]
+file_root = "file"
 net_root = "net"
 
 [program.scancode_to_char]

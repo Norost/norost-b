@@ -131,7 +131,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
 	root.create(b"window_manager")
 		.unwrap()
-		.share(&table.public_table())
+		.share(table.public())
 		.unwrap();
 
 	let mut prop_buf = [0; 511];
