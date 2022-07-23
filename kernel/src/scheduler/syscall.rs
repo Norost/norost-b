@@ -8,8 +8,7 @@ use crate::{
 		Page,
 	},
 	object_table::{
-		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTableOwner, SubRange,
-		TinySlice,
+		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable, SubRange, TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
@@ -302,18 +301,13 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 		} => proc
 			.object_transform_new(buffer_mem, |buffer_mem| {
 				if let Some(buffer_mem) = buffer_mem.clone().memory_object() {
-					StreamingTableOwner::new(
-						allow_sharing,
-						buffer_mem,
-						buffer_mem_block_size,
-						hints,
-					)
-					.map_err(|e| match e {
-						NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
-						NewStreamingTableError::Map(_) => Error::CantCreateObject,
-						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
-					})
-					.map(|o| o as Arc<dyn Object>)
+					StreamingTable::new(allow_sharing, buffer_mem, buffer_mem_block_size, hints)
+						.map_err(|e| match e {
+							NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
+							NewStreamingTableError::Map(_) => Error::CantCreateObject,
+							NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
+						})
+						.map(|o| o as Arc<dyn Object>)
 				} else {
 					Err(Error::InvalidData)
 				}

@@ -13,6 +13,8 @@ pub struct StreamTable {
 	buffers: Buffers,
 	notify: rt::Object,
 	table: rt::Object,
+	// Keep a handle around as Root objects use weak references
+	public: rt::Object,
 }
 
 impl StreamTable {
@@ -42,16 +44,18 @@ impl StreamTable {
 		}
 
 		let notify = tbl.open(b"notify").unwrap();
+		let public = tbl.open(b"public").unwrap();
 		Self {
 			queue: queue.into(),
 			buffers,
 			notify,
 			table: tbl,
+			public,
 		}
 	}
 
-	pub fn public_table(&self) -> rt::Object {
-		self.table.open(b"table").unwrap()
+	pub fn public(&self) -> &rt::Object {
+		&self.public
 	}
 
 	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Request)> {
@@ -227,7 +231,8 @@ impl<'a> Deref for Data<'a> {
  * build virtio_gpu to see the issue
 impl<'a> Drop for Data<'a> {
 	fn drop(&mut self) {
-		self.table.buffers.dealloc(self.table.queue.buffer_head_ref(), self.offset)
+		core::mem::replace(&mut self.data, self.table.buffers.alloc_empty())
+			.manual_drop(self.table.queue.borrow().buffer_head_ref());
 	}
 }
 */

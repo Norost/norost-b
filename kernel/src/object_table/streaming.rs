@@ -34,16 +34,13 @@ pub struct StreamingTable {
 	notify_singleton: Arc<Notify>,
 }
 
-/// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
-pub struct StreamingTableOwner(Arc<StreamingTable>);
-
 pub enum NewStreamingTableError {
 	Alloc(AllocateError),
 	Map(MapError),
 	BlockSizeTooLarge,
 }
 
-impl StreamingTableOwner {
+impl StreamingTable {
 	pub fn new(
 		allow_sharing: bool,
 		buffer_mem: Arc<dyn MemoryObject>,
@@ -67,7 +64,7 @@ impl StreamingTableOwner {
 			AddressSpace::kernel_map_object(None, buffer_mem, RWX::RW)
 				.map_err(NewStreamingTableError::Map)?;
 		assert!(buffer_mem_size != 0, "todo");
-		Ok(Arc::new(Self(Arc::new_cyclic(|table| StreamingTable {
+		Ok(Arc::new_cyclic(|table| StreamingTable {
 			jobs: Default::default(),
 			shared: allow_sharing.then(Default::default),
 			queue: Mutex::new(queue),
@@ -77,11 +74,9 @@ impl StreamingTableOwner {
 				table: table.clone(),
 				..Default::default()
 			}),
-		}))))
+		}))
 	}
-}
 
-impl StreamingTable {
 	fn submit_job<T, F>(&self, handle: Handle, f: F) -> Ticket<T>
 	where
 		F: FnOnce(&mut ClientQueue, JobId) -> Request,
@@ -152,15 +147,17 @@ impl StreamingTable {
 	}
 }
 
-impl Object for StreamingTableOwner {
+impl Object for StreamingTable {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(match path {
-			b"notify" => Ok(self.0.notify_singleton.clone()),
-			b"table" => Ok(self.0.clone()),
+			b"notify" => Ok(self.notify_singleton.clone()),
+			b"public" => Ok(Arc::new(StreamObject {
+				table: Arc::downgrade(&self),
+				handle: Handle::MAX,
+			})),
 			&[a, b, c, d] => {
 				let h = arena::Handle::from_raw(Handle::from_le_bytes([a, b, c, d]) as _, ());
-				self.0
-					.shared
+				self.shared
 					.as_ref()
 					.and_then(|s| s.lock().remove(h))
 					.ok_or(Error::DoesNotExist)
@@ -174,33 +171,17 @@ impl Object for StreamingTableOwner {
 	}
 }
 
-unsafe impl MemoryObject for StreamingTableOwner {
+unsafe impl MemoryObject for StreamingTable {
 	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
-		self.0.queue_mem.physical_pages(f)
+		self.queue_mem.physical_pages(f)
 	}
 
 	fn physical_pages_len(&self) -> usize {
-		self.0.queue_mem.physical_pages_len()
+		self.queue_mem.physical_pages_len()
 	}
 
 	fn page_permissions(&self) -> RWX {
 		RWX::RW
-	}
-}
-
-impl Object for StreamingTable {
-	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(Handle::MAX, |q, job_id| Request::Open {
-			job_id,
-			path: self.copy_data_from(q, path),
-		})
-	}
-
-	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(Handle::MAX, |q, job_id| Request::Create {
-			job_id,
-			path: self.copy_data_from(q, path),
-		})
 	}
 }
 
