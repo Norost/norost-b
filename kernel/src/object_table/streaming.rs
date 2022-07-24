@@ -132,7 +132,7 @@ impl StreamingTable {
 						let buf = self.buffer_mem.get(s);
 						let mut b = Box::new_uninit_slice(buf.len());
 						buf.copy_to_uninit(0, &mut b);
-						self.buffer_mem.dealloc(q.buffer_head_ref(), s.offset);
+						buf.manual_drop(q.buffer_head_ref());
 						w.complete(Ok(unsafe { Box::<[_]>::assume_init(b) }))
 					}
 					AnyTicketWaker::U64(w) => w.complete(Ok(v)),
