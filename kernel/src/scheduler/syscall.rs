@@ -298,16 +298,23 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 			buffer_mem,
 			buffer_mem_block_size,
 			allow_sharing,
+			max_request_mem,
 		} => proc
 			.object_transform_new(buffer_mem, |buffer_mem| {
 				if let Some(buffer_mem) = buffer_mem.clone().memory_object() {
-					StreamingTable::new(allow_sharing, buffer_mem, buffer_mem_block_size, hints)
-						.map_err(|e| match e {
-							NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
-							NewStreamingTableError::Map(_) => Error::CantCreateObject,
-							NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
-						})
-						.map(|o| o as Arc<dyn Object>)
+					StreamingTable::new(
+						allow_sharing,
+						buffer_mem,
+						buffer_mem_block_size,
+						max_request_mem,
+						hints,
+					)
+					.map_err(|e| match e {
+						NewStreamingTableError::Alloc(_) => Error::CantCreateObject,
+						NewStreamingTableError::Map(_) => Error::CantCreateObject,
+						NewStreamingTableError::BlockSizeTooLarge => Error::InvalidData,
+					})
+					.map(|o| o as Arc<dyn Object>)
 				} else {
 					Err(Error::InvalidData)
 				}

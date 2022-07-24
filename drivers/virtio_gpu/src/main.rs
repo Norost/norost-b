@@ -185,7 +185,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	// Create table
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 4096 }).unwrap();
-	let mut tbl = StreamTable::new(&tbl_buf, 64.try_into().unwrap());
+	let mut tbl = StreamTable::new(&tbl_buf, 64.try_into().unwrap(), 1024 - 1);
 
 	rt::io::file_root()
 		.unwrap()

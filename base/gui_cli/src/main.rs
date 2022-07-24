@@ -101,7 +101,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.unwrap();
 
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4));
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
 	root.create(b"gui_cli")
 		.unwrap()
 		.share(table.public())

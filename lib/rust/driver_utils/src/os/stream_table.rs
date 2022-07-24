@@ -19,11 +19,12 @@ pub struct StreamTable {
 
 impl StreamTable {
 	/// Create a `StreamTable` with the given memory object as backing store.
-	pub fn new(buffers: &rt::Object, block_size: Pow2Size) -> Self {
+	pub fn new(buffers: &rt::Object, block_size: Pow2Size, max_request_mem: u32) -> Self {
 		let tbl = rt::Object::new(rt::NewObject::StreamTable {
 			allow_sharing: true,
 			buffer_mem: buffers.as_raw(),
 			buffer_mem_block_size: block_size,
+			max_request_mem,
 		})
 		.unwrap();
 

@@ -80,7 +80,7 @@ fn main() -> ! {
 	let (tbl, dma_phys) = {
 		let (dma, dma_phys) =
 			driver_utils::dma::alloc_dma_object((1 << 16).try_into().unwrap()).unwrap();
-		let tbl = StreamTable::new(&dma, Pow2Size(9));
+		let tbl = StreamTable::new(&dma, Pow2Size(9), (1 << 12) - 1);
 		file_root
 			.create(table_name)
 			.unwrap()

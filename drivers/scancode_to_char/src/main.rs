@@ -29,7 +29,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Create a stream table
 	let table = {
 		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-		StreamTable::new(&buf, Pow2Size(5))
+		StreamTable::new(&buf, Pow2Size(5), (1 << 5) - 1)
 	};
 	root.create(table_name)
 		.unwrap()

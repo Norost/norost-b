@@ -32,6 +32,9 @@ pub struct StreamingTable {
 	buffer_mem: Buffers,
 	/// The notify singleton for signaling when data is available.
 	notify_singleton: Arc<Notify>,
+	/// The maximum amount of memory a single request may allocate **minus one**.
+	// FIXME this can overflow on 32-bit architectures when adding +1
+	max_request_mem: u32,
 }
 
 pub enum NewStreamingTableError {
@@ -45,6 +48,7 @@ impl StreamingTable {
 		allow_sharing: bool,
 		buffer_mem: Arc<dyn MemoryObject>,
 		buffer_mem_block_size: Pow2Size,
+		max_request_mem: u32,
 		hints: AllocateHints,
 	) -> Result<Arc<Self>, NewStreamingTableError> {
 		let buffer_size = buffer_mem.physical_pages_len() * Page::SIZE;
@@ -74,6 +78,7 @@ impl StreamingTable {
 				table: table.clone(),
 				..Default::default()
 			}),
+			max_request_mem,
 		}))
 	}
 
@@ -99,15 +104,24 @@ impl StreamingTable {
 	}
 
 	fn copy_data_from_scatter(&self, queue: &mut ClientQueue, data: &[&[u8]]) -> Slice {
-		let len = data.iter().map(|d| d.len()).sum();
+		let mut len = data
+			.iter()
+			.map(|d| d.len())
+			.sum::<usize>()
+			.min(self.max_request_mem as usize + 1);
 		let buf = self
 			.buffer_mem
 			.alloc(queue.buffer_head_ref(), len)
 			.unwrap_or_else(|| todo!("no buffers available"));
 		let mut offt = 0;
 		for d in data {
+			let d = &d[..len.min(d.len())];
 			buf.copy_from(offt, d);
 			offt += d.len();
+			len -= d.len();
+			if len == 0 {
+				break;
+			}
 		}
 		Slice {
 			offset: buf.offset().try_into().unwrap(),
