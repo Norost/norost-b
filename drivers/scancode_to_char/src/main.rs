@@ -94,7 +94,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				buf.clear();
 				let data = table.alloc(1).expect("out of buffers");
 				data.copy_from(0, &[chr]);
-				table.enqueue(job_id, Response::Data { data, length: 1 });
+				table.enqueue(job_id, Response::Data(data));
 				table.flush();
 				return true;
 			} else {
@@ -153,8 +153,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						}
 						let data = table.alloc(b.len()).expect("out of buffers");
 						data.copy_from(0, b);
-						let length = l.try_into().unwrap();
-						(job_id, Response::Data { data, length })
+						(job_id, Response::Data(data))
 					}
 				}
 			}

@@ -219,14 +219,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Request::GetMeta { job_id, property } => {
 					let prop = property.get(&mut tiny_buf);
 					let data = property.into_inner();
+					data.manual_drop();
 					let r = match (handle, &*prop) {
 						(_, b"resolution") => {
 							let (w, h) = (width.to_string(), height.to_string());
+							let data = tbl.alloc(w.len() + 1 + h.len()).expect("out of buffers");
 							data.copy_from(0, w.as_bytes());
 							data.copy_from(w.len(), &[b'x']);
 							data.copy_from(w.len() + 1, h.as_bytes());
-							let length = (w.len() + 1 + h.len()).try_into().unwrap();
-							Response::Data { data, length }
+							Response::Data(data)
 						}
 						(_, b"bin/resolution") => {
 							let r = ipc_gpu::Resolution {
@@ -236,15 +237,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							.encode();
 							let data = tbl.alloc(r.len()).unwrap();
 							data.copy_from(0, &r);
-							Response::Data {
-								data,
-								length: r.len() as _,
-							}
+							Response::Data(data)
 						}
-						_ => {
-							data.manual_drop();
-							Response::Error(Error::DoesNotExist)
-						}
+						_ => Response::Error(Error::DoesNotExist),
 					};
 					(job_id, r)
 				}

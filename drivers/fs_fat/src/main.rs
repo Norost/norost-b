@@ -115,10 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							if !peek {
 								*offset += u64::try_from(len).unwrap();
 							}
-							Response::Data {
-								data,
-								length: len.try_into().unwrap(),
-							}
+							Response::Data(data)
 						}
 						Object::Query(list, index) => {
 							let f = match list.get(*index) {
@@ -132,10 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							};
 							let data = tbl.alloc(f.len()).expect("out of buffers");
 							data.copy_from(0, f.as_bytes());
-							Response::Data {
-								data,
-								length: f.len().try_into().unwrap(),
-							}
+							Response::Data(data)
 						}
 					},
 				),

@@ -147,10 +147,7 @@ fn main() -> ! {
 								data_handles[handle] += u64::from(amount / SECTOR_SIZE);
 							}
 
-							Response::Data {
-								data,
-								length: amount.try_into().unwrap(),
-							}
+							Response::Data(data)
 						},
 					)
 				}

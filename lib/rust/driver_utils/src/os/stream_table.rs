@@ -121,9 +121,9 @@ impl StreamTable {
 			Response::Error(e) => R::Error(e as _),
 			Response::Amount(n) => R::Amount(n),
 			Response::Position(n) => R::Position(n),
-			Response::Data { data, length } => R::Slice(Slice {
-				offset: data.offset().try_into().unwrap(),
-				length,
+			Response::Data(d) => R::Slice(Slice {
+				offset: d.offset().try_into().unwrap(),
+				length: d.len().try_into().unwrap(),
 			}),
 			Response::Handle(h) => R::Handle(h),
 		};
@@ -202,7 +202,7 @@ pub enum Response<'a> {
 	Error(rt::Error),
 	Amount(u32),
 	Position(u64),
-	Data { data: Data<'a>, length: u32 },
+	Data(Data<'a>),
 	Handle(Handle),
 }
 

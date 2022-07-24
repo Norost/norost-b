@@ -525,13 +525,7 @@ impl Table {
 	fn data(&mut self, job_id: JobId, data: &[u8]) {
 		let b = self.table.alloc(data.len()).expect("out of buffers");
 		b.copy_from(0, &data);
-		self.table.enqueue(
-			job_id,
-			Response::Data {
-				data: b,
-				length: data.len().try_into().unwrap(),
-			},
-		);
+		self.table.enqueue(job_id, Response::Data(b));
 		self.dirty = true;
 	}
 

@@ -157,12 +157,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 								let mut ue = ww.user_data.unread_events.borrow_mut();
 								ue.resize = Some(evt);
 								let evt = ipc_wm::Event::Resize(evt).encode();
-								let length = evt.len().try_into().unwrap();
 								for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
 									ue.resize = None;
 									let data = table.alloc(evt.len()).expect("out of buffers");
 									data.copy_from(0, &evt);
-									table.enqueue(id, Response::Data { data, length });
+									table.enqueue(id, Response::Data(data));
 									send_notif = true;
 								}
 							}
@@ -173,17 +172,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}),
 				Request::GetMeta { job_id, property } => {
 					let prop = property.get(&mut prop_buf);
-					let data = property.into_inner();
+					property.manual_drop();
 					let r = match (handle, &*prop) {
-						(Handle::MAX, _) => {
-							data.manual_drop();
-							Response::Error(Error::InvalidOperation as _)
-						}
+						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/resolution") => {
 							let rect = manager.window_rect(h, size).unwrap();
+							let data = table.alloc(8).expect("out of buffers");
 							data.copy_from(0, &u32::from(rect.size().x).to_le_bytes());
 							data.copy_from(4, &u32::from(rect.size().y).to_le_bytes());
-							Response::Data { data, length: 8 }
+							Response::Data(data)
 						}
 						(_, _) => Response::Error(Error::DoesNotExist as _),
 					};
@@ -223,10 +220,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 								let evt = evt.encode();
 								let data = table.alloc(evt.len()).expect("out of buffers");
 								data.copy_from(0, &evt);
-								Response::Data {
-									data,
-									length: evt.len() as _,
-								}
+								Response::Data(data)
 							} else {
 								w.event_listeners.get_mut().push(job_id);
 								continue;
@@ -287,12 +281,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						let mut ue = ww.user_data.unread_events.borrow_mut();
 						ue.resize = Some(evt);
 						let evt = ipc_wm::Event::Resize(evt).encode();
-						let length = evt.len().try_into().unwrap();
 						for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
 							ue.resize = None;
 							let data = table.alloc(evt.len()).expect("out of buffers");
 							data.copy_from(0, &evt);
-							table.enqueue(id, Response::Data { data, length });
+							table.enqueue(id, Response::Data(data));
 							send_notif = true;
 						}
 					}
