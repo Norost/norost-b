@@ -393,8 +393,9 @@ fn main() {
 				Request::Write { job_id, data } => match &mut table.objects[handle] {
 					Object::Socket(Socket::TcpListener(_)) => todo!(),
 					Object::Socket(Socket::TcpConnection(sock)) => {
-						data.copy_to(0, &mut buf[..data.len()]);
-						match sock.write(&buf[..data.len()], &mut iface) {
+						let len = data.len().min(buf.len());
+						data.copy_to(0, &mut buf[..len]);
+						match sock.write(&buf[..len], &mut iface) {
 							Ok(l) if l == 0 => {
 								pending_writes.push(PendingRead {
 									handle,
