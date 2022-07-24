@@ -395,6 +395,7 @@ fn main() {
 					Object::Socket(Socket::TcpConnection(sock)) => {
 						let len = data.len().min(buf.len());
 						data.copy_to(0, &mut buf[..len]);
+						data.manual_drop();
 						match sock.write(&buf[..len], &mut iface) {
 							Ok(l) if l == 0 => {
 								pending_writes.push(PendingRead {
