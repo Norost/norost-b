@@ -401,7 +401,7 @@ fn main() {
 								pending_writes.push(PendingRead {
 									handle,
 									job_id,
-									data: buf.into(),
+									data: buf[..len].into(),
 								});
 							}
 							Ok(l) => table.amount(job_id, l),

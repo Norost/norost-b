@@ -102,7 +102,6 @@ impl TcpConnection {
 		iface: &mut Interface<impl for<'d> Device<'d>>,
 	) -> Option<smoltcp::Result<()>> {
 		let s = iface.get_socket::<TcpSocket>(self.handle);
-		rt::dbg!(s.send_capacity(), s.send_queue(), data.len());
 		(s.send_capacity() - s.send_queue() >= data.len())
 			.then(|| s.send_slice(data).map(|l| debug_assert_eq!(l, data.len())))
 	}
