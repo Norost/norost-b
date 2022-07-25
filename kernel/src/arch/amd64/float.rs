@@ -2,14 +2,11 @@ use super::syscall::current_thread_ptr;
 use alloc::boxed::Box;
 use core::arch::x86_64::{_xgetbv, _xrstor64, _xsave64, _xsetbv};
 
-#[allow(dead_code)]
-const X87_STATE: u8 = 0;
+const X87_STATE: u64 = 1 << 0;
 
-#[allow(dead_code)]
-const SSE_STATE: u8 = 1;
+const SSE_STATE: u64 = 1 << 1;
 
-#[allow(dead_code)]
-const AVX_STATE: u8 = 2;
+const AVX_STATE: u64 = 1 << 2;
 
 #[allow(dead_code)]
 const MPX_BNDREGS_STATE: u8 = 3;
@@ -46,43 +43,24 @@ const HWP_STATE: u8 = 16;
 #[allow(dead_code)]
 const XCOMP_BV: u8 = 63;
 
-#[derive(Default)]
-pub enum FloatStorage {
-	#[default]
-	None,
-	Xmm(Box<Xmm>),
-}
-
-impl FloatStorage {
-	pub fn save(&mut self) {
-		match self {
-			Self::None => {}
-			Self::Xmm(xmm) => xmm.save(),
-		}
-	}
-
-	pub fn restore(&self) {
-		match self {
-			Self::None => {}
-			Self::Xmm(xmm) => xmm.restore(),
-		}
-	}
-}
-
-#[derive(Default)]
-#[repr(align(64))]
-pub struct LegacyRegion([u128; 32]);
-
-#[derive(Default)]
-#[repr(align(64))]
-pub struct XSaveHeader([u128; 4]);
-
+// Keep things simple and just save everything.
+//
+// I originally tried to have separate states for XMM/YMM/... to optimize memory usage but
+// it proved to be too ardous and no other kernels seem to do it, so we'll do it the simple,
+// stupid way.
+//
+// In fact, since basically every program uses SSE2 (and higher) anyways, we won't make it
+// optional and unconditionally initialize the FPU, which should be net faster.
 #[derive(Default)]
 #[repr(align(64))]
 #[repr(C)]
-pub struct Xmm(LegacyRegion, XSaveHeader);
+pub struct FloatStorage {
+	legacy: LegacyRegion,
+	header: XSaveHeader,
+	avx: AvxRegion,
+}
 
-impl Xmm {
+impl FloatStorage {
 	pub fn save(&mut self) {
 		unsafe {
 			_xsave64(self as *mut _ as _, u64::MAX);
@@ -100,47 +78,17 @@ impl Xmm {
 	}
 }
 
-#[allow(dead_code)]
-struct Xcr0(u64);
+#[derive(Default)]
+pub struct LegacyRegion([u128; 32]);
 
-#[allow(dead_code)]
-impl Xcr0 {
-	fn load() -> Self {
-		unsafe { Self(_xgetbv(0)) }
-	}
+#[derive(Default)]
+pub struct XSaveHeader([u128; 4]);
 
-	fn cleared() -> Self {
-		Self(0)
-	}
-
-	fn enable(&mut self, feature: u8) {
-		self.0 |= 1 << feature;
-	}
-
-	unsafe fn store(&self) {
-		unsafe { _xsetbv(0, self.0) }
-	}
-}
+#[derive(Default)]
+pub struct AvxRegion([u128; 16]);
 
 extern "C" fn handle_device_not_available(_rip: *const ()) {
-	let fp = unsafe {
-		&mut *current_thread_ptr()
-			.expect("no thread running")
-			.as_ref()
-			.arch_specific
-			.float
-			.get()
-	};
-	match fp {
-		FloatStorage::None => {
-			// Box::default() uses the box keyword internally, which makes it much less
-			// likely the compiler stupidly reserves a huge amount of stack space.
-			let xmm = Box::<Xmm>::default();
-			xmm.restore();
-			*fp = FloatStorage::Xmm(xmm);
-		}
-		FloatStorage::Xmm(xmm) => xmm.restore(),
-	}
+	panic!("FPU should be unconditionally enabled");
 }
 
 /// # Safety
@@ -150,5 +98,6 @@ pub unsafe fn init() {
 	use super::*;
 	unsafe {
 		idt_set(7, wrap_idt!(rip handle_device_not_available));
+		_xsetbv(0, X87_STATE | SSE_STATE | AVX_STATE);
 	}
 }

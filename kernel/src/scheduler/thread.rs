@@ -83,7 +83,7 @@ impl Thread {
 				kernel_stack_base,
 				process: Some(process),
 				sleep: Default::default(),
-				arch_specific: Default::default(),
+				arch_specific: arch::ThreadData::new_user(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
 			})
@@ -173,7 +173,7 @@ impl Thread {
 				kernel_stack_base,
 				process: None,
 				sleep: Default::default(),
-				arch_specific: Default::default(),
+				arch_specific: arch::ThreadData::new_kernel(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
 			})

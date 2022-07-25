@@ -146,7 +146,9 @@ pub unsafe fn set_current_thread(thread: Arc<Thread>) {
 		msr::wrmsr(msr::KERNEL_GS_BASE, thread.arch_specific.gs.get());
 
 		// Load float / vector registers
-		(&mut *thread.arch_specific.float.get()).restore();
+		(&mut *thread.arch_specific.float.get())
+			.as_ref()
+			.map(|o| o.restore());
 
 		// Set reference to new thread.
 		let user_stack = thread
@@ -183,16 +185,40 @@ pub(super) unsafe fn save_current_thread_state() {
 			thread.arch_specific.gs.set(msr::rdmsr(msr::KERNEL_GS_BASE));
 
 			// Save float / vector registers
-			(&mut *thread.arch_specific.float.get()).save();
+			(&mut *thread.arch_specific.float.get())
+				.as_mut()
+				.map(|o| o.save());
 		}
 	}
 }
 
-#[derive(Default)]
 pub struct ThreadData {
 	fs: Cell<u64>,
 	gs: Cell<u64>,
-	pub(super) float: UnsafeCell<FloatStorage>,
+	// Kernel threads don't use the FPU so try to save a little memory.
+	pub(super) float: UnsafeCell<Option<Box<FloatStorage>>>,
+}
+
+impl ThreadData {
+	/// Initialize thread data for user thread.
+	pub fn new_user() -> Self {
+		Self {
+			fs: 0.into(),
+			gs: 0.into(),
+			// Use Box::default to avoid having the compiler stupidly store FloatStorage on the
+			// stack first.
+			float: Some(Box::default()).into(),
+		}
+	}
+
+	/// Initialize thread data for kernel thread.
+	pub fn new_kernel() -> Self {
+		Self {
+			fs: 0.into(),
+			gs: 0.into(),
+			float: None.into(),
+		}
+	}
 }
 
 #[naked]
