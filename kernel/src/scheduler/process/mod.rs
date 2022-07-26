@@ -209,11 +209,11 @@ impl Process {
 		}
 		// ISRs should be disabled as we're outside a thread.
 		let mut buf = [0; 2];
+		self.exit_code.store(exit_code, Ordering::Relaxed);
 		let s = self.encode_status_bin(&threads, &mut buf);
 		for w in self.wake_on_exit.isr_lock().drain(..) {
 			w.isr_complete(Ok(s.into()));
 		}
-		self.exit_code.store(exit_code, Ordering::Relaxed);
 		// Now we just let the destructors do the rest. Sayonara! :)
 	}
 

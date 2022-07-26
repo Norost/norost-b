@@ -72,7 +72,6 @@ impl ServerHandlers for Handlers {
 	}
 
 	async fn authenticate<'a>(&self, data: &'a [u8]) -> Result<Self::User, ()> {
-		async_std::dbg!();
 		Ok(User {
 			name: "TODO".into(),
 			shell: None,
@@ -85,7 +84,6 @@ impl ServerHandlers for Handlers {
 		ty: SpawnType<'a>,
 		data: &'a [u8],
 	) -> Result<IoSet<Self::Stdin, Self::Stdout, Self::Stderr>, ()> {
-		async_std::dbg!();
 		let wait = |child: Rc<process::Child>| async move {
 			child.wait().await.unwrap().code().unwrap_or(0) as u32
 		};
