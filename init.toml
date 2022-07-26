@@ -12,7 +12,6 @@ stdout = "gui_cli/write"
 stderr = "gui_cli/write"
 
 [program.fs_fat]
-disabled = true
 path = "fs-fat"
 args = [ "file", "disk/data" ]
 target = "file"
@@ -32,7 +31,6 @@ after = [ "window_manager" ]
 file_root = ""
 
 [program.virtio_blk]
-disabled = true
 path = "virtio-blk"
 args = [ "disk" ]
 target = "disk"
