@@ -8,7 +8,7 @@ use crate::{
 		Page,
 	},
 	object_table::{
-		Handle, NewStreamingTableError, Object, Pipe, Root, SeekFrom, StreamingTable, SubRange,
+		pipe, Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable, SubRange,
 		TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
@@ -279,13 +279,16 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 					.map(|o| o as Arc<dyn Object>)
 			})
 			.ok_or(Error::InvalidObject)
-			.flatten(),
+			.flatten()
+			.map(|o| [o, u32::MAX]),
 		NewObject::Root => proc
 			.add_object(Arc::new(Root::new()))
-			.map_err(|e| match e {}),
+			.map_err(|e| match e {})
+			.map(|o| [o, u32::MAX]),
 		NewObject::Duplicate { handle } => proc
 			.duplicate_object_handle(handle)
-			.ok_or(Error::InvalidObject),
+			.ok_or(Error::InvalidObject)
+			.map(|o| [o, u32::MAX]),
 		NewObject::SharedMemory { size } => NonZeroUsize::new((size + Page::MASK) / Page::SIZE)
 			.ok_or(Error::InvalidData)
 			.and_then(|s| {
@@ -294,7 +297,8 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 				})
 			})
 			.map(|o| Arc::new(o) as Arc<dyn Object>)
-			.and_then(|o| proc.add_object(o).map_err(|e| match e {})),
+			.and_then(|o| proc.add_object(o).map_err(|e| match e {}))
+			.map(|o| [o, u32::MAX]),
 		NewObject::StreamTable {
 			buffer_mem,
 			buffer_mem_block_size,
@@ -320,22 +324,24 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 					Err(Error::InvalidData)
 				}
 			})
-			.unwrap_or(Err(Error::InvalidObject)),
+			.unwrap_or(Err(Error::InvalidObject))
+			.map(|o| [o, u32::MAX]),
 		NewObject::PermissionMask { handle, rwx } => proc
 			.object_transform_new(handle, |o| {
 				r#virtual::mask_permissions_object(o.clone(), rwx).ok_or(Error::InvalidData)
 			})
-			.unwrap_or(Err(Error::InvalidObject)),
-		NewObject::Pipe => proc.add_object(Pipe::new()).map_err(|e| match e {}),
+			.unwrap_or(Err(Error::InvalidObject))
+			.map(|o| [o, u32::MAX]),
+		NewObject::Pipe => proc.add_objects(pipe::new()).map_err(|e| match e {}),
 	}
 	.map_or_else(
 		|e| Return {
 			status: e as _,
 			value: 0,
 		},
-		|h| Return {
-			status: 0,
-			value: h.try_into().unwrap(),
+		|[a, b]| Return {
+			status: a.try_into().unwrap(),
+			value: b.try_into().unwrap(),
 		},
 	)
 }

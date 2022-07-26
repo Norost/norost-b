@@ -65,6 +65,19 @@ impl Process {
 		Ok(erase_handle(objects.insert(object)))
 	}
 
+	/// Add two objects to the process' object table.
+	pub fn add_objects(
+		&self,
+		objects: [Arc<dyn Object>; 2],
+	) -> Result<[Handle; 2], AddObjectError> {
+		let [a, b] = objects;
+		let mut objects = self.objects.lock();
+		Ok([
+			erase_handle(objects.insert(a)),
+			erase_handle(objects.insert(b)),
+		])
+	}
+
 	/// Map a memory object to a memory range.
 	pub fn map_memory_object(
 		&self,

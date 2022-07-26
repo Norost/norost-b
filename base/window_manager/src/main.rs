@@ -68,7 +68,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let shmem_size = size.x as usize * size.y as usize * 3;
 	let shmem_size = (shmem_size + 0xfff) & !0xfff;
-	let shmem_obj = rt::Object::new(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
+	let (shmem_obj, _) =
+		rt::Object::new(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
 	let (shmem, shmem_size) = shmem_obj
 		.map_object(None, rt::io::RWX::RW, 0, shmem_size)
 		.unwrap();
@@ -77,7 +78,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			handle: shmem_obj.as_raw(),
 			rwx: rt::io::RWX::R,
 		})
-		.unwrap(),
+		.unwrap()
+		.0,
 	)
 	.expect("failed to share mem with GPU");
 	// SAFETY: only we can write to this slice. The other side can go figure.
@@ -127,7 +129,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		[255, 0, 255],
 	];
 
-	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
 	root.create(b"window_manager")
 		.unwrap()

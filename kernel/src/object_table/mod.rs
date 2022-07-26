@@ -5,8 +5,9 @@
 //! Objects can be searched/filtered with tags. Individual objects are addressed by unique
 //! integer IDs.
 
+pub mod pipe;
+
 mod object;
-mod pipe;
 mod query;
 mod root;
 mod streaming;
@@ -22,7 +23,6 @@ pub use norostb_kernel::{
 };
 
 pub use object::*;
-pub use pipe::Pipe;
 pub use query::*;
 pub use root::Root;
 pub use streaming::{NewStreamingTableError, StreamingTable};

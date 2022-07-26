@@ -64,15 +64,18 @@ impl Command {
 			n: u32,
 			io: &mut Stdio,
 			og: Option<rt::RefObject<'a>>,
-			sto: &'a mut Option<rt::Object>,
+			sto: &'a mut Option<(rt::Object, rt::Object)>,
+			dir: bool,
 		) -> io::Result<impl Iterator<Item = (u32, rt::RefObject<'a>)>> {
 			let io = mem::replace(&mut io.0, StdioTy::Inherit);
 			Ok(match io {
 				StdioTy::Null => None,
 				StdioTy::Inherit => og,
 				StdioTy::Piped => {
-					*sto = Some(rt::Object::new(rt::NewObject::Pipe)?);
-					sto.as_ref().map(rt::RefObject::from)
+					let (wr, rd) = rt::Object::new(rt::NewObject::Pipe)?;
+					let (a, b) = if dir { (rd, wr) } else { (wr, rd) };
+					*sto = Some((a, b));
+					sto.as_ref().map(|(_, o)| rt::RefObject::from(o))
 				}
 			}
 			.into_iter()
@@ -86,18 +89,30 @@ impl Command {
 		let proc = rt::process::Process::new(
 			rt::io::process_root().unwrap(),
 			&res?,
-			io(ID_STDIN, &mut self.stdin, io::stdin(), &mut stdin)?
-				.chain(io(ID_STDOUT, &mut self.stdout, io::stdout(), &mut stdout)?)
-				.chain(io(ID_STDERR, &mut self.stderr, io::stderr(), &mut stderr)?)
+			io(ID_STDIN, &mut self.stdin, io::stdin(), &mut stdin, false)?
+				.chain(io(
+					ID_STDOUT,
+					&mut self.stdout,
+					io::stdout(),
+					&mut stdout,
+					true,
+				)?)
+				.chain(io(
+					ID_STDERR,
+					&mut self.stderr,
+					io::stderr(),
+					&mut stderr,
+					true,
+				)?)
 				.chain(rt::process::Process::default_root_handles()),
 			self.args.iter(),
 			self.env.iter().map(|(a, b)| (a, b)),
 		)?;
 		Ok(Child {
 			process: proc.into_object().into(),
-			stdin: stdin.map(|o| ChildStdin(o.into())),
-			stdout: stdout.map(|o| ChildStdout(o.into())),
-			stderr: stderr.map(|o| ChildStderr(o.into())),
+			stdin: stdin.map(|(o, _)| ChildStdin(o.into())),
+			stdout: stdout.map(|(o, _)| ChildStdout(o.into())),
+			stderr: stderr.map(|(o, _)| ChildStderr(o.into())),
 		})
 	}
 }

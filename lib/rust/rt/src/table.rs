@@ -14,8 +14,8 @@ pub struct Object(Handle);
 impl Object {
 	/// Create a new local object.
 	#[inline(always)]
-	pub fn new(args: NewObject) -> io::Result<Self> {
-		io::new_object(args).map(Self)
+	pub fn new(args: NewObject) -> io::Result<(Self, Self)> {
+		io::new_object(args).map(|(a, b)| (Self(a), Self(b)))
 	}
 
 	#[inline(always)]

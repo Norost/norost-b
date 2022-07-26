@@ -69,14 +69,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let (fb, _) = {
 		let size = width as usize * height as usize * 3;
-		let fb = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
+		let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
 		window
 			.share(
 				&rt::Object::new(rt::NewObject::PermissionMask {
 					handle: fb.as_raw(),
 					rwx: rt::io::RWX::R,
 				})
-				.unwrap(),
+				.unwrap()
+				.0,
 			)
 			.unwrap();
 		fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
@@ -100,7 +101,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
 		.unwrap();
 
-	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
 	root.create(b"gui_cli")
 		.unwrap()

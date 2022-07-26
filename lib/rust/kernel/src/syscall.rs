@@ -231,7 +231,7 @@ pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
 }
 
 #[inline]
-pub fn new_object(args: NewObject) -> error::Result<Handle> {
+pub fn new_object(args: NewObject) -> error::Result<(Handle, Handle)> {
 	use NewObjectArgs::*;
 	let (ty, args) = args.into_args();
 	ret(match args {
@@ -240,7 +240,7 @@ pub fn new_object(args: NewObject) -> error::Result<Handle> {
 		N2(a, b) => syscall!(ID_NEW_OBJECT(ty, a, b)),
 		N3(a, b, c) => syscall!(ID_NEW_OBJECT(ty, a, b, c)),
 	})
-	.map(|(_, h)| h as u32)
+	.map(|(a, b)| (a as _, b as _))
 }
 
 #[inline]

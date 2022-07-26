@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// Create a new table.
 	let tbl = {
-		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 16 }).unwrap();
+		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 16 }).unwrap();
 		StreamTable::new(&buf, Pow2Size(9), (1 << 12) - 1)
 	};
 	rt::io::file_root()

@@ -527,7 +527,7 @@ struct Table {
 
 impl Table {
 	fn new(table_name: &[u8]) -> Self {
-		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 18 }).unwrap();
+		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 18 }).unwrap();
 		let table = StreamTable::new(&buf, rt::io::Pow2Size(9), (1 << 12) - 1);
 		rt::io::file_root()
 			.unwrap()
