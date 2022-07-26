@@ -1,0 +1,12 @@
+[package]
+name = "norost_rt_default"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../rt"
+
+[dependencies.rt_alloc]
+package = "norostb_rt_alloc"
+path = "../rt_alloc"

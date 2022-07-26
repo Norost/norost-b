@@ -8,8 +8,7 @@ use crate::{
 		Page,
 	},
 	object_table::{
-		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTableOwner, SubRange,
-		TinySlice,
+		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable, SubRange, TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
@@ -299,13 +298,15 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 			buffer_mem,
 			buffer_mem_block_size,
 			allow_sharing,
+			max_request_mem,
 		} => proc
 			.object_transform_new(buffer_mem, |buffer_mem| {
 				if let Some(buffer_mem) = buffer_mem.clone().memory_object() {
-					StreamingTableOwner::new(
+					StreamingTable::new(
 						allow_sharing,
 						buffer_mem,
 						buffer_mem_block_size,
+						max_request_mem,
 						hints,
 					)
 					.map_err(|e| match e {

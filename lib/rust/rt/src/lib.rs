@@ -13,7 +13,7 @@
 #![feature(allocator_api)]
 #![feature(asm_const, asm_sym)]
 #![feature(core_intrinsics)]
-#![feature(const_btree_new)]
+#![feature(const_btree_new, const_trait_impl)]
 #![feature(inline_const)]
 #![feature(linkage)]
 #![feature(let_else)]

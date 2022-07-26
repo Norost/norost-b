@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::os::stream_table::{Data, Request, Response};
+use driver_utils::os::stream_table::{Data, Request, Response, StreamTable};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 
@@ -96,6 +96,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			_ => unreachable!(),
 		}
 	};
+	let wait = || poll.read(&mut []).unwrap();
+	let wait_tk = |dev: &mut virtio_gpu::Device, tk| {
+		while dev.poll_control_queue(|t| assert_eq!(tk, t)) == 0 {
+			wait();
+		}
+	};
 
 	// Allocate buffers for virtio queue requests
 	let (buf, buf_phys, buf_size) = driver_utils::dma::alloc_dma(256.try_into().unwrap()).unwrap();
@@ -127,9 +133,28 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Set up scanout
 	let mut backing = virtio_gpu::BackingStorage::new(buf2);
 	backing.push(&fb);
+	let scanout_id = 0;
+	let scanout_resource_id = 1.try_into().unwrap();
 	let rect = Rect::new(0, 0, width.try_into().unwrap(), height.try_into().unwrap());
-	let ret = unsafe { dev.init_scanout(virtio_gpu::Format::Rgbx8Unorm, rect, backing, &mut buf) };
-	let id = ret.unwrap();
+	let ret = unsafe {
+		let tk = dev
+			.create_resource_2d(
+				scanout_resource_id,
+				rect,
+				virtio_gpu::Format::Rgbx8Unorm,
+				&mut buf,
+			)
+			.unwrap();
+		wait_tk(&mut dev, tk);
+		let tk = dev
+			.attach_resource_2d(scanout_resource_id, backing, &mut buf)
+			.unwrap();
+		wait_tk(&mut dev, tk);
+		let tk = dev
+			.init_scanout(scanout_id, scanout_resource_id, rect, &mut buf)
+			.unwrap();
+		wait_tk(&mut dev, tk);
+	};
 
 	// Draw colors
 	for y in 0..height {
@@ -147,18 +172,26 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	dev.draw(id, rect, &mut buf).expect("failed to draw");
+	unsafe {
+		let tk = dev
+			.transfer(scanout_resource_id, rect, &mut buf)
+			.expect("failed to draw");
+		wait_tk(&mut dev, tk);
+		let tk = dev
+			.flush(scanout_resource_id, rect, &mut buf)
+			.expect("failed to draw");
+		wait_tk(&mut dev, tk);
+	}
 
 	// Create table
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 4096 }).unwrap();
-	let mut tbl =
-		driver_utils::os::stream_table::StreamTable::new(&tbl_buf, 64.try_into().unwrap());
+	let mut tbl = StreamTable::new(&tbl_buf, 64.try_into().unwrap(), 1024 - 1);
 
 	rt::io::file_root()
 		.unwrap()
 		.create(table_name)
 		.unwrap()
-		.share(&tbl.public_table())
+		.share(tbl.public())
 		.unwrap();
 
 	// Sync doesn't need any storage, so optimize it a little by using a constant handle.
@@ -186,14 +219,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Request::GetMeta { job_id, property } => {
 					let prop = property.get(&mut tiny_buf);
 					let data = property.into_inner();
+					data.manual_drop();
 					let r = match (handle, &*prop) {
 						(_, b"resolution") => {
 							let (w, h) = (width.to_string(), height.to_string());
+							let data = tbl.alloc(w.len() + 1 + h.len()).expect("out of buffers");
 							data.copy_from(0, w.as_bytes());
 							data.copy_from(w.len(), &[b'x']);
 							data.copy_from(w.len() + 1, h.as_bytes());
-							let length = (w.len() + 1 + h.len()).try_into().unwrap();
-							Response::Data { data, length }
+							Response::Data(data)
 						}
 						(_, b"bin/resolution") => {
 							let r = ipc_gpu::Resolution {
@@ -203,15 +237,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							.encode();
 							let data = tbl.alloc(r.len()).unwrap();
 							data.copy_from(0, &r);
-							Response::Data {
-								data,
-								length: r.len() as _,
-							}
+							Response::Data(data)
 						}
-						_ => {
-							data.manual_drop();
-							Response::Error(Error::DoesNotExist)
-						}
+						_ => Response::Error(Error::DoesNotExist),
 					};
 					(job_id, r)
 				}
@@ -264,7 +292,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 										}
 									}
 								}
-								dev.draw(id, r, &mut buf).expect("failed to draw");
+								unsafe {
+									let tk = dev
+										.transfer(scanout_resource_id, r, &mut buf)
+										.expect("failed to draw");
+									wait_tk(&mut dev, tk);
+									let tk = dev
+										.flush(scanout_resource_id, r, &mut buf)
+										.expect("failed to draw");
+									wait_tk(&mut dev, tk);
+								}
 								Response::Amount(d.len().try_into().unwrap())
 							} else {
 								Response::Error(Error::InvalidData as _)

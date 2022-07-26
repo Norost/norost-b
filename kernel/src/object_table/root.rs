@@ -133,7 +133,7 @@ impl Object for CreateRootEntry {
 	fn share(&self, share: &Arc<dyn Object>) -> Ticket<u64> {
 		let mut name = self.name.lock();
 		Ticket::new_complete(if name.is_empty() {
-			Err(Error::InvalidOperation)
+			Err(Error::InvalidData)
 		} else {
 			self.root.add(mem::take(&mut *name), Arc::downgrade(share));
 			Ok(0)

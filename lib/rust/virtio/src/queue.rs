@@ -1,20 +1,22 @@
 //! Implementation of **split** virtqueues.
 
-use super::{PhysAddr, PhysRegion};
-use core::convert::{TryFrom, TryInto};
-use core::fmt;
-use core::mem;
-use core::ptr::NonNull;
-use core::slice;
-use core::sync::atomic::{self, Ordering};
+use crate::{PhysAddr, PhysRegion};
+use core::{
+	cell::Cell,
+	convert::{TryFrom, TryInto},
+	fmt, mem,
+	ptr::NonNull,
+	slice,
+	sync::atomic::{self, Ordering},
+};
 use endian::{u16le, u32le};
 
 #[repr(C)]
 struct Descriptor {
-	address: PhysAddr,
-	length: u32le,
-	flags: u16le,
-	next: u16le,
+	address: Cell<PhysAddr>,
+	length: Cell<u32le>,
+	flags: Cell<u16le>,
+	next: Cell<u16le>,
 }
 
 impl Descriptor {
@@ -68,12 +70,18 @@ pub struct Queue<'a> {
 	_config: &'a super::pci::CommonConfig,
 	mask: u16,
 	last_used: u16,
-	free_descriptors: [u16; 8],
-	free_count: u16,
+	alloc: DescriptorAlloc,
 	descriptors: NonNull<Descriptor>,
-	pub available: NonNull<Avail>,
-	pub used: NonNull<Used>,
+	available: NonNull<Avail>,
+	used: NonNull<Used>,
 	notify_offset: u16,
+}
+
+struct DescriptorAlloc {
+	free_head: u16,
+	// A separate counter is more efficient than (ab)using the flags field as it avoids many
+	// loads/stores.
+	free_count: u16,
 }
 
 /// Returns the available head & ring.
@@ -130,7 +138,7 @@ impl<'a> Queue<'a> {
 		dma_alloc: impl FnOnce(usize, usize) -> Result<(NonNull<()>, PhysAddr), DmaError>,
 	) -> Result<Self, NewQueueError<DmaError>> {
 		// TODO ensure max_size is a power of 2
-		let size = u16::from(config.queue_size.get()).min(max_size) as usize;
+		let size = usize::from(u16::from(config.queue_size.get()).min(max_size));
 		let desc_size = mem::size_of::<Descriptor>() * size;
 		let avail_size = mem::size_of::<AvailHead>()
 			+ mem::size_of::<AvailElement>() * size
@@ -152,19 +160,6 @@ impl<'a> Queue<'a> {
 			NonNull::<Used>::new_unchecked(mem.as_ptr().add(align(desc_size + avail_size)).cast())
 		};
 
-		unsafe {
-			for i in 0..size {
-				*used.as_ptr().cast::<UsedHead>().add(1).cast::<u16>().add(i) = 0xffff
-			}
-		}
-
-		let mut free_descriptors = [0; 8];
-		for (i, u) in free_descriptors.iter_mut().enumerate() {
-			*u = i as u16;
-		}
-		let free_descriptors = [5, 7, 6, 0, 1, 3, 2, 4];
-		let free_count = 8;
-
 		let d_phys = phys;
 		let a_phys = phys + u64::try_from(desc_size).unwrap();
 		let u_phys = phys + u64::try_from(align(desc_size + avail_size)).unwrap();
@@ -180,107 +175,99 @@ impl<'a> Queue<'a> {
 
 		msix.map(|msix| config.queue_msix_vector.set(msix.into()));
 
-		Ok(Queue {
+		let mut q = Queue {
 			_config: config,
 			mask: size as u16 - 1,
 			last_used: 0,
-			free_descriptors,
-			free_count,
+			alloc: DescriptorAlloc {
+				free_head: 0,
+				free_count: 0,
+			},
 			descriptors,
 			available,
 			used,
 			notify_offset,
-		})
+		};
+
+		(0..size).for_each(|i| q.alloc.push_free_descr(descriptors_table!(q), i as _));
+
+		Ok(q)
 	}
 
 	/// Convert an iterator of `(address, data)` into a linked list of descriptors and put it in the
 	/// available ring.
 	///
-	/// Two callback functions can be specified:
+	/// # Panics
 	///
-	/// * The first will return a descriptor associated with each entry in the iterator
-	///
-	/// * The second will return the descriptor, physical address and size associated with each
-	///   buffer that may be collected.
-	pub fn send<I>(
-		&mut self,
-		iterator: I,
-		mut used: Option<&mut dyn FnMut(u16)>,
-		callback: impl FnMut(u16, PhysRegion),
-	) -> Result<(), NoBuffers>
+	/// The iterator must return at least one element, otherwise no descriptors can actually
+	/// be sent.
+	pub fn send<I>(&mut self, iterator: I) -> Result<Token, NoBuffers>
 	where
 		I: ExactSizeIterator<Item = (PhysAddr, u32, bool)>,
 	{
 		let count = iterator.len().try_into().unwrap();
-		if count == 0 {
-			// TODO is this really the right thing to do?
-			return Ok(());
+		assert!(count != 0, "expected at least one element");
+
+		if self.alloc.free_count < count {
+			return Err(NoBuffers);
 		}
 
-		if self.free_count < count {
-			self.collect_used(callback);
-			(self.free_count < count).then(|| ()).ok_or(NoBuffers)?;
-		}
-
-		let desc = descriptors_table!(self);
 		let (avail_head, avail_ring) = available_ring!(self);
+		let desc = descriptors_table!(self);
 
-		let mut head = u16le::from(0);
-		let mut prev_next = &mut head;
+		let head = Cell::new(u16le::from(0));
+		let mut prev_next = &head;
 		let mut iterator = iterator.peekable();
-		let mut free_count = self.free_count;
 		while let Some((address, length, write)) = iterator.next() {
-			free_count = free_count.checked_sub(1).ok_or(NoBuffers)?;
-			let i = usize::from(self.free_descriptors[usize::from(free_count)]);
-			desc[i].address = address;
-			desc[i].length = u32le::from(u32::try_from(length).expect("Length too large"));
-			desc[i].flags = u16le::from(u16::from(write) * Descriptor::WRITE);
-			desc[i].flags |= u16le::from(u16::from(iterator.peek().is_some()) * Descriptor::NEXT);
-			used.as_mut().map(|f| f(i as u16));
-			*prev_next = u16le::from(i as u16);
-			prev_next = &mut desc[i].next;
+			let i = usize::from(self.alloc.pop_free_descr(desc).unwrap());
+			desc[i].address.set(address);
+			desc[i]
+				.length
+				.set(u32::try_from(length).expect("Length too large").into());
+			desc[i].flags.set(u16le::from(
+				u16::from(write) * Descriptor::WRITE
+					| u16::from(iterator.peek().is_some()) * Descriptor::NEXT,
+			));
+			prev_next.set(u16le::from(i as u16));
+			prev_next = &desc[i].next;
 		}
-		self.free_count = free_count;
 
-		avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head;
+		avail_ring[usize::from(u16::from(avail_head.index) & self.mask)].index = head.get();
 		atomic::fence(Ordering::AcqRel);
 		avail_head.index = u16::from(avail_head.index).wrapping_add(1).into();
 
-		Ok(())
+		Ok(Token(head.get()))
 	}
 
 	/// Collect used buffers from the device and add them to the free_descriptors list.
 	///
-	/// A callback function can be specified which will return the descriptor, physical address
-	/// and size associated with each buffer.
+	/// The callback is called once for each returned head descriptor.
 	///
 	/// # Returns
 	///
 	/// The amount of buffers collected.
-	pub fn collect_used(&mut self, mut callback: impl FnMut(u16, PhysRegion)) -> usize {
+	#[allow(unreachable_code, dead_code, unused)]
+	pub fn collect_used(&mut self, mut callback: impl FnMut(Token, PhysRegion)) -> usize {
 		atomic::fence(Ordering::Acquire);
 		let (head, ring) = used_ring!(self);
 		let table = descriptors_table!(self);
 
 		let mut index @ last = self.last_used;
 		let head_index = u16::from(head.index);
-		//callback(head_index, index.into(), u32::MAX - 1);
 
 		while index != head_index {
 			// TODO maybe we should use unwrap?
 			let mut descr_index = u32::from(ring[usize::from(index & self.mask)].index) as u16;
+			let base = table[usize::from(descr_index)].address.get().into();
+			let size = table[usize::from(descr_index)].length.get().into();
+			callback(Token(descr_index.into()), PhysRegion { base, size });
 			loop {
-				assert_ne!(descr_index, u16::MAX);
 				let descr = &table[usize::from(descr_index)];
-				let region = PhysRegion {
-					base: descr.address,
-					size: descr.length.into(),
-				};
-				callback(descr_index, region);
-				self.free_descriptors[usize::from(self.free_count)] = descr_index;
-				self.free_count += 1;
-				if u16::from(descr.flags) & Descriptor::NEXT > 0 {
-					descr_index = descr.next.into();
+				let (flags, next) = (descr.flags.get(), descr.next.get());
+				self.alloc.push_free_descr(table, descr_index);
+				if Descriptor::NEXT & flags > 0 {
+					debug_assert_ne!(descr_index, next, "cycle | {}", self.alloc.free_count);
+					descr_index = next.into();
 				} else {
 					break;
 				}
@@ -291,27 +278,28 @@ impl<'a> Queue<'a> {
 		usize::from(head_index.wrapping_sub(last))
 	}
 
-	/// Wait for any used buffers to appear in the queue, which is useful for polling
-	/// a device for readiness.
-	///
-	/// An optional wait function can be specified to do other work instead of idly
-	/// wasting cycles.
-	pub fn wait_for_used(
-		&mut self,
-		mut callback: impl FnMut(u16, PhysRegion),
-		mut wait_fn: impl FnMut(),
-	) {
-		while usize::from(self.free_count) != self.free_descriptors.len()
-			&& self.collect_used(&mut callback) == 0
-		{
-			//callback(self.free_count, self.free_descriptors.len() as u64, u32::MAX);
-			wait_fn();
-		}
-	}
-
 	/// Return the offset relative to the notify address to flush this queue.
 	pub fn notify_offset(&self) -> u16 {
 		self.notify_offset
+	}
+}
+
+impl DescriptorAlloc {
+	/// Get a free descriptor if any are available
+	fn pop_free_descr(&mut self, table: &[Descriptor]) -> Option<u16> {
+		self.free_count.checked_sub(1).map(|c| {
+			self.free_count = c;
+			let head = self.free_head;
+			self.free_head = table[usize::from(head)].next.get().into();
+			head
+		})
+	}
+
+	/// Add a free descriptor
+	fn push_free_descr(&mut self, table: &[Descriptor], descr: u16) {
+		let head = mem::replace(&mut self.free_head, descr);
+		table[usize::from(descr)].next.set(head.into());
+		self.free_count += 1;
 	}
 }
 
@@ -327,3 +315,9 @@ impl fmt::Debug for NoBuffers {
 pub enum NewQueueError<DmaError> {
 	DmaError(DmaError),
 }
+
+/// A token for a single descriptor that has been sent to the device.
+///
+/// A token must not be reused after it is returned from [`Queue::collect_used`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Token(u16le);

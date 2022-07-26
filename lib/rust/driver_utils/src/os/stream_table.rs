@@ -13,15 +13,18 @@ pub struct StreamTable {
 	buffers: Buffers,
 	notify: rt::Object,
 	table: rt::Object,
+	// Keep a handle around as Root objects use weak references
+	public: rt::Object,
 }
 
 impl StreamTable {
 	/// Create a `StreamTable` with the given memory object as backing store.
-	pub fn new(buffers: &rt::Object, block_size: Pow2Size) -> Self {
+	pub fn new(buffers: &rt::Object, block_size: Pow2Size, max_request_mem: u32) -> Self {
 		let tbl = rt::Object::new(rt::NewObject::StreamTable {
 			allow_sharing: true,
 			buffer_mem: buffers.as_raw(),
 			buffer_mem_block_size: block_size,
+			max_request_mem,
 		})
 		.unwrap();
 
@@ -42,16 +45,18 @@ impl StreamTable {
 		}
 
 		let notify = tbl.open(b"notify").unwrap();
+		let public = tbl.open(b"public").unwrap();
 		Self {
 			queue: queue.into(),
 			buffers,
 			notify,
 			table: tbl,
+			public,
 		}
 	}
 
-	pub fn public_table(&self) -> rt::Object {
-		self.table.open(b"table").unwrap()
+	pub fn public(&self) -> &rt::Object {
+		&self.public
 	}
 
 	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Request)> {
@@ -117,9 +122,9 @@ impl StreamTable {
 			Response::Error(e) => R::Error(e as _),
 			Response::Amount(n) => R::Amount(n),
 			Response::Position(n) => R::Position(n),
-			Response::Data { data, length } => R::Slice(Slice {
-				offset: data.offset().try_into().unwrap(),
-				length,
+			Response::Data(d) => R::Slice(Slice {
+				offset: d.offset().try_into().unwrap(),
+				length: d.len().try_into().unwrap(),
 			}),
 			Response::Handle(h) => R::Handle(h),
 		};
@@ -198,7 +203,7 @@ pub enum Response<'a> {
 	Error(rt::Error),
 	Amount(u32),
 	Position(u64),
-	Data { data: Data<'a>, length: u32 },
+	Data(Data<'a>),
 	Handle(Handle),
 }
 
@@ -227,7 +232,8 @@ impl<'a> Deref for Data<'a> {
  * build virtio_gpu to see the issue
 impl<'a> Drop for Data<'a> {
 	fn drop(&mut self) {
-		self.table.buffers.dealloc(self.table.queue.buffer_head_ref(), self.offset)
+		core::mem::replace(&mut self.data, self.table.buffers.alloc_empty())
+			.manual_drop(self.table.queue.borrow().buffer_head_ref());
 	}
 }
 */

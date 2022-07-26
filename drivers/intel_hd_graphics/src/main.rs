@@ -531,11 +531,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let table = {
 		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-		let tbl = StreamTable::new(&buf, rt::io::Pow2Size(5));
-		root.create(b"gpu")
-			.unwrap()
-			.share(&tbl.public_table())
-			.unwrap();
+		let tbl = StreamTable::new(&buf, rt::io::Pow2Size(5), (1 << 8) - 1);
+		root.create(b"gpu").unwrap().share(tbl.public()).unwrap();
 		tbl
 	};
 
@@ -561,7 +558,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}),
 				Request::GetMeta { job_id, property } => {
 					let prop = property.get(&mut tiny_buf);
-					let data = property.into_inner();
+					property.manual_drop();
 					let r = match (handle, &*prop) {
 						(_, b"bin/resolution") => {
 							let r = ipc_gpu::Resolution {
@@ -571,15 +568,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							.encode();
 							let data = table.alloc(r.len()).unwrap();
 							data.copy_from(0, &r);
-							Response::Data {
-								data,
-								length: r.len() as _,
-							}
+							Response::Data(data)
 						}
-						_ => {
-							data.manual_drop();
-							Response::Error(Error::DoesNotExist)
-						}
+						_ => Response::Error(Error::DoesNotExist),
 					};
 					(job_id, r)
 				}

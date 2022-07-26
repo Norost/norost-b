@@ -63,8 +63,63 @@ impl Bitset {
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key(pub usize);
+
+impl const Default for Key {
+	fn default() -> Self {
+		Self(usize::MAX)
+	}
+}
+
+#[derive(Debug)]
+pub struct AtomicKey(pub AtomicUsize);
+
+impl const Default for AtomicKey {
+	fn default() -> Self {
+		Self(AtomicUsize::new(Key::default().0))
+	}
+}
+
+impl AtomicKey {
+	#[inline]
+	pub fn load(&self, ordering: Ordering) -> Key {
+		Key(self.0.load(ordering))
+	}
+
+	#[inline]
+	pub fn store(&self, value: Key, ordering: Ordering) {
+		self.0.store(value.0, ordering)
+	}
+
+	#[inline]
+	pub fn compare_exchange(
+		&self,
+		current: Key,
+		new: Key,
+		success: Ordering,
+		failure: Ordering,
+	) -> Result<Key, Key> {
+		self.0
+			.compare_exchange(current.0, new.0, success, failure)
+			.map(Key)
+			.map_err(Key)
+	}
+
+	#[inline]
+	pub fn compare_exchange_weak(
+		&self,
+		current: Key,
+		new: Key,
+		success: Ordering,
+		failure: Ordering,
+	) -> Result<Key, Key> {
+		self.0
+			.compare_exchange_weak(current.0, new.0, success, failure)
+			.map(Key)
+			.map_err(Key)
+	}
+}
 
 #[repr(C)]
 struct Entry {
@@ -200,8 +255,6 @@ pub unsafe fn set(key: Key, data: *mut ()) {
 /// [`init_thread`] must have been called for this thread.
 ///
 /// Only keys returned from [`allocate`] may be used.
-///
-/// The data must be initialized with [`set_data`].
 #[inline]
 pub unsafe fn get(key: Key) -> *mut () {
 	unsafe { super::read_tls_offset(key.0) as *mut _ }

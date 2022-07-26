@@ -32,10 +32,10 @@ pub struct StreamingTable {
 	buffer_mem: Buffers,
 	/// The notify singleton for signaling when data is available.
 	notify_singleton: Arc<Notify>,
+	/// The maximum amount of memory a single request may allocate **minus one**.
+	// FIXME this can overflow on 32-bit architectures when adding +1
+	max_request_mem: u32,
 }
-
-/// A wrapper around a [`StreamingTable`], intended for owners to process jobs.
-pub struct StreamingTableOwner(Arc<StreamingTable>);
 
 pub enum NewStreamingTableError {
 	Alloc(AllocateError),
@@ -43,11 +43,12 @@ pub enum NewStreamingTableError {
 	BlockSizeTooLarge,
 }
 
-impl StreamingTableOwner {
+impl StreamingTable {
 	pub fn new(
 		allow_sharing: bool,
 		buffer_mem: Arc<dyn MemoryObject>,
 		buffer_mem_block_size: Pow2Size,
+		max_request_mem: u32,
 		hints: AllocateHints,
 	) -> Result<Arc<Self>, NewStreamingTableError> {
 		let buffer_size = buffer_mem.physical_pages_len() * Page::SIZE;
@@ -67,7 +68,7 @@ impl StreamingTableOwner {
 			AddressSpace::kernel_map_object(None, buffer_mem, RWX::RW)
 				.map_err(NewStreamingTableError::Map)?;
 		assert!(buffer_mem_size != 0, "todo");
-		Ok(Arc::new(Self(Arc::new_cyclic(|table| StreamingTable {
+		Ok(Arc::new_cyclic(|table| StreamingTable {
 			jobs: Default::default(),
 			shared: allow_sharing.then(Default::default),
 			queue: Mutex::new(queue),
@@ -77,11 +78,10 @@ impl StreamingTableOwner {
 				table: table.clone(),
 				..Default::default()
 			}),
-		}))))
+			max_request_mem,
+		}))
 	}
-}
 
-impl StreamingTable {
 	fn submit_job<T, F>(&self, handle: Handle, f: F) -> Ticket<T>
 	where
 		F: FnOnce(&mut ClientQueue, JobId) -> Request,
@@ -104,15 +104,24 @@ impl StreamingTable {
 	}
 
 	fn copy_data_from_scatter(&self, queue: &mut ClientQueue, data: &[&[u8]]) -> Slice {
-		let len = data.iter().map(|d| d.len()).sum();
+		let mut len = data
+			.iter()
+			.map(|d| d.len())
+			.sum::<usize>()
+			.min(self.max_request_mem as usize + 1);
 		let buf = self
 			.buffer_mem
 			.alloc(queue.buffer_head_ref(), len)
 			.unwrap_or_else(|| todo!("no buffers available"));
 		let mut offt = 0;
 		for d in data {
+			let d = &d[..len.min(d.len())];
 			buf.copy_from(offt, d);
 			offt += d.len();
+			len -= d.len();
+			if len == 0 {
+				break;
+			}
 		}
 		Slice {
 			offset: buf.offset().try_into().unwrap(),
@@ -137,7 +146,7 @@ impl StreamingTable {
 						let buf = self.buffer_mem.get(s);
 						let mut b = Box::new_uninit_slice(buf.len());
 						buf.copy_to_uninit(0, &mut b);
-						self.buffer_mem.dealloc(q.buffer_head_ref(), s.offset);
+						buf.manual_drop(q.buffer_head_ref());
 						w.complete(Ok(unsafe { Box::<[_]>::assume_init(b) }))
 					}
 					AnyTicketWaker::U64(w) => w.complete(Ok(v)),
@@ -152,15 +161,17 @@ impl StreamingTable {
 	}
 }
 
-impl Object for StreamingTableOwner {
+impl Object for StreamingTable {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(match path {
-			b"notify" => Ok(self.0.notify_singleton.clone()),
-			b"table" => Ok(self.0.clone()),
+			b"notify" => Ok(self.notify_singleton.clone()),
+			b"public" => Ok(Arc::new(StreamObject {
+				table: Arc::downgrade(&self),
+				handle: Handle::MAX,
+			})),
 			&[a, b, c, d] => {
 				let h = arena::Handle::from_raw(Handle::from_le_bytes([a, b, c, d]) as _, ());
-				self.0
-					.shared
+				self.shared
 					.as_ref()
 					.and_then(|s| s.lock().remove(h))
 					.ok_or(Error::DoesNotExist)
@@ -174,33 +185,17 @@ impl Object for StreamingTableOwner {
 	}
 }
 
-unsafe impl MemoryObject for StreamingTableOwner {
+unsafe impl MemoryObject for StreamingTable {
 	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
-		self.0.queue_mem.physical_pages(f)
+		self.queue_mem.physical_pages(f)
 	}
 
 	fn physical_pages_len(&self) -> usize {
-		self.0.queue_mem.physical_pages_len()
+		self.queue_mem.physical_pages_len()
 	}
 
 	fn page_permissions(&self) -> RWX {
 		RWX::RW
-	}
-}
-
-impl Object for StreamingTable {
-	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(Handle::MAX, |q, job_id| Request::Open {
-			job_id,
-			path: self.copy_data_from(q, path),
-		})
-	}
-
-	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		self.submit_job(Handle::MAX, |q, job_id| Request::Create {
-			job_id,
-			path: self.copy_data_from(q, path),
-		})
 	}
 }
 

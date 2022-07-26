@@ -4,7 +4,6 @@ use core::ops::{Index, IndexMut};
 /// A typed arena that takes a [`Handle`] as key.
 ///
 /// This is commonly used with kernel tables, as those need a unique [`Handle`] per resource.
-#[derive(Default)]
 pub struct Arena<T> {
 	inner: ::arena::Arena<T, ()>,
 }
@@ -70,6 +69,14 @@ impl<T> Arena<T> {
 
 	fn convert_from_handle(handle: ::arena::Handle<()>) -> Option<Handle> {
 		handle.into_raw().0.try_into().ok()
+	}
+}
+
+impl<T> Default for Arena<T> {
+	fn default() -> Self {
+		Self {
+			inner: Default::default(),
+		}
 	}
 }
 

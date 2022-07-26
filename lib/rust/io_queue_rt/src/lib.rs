@@ -4,19 +4,20 @@
 #![deny(unused)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
 pub use nora_io_queue::{error, Handle, Monotonic, Pow2Size, SeekFrom};
 
-use alloc::vec::Vec;
+use alloc::boxed::Box;
 use arena::Arena;
+use async_completion::{Buf, BufMut};
 use core::{
 	cell::{Cell, RefCell},
 	fmt,
 	future::Future,
 	mem::{self, MaybeUninit},
 	pin::Pin,
+	slice,
 	task::{Context, Poll, Waker},
 	time::Duration,
 };
@@ -24,7 +25,7 @@ use nora_io_queue::{self as q, Request};
 
 pub struct Queue {
 	inner: RefCell<q::Queue>,
-	inflight_buffers: RefCell<Arena<(Vec<u8>, BufferFutureState), ()>>,
+	inflight_buffers: RefCell<Arena<BufferFutureState, ()>>,
 	/// A counter of responses that have been popped of but have not yet been consumed
 	/// by the client.
 	///
@@ -62,38 +63,35 @@ impl Queue {
 	}
 
 	/// Submit a request involving reading into byte buffers.
-	fn submit_read_buffer<F>(
+	fn submit_read_buffer<B: BufMut, F>(
 		&self,
-		mut buf: Vec<u8>,
+		mut buffer: B,
 		handle: Handle,
-		n: usize,
 		wrap: F,
-	) -> Result<BufferFuture<'_>, Full>
+	) -> Result<BufferFuture<'_, B>, Full<B>>
 	where
 		F: FnOnce(&'static mut [MaybeUninit<u8>]) -> Request,
 	{
-		let l = buf.len();
-		buf.reserve(l + n);
 		let mut inflight = self.inflight_buffers.borrow_mut();
-		let i = inflight.insert((buf, BufferFutureState::Inflight));
-		let buffer = &mut inflight[i].0.spare_capacity_mut()[..n];
-		// SAFETY:
-		// - The buffer will live at least as long as this queue due to us putting
-		//   it in inflight_buffers. inflight_buffers can only be allocated through dropping.
-		// - The destructor of the inner queue ensures no more requests are in flight.
-		// - If this queue is mem::forgot()ten then the buffer lives forever.
-		let buffer = unsafe { extend_lifetime_mut(buffer) };
-		self.inner
+		let i = inflight.insert(BufferFutureState::Inflight);
+		// SAFETY: The buffer will live at least as long as the BufferFuture,
+		// even if it is mem::forgot()ten
+		let buf = unsafe { extend_lifetime_mut(buf_as_slice_total_mut(&mut buffer)) };
+		let res = self
+			.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
-			.map_err(|_| {
-				// The buffer is safe to remove since the request did not actually get submitted.
-				Full(inflight.remove(i).unwrap().0)
-			})?;
-		Ok(BufferFuture {
-			queue: Some(self).into(),
-			inflight_index: i,
-		})
+			.submit(i.into_raw().0 as u64, handle, wrap(buf));
+		match res {
+			Ok(_) => Ok(BufferFuture {
+				queue: self,
+				inflight_index: i,
+				buffer: Some(buffer),
+			}),
+			Err(_) => {
+				inflight.remove(i);
+				Err(Full(buffer))
+			}
+		}
 	}
 
 	/// Submit a request involving writing from byte buffers.
@@ -103,135 +101,107 @@ impl Queue {
 	/// # Panics
 	///
 	/// If `offset` is larger than the length of `buf`.
-	fn submit_write_buffer<F>(
+	fn submit_write_buffer<B: Buf, F>(
 		&self,
-		buf: Vec<u8>,
-		offset: usize,
+		buffer: B,
 		handle: Handle,
 		wrap: F,
-	) -> Result<BufferFuture<'_>, Full>
+	) -> Result<BufferFuture<'_, B>, Full<B>>
 	where
 		F: FnOnce(&'static [u8]) -> Request,
 	{
 		let mut inflight = self.inflight_buffers.borrow_mut();
-		let i = inflight.insert((buf, BufferFutureState::Inflight));
-		let buffer = &inflight[i].0[offset..];
-		// SAFETY:
-		// - The buffer will live at least as long as this queue due to us putting
-		//   it in inflight_buffers. inflight_buffers can only be deallocated through dropping.
-		// - The destructor of the inner queue ensures no more requests are in flight.
-		// - If this queue is mem::forgot()ten then the buffer lives forever.
-		let buffer = unsafe { extend_lifetime(buffer) };
-		self.inner
+		let i = inflight.insert(BufferFutureState::Inflight);
+		// SAFETY: The buffer will live at least as long as the BufferFuture,
+		// even if it is mem::forgot()ten
+		let buf = unsafe { extend_lifetime(buf_as_slice_init(&buffer)) };
+		let res = self
+			.inner
 			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, wrap(buffer))
-			.map_err(|_| {
-				// The buffer is safe to remove since the request did not actually get submitted.
-				Full(inflight.remove(i).unwrap().0)
-			})?;
-		Ok(BufferFuture {
-			queue: Some(self).into(),
-			inflight_index: i,
-		})
+			.submit(i.into_raw().0 as u64, handle, wrap(buf));
+		match res {
+			Ok(_) => Ok(BufferFuture {
+				queue: self,
+				inflight_index: i,
+				buffer: Some(buffer),
+			}),
+			Err(_) => {
+				inflight.remove(i);
+				Err(Full(buffer))
+			}
+		}
 	}
 
 	/// Submit a request not involving a byte buffer.
 	///
-	/// While a `BufferFuture` is returned the `Vec` is a dummy.
-	fn submit_no_buffer(&self, handle: Handle, request: Request) -> Result<BufferFuture<'_>, Full> {
-		let mut inflight = self.inflight_buffers.borrow_mut();
-		let i = inflight.insert((Vec::new(), BufferFutureState::Inflight));
-		self.inner
-			.borrow_mut()
-			.submit(i.into_raw().0 as u64, handle, request)
-			.map_err(|_| Full(Vec::new()))?;
-		Ok(BufferFuture {
-			queue: Some(self).into(),
-			inflight_index: i,
-		})
+	/// While a `BufferFuture` is returned the buffer is a dummy.
+	fn submit_no_buffer(
+		&self,
+		handle: Handle,
+		request: Request,
+	) -> Result<BufferFuture<'_, ()>, Full<()>> {
+		self.submit_write_buffer((), handle, |_| request)
 	}
 
 	/// Read data from an object, advancing the seek head.
-	///
-	/// The data is appended to the buffer.
-	pub fn submit_read(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Read<'_>, Full> {
-		self.submit_read_buffer(buf, handle, n, |buffer| Request::Read { buffer })
+	pub fn submit_read<B>(&self, handle: Handle, buf: B) -> Result<Read<'_, B>, Full<B>>
+	where
+		B: BufMut,
+	{
+		self.submit_read_buffer(buf, handle, |buffer| Request::Read { buffer })
 			.map(|fut| Read { fut })
 	}
 
+	/// Read data from an object without advancing the seek head.
+	pub fn submit_peek<B>(&self, handle: Handle, buf: B) -> Result<Peek<'_, B>, Full<B>>
+	where
+		B: BufMut,
+	{
+		self.submit_read_buffer(buf, handle, |buffer| Request::Peek { buffer })
+			.map(|fut| Peek { fut })
+	}
+
 	/// Write data to an object.
-	///
-	/// Only data from `data[offset..]` is written from start to end. Not all data may be written.
-	///
-	/// # Panics
-	///
-	/// If `offset` is larger than the length of `data`.
-	pub fn submit_write(
-		&self,
-		handle: Handle,
-		data: Vec<u8>,
-		offset: usize,
-	) -> Result<Write<'_>, Full> {
-		self.submit_write_buffer(data, offset, handle, |buffer| Request::Write { buffer })
+	pub fn submit_write<B>(&self, handle: Handle, data: B) -> Result<Write<'_, B>, Full<B>>
+	where
+		B: Buf,
+	{
+		self.submit_write_buffer(data, handle, |buffer| Request::Write { buffer })
 			.map(|fut| Write { fut })
 	}
 
 	/// Open an object.
-	///
-	/// Only the bytes in `path[offset..]` are interpreted.
-	///
-	/// # Panics
-	///
-	/// If `offset` is larger than the length of `path`.
-	pub fn submit_open(
-		&self,
-		handle: Handle,
-		path: Vec<u8>,
-		offset: usize,
-	) -> Result<Open<'_>, Full> {
-		self.submit_write_buffer(path, offset, handle, |path| Request::Open { path })
+	pub fn submit_open<B>(&self, handle: Handle, path: B) -> Result<Open<'_, B>, Full<B>>
+	where
+		B: Buf,
+	{
+		self.submit_write_buffer(path, handle, |path| Request::Open { path })
 			.map(|fut| Open { fut })
 	}
 
 	/// Create an object.
-	///
-	/// Only the bytes in `path[offset..]` are interpreted.
-	///
-	/// # Panics
-	///
-	/// If `offset` is larger than the length of `path`.
-	pub fn submit_create(
-		&self,
-		handle: Handle,
-		path: Vec<u8>,
-		offset: usize,
-	) -> Result<Create<'_>, Full> {
-		self.submit_write_buffer(path, offset, handle, |path| Request::Create { path })
+	pub fn submit_create<B>(&self, handle: Handle, path: B) -> Result<Create<'_, B>, Full<B>>
+	where
+		B: Buf,
+	{
+		self.submit_write_buffer(path, handle, |path| Request::Create { path })
 			.map(|fut| Create { fut })
 	}
 
-	pub fn submit_seek(&self, handle: Handle, from: SeekFrom) -> Result<Seek<'_>, Full> {
+	pub fn submit_seek(&self, handle: Handle, from: SeekFrom) -> Result<Seek<'_>, Full<()>> {
 		self.submit_no_buffer(handle, Request::Seek { from })
 			.map(|fut| Seek { fut })
 	}
 
-	pub fn submit_close(&self, handle: Handle) -> Result<(), Full> {
+	pub fn submit_close(&self, handle: Handle) -> Result<(), Full<()>> {
 		self.inner
 			.borrow_mut()
 			.submit(u64::MAX, handle, Request::Close)
 			.map(|b| debug_assert!(!b))
-			.map_err(|_| todo!())
+			.map_err(|_| Full(()))
 	}
 
-	/// Read data from an object without advancing the seek head.
-	///
-	/// The data is appended to the buffer.
-	pub fn submit_peek(&self, handle: Handle, buf: Vec<u8>, n: usize) -> Result<Peek<'_>, Full> {
-		self.submit_read_buffer(buf, handle, n, |buffer| Request::Peek { buffer })
-			.map(|fut| Peek { fut })
-	}
-
-	pub fn submit_share(&self, handle: Handle, share: Handle) -> Result<Share<'_>, Full> {
+	pub fn submit_share(&self, handle: Handle, share: Handle) -> Result<Share<'_>, Full<()>> {
 		self.submit_no_buffer(handle, Request::Share { share })
 			.map(|fut| Share { fut })
 	}
@@ -244,12 +214,8 @@ impl Queue {
 			n += 1;
 			let i = arena::Handle::from_raw(resp.user_data as usize, ());
 			let s = BufferFutureState::Finished(error::result(resp.value).map(|v| v as u64));
-			let t = &mut inflight[i];
-			match mem::replace(&mut t.1, s) {
-				BufferFutureState::Cancelled => {
-					// Remove the buffer to avoid leaks.
-					// This is safe since the kernel has finished doing whatever operations it
-					// needs to do with it.
+			match mem::replace(&mut inflight[i], s) {
+				BufferFutureState::Cancelled(_) => {
 					inflight.remove(i).unwrap();
 					n -= 1;
 				}
@@ -283,50 +249,56 @@ unsafe fn extend_lifetime_mut<'a, T: ?Sized>(t: &'a mut T) -> &'static mut T {
 	unsafe { mem::transmute(t) }
 }
 
-/// Structure returned if the queue is full. It contains the [`Vec`] that was passed as argument.
-/// If the request did not take a [`Vec`] this structure contains an empty [`Vec`].
-pub struct Full(pub Vec<u8>);
+fn buf_as_slice_init<B: Buf>(buf: &B) -> &[u8] {
+	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
+	unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.bytes_init()) }
+}
 
-/// Custom debug impl since there is no need to print the inner [`Vec`].
-impl fmt::Debug for Full {
+fn buf_as_slice_total_mut<B: BufMut>(buf: &mut B) -> &mut [MaybeUninit<u8>] {
+	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
+	unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), buf.bytes_total()) }
+}
+
+/// Structure returned if the queue is full.
+/// It contains the buffer that was passed as argument.
+pub struct Full<B: Buf>(pub B);
+
+/// Custom debug impl since there is no need to print the inner buffer.
+impl<B: Buf> fmt::Debug for Full<B> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		"Full".fmt(f)
 	}
 }
 
-#[derive(Debug)]
 enum BufferFutureState {
 	Inflight,
 	InflightWithWaker(Waker),
 	Finished(error::Result<u64>),
-	Cancelled,
+	Cancelled(Box<dyn Buf>),
 }
 
 /// A future that involves byte buffers.
-struct BufferFuture<'a> {
-	queue: Cell<Option<&'a Queue>>,
+struct BufferFuture<'a, B: Buf> {
+	queue: &'a Queue,
 	inflight_index: arena::Handle<()>,
+	buffer: Option<B>,
 }
 
-impl Future for BufferFuture<'_> {
-	type Output = (Vec<u8>, error::Result<u64>);
+impl<B: Buf> Future for BufferFuture<'_, B> {
+	type Output = (Result<u64, error::Error>, B);
 
 	/// Check if the read request has finished.
-	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		let queue = match self.queue.get() {
-			Some(q) => q,
-			None => panic!("poll after ready"),
-		};
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		let i = self.inflight_index;
-		let mut inflight = queue.inflight_buffers.borrow_mut();
+		let mut inflight = self.queue.inflight_buffers.borrow_mut();
 		let t = &mut inflight[i];
-		match mem::replace(&mut t.1, BufferFutureState::Cancelled) {
+		match mem::replace(t, BufferFutureState::Cancelled(Box::new(()))) {
 			BufferFutureState::Inflight => {
-				t.1 = BufferFutureState::InflightWithWaker(cx.waker().clone());
+				*t = BufferFutureState::InflightWithWaker(cx.waker().clone());
 				Poll::Pending
 			}
 			BufferFutureState::InflightWithWaker(waker) => {
-				t.1 = BufferFutureState::InflightWithWaker(if waker.will_wake(cx.waker()) {
+				*t = BufferFutureState::InflightWithWaker(if waker.will_wake(cx.waker()) {
 					waker
 				} else {
 					cx.waker().clone()
@@ -334,139 +306,128 @@ impl Future for BufferFuture<'_> {
 				Poll::Pending
 			}
 			BufferFutureState::Finished(res) => {
-				let (vec, _) = inflight.remove(i).unwrap();
-				queue.ready_responses.set(queue.ready_responses.get() - 1);
-				self.queue.set(None);
-				Poll::Ready((vec, res))
+				inflight.remove(i).unwrap();
+				self.queue
+					.ready_responses
+					.set(self.queue.ready_responses.get() - 1);
+				Poll::Ready((res, self.buffer.take().expect("buffer already taken")))
 			}
-			BufferFutureState::Cancelled => unreachable!(),
+			BufferFutureState::Cancelled(_) => unreachable!(),
 		}
 	}
 }
 
-impl Drop for BufferFuture<'_> {
+impl<B: Buf> Drop for BufferFuture<'_, B> {
 	fn drop(&mut self) {
-		let queue = match self.queue.get() {
-			Some(q) => q,
-			None => return,
-		};
-		let i = self.inflight_index;
-		let mut inflight = queue.inflight_buffers.borrow_mut();
-		inflight[i].1 = BufferFutureState::Cancelled;
+		if let Some(buf) = self.buffer.take() {
+			let i = self.inflight_index;
+			let mut inflight = self.queue.inflight_buffers.borrow_mut();
+			match inflight.get_mut(i) {
+				Some(s @ BufferFutureState::Inflight)
+				| Some(s @ BufferFutureState::InflightWithWaker(_)) => {
+					// We can't drop the buffer yet as it is still in use by the queue.
+					*s = BufferFutureState::Cancelled(Box::new(buf));
+				}
+				Some(BufferFutureState::Finished(_)) | None => {}
+				Some(BufferFutureState::Cancelled(_)) => unreachable!(),
+			}
+		}
 	}
 }
 
-/// A pending read request.
-pub struct Read<'a> {
-	fut: BufferFuture<'a>,
+fn poll_set_len<B: BufMut>(
+	fut: &mut BufferFuture<'_, B>,
+	cx: &mut Context<'_>,
+) -> Poll<(error::Result<usize>, B)> {
+	Pin::new(fut).poll(cx).map(|(r, mut buf)| {
+		let r = r.map(|s| {
+			// SAFETY: the kernel should have initialized the exact given amount of bytes.
+			unsafe { buf.set_bytes_init(s as _) };
+			s as _
+		});
+		(r, buf)
+	})
 }
 
-impl Future for Read<'_> {
-	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
+/// A pending read request.
+pub struct Read<'a, B: BufMut> {
+	fut: BufferFuture<'a, B>,
+}
+
+impl<B: BufMut> Future for Read<'_, B> {
+	type Output = (error::Result<usize>, B);
 
 	/// Check if the read request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut)
-			.poll(cx)
-			.map(|(mut vec, r)| match r {
-				Ok(len) => {
-					// SAFETY: the kernel should have written (i.e. initialized) at least len bytes
-					unsafe { vec.set_len(len as usize) };
-					Ok(vec)
-				}
-				Err(e) => Err((vec, e)),
-			})
+		poll_set_len(&mut self.fut, cx)
+	}
+}
+
+/// A pending peek request.
+pub struct Peek<'a, B: BufMut> {
+	fut: BufferFuture<'a, B>,
+}
+
+impl<B: BufMut> Future for Peek<'_, B> {
+	type Output = (error::Result<usize>, B);
+
+	/// Check if the peek request has finished.
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		poll_set_len(&mut self.fut, cx)
 	}
 }
 
 /// A pending write request.
-pub struct Write<'a> {
-	fut: BufferFuture<'a>,
+pub struct Write<'a, B: Buf> {
+	fut: BufferFuture<'a, B>,
 }
 
-impl Future for Write<'_> {
-	type Output = Result<(Vec<u8>, usize), (Vec<u8>, error::Error)>;
+impl<B: Buf> Future for Write<'_, B> {
+	type Output = (error::Result<usize>, B);
 
 	/// Check if the write request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
-			Ok(len) => Ok((vec, len as usize)),
-			Err(e) => Err((vec, e)),
-		})
+		Pin::new(&mut self.fut)
+			.poll(cx)
+			.map(|(r, buf)| (r.map(|s| s as _), buf))
 	}
 }
 
 /// A pending open request.
-pub struct Open<'a> {
-	fut: BufferFuture<'a>,
+pub struct Open<'a, B: Buf> {
+	fut: BufferFuture<'a, B>,
 }
 
-impl Future for Open<'_> {
-	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
+impl<B: Buf> Future for Open<'_, B> {
+	type Output = (error::Result<Handle>, B);
 
 	/// Check if the open request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
-			Ok(h) => Ok((vec, h as Handle)),
-			Err(e) => Err((vec, e)),
-		})
+		Pin::new(&mut self.fut)
+			.poll(cx)
+			.map(|(r, buf)| (r.map(|s| s as _), buf))
 	}
 }
 
 /// A pending create request.
-pub struct Create<'a> {
-	fut: BufferFuture<'a>,
+pub struct Create<'a, B: Buf> {
+	fut: BufferFuture<'a, B>,
 }
 
-impl Future for Create<'_> {
-	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
+impl<B: Buf> Future for Create<'_, B> {
+	type Output = (error::Result<Handle>, B);
 
 	/// Check if the create request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
-			Ok(h) => Ok((vec, h as Handle)),
-			Err(e) => Err((vec, e)),
-		})
-	}
-}
-
-/// A pending query request.
-pub struct Query<'a> {
-	fut: BufferFuture<'a>,
-}
-
-impl Future for Query<'_> {
-	type Output = Result<(Vec<u8>, Handle), (Vec<u8>, error::Error)>;
-
-	/// Check if the query request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
-			Ok(h) => Ok((vec, h as Handle)),
-			Err(e) => Err((vec, e)),
-		})
-	}
-}
-
-/// A pending query next request.
-pub struct QueryNext<'a> {
-	fut: BufferFuture<'a>,
-}
-
-impl Future for QueryNext<'_> {
-	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
-
-	/// Check if the query request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(vec, r)| match r {
-			Ok(_) => Ok(vec),
-			Err(e) => Err((vec, e)),
-		})
+		Pin::new(&mut self.fut)
+			.poll(cx)
+			.map(|(r, buf)| (r.map(|s| s as _), buf))
 	}
 }
 
 /// A pending seek request.
 pub struct Seek<'a> {
-	fut: BufferFuture<'a>,
+	fut: BufferFuture<'a, ()>,
 }
 
 impl Future for Seek<'_> {
@@ -474,36 +435,13 @@ impl Future for Seek<'_> {
 
 	/// Check if the seek request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
-	}
-}
-
-/// A pending peek request.
-pub struct Peek<'a> {
-	fut: BufferFuture<'a>,
-}
-
-impl Future for Peek<'_> {
-	type Output = Result<Vec<u8>, (Vec<u8>, error::Error)>;
-
-	/// Check if the peek request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut)
-			.poll(cx)
-			.map(|(mut vec, r)| match r {
-				Ok(len) => {
-					// SAFETY: the kernel should have written (i.e. initialized) at least len bytes
-					unsafe { vec.set_len(len as usize) };
-					Ok(vec)
-				}
-				Err(e) => Err((vec, e)),
-			})
+		Pin::new(&mut self.fut).poll(cx).map(|(r, _)| r)
 	}
 }
 
 /// A pending share request.
 pub struct Share<'a> {
-	fut: BufferFuture<'a>,
+	fut: BufferFuture<'a, ()>,
 }
 
 impl Future for Share<'_> {
@@ -511,6 +449,6 @@ impl Future for Share<'_> {
 
 	/// Check if the share request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		Pin::new(&mut self.fut).poll(cx).map(|(_, r)| r)
+		Pin::new(&mut self.fut).poll(cx).map(|(r, _)| r)
 	}
 }

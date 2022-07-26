@@ -5,6 +5,10 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
+use async_std::{
+	io::{Read, Write},
+	object::{AsyncObject, RefAsyncObject},
+};
 use core::{
 	cell::{Cell, RefCell},
 	future::Future,
@@ -12,25 +16,7 @@ use core::{
 	time::Duration,
 };
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use nora_io_queue_rt::Queue;
 use norostb_kernel::{error::Error, object::Pow2Size, RWX};
-
-#[global_allocator]
-static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
-
-#[alloc_error_handler]
-fn alloc_error(_: core::alloc::Layout) -> ! {
-	// FIXME the runtime allocates memory by default to write things, so... crap
-	// We can run in similar trouble with the I/O queue. Some way to submit I/O requests
-	// without going through an queue may be useful.
-	rt::exit(129)
-}
-
-#[panic_handler]
-fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-	let _ = rt::io::stderr().map(|o| writeln!(o, "{:?}", info));
-	rt::exit(128)
-}
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
@@ -43,35 +29,28 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	// Create a stream table
 	let table = {
 		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-		StreamTable::new(&buf, Pow2Size(5))
+		StreamTable::new(&buf, Pow2Size(5), (1 << 5) - 1)
 	};
 	root.create(table_name)
 		.unwrap()
-		.share(&table.public_table())
+		.share(table.public())
 		.unwrap();
 
 	// Open input
-	let input = rt::Object::open(&root, input).unwrap().into_raw();
+	let input = rt::Object::open(&root, input).unwrap();
+	let input = async_std::object::AsyncObject::from(input);
 
 	let char_buf = RefCell::new(VecDeque::new());
 	let readers = RefCell::new(driver_utils::Arena::new());
 	let pending_read = Cell::new(None);
 	let shifts = Cell::new(0);
 
-	// Create async I/O queue
-	let queue = Queue::new(
-		nora_io_queue_rt::Pow2Size::P6,
-		nora_io_queue_rt::Pow2Size::P6,
-	)
-	.unwrap();
-
 	let do_read = || async {
 		use scancodes::{Event, ScanCode};
-		let mut buf = queue
-			.submit_read(input, Vec::new(), 4)
-			.unwrap()
-			.await
-			.unwrap();
+		// FIXME https://github.com/rust-lang/rust/issues/99385
+		// It *was* fine up until recently. Imma keep using it for now...
+		let (res, mut buf) = input.read(Vec::with_capacity(4)).await;
+		res.unwrap();
 		assert_eq!(buf.len(), 4, "incomplete scancode");
 		let chr = match Event::try_from(<[u8; 4]>::try_from(&buf[..]).unwrap()).unwrap() {
 			Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
@@ -115,7 +94,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				buf.clear();
 				let data = table.alloc(1).expect("out of buffers");
 				data.copy_from(0, &[chr]);
-				table.enqueue(job_id, Response::Data { data, length: 1 });
+				table.enqueue(job_id, Response::Data(data));
 				table.flush();
 				return true;
 			} else {
@@ -126,11 +105,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	let do_job = || async {
-		queue
-			.submit_read(table.notifier().as_raw(), Vec::new(), 0)
-			.unwrap()
-			.await
-			.unwrap();
+		let (res, mut buf) = RefAsyncObject::from(table.notifier()).read(()).await;
+		res.unwrap();
 		let mut tiny_buf = [0; 16];
 		let (handle, req) = table.dequeue().unwrap();
 		let (job_id, resp) = match req {
@@ -146,7 +122,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 			Request::Close => {
-				readers.borrow_mut().remove(handle).unwrap();
+				if handle != rt::Handle::MAX {
+					// TODO we should have some kind of global refcount to see if we
+					// should exit
+					readers.borrow_mut().remove(handle).unwrap();
+				}
 				// The kernel does not expect a response
 				return true;
 			}
@@ -173,8 +153,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						}
 						let data = table.alloc(b.len()).expect("out of buffers");
 						data.copy_from(0, b);
-						let length = l.try_into().unwrap();
-						(job_id, Response::Data { data, length })
+						(job_id, Response::Data(data))
 					}
 				}
 			}
@@ -227,8 +206,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 			}
 		}
-		queue.poll();
-		queue.wait(Duration::MAX);
-		queue.process();
+		async_std::queue::wait(Duration::MAX);
 	}
 }

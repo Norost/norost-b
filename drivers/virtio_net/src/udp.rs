@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use smoltcp::{
 	iface::{Interface, SocketHandle},
 	phy::Device,

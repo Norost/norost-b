@@ -1,43 +1,59 @@
-use futures::stream::Stream;
-use std::{
+#![no_std]
+#![feature(start)]
+
+extern crate alloc;
+
+use alloc::{boxed::Box, vec::Vec};
+use async_std::{
+	eprintln,
+	io::{Buf, Error, Read, Write},
+	net::{Ipv4Addr, TcpListener, TcpStream},
+	println,
+};
+use core::{
 	future::Future,
-	io::{ErrorKind, Write},
 	pin::Pin,
 	task::{Context, Poll},
 	time::Duration,
+};
+use futures::{
+	future::{self, Either},
+	stream::StreamExt,
 };
 
 const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request</h1>";
 const NOT_FOUND: &[u8] = b"<!DOCTYPE html><h1>404 Not Found</h1>";
 const INTERNAL_SERVER_ERROR: &[u8] = b"<!DOCTYPE html><h1>500 Internal Server Error</h1>";
 
-fn main() {
-	eprintln!("creating listener");
-	let listener = rt::io::net_root()
-		.unwrap()
-		.create(b"default/tcp/listen/80")
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+	async_std::task::block_on(main())
+}
+
+async fn main() -> ! {
+	eprintln!("creating listener").await;
+	let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 80))
+		.await
 		.unwrap();
-	eprintln!("accepting incoming connections");
+	eprintln!("accepting incoming connections").await;
 
-	let do_accept = move |s| rt::io::open(listener.as_raw(), s, 0);
-	let mut accept = do_accept(Vec::from(*b"accept"));
+	let mut accept = Box::pin(listener.accept());
 
-	let mut bufs = Vec::new();
-
-	let do_client = |c: rt::Object, buf: Vec<_>, buf2: Vec<_>| async move {
+	let do_client = |c: TcpStream| async move {
 		loop {
+			let (res, buf) = c.read(Vec::with_capacity(2048)).await;
 			let mut headers = [""; 128];
-			let (mut resp, keep_alive) = match rt::io::read(c.as_raw(), buf, 2048).await {
-				Ok(b) if b.is_empty() => return, // Client closed the connection prematurely
-				Ok(b) => match mhttp::RequestParser::parse(&b, &mut headers) {
-					Ok((req, _)) => handle_client(buf2, req),
-					Err(_) => bad_request(buf2, false),
+			let (mut resp, keep_alive) = match res {
+				Ok(l) if l == 0 => return, // Client closed the connection prematurely
+				Ok(l) => match mhttp::RequestParser::parse(&buf, &mut headers) {
+					Ok((req, _)) => handle_client(Vec::new(), req).await,
+					Err(_) => bad_request(buf, false),
 				},
-				Err(_) => bad_request(buf2, false),
+				Err(_) => bad_request(buf, false),
 			};
 			let mut total = 0;
-			while let Ok((r, n)) = rt::io::write(c.as_raw(), resp, total).await {
-				resp = r;
+			while let (Ok(n), r) = c.write(resp.slice(total..)).await {
+				resp = r.into_inner();
 				if n == 0 {
 					return; // Client closed the connection prematurely
 				}
@@ -53,28 +69,33 @@ fn main() {
 		}
 	};
 	let mut clients = futures::stream::FuturesUnordered::new();
-	let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+	let mut finish_client = clients.next();
 
 	loop {
 		// Accept new clients
-		if let Poll::Ready(r) = Pin::new(&mut accept).poll(&mut cx) {
-			let (accept_str, c) = r.unwrap();
-			let (buf, buf2) = bufs.pop().unwrap_or_else(|| (Vec::new(), Vec::new()));
-			clients.push(do_client(rt::Object::from_raw(c), buf, buf2));
-			accept = do_accept(accept_str);
-		};
-
-		// Handle currently connected clients
-		if !clients.is_empty() {
-			while let Poll::Ready(Some(())) = Pin::new(&mut clients).poll_next(&mut cx) {}
+		match future::select(accept, finish_client).await {
+			Either::Left((r, _f)) => {
+				clients.push(do_client(r.unwrap().0));
+				accept = Box::pin(listener.accept());
+				// TODO will this work properly always?
+				finish_client = clients.next();
+			}
+			Either::Right((r, a)) => {
+				if r.is_none() {
+					clients.push(do_client(a.await.unwrap().0));
+					accept = Box::pin(listener.accept());
+					finish_client = clients.next();
+				} else {
+					accept = a;
+					finish_client = clients.next();
+				}
+			}
 		}
-
-		rt::io::poll_queue_and_wait(Duration::MAX);
 	}
 }
 
-fn handle_client<'a>(buf: Vec<u8>, request: mhttp::RequestParser) -> (Vec<u8>, bool) {
-	println!("{:?}", request.path);
+async fn handle_client<'a>(buf: Vec<u8>, request: mhttp::RequestParser<'_, '_>) -> (Vec<u8>, bool) {
+	println!("{:?}", request.path).await;
 	let keep_alive = request.header("connection") == Some("keep-alive");
 	match request.header("host") {
 		None => bad_request(buf, keep_alive),
@@ -84,7 +105,7 @@ fn handle_client<'a>(buf: Vec<u8>, request: mhttp::RequestParser) -> (Vec<u8>, b
 				"" => "index",
 				p => p,
 			};
-			match std::fs::read(path) {
+			match async_std::fs::read(Vec::from(path)).await.0 {
 				Ok(v) => create_response(
 					buf,
 					mhttp::Status::Ok,
@@ -94,8 +115,8 @@ fn handle_client<'a>(buf: Vec<u8>, request: mhttp::RequestParser) -> (Vec<u8>, b
 				),
 				Err(e) => {
 					use mhttp::Status::*;
-					match e.kind() {
-						ErrorKind::NotFound => create_response(
+					match e {
+						Error::DoesNotExist => create_response(
 							buf,
 							NotFound,
 							NOT_FOUND.len(),
@@ -126,11 +147,17 @@ fn bad_request(buf: Vec<u8>, keep_alive: bool) -> (Vec<u8>, bool) {
 	)
 }
 
-fn num_to_str(n: usize, buf: &mut [u8]) -> &str {
-	let mut p = &mut buf[..];
-	write!(p, "{}", n).unwrap();
-	let d = p.len();
-	core::str::from_utf8(&buf[..buf.len() - d]).unwrap()
+fn num_to_str(mut n: usize, buf: &mut [u8]) -> &str {
+	let mut l = 0;
+	for w in buf.iter_mut().rev() {
+		*w = (n % 10) as u8 + b'0';
+		n /= 10;
+		l += 1;
+		if n == 0 {
+			break;
+		}
+	}
+	core::str::from_utf8(&buf[buf.len() - l..]).unwrap()
 }
 
 fn create_response(

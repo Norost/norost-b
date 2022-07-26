@@ -6,11 +6,20 @@ edition = "2021"
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
 scancodes = { path = "../../lib/rust/scancodes" }
-rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
-rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
-nora_io_queue_rt = { path = "../../lib/rust/io_queue_rt" }
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
+
+[dependencies.async_std]
+package = "norost_async_std"
+path = "../../lib/rust/async_std"

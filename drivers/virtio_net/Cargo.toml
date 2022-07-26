@@ -8,10 +8,19 @@ default-target = "x86_64-unknown-norostb"
 
 [dependencies]
 driver_utils = { path = "../../lib/rust/driver_utils" }
-norostb_kernel = { path = "../../lib/rust/kernel" }
-norostb_rt = { path = "../../lib/rust/rt" }
 smoltcp = { version = "*", default-features = false, features = ["alloc", "proto-ipv6", "medium-ethernet", "socket-tcp", "socket-udp", "proto-ipv4", "socket-dhcpv4"] }
 virtio = { path = "../../lib/rust/virtio" }
 virtio_net = { path = "../../lib/rust/virtio_net" }
 pci = { path = "../../lib/rust/pci" }
 futures = "0.3"
+
+[dependencies.async_std]
+package = "norost_async_std"
+path = "../../lib/rust/async_std"
+
+[dependencies.async-trait]
+version = "0.1"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"

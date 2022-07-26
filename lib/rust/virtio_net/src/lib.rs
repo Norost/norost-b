@@ -152,7 +152,6 @@ impl PacketHeader {
 	const GSO_ECN: u8 = 0x80;
 }
 
-#[repr(align(2048))]
 #[repr(C)]
 pub struct Packet {
 	header: PacketHeader,
@@ -314,14 +313,14 @@ impl<'a> Device<'a> {
 	///
 	/// # Safety
 	///
-	/// `data_phys` must point to a valid memory region.
+	/// `data` must remain valid for the duration of the transmission.
+	/// `data_phys` must point to the same memory region as `data`.
 	pub unsafe fn send<'s>(
 		&'s mut self,
-		data: &mut Packet,
+		mut data: NonNull<Packet>,
 		data_phys: PhysRegion,
-		wait: impl FnMut(),
-	) -> Result<(), SendError> {
-		data.header = PacketHeader {
+	) -> Result<TxToken, SendError> {
+		data.as_mut().header = PacketHeader {
 			flags: 0,
 			gso_type: PacketHeader::GSO_NONE,
 			csum_start: 0.into(),
@@ -335,23 +334,27 @@ impl<'a> Device<'a> {
 
 		let data = [(data_phys.base, data_phys.size, false)];
 
-		self.tx_queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = self
+			.tx_queue
+			.send(data.iter().copied())
 			.expect("Failed to send data");
 
 		self.notify.send(self.tx_queue.notify_offset());
 
-		self.tx_queue.wait_for_used(|_, _| (), wait);
+		Ok(TxToken(tk))
+	}
 
-		Ok(())
+	/// Collect tokens for sent packets.
+	pub fn collect_sent(&mut self, mut f: impl FnMut(TxToken, PhysRegion)) -> usize {
+		self.tx_queue.collect_used(|tk, p| f(TxToken(tk), p))
 	}
 
 	/// Receive a number of Ethernet packets, if any are available
 	pub unsafe fn receive<'s>(
 		&'s mut self,
-		callback: impl FnMut(u16, PhysRegion),
+		mut f: impl FnMut(RxToken, PhysRegion),
 	) -> Result<usize, ReceiveError> {
-		Ok(self.rx_queue.collect_used(callback))
+		Ok(self.rx_queue.collect_used(|tk, p| f(RxToken(tk), p)))
 	}
 
 	#[inline]
@@ -367,12 +370,16 @@ impl<'a> Device<'a> {
 	}
 
 	/// Insert a buffer for the device to write RX data to
-	pub fn insert_buffer<'s>(
+	///
+	/// # Safety
+	///
+	/// `data` and `data_phys` must be valid.
+	pub unsafe fn insert_buffer<'s>(
 		&'s mut self,
-		data: &mut Packet,
+		mut data: NonNull<Packet>,
 		data_phys: PhysAddr,
-	) -> Result<(), Full> {
-		data.header = PacketHeader {
+	) -> Result<RxToken, Full> {
+		data.as_mut().header = PacketHeader {
 			flags: 12,
 			gso_type: 34,
 			csum_start: 5678.into(),
@@ -384,13 +391,14 @@ impl<'a> Device<'a> {
 
 		let data = [(data_phys, Packet::MAX_SIZE.try_into().unwrap(), true)];
 
-		self.rx_queue
-			.send(data.iter().copied(), None, |_, _| ())
+		let tk = self
+			.rx_queue
+			.send(data.iter().copied())
 			.expect("Failed to send data");
 
 		self.notify.send(self.rx_queue.notify_offset());
 
-		Ok(())
+		Ok(RxToken(tk))
 	}
 }
 
@@ -399,6 +407,14 @@ impl Drop for Device<'_> {
 		todo!("ensure the device doesn't read/write memory after being dropped");
 	}
 }
+
+/// A token for an active receive operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RxToken(virtio::queue::Token);
+
+/// A token for an active transmit operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TxToken(virtio::queue::Token);
 
 #[derive(Debug)]
 pub enum SetupError<DmaError> {

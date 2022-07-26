@@ -101,10 +101,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.unwrap();
 
 	let tbl_buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5));
+	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
 	root.create(b"gui_cli")
 		.unwrap()
-		.share(&table.public_table())
+		.share(table.public())
 		.unwrap();
 
 	const WRITE_HANDLE: Handle = Handle::MAX - 1;
@@ -127,6 +127,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						b"write" => Response::Handle(WRITE_HANDLE),
 						_ => Response::Error(Error::DoesNotExist),
 					};
+					path.manual_drop();
 					(job_id, resp)
 				}
 				Request::Write { job_id, data } => {

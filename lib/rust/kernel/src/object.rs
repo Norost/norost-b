@@ -109,6 +109,10 @@ pub enum NewObject {
 		buffer_mem: Handle,
 		buffer_mem_block_size: Pow2Size,
 		allow_sharing: bool,
+		/// The maximum amount of memory a request may allocate **minus one**.
+		///
+		/// e.g. maximum 16 bytes -> `max_request_mem = 15`.
+		max_request_mem: u32,
 	},
 	PermissionMask {
 		handle: Handle,
@@ -139,11 +143,13 @@ impl NewObject {
 				buffer_mem,
 				buffer_mem_block_size,
 				allow_sharing,
+				max_request_mem,
 			} => (
 				StreamTable,
-				N2(
+				N3(
 					buffer_mem as _,
 					usize::from(buffer_mem_block_size.0) | usize::from(allow_sharing) << 8,
+					max_request_mem as _,
 				),
 			),
 			Self::PermissionMask { handle, rwx } => {
@@ -168,6 +174,7 @@ impl NewObject {
 				buffer_mem: a as _,
 				buffer_mem_block_size: Pow2Size(b as _),
 				allow_sharing: b & (1 << 8) != 0,
+				max_request_mem: c as _,
 			},
 			PermissionMask => Self::PermissionMask {
 				handle: a as _,

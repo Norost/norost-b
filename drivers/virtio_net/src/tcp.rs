@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use smoltcp::{
 	iface::{Interface, SocketHandle},
 	phy::Device,
@@ -95,6 +96,17 @@ impl TcpConnection {
 		iface.get_socket::<TcpSocket>(self.handle).send_slice(data)
 	}
 
+	pub fn write_all(
+		&mut self,
+		data: &[u8],
+		iface: &mut Interface<impl for<'d> Device<'d>>,
+	) -> Option<smoltcp::Result<()>> {
+		let s = iface.get_socket::<TcpSocket>(self.handle);
+		rt::dbg!(s.send_capacity(), s.send_queue(), data.len());
+		(s.send_capacity() - s.send_queue() >= data.len())
+			.then(|| s.send_slice(data).map(|l| debug_assert_eq!(l, data.len())))
+	}
+
 	pub fn close(&mut self, iface: &mut Interface<impl for<'d> Device<'d>>) {
 		iface.get_socket::<TcpSocket>(self.handle).close();
 	}
@@ -113,8 +125,8 @@ fn new_socket(
 	iface: &mut Interface<impl for<'d> Device<'d>>,
 	f: impl FnOnce(&mut TcpSocket),
 ) -> SocketHandle {
-	let rx = TcpSocketBuffer::new(Vec::from([0; 1024]));
-	let tx = TcpSocketBuffer::new(Vec::from([0; 1024]));
+	let rx = TcpSocketBuffer::new(Vec::from([0; 4096]));
+	let tx = TcpSocketBuffer::new(Vec::from([0; 4096]));
 	let mut sock = TcpSocket::new(rx, tx);
 	f(&mut sock);
 	iface.add_socket(sock)

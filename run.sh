@@ -9,6 +9,7 @@ cpu="--enable-kvm -cpu host"
 
 exec qemu-system-x86_64 \
 	$cpu \
+	-m 256M \
 	-machine q35 \
 	-drive format=raw,media=cdrom,file=norost.iso \
 	-serial mon:stdio \
