@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, rc::Rc};
 
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
@@ -52,7 +52,7 @@ struct Handlers {
 
 struct User {
 	name: Box<str>,
-	shell: Option<process::Child>,
+	shell: Option<Rc<process::Child>>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -86,14 +86,13 @@ impl ServerHandlers for Handlers {
 		data: &'a [u8],
 	) -> Result<IoSet<Self::Stdin, Self::Stdout, Self::Stderr>, ()> {
 		async_std::dbg!();
-		let wait = |child: &process::Child| {
-			let w = child.wait();
-			async move { w.await.unwrap().code().unwrap_or(0) as u32 }
+		let wait = |child: Rc<process::Child>| async move {
+			child.wait().await.unwrap().code().unwrap_or(0) as u32
 		};
 		match ty {
 			SpawnType::Shell => {
 				let shell = "drivers/minish";
-				let mut shell = process::Command::new(shell)
+				let shell = process::Command::new(shell)
 					.await
 					.stdin(process::Stdio::piped())
 					.await
@@ -104,11 +103,13 @@ impl ServerHandlers for Handlers {
 					.spawn()
 					.await
 					.unwrap();
+				let mut shell = Rc::new(shell);
+				let sh_mut = Rc::get_mut(&mut shell).unwrap();
 				let io = IoSet {
-					stdin: shell.stdin.take().map(AsyncWrapW::new),
-					stdout: shell.stdout.take().map(AsyncWrapR::new),
-					stderr: shell.stderr.take().map(AsyncWrapR::new),
-					wait: Box::pin(wait(&shell)),
+					stdin: sh_mut.stdin.take().map(AsyncWrapW::new),
+					stdout: sh_mut.stdout.take().map(AsyncWrapR::new),
+					stderr: sh_mut.stderr.take().map(AsyncWrapR::new),
+					wait: Box::pin(wait(shell.clone())),
 				};
 				user.shell = Some(shell);
 				Ok(io)
@@ -118,7 +119,7 @@ impl ServerHandlers for Handlers {
 					.split(|c| c.is_ascii_whitespace())
 					.filter(|s| !s.is_empty());
 				let bin = args.next().unwrap();
-				let mut shell = process::Command::new(bin)
+				let shell = process::Command::new(bin)
 					.await
 					.stdin(process::Stdio::piped())
 					.await
@@ -131,11 +132,13 @@ impl ServerHandlers for Handlers {
 					.spawn()
 					.await
 					.unwrap();
+				let mut shell = Rc::new(shell);
+				let sh_mut = Rc::get_mut(&mut shell).unwrap();
 				let io = IoSet {
-					stdin: shell.stdin.take().map(AsyncWrapW::new),
-					stdout: shell.stdout.take().map(AsyncWrapR::new),
-					stderr: shell.stderr.take().map(AsyncWrapR::new),
-					wait: Box::pin(wait(&shell)),
+					stdin: sh_mut.stdin.take().map(AsyncWrapW::new),
+					stdout: sh_mut.stdout.take().map(AsyncWrapR::new),
+					stderr: sh_mut.stderr.take().map(AsyncWrapR::new),
+					wait: Box::pin(wait(shell.clone())),
 				};
 				user.shell = Some(shell);
 				Ok(io)

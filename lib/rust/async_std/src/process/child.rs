@@ -1,4 +1,5 @@
-use crate::{io, AsyncObject};
+use crate::{io, queue, AsyncObject};
+use alloc::vec::Vec;
 use core::future::Future;
 
 pub struct ChildStdin(pub(super) AsyncObject);
@@ -17,16 +18,19 @@ pub struct Child {
 }
 
 impl Child {
-	pub fn wait(&self) -> impl Future<Output = io::Result<ExitStatus>> {
-		//async move { todo!() }
-		core::future::pending()
+	pub async fn wait(&self) -> io::Result<ExitStatus> {
+		let v = Vec::with_capacity(2);
+		let (res, _, v) = self.process.get_meta(b"bin/wait", v).await;
+		res.map(|_| ExitStatus { code: v[1] })
 	}
 }
 
-pub struct ExitStatus {}
+pub struct ExitStatus {
+	code: u8,
+}
 
 impl ExitStatus {
 	pub fn code(&self) -> Option<i32> {
-		None
+		Some(self.code.into())
 	}
 }

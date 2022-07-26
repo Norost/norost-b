@@ -588,14 +588,14 @@ extern "C" fn wait_thread(
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	debug!("exit");
 	#[derive(Clone, Copy)]
-	struct D(*const Process, i32);
+	struct D(*const Process, u8);
 	let proc = Process::current().unwrap();
 	proc.prepare_destroy();
-	let d = D(Arc::into_raw(proc), code as i32);
+	let d = D(Arc::into_raw(proc), code as _);
 	arch::run_on_local_cpu_stack_noreturn!(destroy_process, &d as *const _ as _);
 
 	extern "C" fn destroy_process(data: *const ()) -> ! {
-		let D(process, _code) = unsafe { data.cast::<D>().read() };
+		let D(process, code) = unsafe { data.cast::<D>().read() };
 		let process = unsafe { Arc::from_raw(process) };
 
 		arch::amd64::clear_current_thread();
@@ -607,7 +607,7 @@ extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize
 		// SAFETY: we switched to the CPU local stack and won't return to a stack of a thread
 		// owned by this process. We also switched to the default address space.
 		unsafe {
-			process.destroy();
+			process.destroy(code);
 		}
 
 		// SAFETY: there is no thread state to save.

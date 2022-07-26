@@ -4,7 +4,7 @@ use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTick
 use crate::memory::frame::OwnedPageFrames;
 use crate::memory::r#virtual::{MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{AnyTicketValue, Error, Handle, Object};
+use crate::object_table::{AnyTicketValue, Error, Handle, Object, TinySlice};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
 	ptr::{self, NonNull},
@@ -151,13 +151,17 @@ impl super::Process {
 				})
 			};
 			let handle = unerase_handle(e.handle);
+			let Some(object) = objects.get(handle) else {
+				push_resp(Error::InvalidObject as i64);
+				continue;
+			};
 			match e.ty {
 				Request::READ | Request::PEEK => {
 					let data_ptr = e.arguments_64[0] as *mut u8;
 					let data_len = e.arguments_64[1] as usize;
-					let object = objects.get(handle).unwrap().clone();
-					let mut ticket =
-						object.read(data_len.try_into().unwrap(), e.ty == Request::PEEK);
+					let mut ticket = object
+						.clone()
+						.read(data_len.try_into().unwrap(), e.ty == Request::PEEK);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),
@@ -168,7 +172,6 @@ impl super::Process {
 					let data_ptr = e.arguments_64[0] as *const u8;
 					let data_len = e.arguments_64[1] as usize;
 					let data = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
-					let object = objects.get(handle).unwrap();
 					// TODO crappy workaround for Stream table
 					// We should instead pass a reference to the objects list or some Context
 					// object.
@@ -186,10 +189,6 @@ impl super::Process {
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					let object = match objects.get(handle) {
-						Some(o) => o,
-						None => todo!("{:?}", handle),
-					};
 					let mut ticket = object.clone().open(path);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
@@ -203,7 +202,6 @@ impl super::Process {
 					let path_ptr = e.arguments_64[0] as *const u8;
 					let path_len = e.arguments_64[1] as usize;
 					let path = unsafe { core::slice::from_raw_parts(path_ptr, path_len) };
-					let object = objects.get(handle).unwrap();
 					let mut ticket = object.clone().create(path);
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
@@ -222,16 +220,11 @@ impl super::Process {
 						push_resp(-1);
 						continue;
 					};
-					match objects.get(handle) {
-						Some(object) => {
-							let mut ticket = object.seek(from);
-							match poll(&mut ticket) {
-								Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
-								Poll::Ready(Ok(n)) => push_resp(n as i64),
-								Poll::Ready(Err(e)) => push_resp(e as i64),
-							}
-						}
-						None => push_resp(Error::InvalidObject as i64),
+					let mut ticket = object.seek(from);
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
+						Poll::Ready(Ok(n)) => push_resp(n as i64),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
 					}
 				}
 				Request::CLOSE => {
@@ -240,8 +233,8 @@ impl super::Process {
 				}
 				Request::SHARE => {
 					let share = unerase_handle(e.arguments_64[0] as Handle);
-					if let (Some(obj), Some(shr)) = (objects.get(handle), objects.get(share)) {
-						let mut ticket = obj.clone().share(shr);
+					if let Some(shr) = objects.get(share) {
+						let mut ticket = object.clone().share(shr);
 						match poll(&mut ticket) {
 							Poll::Pending => push_pending(ptr::null_mut(), 0, ticket.into()),
 							Poll::Ready(Ok(n)) => push_resp(n as i64),
@@ -251,6 +244,21 @@ impl super::Process {
 						push_resp(Error::InvalidObject as i64)
 					}
 				}
+				Request::GET_META => {
+					let [prop_len, val_len, _] = e.arguments_8;
+					let [prop_ptr, val_ptr] = e.arguments_64;
+					let prop =
+						unsafe { TinySlice::from_raw_parts(prop_ptr as *const u8, prop_len) };
+					let mut ticket = object.clone().get_meta(prop);
+					let (val_ptr, val_len) = (val_ptr as *mut u8, val_len.into());
+					match poll(&mut ticket) {
+						Poll::Pending => push_pending(val_ptr, val_len, ticket.into()),
+						Poll::Ready(Ok(b)) => push_resp(copy_data_to(val_ptr, val_len, b)),
+						Poll::Ready(Err(e)) => push_resp(e as i64),
+					}
+				}
+				Request::SET_META => todo!(),
+				Request::DESTROY => todo!(),
 				op => {
 					warn!("Unknown I/O queue operation {}", op);
 					push_resp(Error::InvalidOperation as i64);

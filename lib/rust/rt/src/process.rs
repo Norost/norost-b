@@ -97,6 +97,13 @@ impl Process {
 		self.0
 	}
 
+	/// Wait until this process is destroyed.
+	pub fn wait(self) -> io::Result<ExitStatus> {
+		let mut v = [0; 2];
+		self.0.get_meta(b"bin/wait".into(), (&mut v).into())?;
+		Ok(ExitStatus { code: v[1] })
+	}
+
 	#[inline]
 	pub fn default_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
 		Self::default_stdio_handles().chain(Self::default_root_handles())
@@ -123,4 +130,8 @@ impl Process {
 		.into_iter()
 		.flat_map(|(ty, h)| h.map(|h| (ty, h)))
 	}
+}
+
+pub struct ExitStatus {
+	pub code: u8,
 }

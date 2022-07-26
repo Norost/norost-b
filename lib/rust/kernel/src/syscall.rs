@@ -33,8 +33,6 @@ use core::{
 	time::Duration,
 };
 
-pub struct ExitStatus(pub u32);
-
 struct DebugLossy<'a>(&'a [u8]);
 
 impl fmt::Debug for DebugLossy<'_> {
@@ -331,12 +329,12 @@ pub fn wait_thread(handle: Handle) -> error::Result<()> {
 }
 
 #[inline]
-pub fn exit(code: i32) -> ! {
+pub fn exit(code: u8) -> ! {
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_EXIT,
-			in("edi") code,
+			in("edi") u32::from(code),
 			options(noreturn, nomem),
 		);
 	}

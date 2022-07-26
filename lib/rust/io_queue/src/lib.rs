@@ -3,14 +3,11 @@
 #![deny(unused)]
 
 use core::{mem::MaybeUninit, time::Duration};
-use norostb_kernel::{
-	io::{self, TinySlice},
-	syscall,
-};
+use norostb_kernel::{io, syscall};
 
 pub use norostb_kernel::{
 	error,
-	io::{Handle, Response, SeekFrom},
+	io::{Handle, Response, SeekFrom, TinySlice},
 	time::Monotonic,
 };
 

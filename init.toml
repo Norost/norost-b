@@ -78,6 +78,7 @@ path = "intel_hd_graphics"
 file_root = ""
 
 [program.window_manager]
+disabled = true
 path = "window_manager"
 after = [ "gpu/sync" ]
 file_root = ""

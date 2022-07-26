@@ -1,5 +1,5 @@
 use crate::{
-	io::{self, Buf},
+	io::{self, Buf, BufMut},
 	queue,
 };
 use core::{marker::PhantomData, mem, mem::ManuallyDrop, ops::Deref};
@@ -28,6 +28,16 @@ impl AsyncObject {
 	pub async fn create<B: Buf>(&self, path: B) -> (io::Result<Self>, B) {
 		let (res, b) = queue::submit(|q, b| q.submit_create(self.0, b), path).await;
 		(res.map(Self), b)
+	}
+
+	pub async fn get_meta<B, Bm>(&self, property: B, value: Bm) -> (io::Result<u8>, B, Bm)
+	where
+		B: Buf,
+		Bm: BufMut,
+	{
+		let (res, b, bm) =
+			queue::submit2(|q, b, bm| q.submit_get_meta(self.0, b, bm), property, value).await;
+		(res, b, bm)
 	}
 }
 
