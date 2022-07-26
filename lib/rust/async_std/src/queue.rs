@@ -1,4 +1,4 @@
-use crate::io::Buf;
+use crate::io::{Buf, BufMut};
 use alloc::boxed::Box;
 use core::{sync::atomic::Ordering, time::Duration};
 use io_queue_rt::{Full, Pow2Size, Queue};
@@ -11,9 +11,28 @@ where
 	F: Fn(&'static Queue, B) -> Result<R, Full<B>>,
 	B: Buf,
 {
+	submit2(|q, b, _| f(q, b).map_err(|Full(b)| Full((b, ()))), buf, ())
+}
+
+/// Try to submit a request, blocking & retrying if the queue is full.
+pub fn submit_mut<F, B, R>(f: F, mut buf: B) -> R
+where
+	F: Fn(&'static Queue, B) -> Result<R, Full<B>>,
+	B: BufMut,
+{
+	submit2(|q, _, b| f(q, b).map_err(|Full(b)| Full(((), b))), (), buf)
+}
+
+/// Try to submit a request, blocking & retrying if the queue is full.
+pub fn submit2<F, B, Bm, R>(f: F, mut buf: B, mut buf2: Bm) -> R
+where
+	F: Fn(&'static Queue, B, Bm) -> Result<R, Full<(B, Bm)>>,
+	B: Buf,
+	Bm: BufMut,
+{
 	let q = get();
 	loop {
-		buf = match f(&q, buf) {
+		(buf, buf2) = match f(q, buf, buf2) {
 			Ok(r) => return r,
 			Err(Full(b)) => b,
 		};

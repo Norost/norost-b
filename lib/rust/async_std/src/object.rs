@@ -1,5 +1,5 @@
 use crate::{
-	io::{self, Buf},
+	io::{self, Buf, BufMut},
 	queue,
 };
 use core::{marker::PhantomData, mem, mem::ManuallyDrop, ops::Deref};
@@ -24,11 +24,38 @@ impl AsyncObject {
 		let (res, b) = queue::submit(|q, b| q.submit_open(self.0, b), path).await;
 		(res.map(Self), b)
 	}
+
+	pub async fn create<B: Buf>(&self, path: B) -> (io::Result<Self>, B) {
+		let (res, b) = queue::submit(|q, b| q.submit_create(self.0, b), path).await;
+		(res.map(Self), b)
+	}
+
+	pub async fn get_meta<B, Bm>(&self, property: B, value: Bm) -> (io::Result<u8>, B, Bm)
+	where
+		B: Buf,
+		Bm: BufMut,
+	{
+		let (res, b, bm) =
+			queue::submit2(|q, b, bm| q.submit_get_meta(self.0, b, bm), property, value).await;
+		(res, b, bm)
+	}
 }
 
 impl From<rt::Object> for AsyncObject {
 	fn from(obj: rt::Object) -> Self {
 		Self(obj.into_raw())
+	}
+}
+
+impl From<AsyncObject> for rt::Object {
+	fn from(obj: AsyncObject) -> Self {
+		Self::from_raw(ManuallyDrop::new(obj).0)
+	}
+}
+
+impl<'a> From<&'a AsyncObject> for rt::RefObject<'a> {
+	fn from(obj: &'a AsyncObject) -> Self {
+		Self::from_raw(obj.0)
 	}
 }
 
@@ -86,7 +113,16 @@ pub struct RefAsyncObject<'a> {
 
 impl<'a> From<&'a rt::Object> for RefAsyncObject<'a> {
 	fn from(obj: &'a rt::Object) -> Self {
-		Self::from(obj.as_ref_object())
+		Self::from(rt::RefObject::from(obj))
+	}
+}
+
+impl<'a> From<&'a AsyncObject> for RefAsyncObject<'a> {
+	fn from(obj: &'a AsyncObject) -> Self {
+		Self {
+			handle: obj.0,
+			_marker: PhantomData,
+		}
 	}
 }
 
@@ -99,6 +135,12 @@ impl<'a> From<rt::RefObject<'a>> for RefAsyncObject<'a> {
 	}
 }
 
+impl<'a> From<RefAsyncObject<'a>> for rt::RefObject<'a> {
+	fn from(obj: RefAsyncObject<'a>) -> Self {
+		Self::from_raw(obj.handle)
+	}
+}
+
 impl<'a> Deref for RefAsyncObject<'a> {
 	type Target = AsyncObject;
 
@@ -106,4 +148,12 @@ impl<'a> Deref for RefAsyncObject<'a> {
 		// SAFETY: Object is a simple wrapper around the handle.
 		unsafe { mem::transmute(&self.handle) }
 	}
+}
+
+pub fn file_root() -> RefAsyncObject<'static> {
+	RefAsyncObject::from(io::file_root().expect("no file root"))
+}
+
+pub fn process_root() -> RefAsyncObject<'static> {
+	RefAsyncObject::from(io::process_root().expect("no process root"))
 }

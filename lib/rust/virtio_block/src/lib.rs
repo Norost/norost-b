@@ -173,8 +173,8 @@ impl<'a> BlockDevice<'a> {
 	/// # Safety
 	///
 	/// The physical region must be valid for the duration of the operation.
-	pub unsafe fn write<'s>(
-		&'s mut self,
+	pub unsafe fn write(
+		&mut self,
 		data: impl ExactSizeIterator<Item = PhysRegion>,
 		sector_start: u64,
 	) -> Result<OpToken, WriteError> {
@@ -191,7 +191,7 @@ impl<'a> BlockDevice<'a> {
 		&mut self,
 		data: impl ExactSizeIterator<Item = PhysRegion>,
 		sector_start: u64,
-	) -> Result<OpToken, WriteError> {
+	) -> Result<OpToken, ReadError> {
 		unsafe { self.do_op(data, sector_start, true).map_err(|()| todo!()) }
 	}
 
@@ -223,7 +223,7 @@ impl<'a> BlockDevice<'a> {
 			mem::size_of::<RequestHeader>().try_into().unwrap(),
 			false,
 		);
-		let data = data.map(|d| (d.base, d.size, true));
+		let data = data.map(|d| (d.base, d.size, read));
 		let footer = (
 			self.request_header_status_phys
 				+ u64::try_from(offset_of_tuple!((RequestHeader, RequestStatus), 1)).unwrap(),
@@ -272,6 +272,18 @@ pub enum SetupError<DmaError> {
 pub enum WriteError {}
 
 impl fmt::Debug for WriteError {
+	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+		/*
+		f.write_str(match self {
+		})
+		*/
+		Ok(())
+	}
+}
+
+pub enum ReadError {}
+
+impl fmt::Debug for ReadError {
 	fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
 		/*
 		f.write_str(match self {

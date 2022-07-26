@@ -15,3 +15,7 @@ path = "../../lib/rust/async_std"
 version = "0.3"
 default-features = false
 features = ["alloc"]
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"

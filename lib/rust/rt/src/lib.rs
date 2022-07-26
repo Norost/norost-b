@@ -65,7 +65,7 @@ pub mod tls;
 use core::ptr::NonNull;
 
 pub use io::RWX;
-pub use norostb_kernel::{error::Error, time, AtomicHandle, Handle};
+pub use norostb_kernel::{error::Error, syscall::exit, time, AtomicHandle, Handle};
 pub use process::Process;
 pub use table::{NewObject, Object, RefObject};
 
@@ -89,8 +89,7 @@ unsafe extern "C" fn rt_start(arguments: Option<NonNull<u8>>) -> ! {
 		args::init(arguments);
 	}
 	// SAFETY: we can't actually guarantee safety due to weak linkage.
-	let status = unsafe { rt_main(arguments) };
-	norostb_kernel::syscall::exit(status)
+	exit(unsafe { rt_main(arguments) })
 }
 
 /// Do some preparatory work, then call the main function.
@@ -108,16 +107,11 @@ unsafe extern "C" fn rt_start(arguments: Option<NonNull<u8>>) -> ! {
 /// To override it, export a strong symbol with the name `__rt_main`.
 #[linkage = "weak"]
 #[export_name = "__rt_main"]
-unsafe extern "C" fn rt_main(_arguments: Option<NonNull<u8>>) -> i32 {
+unsafe extern "C" fn rt_main(_arguments: Option<NonNull<u8>>) -> u8 {
 	extern "C" {
 		fn main(argc: isize, argv: Option<NonNull<*const u8>>) -> i32;
 	}
 	// We don't use any of the parameters in stdlib but I haven't figured out how to
 	// get rid of them yet :(
-	unsafe { main(0, None) }
-}
-
-#[inline]
-pub fn exit(code: i32) -> ! {
-	norostb_kernel::syscall::exit(code)
+	unsafe { main(0, None) as _ }
 }

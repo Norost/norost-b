@@ -33,8 +33,6 @@ use core::{
 	time::Duration,
 };
 
-pub struct ExitStatus(pub u32);
-
 struct DebugLossy<'a>(&'a [u8]);
 
 impl fmt::Debug for DebugLossy<'_> {
@@ -233,7 +231,7 @@ pub fn do_io(request: io::DoIo<'_>) -> error::Result<u64> {
 }
 
 #[inline]
-pub fn new_object(args: NewObject) -> error::Result<Handle> {
+pub fn new_object(args: NewObject) -> error::Result<(Handle, Handle)> {
 	use NewObjectArgs::*;
 	let (ty, args) = args.into_args();
 	ret(match args {
@@ -242,7 +240,7 @@ pub fn new_object(args: NewObject) -> error::Result<Handle> {
 		N2(a, b) => syscall!(ID_NEW_OBJECT(ty, a, b)),
 		N3(a, b, c) => syscall!(ID_NEW_OBJECT(ty, a, b, c)),
 	})
-	.map(|(_, h)| h as u32)
+	.map(|(a, b)| (a as _, b as _))
 }
 
 #[inline]
@@ -331,12 +329,12 @@ pub fn wait_thread(handle: Handle) -> error::Result<()> {
 }
 
 #[inline]
-pub fn exit(code: i32) -> ! {
+pub fn exit(code: u8) -> ! {
 	unsafe {
 		asm!(
 			"syscall",
 			in("eax") ID_EXIT,
-			in("edi") code,
+			in("edi") u32::from(code),
 			options(noreturn, nomem),
 		);
 	}

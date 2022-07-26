@@ -5,6 +5,8 @@
 //! Objects can be searched/filtered with tags. Individual objects are addressed by unique
 //! integer IDs.
 
+pub mod pipe;
+
 mod object;
 mod query;
 mod root;

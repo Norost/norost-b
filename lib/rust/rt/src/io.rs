@@ -210,7 +210,7 @@ pub fn share(handle: Handle, share: Handle) -> Result<u64> {
 }
 
 #[inline(always)]
-pub fn new_object(args: NewObject) -> Result<Handle> {
+pub fn new_object(args: NewObject) -> Result<(Handle, Handle)> {
 	syscall::new_object(args)
 }
 

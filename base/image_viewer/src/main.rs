@@ -22,11 +22,11 @@ fn main() {
 
 	loop {
 		let (fb_ptr, fb_size) = {
-			let fb = rt::Object::new(rt::NewObject::SharedMemory {
+			let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory {
 				size: res.x as usize * res.y as usize * 3,
 			})
 			.unwrap();
-			let fb_rdonly = rt::Object::new(rt::NewObject::PermissionMask {
+			let (fb_rdonly, _) = rt::Object::new(rt::NewObject::PermissionMask {
 				handle: fb.as_raw(),
 				rwx: rt::io::RWX::R,
 			})

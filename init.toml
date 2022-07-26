@@ -3,6 +3,7 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
+disabled = true
 path = "minish"
 file_root = ""
 after = [ "gui_cli", "ps2_kbd/stream" ]
@@ -18,11 +19,13 @@ after = [ "disk/data" ]
 file_root = ""
 
 [program.gui_cli]
+disabled = true
 path = "gui_cli"
 after = [ "window_manager" ]
 file_root = ""
 
 [program.image_viewer]
+disabled = true
 path = "image_viewer"
 after = [ "window_manager" ]
 file_root = ""
@@ -34,6 +37,7 @@ target = "disk"
 file_root = ""
 
 [program.virtio_gpu]
+disabled = true
 path = "virtio-gpu"
 args = [ "gpu" ]
 target = "net"
@@ -46,16 +50,25 @@ target = "net"
 file_root = ""
 
 [program.static_http_server]
+disabled = true
 path = "static_http_server"
 after = [ "file", "net" ]
 file_root = "file"
 net_root = "net"
 
 [program.scancode_to_char]
+disabled = true
 path = "scancode_to_char"
 args = [ "ps2_kbd", "ps2_keyboard/scancodes" ]
 after = [ "ps2_keyboard/scancodes" ]
 file_root = ""
+
+[program.ssh]
+path = "ssh"
+after = [ "net" ]
+file_root = ""
+net_root = "net"
+process_root = "process"
 
 [program.intel_hd_graphics]
 disabled = true
@@ -63,6 +76,7 @@ path = "intel_hd_graphics"
 file_root = ""
 
 [program.window_manager]
+disabled = true
 path = "window_manager"
 after = [ "gpu/sync" ]
 file_root = ""

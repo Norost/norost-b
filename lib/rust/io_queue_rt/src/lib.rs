@@ -12,6 +12,7 @@ use alloc::boxed::Box;
 use arena::Arena;
 use async_completion::{Buf, BufMut};
 use core::{
+	any::Any,
 	cell::{Cell, RefCell},
 	fmt,
 	future::Future,
@@ -21,7 +22,7 @@ use core::{
 	task::{Context, Poll, Waker},
 	time::Duration,
 };
-use nora_io_queue::{self as q, Request};
+use nora_io_queue::{self as q, Request, TinySlice};
 
 pub struct Queue {
 	inner: RefCell<q::Queue>,
@@ -95,12 +96,6 @@ impl Queue {
 	}
 
 	/// Submit a request involving writing from byte buffers.
-	///
-	/// Only data from `buf[offset..]` is written from start to end. Not all data may be written.
-	///
-	/// # Panics
-	///
-	/// If `offset` is larger than the length of `buf`.
 	fn submit_write_buffer<B: Buf, F>(
 		&self,
 		buffer: B,
@@ -141,6 +136,48 @@ impl Queue {
 		request: Request,
 	) -> Result<BufferFuture<'_, ()>, Full<()>> {
 		self.submit_write_buffer((), handle, |_| request)
+	}
+
+	/// Submit a request involving two tiny buffers, one for reading and one for writing.
+	///
+	/// If the write buffer has capacity larger than 255, it is capped.
+	///
+	/// # Panics
+	///
+	/// If the read buffer is larger than 255 bytes.
+	fn submit_write_read_tiny_buffers<B, Bm, F>(
+		&self,
+		buffer_read: B,
+		mut buffer_write: Bm,
+		handle: Handle,
+		wrap: F,
+	) -> Result<BufferFuture2<'_, B, Bm>, Full<(B, Bm)>>
+	where
+		B: Buf,
+		Bm: BufMut,
+		F: FnOnce(&'static TinySlice<u8>, &'static mut TinySlice<MaybeUninit<u8>>) -> Request,
+	{
+		let mut inflight = self.inflight_buffers.borrow_mut();
+		let i = inflight.insert(BufferFutureState::Inflight);
+		// SAFETY: The buffer will live at least as long as the BufferFuture,
+		// even if it is mem::forgot()ten
+		let buf_r = unsafe { extend_lifetime(tiny_buf_as_slice_init(&buffer_read)) };
+		let buf_w = unsafe { extend_lifetime_mut(tiny_buf_as_slice_total_mut(&mut buffer_write)) };
+		let res = self
+			.inner
+			.borrow_mut()
+			.submit(i.into_raw().0 as u64, handle, wrap(buf_r, buf_w));
+		match res {
+			Ok(_) => Ok(BufferFuture2 {
+				queue: self,
+				inflight_index: i,
+				buffers: Some((buffer_read, buffer_write)),
+			}),
+			Err(_) => {
+				inflight.remove(i);
+				Err(Full((buffer_read, buffer_write)))
+			}
+		}
 	}
 
 	/// Read data from an object, advancing the seek head.
@@ -206,6 +243,22 @@ impl Queue {
 			.map(|fut| Share { fut })
 	}
 
+	pub fn submit_get_meta<B, Bm>(
+		&self,
+		handle: Handle,
+		property: B,
+		value: Bm,
+	) -> Result<GetMeta<'_, B, Bm>, Full<(B, Bm)>>
+	where
+		B: Buf,
+		Bm: BufMut,
+	{
+		self.submit_write_read_tiny_buffers(property, value, handle, |property, value| {
+			Request::GetMeta { property, value }
+		})
+		.map(|fut| GetMeta { fut })
+	}
+
 	pub fn process(&self) {
 		let mut inner = self.inner.borrow_mut();
 		let mut inflight = self.inflight_buffers.borrow_mut();
@@ -251,7 +304,7 @@ unsafe fn extend_lifetime_mut<'a, T: ?Sized>(t: &'a mut T) -> &'static mut T {
 
 fn buf_as_slice_init<B: Buf>(buf: &B) -> &[u8] {
 	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
-	unsafe { slice::from_raw_parts(buf.as_ptr().cast(), buf.bytes_init()) }
+	unsafe { slice::from_raw_parts(buf.as_ptr(), buf.bytes_init()) }
 }
 
 fn buf_as_slice_total_mut<B: BufMut>(buf: &mut B) -> &mut [MaybeUninit<u8>] {
@@ -259,9 +312,21 @@ fn buf_as_slice_total_mut<B: BufMut>(buf: &mut B) -> &mut [MaybeUninit<u8>] {
 	unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), buf.bytes_total()) }
 }
 
+fn tiny_buf_as_slice_init<B: Buf>(buf: &B) -> &TinySlice<u8> {
+	let len = buf.bytes_init().try_into().expect("tiny buffer too large");
+	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
+	unsafe { TinySlice::from_raw_parts(buf.as_ptr(), len) }
+}
+
+fn tiny_buf_as_slice_total_mut<B: BufMut>(buf: &mut B) -> &mut TinySlice<MaybeUninit<u8>> {
+	let len = buf.bytes_total().try_into().unwrap_or(u8::MAX);
+	// SAFETY: the Buf impl guarantees the returned pointer and length are valid.
+	unsafe { TinySlice::from_raw_parts_mut(buf.as_mut_ptr().cast(), len) }
+}
+
 /// Structure returned if the queue is full.
 /// It contains the buffer that was passed as argument.
-pub struct Full<B: Buf>(pub B);
+pub struct Full<B>(pub B);
 
 /// Custom debug impl since there is no need to print the inner buffer.
 impl<B: Buf> fmt::Debug for Full<B> {
@@ -274,7 +339,7 @@ enum BufferFutureState {
 	Inflight,
 	InflightWithWaker(Waker),
 	Finished(error::Result<u64>),
-	Cancelled(Box<dyn Buf>),
+	Cancelled(Box<dyn Any>),
 }
 
 /// A future that involves byte buffers.
@@ -320,6 +385,65 @@ impl<B: Buf> Future for BufferFuture<'_, B> {
 impl<B: Buf> Drop for BufferFuture<'_, B> {
 	fn drop(&mut self) {
 		if let Some(buf) = self.buffer.take() {
+			let i = self.inflight_index;
+			let mut inflight = self.queue.inflight_buffers.borrow_mut();
+			match inflight.get_mut(i) {
+				Some(s @ BufferFutureState::Inflight)
+				| Some(s @ BufferFutureState::InflightWithWaker(_)) => {
+					// We can't drop the buffer yet as it is still in use by the queue.
+					*s = BufferFutureState::Cancelled(Box::new(buf));
+				}
+				Some(BufferFutureState::Finished(_)) | None => {}
+				Some(BufferFutureState::Cancelled(_)) => unreachable!(),
+			}
+		}
+	}
+}
+
+/// A future that involves *two* byte buffers.
+struct BufferFuture2<'a, B: Buf, Bm: Buf> {
+	queue: &'a Queue,
+	inflight_index: arena::Handle<()>,
+	buffers: Option<(B, Bm)>,
+}
+
+impl<B: Buf, Bm: Buf> Future for BufferFuture2<'_, B, Bm> {
+	type Output = (Result<u64, error::Error>, B, Bm);
+
+	/// Check if the read request has finished.
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		let i = self.inflight_index;
+		let mut inflight = self.queue.inflight_buffers.borrow_mut();
+		let t = &mut inflight[i];
+		match mem::replace(t, BufferFutureState::Cancelled(Box::new(()))) {
+			BufferFutureState::Inflight => {
+				*t = BufferFutureState::InflightWithWaker(cx.waker().clone());
+				Poll::Pending
+			}
+			BufferFutureState::InflightWithWaker(waker) => {
+				*t = BufferFutureState::InflightWithWaker(if waker.will_wake(cx.waker()) {
+					waker
+				} else {
+					cx.waker().clone()
+				});
+				Poll::Pending
+			}
+			BufferFutureState::Finished(res) => {
+				inflight.remove(i).unwrap();
+				self.queue
+					.ready_responses
+					.set(self.queue.ready_responses.get() - 1);
+				let (b, bm) = self.buffers.take().expect("buffer already taken");
+				Poll::Ready((res, b, bm))
+			}
+			BufferFutureState::Cancelled(_) => unreachable!(),
+		}
+	}
+}
+
+impl<B: Buf, Bm: Buf> Drop for BufferFuture2<'_, B, Bm> {
+	fn drop(&mut self) {
+		if let Some(buf) = self.buffers.take() {
 			let i = self.inflight_index;
 			let mut inflight = self.queue.inflight_buffers.borrow_mut();
 			match inflight.get_mut(i) {
@@ -450,5 +574,23 @@ impl Future for Share<'_> {
 	/// Check if the share request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		Pin::new(&mut self.fut).poll(cx).map(|(r, _)| r)
+	}
+}
+
+pub struct GetMeta<'a, B: Buf, Bm: BufMut> {
+	fut: BufferFuture2<'a, B, Bm>,
+}
+
+impl<B: Buf, Bm: BufMut> Future for GetMeta<'_, B, Bm> {
+	type Output = (Result<u8, error::Error>, B, Bm);
+
+	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		Pin::new(&mut self.fut).poll(cx).map(|(r, b, mut bm)| {
+			if let Ok(l) = &r {
+				// SAFETY: the kernel should have initialized the exact given amount of bytes.
+				unsafe { bm.set_bytes_init(*l as u8 as _) }
+			}
+			(r.map(|l| l as u8), b, bm)
+		})
 	}
 }

@@ -10,13 +10,17 @@ use crate::{
 		r#virtual::{AddressSpace, MapError, UnmapError, RWX},
 		Page,
 	},
-	object_table::{AnyTicket, Object},
+	object_table::{AnyTicket, Error, Object, Ticket, TicketWaker, TinySlice},
 	sync::{Mutex, SpinLock},
 	util::{erase_handle, unerase_handle},
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use arena::Arena;
-use core::{num::NonZeroUsize, ptr::NonNull};
+use core::{
+	num::NonZeroUsize,
+	ptr::NonNull,
+	sync::atomic::{AtomicU8, Ordering},
+};
 use norostb_kernel::Handle;
 
 pub use table::post_init;
@@ -27,6 +31,8 @@ pub struct Process {
 	threads: SpinLock<Arena<Arc<Thread>, u8>>,
 	objects: Mutex<Arena<Arc<dyn Object>, u8>>,
 	io_queues: Mutex<Vec<io::Queue>>,
+	exit_code: AtomicU8,
+	wake_on_exit: SpinLock<Vec<TicketWaker<Box<[u8]>>>>,
 }
 
 struct PendingTicket {
@@ -44,6 +50,8 @@ impl Process {
 			threads: Default::default(),
 			objects: Default::default(),
 			io_queues: Default::default(),
+			exit_code: 0.into(),
+			wake_on_exit: Default::default(),
 		})
 	}
 
@@ -55,6 +63,19 @@ impl Process {
 	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<Handle, AddObjectError> {
 		let mut objects = self.objects.lock();
 		Ok(erase_handle(objects.insert(object)))
+	}
+
+	/// Add two objects to the process' object table.
+	pub fn add_objects(
+		&self,
+		objects: [Arc<dyn Object>; 2],
+	) -> Result<[Handle; 2], AddObjectError> {
+		let [a, b] = objects;
+		let mut objects = self.objects.lock();
+		Ok([
+			erase_handle(objects.insert(a)),
+			erase_handle(objects.insert(b)),
+		])
 	}
 
 	/// Map a memory object to a memory range.
@@ -177,7 +198,7 @@ impl Process {
 	/// The caller may *not* be using any resources of this process, especially the address space
 	/// or a thread!
 	#[cfg_attr(debug_assertions, track_caller)]
-	pub unsafe fn destroy(self: Arc<Self>) {
+	pub unsafe fn destroy(self: Arc<Self>, exit_code: u8) {
 		// Destroy all threads
 		let mut threads = self.threads.isr_lock();
 		for (_, thr) in threads.drain() {
@@ -186,12 +207,36 @@ impl Process {
 				thr.destroy();
 			}
 		}
+		// ISRs should be disabled as we're outside a thread.
+		let mut buf = [0; 2];
+		self.exit_code.store(exit_code, Ordering::Relaxed);
+		let s = self.encode_status_bin(&threads, &mut buf);
+		for w in self.wake_on_exit.isr_lock().drain(..) {
+			w.isr_complete(Ok(s.into()));
+		}
 		// Now we just let the destructors do the rest. Sayonara! :)
 	}
 
 	/// Get the current active process.
 	pub fn current() -> Option<Arc<Self>> {
 		arch::current_process()
+	}
+
+	/// Encode the current status of this process.
+	fn encode_status_bin<'a>(
+		&self,
+		threads: &Arena<Arc<Thread>, u8>,
+		buf: &'a mut [u8; 2],
+	) -> &'a [u8] {
+		const IS_DESTROYED: u8 = 1 << 0;
+		if threads.is_empty() {
+			buf[0] = IS_DESTROYED;
+			buf[1] = self.exit_code.load(Ordering::Relaxed);
+			buf
+		} else {
+			buf[0] = 0;
+			&buf[..1]
+		}
 	}
 }
 
@@ -203,7 +248,24 @@ impl Drop for Process {
 	}
 }
 
-impl Object for Process {}
+impl Object for Process {
+	fn get_meta(self: Arc<Self>, property: &TinySlice<u8>) -> Ticket<Box<[u8]>> {
+		let mut buf = [0; 2];
+		Ticket::new_complete(match property.as_ref() {
+			// Get the status of the process.
+			b"bin/status" => Ok(self
+				.encode_status_bin(&self.threads.lock(), &mut buf)
+				.into()),
+			// Wait for the process to exit and return the status.
+			b"bin/wait" => {
+				let (t, w) = Ticket::new();
+				self.wake_on_exit.lock().push(w);
+				return t;
+			}
+			_ => Err(Error::InvalidData),
+		})
+	}
+}
 
 #[derive(Debug)]
 pub enum AddObjectError {}

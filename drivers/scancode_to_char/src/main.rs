@@ -17,6 +17,7 @@ use core::{
 };
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use norostb_kernel::{error::Error, object::Pow2Size, RWX};
+use rt_default as _;
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
@@ -28,7 +29,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	// Create a stream table
 	let table = {
-		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 		StreamTable::new(&buf, Pow2Size(5), (1 << 5) - 1)
 	};
 	root.create(table_name)

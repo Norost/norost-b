@@ -77,3 +77,7 @@ strip = "symbols"
 
 [patch.crates-io]
 dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
+getrandom = { path = "../thirdparty/getrandom" }
+
+[patch."https://github.com/Demindiro/nora_ssh".nora_ssh]
+path = "../../crypto/nora_ssh/nora_ssh"

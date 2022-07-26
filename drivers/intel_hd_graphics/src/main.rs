@@ -421,7 +421,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				unsafe {
 					// Disable sequence
 					// b. Disable planes (VGA or hires)
-					vga::disable_vga(&mut control, ioport.as_ref_object());
+					vga::disable_vga(&mut control, (&ioport).into());
 					plane::disable(&mut control, plane::Plane::A);
 					// c. Disable TRANS_CONF
 					transcoder::disable(&mut control, Transcoder::EDP);
@@ -530,7 +530,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	let table = {
-		let buf = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
+		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 		let tbl = StreamTable::new(&buf, rt::io::Pow2Size(5), (1 << 8) - 1);
 		root.create(b"gpu").unwrap().share(tbl.public()).unwrap();
 		tbl
