@@ -128,14 +128,6 @@ impl Object {
 		h
 	}
 
-	#[inline(always)]
-	pub fn as_ref_object(&self) -> RefObject<'_> {
-		RefObject {
-			handle: self.0,
-			_marker: PhantomData,
-		}
-	}
-
 	#[inline]
 	pub const fn from_raw(handle: Handle) -> Self {
 		Self(handle)
@@ -179,7 +171,6 @@ pub struct RefObject<'a> {
 }
 
 impl<'a> RefObject<'a> {
-	#[inline]
 	pub const fn from_raw(handle: Handle) -> Self {
 		Self {
 			handle,
@@ -187,14 +178,21 @@ impl<'a> RefObject<'a> {
 		}
 	}
 
-	#[inline]
 	pub const fn as_raw(&self) -> Handle {
 		self.handle
 	}
 
-	#[inline]
 	pub const fn into_raw(self) -> Handle {
 		self.handle
+	}
+}
+
+impl<'a> From<&'a Object> for RefObject<'a> {
+	fn from(obj: &'a Object) -> Self {
+		Self {
+			handle: obj.0,
+			_marker: PhantomData,
+		}
 	}
 }
 

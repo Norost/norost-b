@@ -1,6 +1,6 @@
 use crate::{
 	io::{Buf, Read},
-	object::RefAsyncObject,
+	object::{file_root, RefAsyncObject},
 	AsyncObject,
 };
 use alloc::vec::Vec;
@@ -11,9 +11,20 @@ pub struct File(AsyncObject);
 impl_wrap!(File read);
 impl_wrap!(File write);
 
+impl File {
+	pub async fn open<B: Buf>(&self, path: B) -> (io::Result<File>, B) {
+		let (f, path) = file_root().open(path).await;
+		(f.map(File), path)
+	}
+
+	pub async fn create<B: Buf>(&self, path: B) -> (io::Result<File>, B) {
+		let (f, path) = file_root().create(path).await;
+		(f.map(File), path)
+	}
+}
+
 pub async fn read<B: Buf>(path: B) -> (io::Result<Vec<u8>>, B) {
-	let root = io::file_root().expect("no file root");
-	let (f, path) = RefAsyncObject::from(root).open(path).await;
+	let (f, path) = file_root().open(path).await;
 	let f = match f {
 		Ok(f) => f,
 		Err(e) => return (Err(e), path),

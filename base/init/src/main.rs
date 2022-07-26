@@ -110,17 +110,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			) -> Option<rt::RefObject<'a>> {
 				match base {
 					None => None,
-					Some(None) => Some(default.as_ref_object()),
-					Some(Some(base)) => Some(base.as_ref_object()),
+					Some(None) => Some(default.into()),
+					Some(Some(base)) => Some(base.into()),
 				}
 			}
 
 			let t = open(&program.stdin);
-			let stdin = select(&t, &stdin).unwrap_or(stdin.as_ref_object());
+			let stdin = select(&t, &stdin).unwrap_or(stdin);
 			let t = open(&program.stdout);
-			let stdout = select(&t, &stdout).unwrap_or(stdout.as_ref_object());
+			let stdout = select(&t, &stdout).unwrap_or(stdout);
 			let t = open(&program.stderr);
-			let stderr = select(&t, &stderr).unwrap_or(stderr.as_ref_object());
+			let stderr = select(&t, &stderr).unwrap_or(stderr);
 			let t = open(&program.file_root);
 			let file_root = select(&t, &root);
 			let t = open(&program.net_root);

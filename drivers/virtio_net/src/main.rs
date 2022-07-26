@@ -141,18 +141,24 @@ fn main() {
 
 	let mut poll_job = poll_handle.read(());
 
-	struct PendingRead {
+	struct PendingWrite {
 		handle: rt::Handle,
 		job_id: JobId,
 		data: alloc::boxed::Box<[u8]>,
 	}
+	struct PendingRead {
+		handle: rt::Handle,
+		job_id: JobId,
+		len: u32,
+	}
 	// FIXME avoid closing before finishing.
-	let mut pending_writes = Vec::<PendingRead>::new();
+	let mut pending_writes = Vec::<PendingWrite>::new();
+	let mut pending_reads = Vec::<PendingRead>::new();
 
 	let mut t;
 	let mut buf = [0; 2048];
 	loop {
-		// Finish pending reads
+		// Finish pending writes
 		for i in (0..pending_writes.len()).rev() {
 			let p = &mut pending_writes[i];
 			match &mut table.objects[p.handle] {
@@ -161,6 +167,25 @@ fn main() {
 						r.unwrap();
 						table.amount(p.job_id, p.data.len() as _);
 						pending_writes.swap_remove(i);
+					}
+				}
+				Object::Socket(Socket::Udp(_)) => todo!(),
+				_ => unreachable!(),
+			}
+		}
+
+		// Finish pending reads
+		for i in (0..pending_reads.len()).rev() {
+			let p = &mut pending_reads[i];
+			match &mut table.objects[p.handle] {
+				Object::Socket(Socket::TcpConnection(sock)) => {
+					match sock.read(&mut buf[..p.len as _], &mut iface) {
+						Ok(0) => {}
+						Ok(l) => {
+							table.data(p.job_id, &buf[..l]);
+							pending_reads.swap_remove(i);
+						}
+						Err(e) => todo!("{:?}", e),
 					}
 				}
 				Object::Socket(Socket::Udp(_)) => todo!(),
@@ -327,7 +352,7 @@ fn main() {
 					job_id,
 					amount,
 				} => {
-					let len = (amount as usize).min(2048);
+					let len = (amount as usize).min(buf.len());
 					match &mut table.objects[handle] {
 						Object::Socket(Socket::TcpListener(_)) => {
 							table.error(job_id, Error::InvalidOperation)
@@ -339,6 +364,11 @@ fn main() {
 								sock.read(&mut buf[..len], &mut iface)
 							};
 							match r {
+								Ok(0) => pending_reads.push(PendingRead {
+									handle,
+									job_id,
+									len: len.try_into().unwrap(),
+								}),
 								Ok(len) => table.data(job_id, &buf[..len]),
 								Err(smoltcp::Error::Illegal) | Err(smoltcp::Error::Finished) => {
 									table.error(job_id, Error::Unknown)
@@ -398,7 +428,7 @@ fn main() {
 						data.manual_drop();
 						match sock.write(&buf[..len], &mut iface) {
 							Ok(l) if l == 0 => {
-								pending_writes.push(PendingRead {
+								pending_writes.push(PendingWrite {
 									handle,
 									job_id,
 									data: buf[..len].into(),

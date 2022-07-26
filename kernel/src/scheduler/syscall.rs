@@ -8,7 +8,8 @@ use crate::{
 		Page,
 	},
 	object_table::{
-		Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable, SubRange, TinySlice,
+		Handle, NewStreamingTableError, Object, Pipe, Root, SeekFrom, StreamingTable, SubRange,
+		TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
@@ -325,6 +326,7 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 				r#virtual::mask_permissions_object(o.clone(), rwx).ok_or(Error::InvalidData)
 			})
 			.unwrap_or(Err(Error::InvalidObject)),
+		NewObject::Pipe => proc.add_object(Pipe::new()).map_err(|e| match e {}),
 	}
 	.map_or_else(
 		|e| Return {

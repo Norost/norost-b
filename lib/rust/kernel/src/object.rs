@@ -26,6 +26,7 @@ impl_! {
 	SharedMemory 3
 	StreamTable 4
 	PermissionMask 5
+	Pipe 6
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -118,6 +119,7 @@ pub enum NewObject {
 		handle: Handle,
 		rwx: RWX,
 	},
+	Pipe,
 }
 
 pub enum NewObjectArgs {
@@ -155,6 +157,7 @@ impl NewObject {
 			Self::PermissionMask { handle, rwx } => {
 				(PermissionMask, N2(handle as _, rwx.into_raw() as _))
 			}
+			Self::Pipe => (Pipe, N0),
 		};
 		(t as _, a)
 	}
@@ -180,6 +183,7 @@ impl NewObject {
 				handle: a as _,
 				rwx: RWX::try_from_raw((b & 7) as u8)?,
 			},
+			Pipe => Self::Pipe,
 		})
 	}
 }

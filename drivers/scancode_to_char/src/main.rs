@@ -17,6 +17,7 @@ use core::{
 };
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use norostb_kernel::{error::Error, object::Pow2Size, RWX};
+use rt_default as _;
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {

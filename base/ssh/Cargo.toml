@@ -13,6 +13,9 @@ async-trait = "0.1"
 [dependencies.async_std]
 package = "norost_async_std"
 path = "../../lib/rust/async_std"
+default-features = false
+features = ["std"]
 
 [dependencies.nora_ssh]
 git = "https://github.com/Demindiro/nora_ssh"
+features = ["no_send"]

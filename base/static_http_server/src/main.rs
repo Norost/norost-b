@@ -20,6 +20,7 @@ use futures::{
 	future::{self, Either},
 	stream::StreamExt,
 };
+use rt_default as _;
 
 const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request</h1>";
 const NOT_FOUND: &[u8] = b"<!DOCTYPE html><h1>404 Not Found</h1>";

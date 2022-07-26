@@ -6,6 +6,7 @@
 //! integer IDs.
 
 mod object;
+mod pipe;
 mod query;
 mod root;
 mod streaming;
@@ -21,6 +22,7 @@ pub use norostb_kernel::{
 };
 
 pub use object::*;
+pub use pipe::Pipe;
 pub use query::*;
 pub use root::Root;
 pub use streaming::{NewStreamingTableError, StreamingTable};

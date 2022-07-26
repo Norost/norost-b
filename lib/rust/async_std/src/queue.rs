@@ -13,7 +13,7 @@ where
 {
 	let q = get();
 	loop {
-		buf = match f(&q, buf) {
+		buf = match f(q, buf) {
 			Ok(r) => return r,
 			Err(Full(b)) => b,
 		};

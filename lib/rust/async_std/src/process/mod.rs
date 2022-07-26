@@ -1,3 +1,8 @@
+mod child;
+mod command;
+
+pub use child::*;
+pub use command::*;
 pub use rt::exit;
 
 pub struct Stdio(StdioTy);

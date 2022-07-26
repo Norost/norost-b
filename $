@@ -1,0 +1,69 @@
+//! Wrapper around [`Read`]/[`Write`] objects that implements [`AsyncRead`]/[`AsyncWrite`]
+//! respectively.
+//!
+//! Using [`Read`]/[`Write`] directly is recommended to avoid redundant allocations & copies.
+
+use alloc::vec::Vec;
+use core::{pin::Pin, task::{ready, Context, Poll}, future::Future};
+use crate::io::{Read, Write, Seek};
+use futures_io::{AsyncRead, AsyncWrite, AsyncSeek, Error, ErrorKind};
+
+#[pin_project::pin_project]
+pub struct AsyncWrapRW<T: Read<Vec<u8>> + Write<Vec<u8>>> {
+	#[pin]
+	io: T,
+	#[pin]
+	read: State<<T as Read<Vec<u8>>>::Future>,
+	#[pin]
+	write: State<<T as Write<Vec<u8>>>::Future>,
+}
+
+#[pin_project::pin_project(project = StateProj)]
+enum State<T> {
+	Idle,
+	Wait(#[pin] T),
+	Ready { #[pin] data: Vec<u8>, #[pin] offset: usize },
+}
+
+impl<T> AsyncRead for AsyncWrapRW<T>
+where
+	T: Read<Vec<u8>> + Write<Vec<u8>>,
+{
+	fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<usize, Error>> {
+		let mut slf = self.project();
+		loop {
+			match slf.read.project() {
+				StateProj::Idle => {
+					//let v = Vec::with_capacity(buf.len());
+					//slf.read.set(State::Wait(slf.io.read(v)));
+				}
+				StateProj::Wait(fut) => {
+					// SAFETY: self is pinned, so the future won't be moved
+					let (res, data) = ready!(fut.poll(cx));
+					if let Err(res) = res {
+						return Poll::Ready(Err(err_rt_to_std(res)));
+					}
+					if data.is_empty() {
+						//slf.read.set(State::Idle);
+						return Poll::Ready(Ok(0));
+					}
+					//slf.read.set(State::Ready { data, offset: 0 });
+				}
+				StateProj::Ready { data, mut offset } => {
+					let data = &data[*offset..];
+					let len = data.len().min(buf.len());
+					buf[..len].copy_from_slice(&data[..len]);
+					*offset += len;
+					if *offset == data.len() {
+						slf.read.set(State::Idle);
+					}
+					return Poll::Ready(Ok(len));
+				}
+			}
+		}
+	}
+}
+
+fn err_rt_to_std(_e: rt::Error) -> Error {
+	Error::new(ErrorKind::Other, "todo: map error")
+}

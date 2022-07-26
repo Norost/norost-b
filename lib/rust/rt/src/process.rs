@@ -5,8 +5,24 @@ pub struct Process(Object);
 
 impl Process {
 	pub fn new<'a>(
-		process_root: &Object,
-		binary_elf: &Object,
+		process_root: impl Into<RefObject<'a>>,
+		binary_elf: impl Into<RefObject<'a>>,
+		objects: impl Iterator<Item = (u32, impl Into<RefObject<'a>>)>,
+		args: impl Iterator<Item = impl AsRef<[u8]>>,
+		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+	) -> io::Result<Self> {
+		Self::new_inner(
+			process_root.into(),
+			binary_elf.into(),
+			objects.map(|(i, o)| (i, o.into())),
+			args,
+			env,
+		)
+	}
+
+	fn new_inner<'a>(
+		process_root: RefObject<'_>,
+		binary_elf: RefObject<'_>,
 		objects: impl Iterator<Item = (u32, RefObject<'a>)>,
 		args: impl Iterator<Item = impl AsRef<[u8]>>,
 		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
@@ -77,13 +93,17 @@ impl Process {
 		&self.0
 	}
 
+	pub fn into_object(self) -> Object {
+		self.0
+	}
+
 	#[inline]
-	pub fn default_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
+	pub fn default_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
 		Self::default_stdio_handles().chain(Self::default_root_handles())
 	}
 
 	#[inline]
-	pub fn default_root_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
+	pub fn default_root_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
 		[
 			(args::ID_FILE_ROOT, io::file_root()),
 			(args::ID_NET_ROOT, io::net_root()),
@@ -94,7 +114,7 @@ impl Process {
 	}
 
 	#[inline]
-	pub fn default_stdio_handles() -> impl Iterator<Item = (u32, RefObject<'static>)> {
+	pub fn default_stdio_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
 		[
 			(args::ID_STDIN, io::stdin()),
 			(args::ID_STDOUT, io::stdout()),
