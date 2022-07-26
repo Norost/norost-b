@@ -42,37 +42,16 @@ members = [
 ]
 
 [profile.dev]
+split-debuginfo = 'unpacked'
 panic = "abort"
-opt-level = 2
+opt-level = 's'
 
 [profile.release]
+split-debuginfo = 'unpacked'
 codegen-units = 1
 panic = "abort"
+opt-level = 's'
 lto = "fat"
-strip = "symbols"
-
-[profile.dev.package.nora]
-opt-level = 's'
-
-[profile.dev.package.noraboot]
-opt-level = 'z'
-
-[profile.dev.package.init]
-opt-level = 's'
-
-[profile.release.package.nora]
-codegen-units = 1
-opt-level = 's'
-strip = "symbols"
-
-[profile.release.package.noraboot]
-codegen-units = 1
-opt-level = 'z'
-strip = "symbols"
-
-[profile.release.package.init]
-codegen-units = 1
-opt-level = 's'
 strip = "symbols"
 
 [patch.crates-io]

@@ -11,4 +11,6 @@ cargo rustc "$@" -- \
 	-C link-arg=kernel/src/arch/$ARCH/start.s \
 	-C linker=$CC \
 	-C link-arg=-nostartfiles \
-	-C no-redzone=yes
+	-C no-redzone=yes \
+	-Z unstable-options \
+	-C split-debuginfo=unpacked

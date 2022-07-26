@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+TARGET_BOOT=i686-unknown-none-norostbkernel
+TARGET_KERNEL=x86_64-unknown-none-norostbkernel
+TARGET_USER=x86_64-unknown-norostb
+
 set -e
 set -x
 
@@ -19,15 +23,13 @@ fi
 
 set -e
 
-TARGET_BOOT=i686-unknown-none-norostbkernel
-TARGET_KERNEL=x86_64-unknown-none-norostbkernel
-TARGET_USER=x86_64-unknown-norostb
-
 mkdir -p isodir/boot/grub isodir/drivers
 cp target/$TARGET_KERNEL/$build_dir/nora isodir/boot/nora
 cp target/$TARGET_BOOT/$build_dir/noraboot isodir/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
 cp init.toml isodir/init.toml
+
+export RUSTFLAGS="-Z unstable-options -C split-debuginfo=unpacked"
 
 install () {
 	(cd $1/$2 && cargo build $args --target $TARGET_USER)
