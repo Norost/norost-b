@@ -744,6 +744,23 @@ pub enum SeekFrom {
 }
 
 impl SeekFrom {
+	/// Modify an offset while accounting for overflow.
+	pub fn apply(self, offset: usize, max: usize) -> usize {
+		match self {
+			Self::Start(n) => n.try_into().unwrap_or(max),
+			Self::End(n) => max.saturating_sub((-n).try_into().unwrap_or(usize::MAX)),
+			Self::Current(n) => {
+				if n >= 0 {
+					offset
+						.saturating_add(n.try_into().unwrap_or(usize::MAX))
+						.min(max)
+				} else {
+					offset.saturating_sub((-n).try_into().unwrap_or(usize::MAX))
+				}
+			}
+		}
+	}
+
 	pub fn into_raw(self) -> (u8, u64) {
 		match self {
 			Self::Start(n) => (0, n),

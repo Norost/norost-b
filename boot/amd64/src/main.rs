@@ -77,6 +77,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	use multiboot2::bootinfo as bi;
 
 	let mut kernel = None;
+	let mut initfs = None;
 	let mut rsdp = None;
 
 	let (boot_start, boot_end) = unsafe {
@@ -93,19 +94,20 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// no reallocations are necessary.
 	let boot_info = || unsafe { bi::BootInfo::new(arg) };
 
-	// Find kernel & RSDP but just count amount of drivers & ignore the rest
+	// Find initfs, kernel & RSDP but just count amount of drivers & ignore the rest
 	for e in boot_info() {
 		match e {
 			bi::Info::Unknown(ty) => {
 				let _ = writeln!(Stderr, "multiboot2: unknown type {}", ty);
 			}
 			bi::Info::Module(m) => match m.string {
+				b"initfs" => {
+					assert!(initfs.is_none(), "initfs has already been specified");
+					initfs = Some(m)
+				}
 				b"kernel" => {
 					assert!(kernel.is_none(), "kernel has already been specified");
 					kernel = Some(m);
-				}
-				s if s.starts_with(b"driver ") || s.starts_with(b"driver\t") => {
-					info.drivers_len += 1
 				}
 				m => panic!("unknown module type: {:?}", core::str::from_utf8(m)),
 			},
@@ -114,32 +116,11 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		}
 	}
 
-	let kernel = kernel.expect("No kernel module");
-	let _ = writeln!(Stdout, "Kernel: {:#x} - {:#x}", kernel.start, kernel.end);
+	let kernel = kernel.expect("No kernel");
+	let initfs = initfs.expect("No initfs");
+	let _ = writeln!(Stdout, "kernel: {:#x} - {:#x}", kernel.start, kernel.end);
+	let _ = writeln!(Stdout, "initfs: {:#x} - {:#x}", initfs.start, initfs.end);
 	info.rsdp.write(*rsdp.expect("no RSDP found"));
-
-	// Only parse drivers so we can exclude them from the final memory regions
-	let (offset, drivers) = alloc_slice(info.drivers_len.into());
-	info.drivers_offset = offset;
-	let mut i = 0;
-	for e in boot_info() {
-		if let bi::Info::Module(m) = e {
-			if m.string.starts_with(b"driver ") || m.string.starts_with(b"driver\t") {
-				let name = m.string[b"driver ".len()..].trim_ascii();
-				drivers[i] = info::Driver {
-					address: m.start as u32,
-					size: (m.end - m.start).try_into().unwrap(),
-					name_offset: alloc_str(name),
-					_padding: 0,
-				};
-				let name = from_utf8(name);
-				let _ = writeln!(Stdout, "Driver {:?}: {:#x} - {:#x}", name, m.start, m.end);
-				i += 1;
-			} else if m.string == b"driver" {
-				panic!("driver must have a name");
-			}
-		}
-	}
 
 	// Determine free memory regions
 	let iter_regions = |callback: &mut dyn FnMut(info::MemoryRegion)| {
@@ -189,16 +170,9 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 			let list = [
 				(boot_start, boot_end),
 				(kernel.start.into(), kernel.end.into()),
+				(initfs.start.into(), initfs.end.into()),
 			];
-			let driver_list = drivers
-				.iter()
-				.map(|d| (d.address.into(), (d.address + d.size).into()));
-			apply(
-				base,
-				size,
-				callback,
-				list.iter().copied().chain(driver_list),
-			)
+			apply(base, size, callback, list.into_iter())
 		};
 
 		for e in boot_info() {
@@ -239,6 +213,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let (offset, memory_regions) = alloc_slice::<info::MemoryRegion>(memory_regions_count);
 	info.memory_regions_offset = offset;
 	info.memory_regions_len = memory_regions.len().try_into().unwrap();
+	info.initfs_ptr = initfs.start;
+	info.initfs_len = initfs.end - initfs.start;
 	let mut i = 0;
 	iter_regions(&mut |region| {
 		let _ = writeln!(
@@ -332,7 +308,7 @@ impl Write for Stdout {
 fn halt() -> ! {
 	loop {
 		unsafe {
-			asm!("hlt");
+			asm!("hlt", options(nostack, nomem));
 		}
 	}
 }

@@ -12,7 +12,7 @@ stdout = "gui_cli/write"
 stderr = "gui_cli/write"
 
 [program.fs_fat]
-path = "fs-fat"
+path = "fs_fat"
 args = [ "file", "disk/data" ]
 target = "file"
 after = [ "disk/data" ]
@@ -31,20 +31,20 @@ after = [ "window_manager" ]
 file_root = ""
 
 [program.virtio_blk]
-path = "virtio-blk"
+path = "virtio_block"
 args = [ "disk" ]
 target = "disk"
 file_root = ""
 
 [program.virtio_gpu]
 disabled = true
-path = "virtio-gpu"
+path = "virtio_gpu"
 args = [ "gpu" ]
 target = "net"
 file_root = ""
 
 [program.virtio_net]
-path = "virtio-net"
+path = "virtio_net"
 args = [ "net" ]
 target = "net"
 file_root = ""

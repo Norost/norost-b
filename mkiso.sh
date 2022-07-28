@@ -21,41 +21,53 @@ fi
 ./mkkernel.sh $args || exit $?
 ./mkboot.sh $args || exit $?
 
-set -e
+O=$(mktemp -d)
+A=$(mktemp -d)
+trap 'rm -rf "$O" "$A"' EXIT
 
-mkdir -p isodir/boot/grub isodir/drivers
-cp target/$TARGET_KERNEL/$build_dir/nora isodir/boot/nora
-cp target/$TARGET_BOOT/$build_dir/noraboot isodir/boot/noraboot
-cp boot/$ARCH/grub/grub.cfg isodir/boot/grub/grub.cfg
-cp init.toml isodir/init.toml
+mkdir -p $O/boot/grub
+cp target/$TARGET_KERNEL/$build_dir/nora $O/boot/nora
+cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
+cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
-export RUSTFLAGS="-Z unstable-options -C split-debuginfo=unpacked"
+cp init.toml $A/init.toml
+
+if [ "$1" == --release ] # stuff's broken otherwise
+then
+	export RUSTFLAGS="-Z unstable-options -C split-debuginfo=off"
+else
+	export RUSTFLAGS="-Z unstable-options -C split-debuginfo=unpacked"
+fi
 
 install () {
 	(cd $1/$2 && cargo build $args --target $TARGET_USER)
-	cp target/$TARGET_USER/$build_dir/$3 isodir/drivers/$2
+	cp target/$TARGET_USER/$build_dir/$3 $A/$2
 }
 
 install drivers fs_fat             driver_fs_fat
-#install drivers intel_hd_graphics  driver_intel_hd_graphics
-#install drivers scancode_to_char   driver_scancode_to_char
+install drivers intel_hd_graphics  driver_intel_hd_graphics
+install drivers scancode_to_char   driver_scancode_to_char
 install drivers virtio_block       driver_virtio_block
-#install drivers virtio_gpu         driver_virtio_gpu
+install drivers virtio_gpu         driver_virtio_gpu
 install drivers virtio_net         driver_virtio_net
 install base    init               init
-#install base    gui_cli            gui_cli
-#install base    image_viewer       image_viewer
-#install base    jail               jail
+install base    gui_cli            gui_cli
+install base    image_viewer       image_viewer
+install base    jail               jail
 install base    minish             minish
 install base    ssh                ssh
-#install base    static_http_server static_http_server
-#install base    window_manager     window_manager
+install base    static_http_server static_http_server
+install base    window_manager     window_manager
+
+./tools/nrofs.py -rv -C $A $O/boot/norost.nrofs .
 
 # Note: make sure grub-pc-bin is installed! Otherwise QEMU may hang on
 # "Booting from disk" or return error code 0009
-grub-mkrescue -o norost.iso isodir \
+grub-mkrescue -o norost.iso $O \
 	--locales= \
 	--fonts= \
 	--install-modules="multiboot2 normal" \
 	--modules= \
 	--compress=xz
+
+./tools/nrofs.py -lv $O/boot/norost.nrofs

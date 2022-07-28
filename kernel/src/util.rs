@@ -67,7 +67,7 @@ impl fmt::Debug for ByteStr<'_> {
 						.escape_debug()
 						.try_for_each(|c| f.write_char(c))?;
 					f.write_char('\u{fffe}')?;
-					s = &s[e.valid_up_to()..];
+					s = &s[e.valid_up_to() + 1..];
 				}
 			}
 		}

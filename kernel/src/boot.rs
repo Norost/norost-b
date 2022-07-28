@@ -8,8 +8,8 @@ use core::fmt;
 pub struct Info {
 	pub memory_regions_offset: u16,
 	pub memory_regions_len: u16,
-	pub drivers_offset: u16,
-	pub drivers_len: u16,
+	pub initfs_ptr: u32,
+	pub initfs_len: u32,
 	_padding: u32,
 	#[cfg(target_arch = "x86_64")]
 	pub rsdp: rsdp::Rsdp,
@@ -36,16 +36,6 @@ impl Info {
 		}
 	}
 
-	/// All drivers to be loaded at boot.
-	pub fn drivers(&self) -> impl Iterator<Item = Driver<'_>> {
-		unsafe {
-			let b = (self as *const _ as *const u8).add(self.drivers_offset.into());
-			core::slice::from_raw_parts(b.cast(), usize::from(self.drivers_len))
-				.iter()
-				.map(|inner: &RawDriver| Driver { info: self, inner })
-		}
-	}
-
 	/// Get a byte string from the buffer.
 	///
 	/// A byte string is prefixed with a single byte that indicates its length.
@@ -66,7 +56,14 @@ impl fmt::Debug for Info {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct(stringify!(Info))
 			.field("memory_regions", &self.memory_regions())
-			.field("drivers", &DebugIter::new(self.drivers()))
+			.field(
+				"initfs",
+				&format_args!(
+					"{:#x} - {:#x}",
+					self.initfs_ptr,
+					self.initfs_ptr + self.initfs_len - 1
+				),
+			)
 			.field("rsdp", &self.rsdp)
 			.finish()
 	}
