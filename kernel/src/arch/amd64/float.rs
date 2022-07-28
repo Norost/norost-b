@@ -1,6 +1,4 @@
-use super::syscall::current_thread_ptr;
-use alloc::boxed::Box;
-use core::arch::x86_64::{_xgetbv, _xrstor64, _xsave64, _xsetbv};
+use core::arch::x86_64::{_xrstor64, _xsave64, _xsetbv};
 
 const X87_STATE: u64 = 1 << 0;
 
@@ -94,10 +92,12 @@ extern "C" fn handle_device_not_available(_rip: *const ()) {
 /// # Safety
 ///
 /// May only be called once at boot time.
-pub unsafe fn init() {
+pub unsafe fn init(feat: &super::cpuid::Features) {
 	use super::*;
 	unsafe {
 		idt_set(7, wrap_idt!(rip handle_device_not_available));
-		_xsetbv(0, X87_STATE | SSE_STATE | AVX_STATE);
+		let mut flags = X87_STATE | SSE_STATE;
+		flags |= u64::from(feat.avx2()) * AVX_STATE;
+		_xsetbv(0, flags);
 	}
 }

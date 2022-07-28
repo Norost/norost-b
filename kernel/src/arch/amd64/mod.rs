@@ -199,7 +199,7 @@ pub unsafe fn init() {
 
 		r#virtual::init();
 
-		float::init();
+		float::init(&features);
 	}
 }
 

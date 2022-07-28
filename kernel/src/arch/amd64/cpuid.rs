@@ -67,6 +67,7 @@ impl Features {
 	// List stolen from https://sandpile.org/x86/cpuid.htm
 	flag!(basic osxsave = 0x1 | ecx[26]);
 	flag!(basic fsgsbase = 0x7 | ebx[0]);
+	flag!(basic avx2 = 0x7 | ebx[5]);
 }
 
 struct Cpuid {
