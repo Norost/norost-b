@@ -668,6 +668,7 @@ dependencies = [
  "compiler_builtins",
  "nora_stream_table",
  "norostb_kernel",
+ "nrofs",
  "pci",
  "rsdp",
  "scancodes",
@@ -805,6 +806,11 @@ dependencies = [
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
+
+[[package]]
+name = "nrofs"
+version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/nrofs/#104595f983494c5ad603c45a677db0aa2474ade6"
 
 [[package]]
 name = "once_cell"
