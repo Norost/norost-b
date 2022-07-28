@@ -45,10 +45,6 @@ impl LossyRingBuffer {
 			item
 		})
 	}
-
-	fn peek(&mut self) -> Option<Event> {
-		(self.pop != self.push).then(|| self.data[usize::from(self.pop & 0x7f)])
-	}
 }
 
 static EVENTS: SpinLock<LossyRingBuffer> = SpinLock::new(LossyRingBuffer {
@@ -122,7 +118,6 @@ extern "C" fn handle_irq() {
 	match scanset2_decode(seq) {
 		Ok(code) => {
 			unsafe { INDEX = 0 };
-			// FIXME peek
 			if let Some(w) = SCANCODE_READERS.isr_lock().pop() {
 				w.isr_complete(Ok(<[u8; 4]>::from(code).into()));
 			} else {

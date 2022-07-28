@@ -208,11 +208,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					};
 					(job_id, r)
 				}
-				Request::Read {
-					job_id,
-					amount: _,
-					peek: _,
-				} => (
+				Request::Read { job_id, amount: _ } => (
 					job_id,
 					match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),

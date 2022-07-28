@@ -114,11 +114,7 @@ fn main() -> ! {
 					path.manual_drop();
 					(job_id, r)
 				}
-				Request::Read {
-					peek,
-					job_id,
-					amount,
-				} => {
+				Request::Read { job_id, amount } => {
 					(
 						job_id,
 						if handle == Handle::MAX {
@@ -143,9 +139,7 @@ fn main() -> ! {
 								wait();
 							}
 
-							if !peek {
-								data_handles[handle] += u64::from(amount / SECTOR_SIZE);
-							}
+							data_handles[handle] += u64::from(amount / SECTOR_SIZE);
 
 							Response::Data(data)
 						},

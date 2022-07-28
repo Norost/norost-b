@@ -142,10 +142,9 @@ impl ServerQueue {
 			(
 				handle,
 				match r.ty().unwrap() {
-					t @ T::Read | t @ T::Peek => R::Read {
+					T::Read => R::Read {
 						job_id,
 						amount: args.amount(),
-						peek: t == T::Peek,
 					},
 					T::Write => R::Write {
 						job_id,
@@ -226,15 +225,7 @@ impl ClientQueue {
 		type T = raw::RequestType;
 		type R = Request;
 		let (job_id, ty, ()) = match request {
-			R::Read {
-				job_id,
-				amount,
-				peek,
-			} => (
-				job_id,
-				if peek { T::Peek } else { T::Read },
-				v.set_amount(amount),
-			),
+			R::Read { job_id, amount } => (job_id, T::Read, v.set_amount(amount)),
 			R::Write { job_id, data } => (job_id, T::Write, v.set_slice(data.into_raw())),
 			R::GetMeta { job_id, property } => {
 				(job_id, T::GetMeta, v.set_slice(property.into_raw()))
@@ -308,7 +299,6 @@ pub enum Request {
 	Read {
 		job_id: JobId,
 		amount: u32,
-		peek: bool,
 	},
 	Write {
 		job_id: JobId,

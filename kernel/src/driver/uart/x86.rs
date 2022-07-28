@@ -37,7 +37,7 @@ impl Uart {
 	#[must_use = "data may not be written"]
 	pub fn try_send(&mut self, byte: u8) -> bool {
 		if self.transmit_empty() {
-			unsafe { io::outb(self.port, byte) }
+			unsafe { io::out8(self.port, byte) }
 			true
 		} else {
 			false
@@ -47,7 +47,7 @@ impl Uart {
 	#[must_use = "data may be lost if not processed"]
 	pub fn try_read(&mut self) -> Option<u8> {
 		(!self.receive_empty()).then(|| {
-			let b = unsafe { io::inb(self.port) };
+			let b = unsafe { io::in8(self.port) };
 			// TODO figure out how to get QEMU to send us the literal newlines instead.
 			if b == b'\r' {
 				b'\n'
@@ -69,29 +69,29 @@ impl Uart {
 
 	#[must_use = "I/O port space accesses cannot be optimized out"]
 	fn line_status(&self) -> u8 {
-		unsafe { io::inb(self.port + 5) }
+		unsafe { io::in8(self.port + 5) }
 	}
 
 	fn disable_dlab(&mut self) {
 		unsafe {
-			let lc = io::inb(self.port + Self::LINE_CONTROL);
-			io::outb(self.port + Self::LINE_CONTROL, lc & !Self::DLAB_BIT);
+			let lc = io::in8(self.port + Self::LINE_CONTROL);
+			io::out8(self.port + Self::LINE_CONTROL, lc & !Self::DLAB_BIT);
 		}
 	}
 
 	pub(super) fn enable_interrupts(&mut self, interrupts: u8) {
 		unsafe {
 			self.disable_dlab();
-			let intr = io::inb(self.port + Self::INTERRUPT_ENABLE);
-			io::outb(self.port + Self::INTERRUPT_ENABLE, intr | interrupts);
+			let intr = io::in8(self.port + Self::INTERRUPT_ENABLE);
+			io::out8(self.port + Self::INTERRUPT_ENABLE, intr | interrupts);
 		}
 	}
 
 	pub(super) fn disable_interrupts(&mut self, interrupts: u8) {
 		unsafe {
 			self.disable_dlab();
-			let intr = io::inb(self.port + Self::INTERRUPT_ENABLE);
-			io::outb(self.port + Self::INTERRUPT_ENABLE, intr & !interrupts);
+			let intr = io::in8(self.port + Self::INTERRUPT_ENABLE);
+			io::out8(self.port + Self::INTERRUPT_ENABLE, intr & !interrupts);
 		}
 	}
 }

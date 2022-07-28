@@ -51,8 +51,7 @@ impl Object for PipeIn {
 }
 
 impl Object for PipeOut {
-	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
-		assert!(!peek, "get rid of peek altogether");
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
 		let mut pipe = self.0.lock();
 		Ticket::new_complete(if !pipe.buf.is_empty() {
 			let len = length.min(pipe.buf.len());

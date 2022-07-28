@@ -144,10 +144,10 @@ impl Text {
 		// https://wiki.osdev.org/Text_Mode_Cursor#Without_the_BIOS
 		unsafe {
 			let pos = u16::from(self.row) * u16::from(Self::WIDTH) + u16::from(self.column);
-			io::outb(0x3d4, 0x0f);
-			io::outb(0x3d5, pos as u8);
-			io::outb(0x3d4, 0x0e);
-			io::outb(0x3d5, (pos >> 8) as u8);
+			io::out8(0x3d4, 0x0f);
+			io::out8(0x3d5, pos as u8);
+			io::out8(0x3d4, 0x0e);
+			io::out8(0x3d5, (pos >> 8) as u8);
 		}
 	}
 }

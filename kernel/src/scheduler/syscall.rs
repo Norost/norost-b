@@ -182,15 +182,14 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 		};
 		let ins = |l: &mut arena::Arena<_, _>, o| Return::handle(erase_handle(l.insert(o)));
 		match ty {
-			Request::READ | Request::PEEK => block_on(o.clone().read(b, ty == Request::PEEK))
-				.map_or_else(Return::error, |r| {
-					assert!(r.len() <= b, "object returned too much data");
-					unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
-					Return {
-						status: 0,
-						value: r.len(),
-					}
-				}),
+			Request::READ => block_on(o.clone().read(b)).map_or_else(Return::error, |r| {
+				assert!(r.len() <= b, "object returned too much data");
+				unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
+				Return {
+					status: 0,
+					value: r.len(),
+				}
+			}),
 			Request::WRITE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
 				block_on(o.clone().write(r)).map_or_else(Return::error, |r| Return {

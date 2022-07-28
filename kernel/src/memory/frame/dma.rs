@@ -80,7 +80,7 @@ impl Drop for DmaFrame {
 struct Size(usize);
 
 impl Object for Size {
-	fn read(self: Arc<Self>, length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
 		let s = self.0.to_string();
 		Ticket::new_complete(
 			(s.len() <= length)
@@ -93,7 +93,7 @@ impl Object for Size {
 struct Phys(PPN);
 
 impl Object for Phys {
-	fn read(self: Arc<Self>, length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
 		let s = self.0.as_phys().to_string();
 		Ticket::new_complete(
 			(s.len() <= length)

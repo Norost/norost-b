@@ -94,8 +94,8 @@ struct Timeout;
 unsafe fn write_command(cmd: Command) -> Result<(), Timeout> {
 	unsafe {
 		for _ in 0..TIMEOUT {
-			if io::inb(STATUS) & STATUS_INPUT_FULL == 0 {
-				return Ok(io::outb(COMMAND, cmd as u8));
+			if io::in8(STATUS) & STATUS_INPUT_FULL == 0 {
+				return Ok(io::out8(COMMAND, cmd as u8));
 			}
 		}
 		Err(Timeout)
@@ -105,8 +105,8 @@ unsafe fn write_command(cmd: Command) -> Result<(), Timeout> {
 #[must_use = "read_data has side effects"]
 unsafe fn read_data_nowait() -> Result<u8, Timeout> {
 	unsafe {
-		(io::inb(STATUS) & STATUS_OUTPUT_FULL != 0)
-			.then(|| io::inb(DATA))
+		(io::in8(STATUS) & STATUS_OUTPUT_FULL != 0)
+			.then(|| io::in8(DATA))
 			.ok_or(Timeout)
 	}
 }
@@ -115,8 +115,8 @@ unsafe fn read_data_nowait() -> Result<u8, Timeout> {
 unsafe fn read_data() -> Result<u8, Timeout> {
 	unsafe {
 		for _ in 0..TIMEOUT {
-			if io::inb(STATUS) & STATUS_OUTPUT_FULL != 0 {
-				return Ok(io::inb(DATA));
+			if io::in8(STATUS) & STATUS_OUTPUT_FULL != 0 {
+				return Ok(io::in8(DATA));
 			}
 		}
 		Err(Timeout)
@@ -126,8 +126,8 @@ unsafe fn read_data() -> Result<u8, Timeout> {
 unsafe fn write_data(byte: u8) -> Result<(), Timeout> {
 	unsafe {
 		for _ in 0..TIMEOUT {
-			if io::inb(STATUS) & STATUS_INPUT_FULL == 0 {
-				return Ok(io::outb(DATA, byte));
+			if io::in8(STATUS) & STATUS_INPUT_FULL == 0 {
+				return Ok(io::out8(DATA, byte));
 			}
 		}
 		Err(Timeout)
@@ -259,7 +259,7 @@ pub unsafe fn init_acpi(tables: &AcpiTables<impl AcpiHandler>) {
 		write_command(Command::DisablePort2).unwrap();
 
 		// Ensure the output buffer is flushed
-		let _ = io::inb(DATA);
+		let _ = io::in8(DATA);
 
 		// Setup the controller configuration byte up properly
 		write_command(Command::ReadControllerConfiguration).unwrap();

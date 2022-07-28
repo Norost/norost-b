@@ -109,21 +109,6 @@ pub fn read_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize>
 }
 
 #[inline(always)]
-pub fn peek(handle: Handle, buf: &mut [u8]) -> Result<usize> {
-	// SAFETY: the kernel won't deinitialize unread bytes
-	peek_uninit(handle, unsafe { mem::transmute(buf) })
-}
-
-#[inline(always)]
-pub fn peek_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::ReadUninit { buf },
-	})
-	.map(|v| v as _)
-}
-
-#[inline(always)]
 pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
 	syscall::do_io(DoIo {
 		handle,

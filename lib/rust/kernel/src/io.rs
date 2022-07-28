@@ -47,16 +47,15 @@ pub struct Request {
 
 impl Request {
 	pub const READ: u8 = 0;
-	pub const PEEK: u8 = 1;
-	pub const WRITE: u8 = 2;
-	pub const GET_META: u8 = 3;
-	pub const SET_META: u8 = 4;
-	pub const OPEN: u8 = 5;
-	pub const CREATE: u8 = 6;
-	pub const DESTROY: u8 = 7;
-	pub const SEEK: u8 = 8;
-	pub const CLOSE: u8 = 9;
-	pub const SHARE: u8 = 10;
+	pub const WRITE: u8 = 1;
+	pub const GET_META: u8 = 2;
+	pub const SET_META: u8 = 3;
+	pub const OPEN: u8 = 4;
+	pub const CREATE: u8 = 5;
+	pub const DESTROY: u8 = 6;
+	pub const SEEK: u8 = 7;
+	pub const CLOSE: u8 = 8;
+	pub const SHARE: u8 = 9;
 
 	#[inline(always)]
 	pub fn read(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
@@ -73,28 +72,6 @@ impl Request {
 	pub fn read_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
 		Self {
 			ty: Self::READ,
-			handle,
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	#[inline(always)]
-	pub fn peek(user_data: u64, handle: Handle, buf: &mut [u8]) -> Self {
-		Self {
-			ty: Self::PEEK,
-			handle,
-			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
-			user_data,
-			..Default::default()
-		}
-	}
-
-	#[inline(always)]
-	pub fn peek_uninit(user_data: u64, handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Self {
-		Self {
-			ty: Self::PEEK,
 			handle,
 			arguments_64: [buf.as_ptr() as u64, buf.len() as u64],
 			user_data,
@@ -316,10 +293,6 @@ pub enum DoIoOp<'a> {
 	Read { buf: &'a mut [u8] },
 	/// Read data from an object.
 	ReadUninit { buf: &'a mut [MaybeUninit<u8>] },
-	/// Read data from an object without discarding it on the server side.
-	Peek { buf: &'a mut [u8] },
-	/// Read data from an object without discarding it on the server side.
-	PeekUninit { buf: &'a mut [MaybeUninit<u8>] },
 	/// Write data to an object.
 	Write { data: &'a [u8] },
 	/// Open an object at the given location.
@@ -360,8 +333,6 @@ impl DoIo<'_> {
 		match self.op {
 			DoIoOp::Read { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
 			DoIoOp::ReadUninit { buf } => (R::READ, h, N2(buf.as_ptr() as _, buf.len())),
-			DoIoOp::Peek { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
-			DoIoOp::PeekUninit { buf } => (R::PEEK, h, N2(buf.as_ptr() as _, buf.len())),
 			DoIoOp::Write { data } => (R::WRITE, h, N2(data.as_ptr() as _, data.len())),
 			DoIoOp::GetMeta { property, value } => (
 				R::GET_META,

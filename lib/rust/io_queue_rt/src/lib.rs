@@ -189,15 +189,6 @@ impl Queue {
 			.map(|fut| Read { fut })
 	}
 
-	/// Read data from an object without advancing the seek head.
-	pub fn submit_peek<B>(&self, handle: Handle, buf: B) -> Result<Peek<'_, B>, Full<B>>
-	where
-		B: BufMut,
-	{
-		self.submit_read_buffer(buf, handle, |buffer| Request::Peek { buffer })
-			.map(|fut| Peek { fut })
-	}
-
 	/// Write data to an object.
 	pub fn submit_write<B>(&self, handle: Handle, data: B) -> Result<Write<'_, B>, Full<B>>
 	where
@@ -482,20 +473,6 @@ impl<B: BufMut> Future for Read<'_, B> {
 	type Output = (error::Result<usize>, B);
 
 	/// Check if the read request has finished.
-	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		poll_set_len(&mut self.fut, cx)
-	}
-}
-
-/// A pending peek request.
-pub struct Peek<'a, B: BufMut> {
-	fut: BufferFuture<'a, B>,
-}
-
-impl<B: BufMut> Future for Peek<'_, B> {
-	type Output = (error::Result<usize>, B);
-
-	/// Check if the peek request has finished.
 	fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
 		poll_set_len(&mut self.fut, cx)
 	}

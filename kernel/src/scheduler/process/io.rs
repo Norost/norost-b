@@ -156,12 +156,10 @@ impl super::Process {
 				continue;
 			};
 			match e.ty {
-				Request::READ | Request::PEEK => {
+				Request::READ => {
 					let data_ptr = e.arguments_64[0] as *mut u8;
 					let data_len = e.arguments_64[1] as usize;
-					let mut ticket = object
-						.clone()
-						.read(data_len.try_into().unwrap(), e.ty == Request::PEEK);
+					let mut ticket = object.clone().read(data_len.try_into().unwrap());
 					match poll(&mut ticket) {
 						Poll::Pending => push_pending(data_ptr, data_len, ticket.into()),
 						Poll::Ready(Ok(b)) => push_resp(copy_data_to(data_ptr, data_len, b)),

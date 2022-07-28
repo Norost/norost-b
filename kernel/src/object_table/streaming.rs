@@ -257,14 +257,10 @@ impl Object for StreamObject {
 		})
 	}
 
-	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
 		let amount = length.try_into().unwrap_or(u32::MAX);
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |_, job_id| Request::Read {
-				job_id,
-				amount,
-				peek,
-			})
+			tbl.submit_job(self.handle, |_, job_id| Request::Read { job_id, amount })
 		})
 	}
 
@@ -356,7 +352,7 @@ impl Notify {
 }
 
 impl Object for Notify {
-	fn read(self: Arc<Self>, _length: usize, _peek: bool) -> Ticket<Box<[u8]>> {
+	fn read(self: Arc<Self>, _length: usize) -> Ticket<Box<[u8]>> {
 		Ticket::new_complete(if let Some(tbl) = self.table.upgrade() {
 			if tbl.requests_enqueued() != 0 {
 				Ok([].into())

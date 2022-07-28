@@ -20,8 +20,8 @@ pub trait Object {
 		not_implemented()
 	}
 
-	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
-		let _ = (length, peek);
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
+		let _ = length;
 		not_implemented()
 	}
 

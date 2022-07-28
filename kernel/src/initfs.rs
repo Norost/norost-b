@@ -39,16 +39,13 @@ unsafe impl MemoryObject for File {
 }
 
 impl Object for File {
-	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
-		let pos = if peek {
-			self.position.load(Ordering::Relaxed)
-		} else {
-			self.position
-				.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
-					Some(p.saturating_add(length).min(self.data.len()))
-				})
-				.unwrap()
-		};
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
+		let pos = self
+			.position
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
+				Some(p.saturating_add(length).min(self.data.len()))
+			})
+			.unwrap();
 		let bottom = self.data.len().min(pos);
 		let top = self.data.len().min(pos + length).try_into().unwrap();
 		Ticket::new_complete(Ok(self.data[bottom..top].into()))

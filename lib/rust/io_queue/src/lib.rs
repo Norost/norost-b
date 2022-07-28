@@ -147,7 +147,6 @@ impl Queue {
 						expect_response = false;
 						io::Request::close(user_data, handle)
 					}
-					Request::Peek { buffer } => io::Request::peek_uninit(user_data, handle, buffer),
 					Request::Share { share } => io::Request::share(user_data, handle, share),
 				})
 				.map_err(|_| Full)?;
@@ -216,9 +215,6 @@ pub enum Request {
 		from: SeekFrom,
 	},
 	Close,
-	Peek {
-		buffer: &'static mut [MaybeUninit<u8>],
-	},
 	Share {
 		share: Handle,
 	},

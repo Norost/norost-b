@@ -131,31 +131,23 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				// The kernel does not expect a response
 				return true;
 			}
-			Request::Read {
-				job_id,
-				amount,
-				peek,
-			} => {
-				if peek {
-					(job_id, Response::Error(Error::InvalidOperation))
+			Request::Read { job_id, amount } => {
+				let mut char_buf = char_buf.borrow_mut();
+				if char_buf.is_empty() {
+					// There is currently no data, so delay a response until there is
+					// data. Don't enqueue a new TAKE_JOB either so we have a slot
+					// free for when we can send a reply
+					pending_read.set(Some(job_id));
+					return false;
 				} else {
-					let mut char_buf = char_buf.borrow_mut();
-					if char_buf.is_empty() {
-						// There is currently no data, so delay a response until there is
-						// data. Don't enqueue a new TAKE_JOB either so we have a slot
-						// free for when we can send a reply
-						pending_read.set(Some(job_id));
-						return false;
-					} else {
-						let l = tiny_buf.len();
-						let mut b = &mut tiny_buf[..l.min(char_buf.len())];
-						for w in b.iter_mut() {
-							*w = char_buf.pop_front().unwrap();
-						}
-						let data = table.alloc(b.len()).expect("out of buffers");
-						data.copy_from(0, b);
-						(job_id, Response::Data(data))
+					let l = tiny_buf.len();
+					let mut b = &mut tiny_buf[..l.min(char_buf.len())];
+					for w in b.iter_mut() {
+						*w = char_buf.pop_front().unwrap();
 					}
+					let data = table.alloc(b.len()).expect("out of buffers");
+					data.copy_from(0, b);
+					(job_id, Response::Data(data))
 				}
 			}
 			_ => todo!(),

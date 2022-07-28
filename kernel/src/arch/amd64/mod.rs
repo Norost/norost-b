@@ -43,7 +43,7 @@ static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
 pub mod pic {
 	//! https://wiki.osdev.org/PIC
 
-	use super::asm::io::{inb, outb};
+	use super::asm::io::{in8, out8};
 
 	/// IO base address for master PIC
 	pub const PIC1: u16 = 0x20;
@@ -100,20 +100,20 @@ pub mod pic {
 		unsafe {
 			// Setup PIC
 			// ICW1 (allow ICW4 & set PIC to be initialized)
-			outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
-			outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
+			out8(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
+			out8(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
 			// ICW2 (map IVT)
-			outb(PIC1_DATA, 240);
-			outb(PIC2_DATA, 248);
+			out8(PIC1_DATA, 240);
+			out8(PIC2_DATA, 248);
 			// ICW3 (tell master (PIC1) about slave (PIC2) & vice versa)
-			outb(PIC1_DATA, 4);
-			outb(PIC2_DATA, 2);
+			out8(PIC1_DATA, 4);
+			out8(PIC2_DATA, 2);
 			// ICW4 (set 80x86 mode)
-			outb(PIC1_DATA, ICW4_8086);
-			outb(PIC2_DATA, ICW4_8086);
+			out8(PIC1_DATA, ICW4_8086);
+			out8(PIC2_DATA, ICW4_8086);
 			// Mask all interrupts
-			outb(PIC1_DATA, 0xff);
-			outb(PIC2_DATA, 0xff);
+			out8(PIC1_DATA, 0xff);
+			out8(PIC2_DATA, 0xff);
 		}
 	}
 
@@ -127,9 +127,9 @@ pub mod pic {
 	#[allow(dead_code)]
 	fn irq_reg(ocw3: Ocw3) -> u16 {
 		unsafe {
-			outb(PIC1_COMMAND, ocw3 as u8);
-			outb(PIC2_COMMAND, ocw3 as u8);
-			u16::from(inb(PIC1_COMMAND)) | (u16::from(inb(PIC2_COMMAND)) << 8)
+			out8(PIC1_COMMAND, ocw3 as u8);
+			out8(PIC2_COMMAND, ocw3 as u8);
+			u16::from(in8(PIC1_COMMAND)) | (u16::from(in8(PIC2_COMMAND)) << 8)
 		}
 	}
 }

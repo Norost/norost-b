@@ -347,22 +347,14 @@ fn main() {
 						table.error(job_id, Error::InvalidOperation);
 					}
 				}
-				Request::Read {
-					peek,
-					job_id,
-					amount,
-				} => {
+				Request::Read { job_id, amount } => {
 					let len = (amount as usize).min(buf.len());
 					match &mut table.objects[handle] {
 						Object::Socket(Socket::TcpListener(_)) => {
 							table.error(job_id, Error::InvalidOperation)
 						}
 						Object::Socket(Socket::TcpConnection(sock)) => {
-							let r = if peek {
-								sock.peek(&mut buf[..len], &mut iface)
-							} else {
-								sock.read(&mut buf[..len], &mut iface)
-							};
+							let r = sock.read(&mut buf[..len], &mut iface);
 							match r {
 								Ok(0) => pending_reads.push(PendingRead {
 									handle,
@@ -381,39 +373,29 @@ fn main() {
 						}
 						Object::Query(q) => match q {
 							Some(Query::Root(q @ QueryRoot::Default)) => {
-								if !peek {
-									*q = QueryRoot::Global;
-								}
+								*q = QueryRoot::Global;
 								table.data(job_id, b"default")
 							}
 							Some(Query::Root(q @ QueryRoot::Global)) => {
-								if !peek {
-									*q = QueryRoot::IpAddr(0);
-								}
+								*q = QueryRoot::IpAddr(0);
 								table.data(job_id, b"::")
 							}
 							Some(Query::Root(QueryRoot::IpAddr(i))) => {
 								let ip = into_ip6(iface.ip_addrs()[*i].address());
-								if !peek {
-									*i += 1;
-									if *i >= iface.ip_addrs().len() {
-										*q = None;
-									}
+								*i += 1;
+								if *i >= iface.ip_addrs().len() {
+									*q = None;
 								}
 								table.data(job_id, format!("{}", ip).as_bytes())
 							}
 							Some(Query::SourceAddr(addr, p @ Protocol::Tcp)) => {
 								let addr = *addr;
-								if !peek {
-									*p = Protocol::Udp;
-								}
+								*p = Protocol::Udp;
 								table.data(job_id, format!("{}/tcp", addr).as_bytes())
 							}
 							Some(Query::SourceAddr(addr, Protocol::Udp)) => {
 								let addr = *addr;
-								if !peek {
-									*q = None;
-								}
+								*q = None;
 								table.data(job_id, format!("{}/udp", addr).as_bytes())
 							}
 							None => table.data(job_id, &[]),

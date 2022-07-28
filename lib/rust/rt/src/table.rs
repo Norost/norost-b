@@ -50,23 +50,6 @@ impl Object {
 		})
 	}
 
-	#[inline(always)]
-	pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
-		io::peek(self.0, buf)
-	}
-
-	#[inline]
-	pub fn peek_uninit<'a>(
-		&self,
-		buf: &'a mut [MaybeUninit<u8>],
-	) -> io::Result<(&'a mut [u8], &'a mut [MaybeUninit<u8>])> {
-		io::peek_uninit(self.0, buf).map(|l| {
-			let (i, u) = buf.split_at_mut(l);
-			// SAFETY: all bytes in i are initialized
-			(unsafe { MaybeUninit::slice_assume_init_mut(i) }, u)
-		})
-	}
-
 	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
 		io::write(self.0, data)

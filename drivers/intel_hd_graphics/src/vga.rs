@@ -30,7 +30,7 @@ pub unsafe fn disable_vga(control: &mut Control, io: rt::RefObject<'_>) {
 	io.seek(rt::io::SeekFrom::Start(SR_INDEX.into())).unwrap();
 	io.write(&[Sr01::INDEX]).unwrap();
 	let mut sr01 = Sr01(0);
-	io.peek(core::slice::from_mut(&mut sr01.0)).unwrap();
+	io.read(core::slice::from_mut(&mut sr01.0)).unwrap();
 	sr01.set_disabled(true);
 	io.write(core::slice::from_ref(&sr01.0)).unwrap();
 	rt::thread::sleep(core::time::Duration::from_micros(100));

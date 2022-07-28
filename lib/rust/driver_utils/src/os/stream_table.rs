@@ -63,15 +63,7 @@ impl StreamTable {
 		type R = nora_stream_table::Request;
 		let (h, r) = self.queue.borrow_mut().dequeue()?;
 		let r = match r {
-			R::Read {
-				job_id,
-				amount,
-				peek,
-			} => Request::Read {
-				job_id,
-				amount,
-				peek,
-			},
+			R::Read { job_id, amount } => Request::Read { job_id, amount },
 			R::Write { job_id, data } => Request::Write {
 				job_id,
 				data: self.get_owned_buf(data),
@@ -162,7 +154,6 @@ pub enum Request<'a> {
 	Read {
 		job_id: JobId,
 		amount: u32,
-		peek: bool,
 	},
 	Write {
 		job_id: JobId,

@@ -23,7 +23,6 @@ struct Request {
 
 enum RequestType {
 	Read
-	Peek
 	Write
 	GetMeta
 	SetMeta

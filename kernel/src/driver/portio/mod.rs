@@ -16,61 +16,52 @@ struct Io;
 impl Object for Io {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(if path == b"map" {
-			Ok(Arc::new(IoMap { head: 0.into() }))
+			Ok(Arc::new(IoMap { pos: 0.into() }))
 		} else {
-			Err(Error::InvalidData)
+			Err(Error::DoesNotExist)
 		})
 	}
 }
 
 struct IoMap {
-	head: AtomicU16,
-}
-
-impl IoMap {
-	fn fetch_byte(addr: u16) -> Box<[u8]> {
-		dbg!(addr as *const ());
-		// SAFETY: nada *shrugs*
-		[unsafe { io::inb(addr) }].into()
-	}
-
-	fn put_byte(addr: u16, data: u8) {
-		dbg!(addr as *const (), data as *const ());
-		// SAFETY: *shrugs again*
-		unsafe { io::outb(addr, data) }
-	}
+	pos: AtomicU16,
 }
 
 impl Object for IoMap {
 	fn seek(&self, from: SeekFrom) -> Ticket<u64> {
-		let n = match from {
-			SeekFrom::Start(n) => n as u16,
-			SeekFrom::Current(n) => self.head.load(Ordering::Relaxed).wrapping_add(n as u16),
-			SeekFrom::End(n) => (n as u16).wrapping_sub(1),
-		};
-		self.head.store(n, Ordering::Relaxed);
-		Ticket::new_complete(Ok(n.into()))
+		let mut pos = None;
+		self.pos
+			.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| {
+				pos = Some(p);
+				Some(from.apply(p.into(), u16::MAX.into()).try_into().unwrap())
+			})
+			.unwrap();
+		Ticket::new_complete(Ok(pos.unwrap().into()))
 	}
 
-	fn read(self: Arc<Self>, length: usize, peek: bool) -> Ticket<Box<[u8]>> {
-		Ticket::new_complete(match length {
-			1 => Ok(Self::fetch_byte(if peek {
-				self.head.load(Ordering::Relaxed)
-			} else {
-				self.head.fetch_add(1, Ordering::Relaxed)
-			})),
-			2 => todo!(),
-			4 => todo!(),
-			_ => Err(Error::InvalidData),
-		})
+	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
+		let p = self.pos.load(Ordering::Relaxed);
+		// SAFETY: nada *shrugs*
+		unsafe {
+			Ticket::new_complete(match length {
+				1 => Ok(io::in8(p).to_le_bytes().into()),
+				2 => Ok(io::in16(p).to_le_bytes().into()),
+				4 => Ok(io::in32(p).to_le_bytes().into()),
+				_ => Err(Error::InvalidData),
+			})
+		}
 	}
 
 	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
-		match data {
-			&[a] => Self::put_byte(self.head.fetch_add(1, Ordering::Relaxed), a),
-			&[_, _] => todo!(),
-			&[_, _, _, _] => todo!(),
-			_ => return Ticket::new_complete(Err(Error::InvalidData)),
+		let p = self.pos.load(Ordering::Relaxed);
+		// SAFETY: *shrugs again*
+		unsafe {
+			match data {
+				&[a] => io::out8(p, a),
+				&[a, b] => io::out16(p, u16::from_le_bytes([a, b])),
+				&[a, b, c, d] => io::out32(p, u32::from_le_bytes([a, b, c, d])),
+				_ => return Ticket::new_complete(Err(Error::InvalidData)),
+			}
 		}
 		Ticket::new_complete(Ok(data.len().try_into().unwrap()))
 	}

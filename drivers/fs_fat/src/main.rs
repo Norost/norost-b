@@ -98,11 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						}
 					},
 				),
-				Request::Read {
-					peek,
-					job_id,
-					amount,
-				} => (
+				Request::Read { job_id, amount } => (
 					job_id,
 					match &mut objects[handle] {
 						Object::File(path, offset) => {
@@ -112,17 +108,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							let len = file.read(&mut buf[..len]).unwrap();
 							let data = tbl.alloc(len).expect("out of buffers");
 							data.copy_from(0, &buf[..len]);
-							if !peek {
-								*offset += u64::try_from(len).unwrap();
-							}
+							*offset += u64::try_from(len).unwrap();
 							Response::Data(data)
 						}
 						Object::Query(list, index) => {
 							let f = match list.get(*index) {
 								Some(f) => {
-									if !peek {
-										*index += 1;
-									}
+									*index += 1;
 									f
 								}
 								None => "",
