@@ -12,6 +12,10 @@ norostb_kernel = { path = "../kernel" }
 norostb_rt = { path = "../rt" }
 nora_stream_table = { path = "../ipc/stream_table" }
 
+[dependencies.accessor]
+version = "0.3"
+optional = true
+
 [features]
 default = ["std", "alloc", "rt"]
 std = []

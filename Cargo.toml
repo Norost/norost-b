@@ -11,6 +11,7 @@ members = [
 	"drivers/virtio_block",
 	"drivers/virtio_gpu",
 	"drivers/virtio_net",
+	"drivers/usb",
 	"lib/rust/arena",
 	"lib/rust/async_completion",
 	"lib/rust/async_std",
@@ -59,6 +60,7 @@ strip = "symbols"
 [patch.crates-io]
 dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
 getrandom = { git = "https://git.sr.ht/~demindiro/getrandom" }
+xhci = { git = "https://github.com/Demindiro/xhci/", branch = "fix-try_from-type-range" }
 
 [patch.crates-io.os_str_bytes]
 git = "https://git.sr.ht/~demindiro/os_str_bytes"

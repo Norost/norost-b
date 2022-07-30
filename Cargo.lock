@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "accessor"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd8b2abd55bf1f9cffbf00fd594566c51a9d31402553284920c1309ca8351086"
+
+[[package]]
 name = "acpi"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -331,9 +337,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_usb"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "norost_rt_default",
+ "norostb_rt",
+ "pci",
+ "xhci",
+]
+
+[[package]]
 name = "driver_utils"
 version = "0.2.0"
 dependencies = [
+ "accessor",
  "arena",
  "nora_stream_table",
  "norostb_kernel",
@@ -935,6 +953,26 @@ version = "0.1.0"
 source = "git+https://git.sr.ht/~demindiro/nrofs/#104595f983494c5ad603c45a677db0aa2474ade6"
 
 [[package]]
+name = "num-derive"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -961,6 +999,12 @@ dependencies = [
  "elliptic-curve",
  "sha2 0.10.2",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c520e05135d6e763148b6426a837e239041653ba7becd2e538c076c738025fc"
 
 [[package]]
 name = "pci"
@@ -1491,6 +1535,18 @@ dependencies = [
  "curve25519-dalek",
  "rand_core 0.6.3",
  "zeroize",
+]
+
+[[package]]
+name = "xhci"
+version = "0.8.5"
+source = "git+https://github.com/Demindiro/xhci/?branch=fix-try_from-type-range#1fb109ffb1bb806464e47b4a61ce1385310f52e2"
+dependencies = [
+ "accessor",
+ "bit_field",
+ "num-derive",
+ "num-traits",
+ "paste",
 ]
 
 [[package]]

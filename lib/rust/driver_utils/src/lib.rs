@@ -14,6 +14,8 @@ extern crate alloc;
 mod arena;
 mod util;
 
+#[cfg(feature = "accessor")]
+pub mod accessor;
 pub mod dma;
 pub mod io;
 pub mod os;
