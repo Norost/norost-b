@@ -1,3 +1,11 @@
+//! # I/O space access
+//!
+//! While using the TSS' IOPB is possible on x86 and x64, it is highly arch-specific and riddled
+//! with legacy cruft that will inevitable lead to security issues[1].
+//! Instead, a custom object is used which is simpler and very likely smaller in total space used.
+//!
+//! [1]: http://www.os2museum.com/wp/the-history-of-a-security-hole/
+
 use crate::{
 	arch::asm::io,
 	object_table::{Error, Object, Root, SeekFrom, Ticket},

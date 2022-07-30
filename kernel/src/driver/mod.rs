@@ -2,6 +2,8 @@ mod acpi;
 pub mod apic;
 #[cfg(feature = "driver-hpet")]
 pub mod hpet;
+#[cfg(feature = "driver-interrupt")]
+mod interrupt;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
 #[cfg(feature = "driver-pic")]
@@ -60,6 +62,9 @@ pub fn post_init(root: &Root) {
 	#[cfg(feature = "driver-ps2")]
 	ps2::post_init(root);
 
-	#[cfg(feature = "driver-ps2")]
+	#[cfg(feature = "driver-pci")]
 	pci::post_init(root);
+
+	#[cfg(feature = "driver-interrupt")]
+	interrupt::post_init(root);
 }

@@ -404,6 +404,16 @@ pub fn allocate_irq() -> Result<u8, IrqsExhausted> {
 		.map_err(|_| IrqsExhausted)
 }
 
+/// Deallocate an IRQ ID.
+///
+/// # Safety
+///
+/// The ID must be valid and allocated from allocate_irq.
+pub unsafe fn deallocate_irq(n: u8) {
+	warn!("todo: implement deallocate_irq");
+	let _ = n;
+}
+
 #[derive(Debug)]
 pub struct IrqsExhausted;
 

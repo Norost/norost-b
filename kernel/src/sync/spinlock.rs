@@ -95,9 +95,9 @@ impl<T> From<T> for SpinLock<T> {
 	}
 }
 
-impl<T> Default for SpinLock<T>
+impl<T> const Default for SpinLock<T>
 where
-	T: Default,
+	T: ~const Default,
 {
 	fn default() -> Self {
 		Self::new(Default::default())

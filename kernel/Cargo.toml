@@ -24,21 +24,20 @@ git = "https://git.sr.ht/~demindiro/nrofs/"
 # TODO only enable driver-portio for x86 platforms
 default = [
 	"mem-max-16t",
+	"driver-interrupt",
 	"driver-pci",
 	"driver-hpet",
 	"driver-vga",
-	"driver-ps2-keyboard",
 	"driver-portio",
 ]
 mem-max-16t = []
 mem-max-256m = []
+driver-interrupt = []
 driver-pci = []
 driver-hpet = []
 driver-pic = []
 driver-rtc = []
 driver-vga = []
-driver-ps2 = []
-driver-ps2-keyboard = ["driver-ps2"]
 driver-portio = []
 debug = []
 debug-sanitize-heap = []

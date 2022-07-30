@@ -1,0 +1,20 @@
+[package]
+name = "driver_ps2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.driver_utils]
+package = "driver_utils"
+path = "../../lib/rust/driver_utils"
+default-features = false
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"
+
+[dependencies.scancodes]
+path = "../../lib/rust/scancodes"

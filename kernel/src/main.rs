@@ -12,7 +12,7 @@
 )]
 #![feature(decl_macro)]
 #![feature(drain_filter)]
-#![feature(let_else)]
+#![feature(if_let_guard, let_else)]
 #![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
