@@ -1,7 +1,6 @@
 cargo-features = ["strip"]
 
 [workspace]
-
 members = [
 	"kernel",
 	"boot/amd64",
@@ -40,6 +39,9 @@ members = [
 	"base/ssh",
 	"base/static_http_server",
 	"base/window_manager",
+]
+exclude = [
+	"thirdparty/rust"
 ]
 
 [profile.dev]
