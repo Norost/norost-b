@@ -10,21 +10,15 @@ use crate::{
 	sync::SpinLock,
 	util,
 };
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
-	vec::Vec,
-};
-use arena::Arena;
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::{mem, str};
 
-struct Entry {
-	irq: u8,
-	vector: u8,
-	object: Arc<Interrupt>,
-}
+// TODO add a vector and irq type to arch
+type InterruptVector = u8;
+type InterruptIrq = u8;
 
-static LISTENERS: SpinLock<Arena<Entry, ()>> = Default::default();
+// TODO use rwlock of sorts and add interior mutability to Entry.
+static LISTENERS: SpinLock<BTreeMap<InterruptVector, Entry>> = SpinLock::new(BTreeMap::new());
 
 struct InterruptTable;
 
@@ -43,64 +37,57 @@ impl Object for InterruptTable {
 			_ => return Error::DoesNotExist.into(),
 		};
 		unsafe {
-			arch::amd64::idt_set(vector.into(), crate::wrap_idt!(handle_irq));
+			arch::amd64::set_interrupt_handler(vector.into(), handle_irq);
 			io_apic::set_irq(irq, 0, vector, mode, false);
 		}
-		let mut l = LISTENERS.lock();
-		let h = l.insert_with(|handle| Entry {
-			irq,
+		LISTENERS.lock().insert(
 			vector,
-			object: Arc::new(Interrupt(
-				InterruptInner {
-					mode,
-					irq,
-					triggered: false,
-					handle,
-					wake: Default::default(),
-				}
-				.into(),
-			)),
-		});
-		Ticket::new_complete(Ok(l[h].object.clone()))
+			Entry {
+				mode,
+				irq,
+				triggered: false,
+				wake: Default::default(),
+			},
+		);
+		Ticket::new_complete(Ok(Arc::new(Interrupt(vector))))
 	}
 }
 
-struct InterruptInner {
+struct Entry {
 	mode: TriggerMode,
-	irq: u8,
+	irq: InterruptIrq,
 	triggered: bool,
-	handle: arena::Handle<()>,
 	wake: Vec<TicketWaker<Box<[u8]>>>,
 }
 
-struct Interrupt(SpinLock<InterruptInner>);
+struct Interrupt(InterruptVector);
 
 impl Drop for Interrupt {
 	fn drop(&mut self) {
-		let mut l = LISTENERS.auto_lock();
-		let e = l.remove(self.0.get_mut().handle).unwrap();
-		unsafe { arch::deallocate_irq(e.vector) }
+		LISTENERS.auto_lock().remove(&self.0).unwrap();
+		unsafe { arch::deallocate_irq(self.0) }
 	}
 }
 
 impl Object for Interrupt {
 	fn read(self: Arc<Self>, _: usize) -> Ticket<Box<[u8]>> {
-		let mut irq = self.0.lock();
-		if mem::take(&mut irq.triggered) {
+		let mut l = LISTENERS.auto_lock();
+		let e = l.get_mut(&self.0).unwrap();
+		if mem::take(&mut e.triggered) {
 			Ticket::new_complete(Ok([].into()))
 		} else {
 			let (t, w) = Ticket::new();
-			irq.wake.push(w);
+			e.wake.push(w);
 			t
 		}
 	}
 
 	fn write(self: Arc<Self>, _: &[u8]) -> Ticket<u64> {
-		let mut irq = self.0.lock();
-		// FIXME check if we actually need to send an EOI
+		let mut l = LISTENERS.auto_lock();
+		let e = l.get_mut(&self.0).unwrap();
 		unsafe {
-			if irq.mode == TriggerMode::Level {
-				io_apic::mask_irq(irq.irq, false);
+			if e.mode == TriggerMode::Level {
+				io_apic::mask_irq(e.irq, false);
 			}
 		}
 		0.into()
@@ -113,19 +100,16 @@ pub fn post_init(root: &Root) {
 	let _ = Arc::into_raw(tbl);
 }
 
-extern "C" fn handle_irq() {
+extern "C" fn handle_irq(vector: u32) {
 	let mut l = LISTENERS.isr_lock();
-	// TODO irq numbers
-	for (_, e) in l.iter_mut() {
-		let mut w = e.object.0.isr_lock();
-		if let Some(w) = w.wake.pop() {
-			w.isr_complete(Ok([].into()));
-		} else {
-			w.triggered = true;
-		}
-		if w.mode == TriggerMode::Level {
-			unsafe { io_apic::mask_irq(e.irq, true) };
-		}
+	let e = l.get_mut(&(vector as _)).unwrap();
+	if let Some(w) = e.wake.pop() {
+		w.isr_complete(Ok([].into()));
+	} else {
+		e.triggered = true;
+	}
+	if e.mode == TriggerMode::Level {
+		unsafe { io_apic::mask_irq(e.irq, true) };
 	}
 	local_apic::get().eoi.set(0);
 }

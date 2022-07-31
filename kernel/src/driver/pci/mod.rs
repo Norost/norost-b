@@ -117,7 +117,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 							use crate::arch::amd64;
 							let irq = amd64::allocate_irq().expect("irq");
 							unsafe {
-								amd64::idt_set(irq.into(), crate::wrap_idt!(irq_handler));
+								amd64::set_interrupt_handler(irq.into(), irq_handler);
 							}
 							irq
 						};
@@ -136,7 +136,7 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 	}
 }
 
-extern "C" fn irq_handler() {
+extern "C" fn irq_handler(_: u32) {
 	device::irq_handler();
 	local_apic::get().eoi.set(0);
 }

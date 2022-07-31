@@ -1,5 +1,7 @@
-use core::arch::asm;
-use core::mem;
+use core::{
+	arch::{asm, global_asm},
+	mem,
+};
 
 pub macro __swap_gs() {
 	"cmp DWORD PTR [rsp + 8], 8",
@@ -327,8 +329,11 @@ impl IDTEntry {
 	};
 
 	pub fn new(selector: u16, handler: Handler, ist: u8) -> Self {
+		Self::new_raw(selector, handler as _, ist)
+	}
+
+	const fn new_raw(selector: u16, handler: u64, ist: u8) -> Self {
 		assert!(ist < 8, "ist out of bounds");
-		let handler = handler as u64;
 		Self {
 			offset_low: (handler >> 0) as u16,
 			selector,
@@ -344,15 +349,21 @@ impl IDTEntry {
 }
 
 #[repr(C)]
-pub struct IDT<const L: usize> {
-	descriptors: [IDTEntry; L],
+pub struct IDT {
+	descriptors: [IDTEntry; 256],
 }
 
-impl<const L: usize> IDT<L> {
+impl IDT {
 	pub const fn new() -> Self {
-		Self {
-			descriptors: [IDTEntry::EMPTY; L],
+		let mut descriptors = [IDTEntry::EMPTY; 256];
+		let mut offset = 0;
+		let mut i = super::IRQ_STUB_OFFSET;
+		while i < descriptors.len() {
+			descriptors[i] = IDTEntry::new_raw(1 * 8, super::KERNEL_BASE + offset, 0);
+			offset += 5;
+			i += 1;
 		}
+		Self { descriptors }
 	}
 
 	pub fn set(&mut self, index: usize, entry: IDTEntry) {
@@ -368,7 +379,7 @@ pub struct IDTPointer {
 }
 
 impl IDTPointer {
-	pub fn new<const L: usize>(idt: &'static IDT<L>) -> Self {
+	pub fn new(idt: &'static IDT) -> Self {
 		Self {
 			limit: u16::try_from(mem::size_of_val(idt) - 1).unwrap(),
 			offset: idt as *const _ as u64,
@@ -377,7 +388,7 @@ impl IDTPointer {
 
 	pub fn activate(&self) {
 		unsafe {
-			asm!("lidt [{0}]", in(reg) self);
+			asm!("lidt [{0}]", in(reg) self, options(readonly, nostack));
 		}
 	}
 }

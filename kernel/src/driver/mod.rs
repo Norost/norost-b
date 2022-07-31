@@ -10,8 +10,6 @@ pub mod pci;
 pub mod pic;
 #[cfg(feature = "driver-portio")]
 pub mod portio;
-#[cfg(feature = "driver-ps2")]
-pub mod ps2;
 #[cfg(feature = "driver-rtc")]
 pub mod rtc;
 pub mod uart;
@@ -58,9 +56,6 @@ pub fn post_init(root: &Root) {
 
 	#[cfg(feature = "driver-portio")]
 	portio::post_init(root);
-
-	#[cfg(feature = "driver-ps2")]
-	ps2::post_init(root);
 
 	#[cfg(feature = "driver-pci")]
 	pci::post_init(root);

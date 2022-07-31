@@ -35,9 +35,6 @@ pub unsafe fn init(boot: &boot::Info) {
 
 		super::apic::init_acpi(&acpi);
 
-		#[cfg(feature = "driver-ps2")]
-		super::ps2::init_acpi(&acpi);
-
 		#[cfg(feature = "driver-pci")]
 		super::pci::init_acpi(&acpi);
 

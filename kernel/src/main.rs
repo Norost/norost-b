@@ -6,6 +6,7 @@
 #![feature(
 	const_btree_new,
 	const_default_impls,
+	const_for,
 	const_maybe_uninit_uninit_array,
 	const_trait_impl,
 	inline_const

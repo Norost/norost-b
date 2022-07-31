@@ -111,11 +111,11 @@ pub(super) unsafe fn init() {
 
 	unsafe {
 		io_apic::set_irq(com1_irq, 0, com1_vec, io_apic::TriggerMode::Level, false);
-		amd64::idt_set(com1_vec.into(), crate::wrap_idt!(irq_handler));
+		amd64::set_interrupt_handler(com1_vec.into(), irq_handler);
 	}
 }
 
-extern "C" fn irq_handler() {
+extern "C" fn irq_handler(_: u32) {
 	super::table::irq_handler();
 	local_apic::get().eoi.set(0);
 }
