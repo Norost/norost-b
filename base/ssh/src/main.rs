@@ -1,13 +1,13 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc};
-
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
 	env,
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	process,
 };
+use clap::Parser;
 use core::{
 	cell::{Cell, RefCell, RefMut},
 	future::Future,
@@ -28,17 +28,49 @@ use nora_ssh::{
 	Identifier,
 };
 use rand::{rngs::StdRng, CryptoRng, RngCore, SeedableRng};
+use serde_derive::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct Keys {
+	ecdsa: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+	keys: Keys,
+}
+
+#[derive(Parser, Debug)]
+struct Args {
+	#[clap(value_parser)]
+	config: String,
+}
 
 fn main() -> ! {
-	async_std::task::block_on(async {
-		let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-		let server_secret = ecdsa::SigningKey::<p256::NistP256>::random(&mut rng);
+	let args = Args::parse();
 
+	let config = std::fs::read(&args.config).unwrap();
+	let config: Config = match toml::from_slice(&config) {
+		Ok(p) => p,
+		Err(e) => {
+			eprintln!("{}", e);
+			std::process::exit(1);
+		}
+	};
+
+	let key = config.keys.ecdsa.expect("no keys");
+	let key = std::fs::read(&key).unwrap();
+	let key = std::str::from_utf8(&key).expect("invalid key");
+	let key = key.trim();
+	let key = base85::decode(key).expect("invalid key");
+	let key = ecdsa::SigningKey::<p256::NistP256>::from_bytes(&key).expect("invalid key");
+
+	async_std::task::block_on(async {
 		let addr = (Ipv4Addr::UNSPECIFIED, 22);
 		let listener = TcpListener::bind(addr).await.unwrap();
 		let server = Server::new(
 			Identifier::new(b"SSH-2.0-nora_ssh example").unwrap(),
-			server_secret,
+			key,
 			Handlers { listener },
 		);
 

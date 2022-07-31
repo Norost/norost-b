@@ -46,7 +46,6 @@ target = "net"
 file_root = ""
 
 [program.virtio_net]
-disabled = true
 path = "virtio_net"
 args = [ "net" ]
 target = "net"
@@ -70,8 +69,8 @@ after = [ "ps2/keyboard/stream" ]
 file_root = ""
 
 [program.ssh]
-disabled = true
 path = "ssh"
+args = [ "drivers/ssh.toml" ]
 after = [ "net" ]
 file_root = ""
 net_root = "net"

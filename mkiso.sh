@@ -30,7 +30,9 @@ cp target/$TARGET_KERNEL/$build_dir/nora $O/boot/nora
 cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
-cp init.toml $A/init.toml
+cp init.toml      $A/init.toml
+cp ssh.toml       $A/ssh.toml
+cp ssh_ecdsa.priv $A/ssh_ecdsa.priv
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then
@@ -50,13 +52,13 @@ install drivers ps2                driver_ps2
 install drivers scancode_to_char   driver_scancode_to_char
 #install drivers virtio_block       driver_virtio_block
 #install drivers virtio_gpu         driver_virtio_gpu
-#install drivers virtio_net         driver_virtio_net
+install drivers virtio_net         driver_virtio_net
 install base    init               init
 #install base    gui_cli            gui_cli
 #install base    image_viewer       image_viewer
 #install base    jail               jail
 install base    minish             minish
-#install base    ssh                ssh
+install base    ssh                ssh
 #install base    static_http_server static_http_server
 #install base    window_manager     window_manager
 
