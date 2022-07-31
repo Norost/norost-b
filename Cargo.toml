@@ -1,12 +1,12 @@
 cargo-features = ["strip"]
 
 [workspace]
-
 members = [
 	"kernel",
 	"boot/amd64",
 	"drivers/fs_fat",
 	"drivers/intel_hd_graphics",
+	"drivers/ps2",
 	"drivers/scancode_to_char",
 	"drivers/virtio_block",
 	"drivers/virtio_gpu",
@@ -39,6 +39,9 @@ members = [
 	"base/ssh",
 	"base/static_http_server",
 	"base/window_manager",
+]
+exclude = [
+	"thirdparty/rust"
 ]
 
 [profile.dev]

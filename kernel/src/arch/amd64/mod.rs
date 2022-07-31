@@ -28,14 +28,22 @@ pub use syscall::{
 /// The IRQ used by the timer.
 pub const TIMER_IRQ: u8 = 32;
 
+// Used to construct IDT at compile time. See idt.s, idt.rs and link.ld
+const KERNEL_BASE: u64 = 0xffff800000000000;
+
 static mut TSS: tss::TSS = tss::TSS::new();
 
 static mut GDT: MaybeUninit<gdt::GDT> = MaybeUninit::uninit();
 // TODO do we really need to keep this in memory forever?
 static mut GDT_PTR: MaybeUninit<gdt::GDTPointer> = MaybeUninit::uninit();
 
-static mut IDT: idt::IDT<256> = idt::IDT::new();
+static mut IDT: idt::IDT = idt::IDT::new();
 static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
+
+const IRQ_STUB_OFFSET: usize = 33;
+#[export_name = "irq_handler_table"]
+static mut IRQ_HANDLER_TABLE: [extern "C" fn(u32); 256 - IRQ_STUB_OFFSET] =
+	[irq_default_handler; 256 - IRQ_STUB_OFFSET];
 
 // Start from 33, where IRQs 0..31 are used for exceptions and 32 is reserved for the timer.
 static IRQ_ALLOCATOR: AtomicU8 = AtomicU8::new(33);
@@ -362,13 +370,25 @@ extern "C" fn handle_security_exception(error: u32, rip: *const ()) {
 	halt();
 }
 
+extern "C" fn irq_default_handler(irq: u32) {
+	fatal!("Unexpected IRQ {}!", irq);
+	halt();
+}
+
 pub fn halt() {
 	unsafe { asm!("hlt", options(nomem, nostack, preserves_flags)) };
 }
 
-pub unsafe fn idt_set(irq: usize, entry: IDTEntry) {
+unsafe fn idt_set(irq: usize, entry: IDTEntry) {
 	unsafe {
 		IDT.set(irq, entry);
+	}
+}
+
+pub unsafe fn set_interrupt_handler(interrupt: u32, handler: extern "C" fn(u32)) {
+	let interrupt = u8::try_from(interrupt).unwrap();
+	unsafe {
+		IRQ_HANDLER_TABLE[usize::from(interrupt) - IRQ_STUB_OFFSET] = handler;
 	}
 }
 
@@ -402,6 +422,16 @@ pub fn allocate_irq() -> Result<u8, IrqsExhausted> {
 			(n <= 0xfe).then(|| n + 1)
 		})
 		.map_err(|_| IrqsExhausted)
+}
+
+/// Deallocate an IRQ ID.
+///
+/// # Safety
+///
+/// The ID must be valid and allocated from allocate_irq.
+pub unsafe fn deallocate_irq(n: u8) {
+	warn!("todo: implement deallocate_irq");
+	let _ = n;
 }
 
 #[derive(Debug)]

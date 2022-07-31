@@ -12,6 +12,7 @@
 extern crate alloc;
 
 mod arena;
+mod util;
 
 pub mod dma;
 pub mod io;

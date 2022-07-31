@@ -38,6 +38,18 @@ impl<T> Ticket<T> {
 	}
 }
 
+impl<T> From<Result<T, Error>> for Ticket<T> {
+	fn from(res: Result<T, Error>) -> Self {
+		Self::new_complete(res)
+	}
+}
+
+impl<T> From<Error> for Ticket<T> {
+	fn from(e: Error) -> Self {
+		Self::new_complete(Err(e))
+	}
+}
+
 pub struct TicketWaker<T> {
 	inner: Arc<SpinLock<TicketInner<T>>>,
 }
@@ -131,6 +143,12 @@ macro_rules! any_ticket {
 					Self::$v(t) => t,
 					_ => unreachable!(),
 				}
+			}
+		}
+
+		impl From<$t> for Ticket<$t> {
+			fn from(v: $t) -> Self {
+				Self::new_complete(Ok(v))
 			}
 		}
 	};

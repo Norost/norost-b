@@ -8,14 +8,18 @@ struct IoApic {
 	data: RegRW,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TriggerMode {
-	#[allow(dead_code)]
 	Edge,
 	Level,
 }
 
-pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMode) {
-	let i = 0x10 + u32::from(irq) * 2;
+fn irq_offset(irq: u8) -> u32 {
+	0x10 + u32::from(irq) * 2
+}
+
+pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMode, mask: bool) {
+	let i = irq_offset(irq);
 
 	unsafe {
 		// APIC ID | ...
@@ -23,6 +27,7 @@ pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMod
 
 		// ... | mask | ... | trigger mode | ... | delivery status | destination | delivery | vector
 		let wr = read(i + 0) & 0xfffe_0000;
+		let wr = wr | u32::from(mask) << 16;
 		let wr = wr
 			| match trigger_mode {
 				TriggerMode::Edge => 0,
@@ -33,6 +38,13 @@ pub unsafe fn set_irq(irq: u8, apic_id: u8, vector: u8, trigger_mode: TriggerMod
 		let wr = wr | 0b000 << 8;
 		let wr = wr | u32::from(vector);
 		write(i + 0, wr);
+	}
+}
+
+pub unsafe fn mask_irq(irq: u8, enable: bool) {
+	let i = irq_offset(irq);
+	unsafe {
+		write(i, read(i) & !(1 << 16) | u32::from(enable) << 16);
 	}
 }
 

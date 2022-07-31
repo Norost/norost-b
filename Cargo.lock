@@ -253,6 +253,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_ps2"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "futures-util",
+ "norost_async_std",
+ "norost_rt_default",
+ "norostb_rt",
+ "scancodes",
+]
+
+[[package]]
 name = "driver_scancode_to_char"
 version = "0.1.0"
 dependencies = [
@@ -671,7 +683,6 @@ dependencies = [
  "nrofs",
  "pci",
  "rsdp",
- "scancodes",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ SECTIONS
  
 	.text BLOCK(4K) : ALIGN(4K)
 	{
+		KEEP(*(.text.idt))
 		*(.text .text.*)
 	}
  

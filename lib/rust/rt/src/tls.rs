@@ -194,7 +194,7 @@ pub(crate) unsafe fn deinit_thread() {
 				}
 			}
 		}
-		Box::from_raw(ptr::slice_from_raw_parts_mut(storage, ENTRIES));
+		let _ = Box::from_raw(ptr::slice_from_raw_parts_mut(storage, ENTRIES));
 	}
 }
 

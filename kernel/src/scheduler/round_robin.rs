@@ -63,9 +63,9 @@ pub fn next() -> Option<Arc<Thread>> {
 			n.next
 		};
 		let c = unsafe { curr.as_mut() };
-		drop(unsafe {
-			Box::from_raw(c.next.as_ptr());
-		});
+		unsafe {
+			let _ = Box::from_raw(c.next.as_ptr());
+		}
 		l.0 -= 1;
 		if c.next == curr {
 			return None;

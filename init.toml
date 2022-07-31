@@ -3,15 +3,16 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
-after = [ "gui_cli", "ps2_kbd/stream" ]
-stdin = "ps2_kbd/stream"
-stdout = "gui_cli/write"
-stderr = "gui_cli/write"
+#after = [ "gui_cli", "keyboard/stream" ]
+after = [ "keyboard/stream" ]
+stdin = "keyboard/stream"
+#stdout = "gui_cli/write"
+#stderr = "gui_cli/write"
 
 [program.fs_fat]
+disabled = true
 path = "fs_fat"
 args = [ "file", "disk/data" ]
 target = "file"
@@ -31,6 +32,7 @@ after = [ "window_manager" ]
 file_root = ""
 
 [program.virtio_blk]
+disabled = true
 path = "virtio_block"
 args = [ "disk" ]
 target = "disk"
@@ -44,6 +46,7 @@ target = "net"
 file_root = ""
 
 [program.virtio_net]
+disabled = true
 path = "virtio_net"
 args = [ "net" ]
 target = "net"
@@ -56,14 +59,18 @@ after = [ "file", "net" ]
 file_root = "file"
 net_root = "net"
 
+[program.ps2]
+path = "ps2"
+file_root = ""
+
 [program.scancode_to_char]
-disabled = true
 path = "scancode_to_char"
-args = [ "ps2_kbd", "ps2_keyboard/scancodes" ]
-after = [ "ps2_keyboard/scancodes" ]
+args = [ "keyboard", "ps2/keyboard/stream" ]
+after = [ "ps2/keyboard/stream" ]
 file_root = ""
 
 [program.ssh]
+disabled = true
 path = "ssh"
 after = [ "net" ]
 file_root = ""

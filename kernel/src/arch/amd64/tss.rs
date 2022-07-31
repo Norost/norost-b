@@ -1,4 +1,4 @@
-use core::{cell::Cell, num::NonZeroUsize};
+use core::{cell::Cell, mem, num::NonZeroUsize};
 
 #[repr(C)]
 pub struct TSS {
@@ -20,7 +20,9 @@ impl TSS {
 			ist: [const { [Cell::new(0), Cell::new(0)] }; 7],
 			_reserved_2: [0; 2],
 			_reserved_3: 0,
-			iomap_base: Cell::new(0),
+			// The CPU starts reading from TSS addr + IOPB, so make sure it points to the end of
+			// the TSS lest our minds break and things are vulnerable.
+			iomap_base: Cell::new(mem::size_of::<Self>() as _),
 		}
 	}
 

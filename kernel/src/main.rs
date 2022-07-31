@@ -6,13 +6,14 @@
 #![feature(
 	const_btree_new,
 	const_default_impls,
+	const_for,
 	const_maybe_uninit_uninit_array,
 	const_trait_impl,
 	inline_const
 )]
 #![feature(decl_macro)]
 #![feature(drain_filter)]
-#![feature(let_else)]
+#![feature(if_let_guard, let_else)]
 #![feature(maybe_uninit_slice, maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(never_type)]
