@@ -3,13 +3,13 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
-after = [ "gui_cli", "ps2_kbd/stream" ]
-stdin = "ps2_kbd/stream"
-stdout = "gui_cli/write"
-stderr = "gui_cli/write"
+#after = [ "gui_cli", "keyboard/stream" ]
+after = [ "keyboard/stream" ]
+stdin = "keyboard/stream"
+#stdout = "gui_cli/write"
+#stderr = "gui_cli/write"
 
 [program.fs_fat]
 disabled = true
@@ -64,10 +64,9 @@ path = "ps2"
 file_root = ""
 
 [program.scancode_to_char]
-disabled = true
 path = "scancode_to_char"
-args = [ "ps2_kbd", "ps2_keyboard/scancodes" ]
-after = [ "ps2_keyboard/scancodes" ]
+args = [ "keyboard", "ps2/keyboard/stream" ]
+after = [ "ps2/keyboard/stream" ]
 file_root = ""
 
 [program.ssh]

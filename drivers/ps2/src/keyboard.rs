@@ -1,5 +1,6 @@
 use super::*;
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc};
+use core::cell::RefCell;
 use driver_utils::os::stream_table::JobId;
 use scancodes::{
 	scanset::ps2::{scanset2_decode, DecodeError},
@@ -8,10 +9,9 @@ use scancodes::{
 
 pub struct Keyboard {
 	port: Port,
-	readers: VecDeque<JobId>,
-	events: LossyRingBuffer<Event>,
-	buf: [u8; 8],
-	buf_index: u8,
+	readers: RefCell<VecDeque<JobId>>,
+	events: RefCell<LossyRingBuffer<Event>>,
+	buf: RefCell<TinyBuf>,
 	interrupt: rt::Object,
 }
 
@@ -27,6 +27,12 @@ struct LossyRingBuffer<T> {
 	push: u8,
 	pop: u8,
 	data: [T; 128],
+}
+
+#[derive(Default)]
+struct TinyBuf {
+	buf: [u8; 8],
+	index: u8,
 }
 
 impl<T: ~const Default> const Default for LossyRingBuffer<T> {
@@ -91,7 +97,6 @@ impl Keyboard {
 			events: Default::default(),
 			readers: Default::default(),
 			buf: Default::default(),
-			buf_index: Default::default(),
 			interrupt,
 		}
 	}
@@ -102,49 +107,49 @@ impl Device for Keyboard {
 		(&self.interrupt).into()
 	}
 
-	fn add_reader<'a>(
-		&mut self,
-		reader: JobId,
-		buf: &'a mut [u8; 16],
-	) -> Option<(JobId, &'a [u8])> {
-		if let Some(e) = self.events.pop() {
-			todo!()
+	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])> {
+		if let Some(e) = self.events.borrow_mut().pop() {
+			let buf = &mut buf[..4];
+			buf.copy_from_slice(&<[u8; 4]>::from(e));
+			Some((reader, buf))
 		} else {
-			todo!()
+			self.readers.borrow_mut().push_back(reader);
+			None
 		}
 	}
 
 	fn handle_interrupt<'a>(
-		&mut self,
+		&self,
 		ps2: &mut Ps2,
-		buf: &'a mut [u8; 16],
+		out_buf: &'a mut [u8; 16],
 	) -> Option<(JobId, &'a [u8])> {
 		let Ok(b) = ps2.read_port_data_nowait() else {
 			// TODO for some reason the keyboard fires an IRQ for seemingly no reason. Just
 			// ignore them for now.
 			return None;
 		};
-		self.buf[usize::from(self.buf_index)] = b;
-		self.buf_index += 1;
+		let mut buf = self.buf.borrow_mut();
+		let buf = &mut *buf;
+		buf.buf[usize::from(buf.index)] = b;
+		buf.index += 1;
 
-		let seq = &self.buf[..self.buf_index.into()];
+		let seq = &buf.buf[..buf.index.into()];
 		match scanset2_decode(seq) {
 			Ok(code) => {
-				rt::dbg!(code);
-				self.buf_index = 0;
-				if let Some(id) = self.readers.pop_front() {
-					let buf = &mut buf[..4];
-					buf.copy_from_slice(&<[u8; 4]>::from(code));
-					Some((id, buf))
+				buf.index = 0;
+				if let Some(id) = self.readers.borrow_mut().pop_front() {
+					let out_buf = &mut out_buf[..4];
+					out_buf.copy_from_slice(&<[u8; 4]>::from(code));
+					Some((id, out_buf))
 				} else {
-					self.events.push(code);
+					self.events.borrow_mut().push(code);
 					None
 				}
 			}
 			Err(DecodeError::Incomplete) => None,
 			Err(DecodeError::NotRecognized) => {
 				log!("scancode {:x?} is not recognized", seq);
-				self.buf_index = 0;
+				buf.index = 0;
 				None
 			}
 		}

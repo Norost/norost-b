@@ -2,6 +2,7 @@
 #![feature(start)]
 #![feature(const_trait_impl, inline_const)]
 #![feature(let_else)]
+#![deny(unused_must_use)]
 
 extern crate alloc;
 
@@ -15,26 +16,111 @@ mod keyboard;
 
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::boxed::Box;
-use driver_utils::os::{portio::PortIo, stream_table::JobId};
+use async_std::{
+	io::{Read, Write},
+	object::RefAsyncObject,
+	task,
+};
+use driver_utils::os::{
+	portio::PortIo,
+	stream_table::{JobId, Request, Response, StreamTable},
+};
+use futures_util::future;
 use rt as _;
 use rt_default as _;
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
-	main()
+	task::block_on(main())
 }
 
-fn main() -> ! {
+async fn main() -> ! {
 	let (mut ps2, [dev1, dev2]) = Ps2::init();
 	let mut buf = [0; 16];
 
-	let mut dev1 = dev1.unwrap();
+	let dev1 = dev1.unwrap();
 
-	loop {
-		dev1.interrupter().read(&mut []).unwrap();
-		dev1.handle_interrupt(&mut ps2, &mut buf);
-		dev1.interrupter().write(&mut []).unwrap();
-	}
+	let tbl = {
+		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 256 }).unwrap();
+		StreamTable::new(&buf, 8.try_into().unwrap(), 16 - 1)
+	};
+	rt::io::file_root()
+		.unwrap()
+		.create(b"ps2")
+		.unwrap()
+		.share(tbl.public())
+		.unwrap();
+
+	let tbl_notify = RefAsyncObject::from(tbl.notifier());
+	let dev1_intr = RefAsyncObject::from(dev1.interrupter());
+
+	let tbl_loop = async {
+		let mut buf = [0; 16];
+		loop {
+			tbl_notify.read(()).await.0.unwrap();
+			let mut flush = false;
+			const KEYBOARD_STREAM_HANDLE: rt::Handle = rt::Handle::MAX - 1;
+			while let Some((handle, req)) = tbl.dequeue() {
+				let (job_id, resp) = match req {
+					Request::Open { job_id, path } => (job_id, {
+						let l = path.len();
+						path.copy_to(0, &mut buf[..l]);
+						path.manual_drop();
+						if &buf[..l] == b"keyboard/stream" {
+							Response::Handle(KEYBOARD_STREAM_HANDLE)
+						} else {
+							Response::Error(rt::Error::DoesNotExist)
+						}
+					}),
+					Request::Read { job_id, amount } => (
+						job_id,
+						match handle {
+							rt::Handle::MAX => Response::Error(rt::Error::InvalidOperation),
+							KEYBOARD_STREAM_HANDLE => {
+								if amount < 4 {
+									Response::Error(rt::Error::InvalidData)
+								} else if let Some((job_id, d)) = dev1.add_reader(job_id, &mut buf)
+								{
+									let mut data = tbl.alloc(d.len()).expect("out of buffers");
+									data.copy_from(0, d);
+									Response::Data(data)
+								} else {
+									continue;
+								}
+							}
+							_ => unreachable!(),
+						},
+					),
+					Request::Close => continue,
+					Request::Create { job_id, .. }
+					| Request::Destroy { job_id, .. }
+					| Request::Seek { job_id, .. }
+					| Request::Share { job_id, .. }
+					| Request::Write { job_id, .. }
+					| Request::GetMeta { job_id, .. }
+					| Request::SetMeta { job_id, .. } => (job_id, Response::Error(rt::Error::InvalidOperation)),
+				};
+				tbl.enqueue(job_id, resp);
+				flush = true;
+			}
+			flush.then(|| tbl.flush());
+		}
+	};
+	let dev1_loop = async {
+		loop {
+			dev1_intr.read(()).await.0.unwrap();
+			if let Some((job_id, d)) = dev1.handle_interrupt(&mut ps2, &mut buf) {
+				let mut data = tbl.alloc(d.len()).expect("out of buffers");
+				data.copy_from(0, d);
+				tbl.enqueue(job_id, Response::Data(data));
+				tbl.flush();
+			}
+			dev1_intr.write(()).await.0.unwrap();
+		}
+	};
+	futures_util::pin_mut!(tbl_loop);
+	futures_util::pin_mut!(dev1_loop);
+	future::select(tbl_loop, dev1_loop).await.factor_first().0
 }
 
 const DATA: u16 = 0x60;
@@ -134,10 +220,12 @@ enum ReadAckError {
 }
 
 trait Device {
-	fn add_reader<'a>(&mut self, job: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])>;
+	#[must_use]
+	fn add_reader<'a>(&self, job: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])>;
 
+	#[must_use]
 	fn handle_interrupt<'a>(
-		&mut self,
+		&self,
 		ps2: &mut Ps2,
 		buf: &'a mut [u8; 16],
 	) -> Option<(JobId, &'a [u8])>;

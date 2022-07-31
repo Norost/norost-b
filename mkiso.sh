@@ -47,7 +47,7 @@ install () {
 #install drivers fs_fat             driver_fs_fat
 #install drivers intel_hd_graphics  driver_intel_hd_graphics
 install drivers ps2                driver_ps2
-#install drivers scancode_to_char   driver_scancode_to_char
+install drivers scancode_to_char   driver_scancode_to_char
 #install drivers virtio_block       driver_virtio_block
 #install drivers virtio_gpu         driver_virtio_gpu
 #install drivers virtio_net         driver_virtio_net
@@ -55,7 +55,7 @@ install base    init               init
 #install base    gui_cli            gui_cli
 #install base    image_viewer       image_viewer
 #install base    jail               jail
-#install base    minish             minish
+install base    minish             minish
 #install base    ssh                ssh
 #install base    static_http_server static_http_server
 #install base    window_manager     window_manager
