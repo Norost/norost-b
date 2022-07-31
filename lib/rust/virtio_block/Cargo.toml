@@ -9,10 +9,9 @@ edition = "2021"
 [dependencies]
 virtio = { path = "../virtio" }
 pci = { path = "../pci" }
-endian = { path = "../endian" }
 volatile = { path = "../volatile" }
-#fatfs = { path = "../../../thirdparty/rust/fatfs/", optional = true, default-features = false }
-norostb_kernel = { path = "../kernel" }
 memoffset = "0.6.5"
 
-[features]
+[dependencies.endian]
+package = "nora_endian"
+version = "0.1"

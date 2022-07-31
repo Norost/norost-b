@@ -10,7 +10,6 @@ default-target = "x86_64-unknown-norostb"
 rt = { package = "norostb_rt", path = "../../lib/rust/rt" }
 rt_alloc = { package = "norostb_rt_alloc", path = "../../lib/rust/rt_alloc" }
 pci = { path = "../../lib/rust/pci" }
-endian = { path = "../../lib/rust/endian" }
 
 [dependencies.driver_utils]
 path = "../../lib/rust/driver_utils"
@@ -18,3 +17,7 @@ default-features = false
 
 [dependencies.ipc_gpu]
 path = "../../lib/rust/ipc/gpu"
+
+[dependencies.endian]
+package = "nora_endian"
+version = "0.1"

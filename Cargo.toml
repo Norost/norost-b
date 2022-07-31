@@ -15,7 +15,6 @@ members = [
 	"lib/rust/async_completion",
 	"lib/rust/async_std",
 	"lib/rust/driver_utils",
-	"lib/rust/endian",
 	"lib/rust/pci",
 	"lib/rust/scancodes",
 	"lib/rust/virtio",

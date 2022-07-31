@@ -245,8 +245,8 @@ name = "driver_intel_hd_graphics"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
- "endian",
  "ipc_gpu",
+ "nora_endian",
  "norostb_rt",
  "norostb_rt_alloc",
  "pci",
@@ -358,10 +358,6 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
-
-[[package]]
-name = "endian"
-version = "0.1.0"
 
 [[package]]
 name = "fatfs"
@@ -678,12 +674,19 @@ dependencies = [
  "arena",
  "cfg-if",
  "compiler_builtins",
+ "nora_endian",
  "nora_stream_table",
  "norostb_kernel",
  "nrofs",
  "pci",
  "rsdp",
 ]
+
+[[package]]
+name = "nora_endian"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "280db64d556ef447ff253df2bb152b94b6e87ef9c7ca7996a60e520291b512c0"
 
 [[package]]
 name = "nora_io_queue"
@@ -850,7 +853,7 @@ dependencies = [
 name = "pci"
 version = "0.1.0"
 dependencies = [
- "endian",
+ "nora_endian",
  "volatile",
 ]
 
@@ -1238,7 +1241,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "virtio"
 version = "0.1.0"
 dependencies = [
- "endian",
+ "nora_endian",
  "pci",
  "volatile",
 ]
@@ -1247,9 +1250,8 @@ dependencies = [
 name = "virtio_block"
 version = "0.1.0"
 dependencies = [
- "endian",
  "memoffset",
- "norostb_kernel",
+ "nora_endian",
  "pci",
  "virtio",
  "volatile",
@@ -1259,7 +1261,7 @@ dependencies = [
 name = "virtio_gpu"
 version = "0.1.0"
 dependencies = [
- "endian",
+ "nora_endian",
  "pci",
  "virtio",
  "volatile",
@@ -1269,7 +1271,7 @@ dependencies = [
 name = "virtio_net"
 version = "0.1.0"
 dependencies = [
- "endian",
+ "nora_endian",
  "pci",
  "virtio",
  "volatile",

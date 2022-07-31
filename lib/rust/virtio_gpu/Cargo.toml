@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-endian = { path = "../endian/" }
 pci = { path = "../pci/" }
 virtio = { path = "../virtio" }
 volatile = { path = "../volatile" }
+
+[dependencies.endian]
+package = "nora_endian"
+version = "0.1"

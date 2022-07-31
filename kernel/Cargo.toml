@@ -16,6 +16,10 @@ arena = { path = "../lib/rust/arena" }
 compiler_builtins = { version = "0.1", features = ["mem"] }
 nora_stream_table = { path = "../lib/rust/ipc/stream_table" }
 
+[dependencies.endian]
+package = "nora_endian"
+version = "0.1"
+
 [dependencies.nrofs]
 git = "https://git.sr.ht/~demindiro/nrofs/"
 
