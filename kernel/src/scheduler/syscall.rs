@@ -91,7 +91,7 @@ fn raw_to_rwx(rwx: usize) -> Option<RWX> {
 }
 
 extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("alloc {:#x} {} {:#03b}", base, size, rwx);
+	debug!(syscall "alloc {:#x} {} {:#03b}", base, size, rwx);
 	let Some(count) = NonZeroUsize::new((size + Page::MASK) / Page::SIZE) else {
 		return Return {
 			status: Error::InvalidData as _,
@@ -129,7 +129,7 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 }
 
 extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("dealloc {:#x} {}", base, size);
+	debug!(syscall "dealloc {:#x} {}", base, size);
 	if base & Page::MASK != 0 || size & Page::MASK != 0 {
 		return Return {
 			status: Error::InvalidData as _,
@@ -172,7 +172,7 @@ extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _
 extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
 	use super::block_on;
 	let handle = unerase_handle(handle as _);
-	debug!("do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
+	debug!(syscall "do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
 	Process::current().unwrap().objects_operate(|objects| {
 		let Some(o) = objects.get(handle) else { return Return::INVALID_OBJECT };
 		let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
@@ -259,7 +259,7 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 }
 
 extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: usize) -> Return {
-	debug!("new_object {} {:#x} {:#x} {:#x}", ty, a, b, c);
+	debug!(syscall "new_object {} {:#x} {:#x} {:#x}", ty, a, b, c);
 	let Some(args) = NewObject::try_from_args(ty, a, b, c) else {
 		return Return {
 			status: Error::InvalidData as _,
@@ -353,7 +353,7 @@ extern "C" fn map_object(
 	max_length: usize,
 	_: usize,
 ) -> Return {
-	debug!(
+	debug!(syscall
 		"map_object {:?} {:#x} {:03b} {} {}",
 		unerase_handle(handle as _),
 		base,
@@ -399,7 +399,7 @@ extern "C" fn sleep(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("sleep");
+	debug!(syscall "sleep");
 	let time = merge_u64(time_l, time_h);
 	let time = Duration::from_nanos(time.into());
 	Thread::current().unwrap().sleep(time);
@@ -414,7 +414,7 @@ extern "C" fn spawn_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("spawn_thread");
+	debug!(syscall "spawn_thread");
 	Process::current()
 		.unwrap()
 		.spawn_thread(start, stack)
@@ -438,7 +438,7 @@ extern "C" fn create_io_queue(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("create_io_queue");
+	debug!(syscall "create_io_queue");
 	Process::current()
 		.unwrap()
 		.create_io_queue(
@@ -466,7 +466,7 @@ extern "C" fn destroy_io_queue(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("destroy_io_queue {:#x}", base);
+	debug!(syscall "destroy_io_queue {:#x}", base);
 	NonNull::new(base as *mut _).map_or(
 		Return {
 			status: 1,
@@ -498,7 +498,7 @@ extern "C" fn poll_io_queue(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("poll_io_queue {:#x}", base);
+	debug!(syscall "poll_io_queue {:#x}", base);
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
@@ -519,7 +519,7 @@ extern "C" fn wait_io_queue(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("wait_io_queue");
+	debug!(syscall "wait_io_queue");
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
@@ -538,7 +538,7 @@ extern "C" fn wait_io_queue(
 }
 
 extern "C" fn exit_thread(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("exit_thread");
+	debug!(syscall "exit_thread");
 	let thread = Arc::into_raw(Thread::current().unwrap());
 	arch::run_on_local_cpu_stack_noreturn!(destroy_thread, thread.cast());
 
@@ -571,7 +571,7 @@ extern "C" fn wait_thread(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!("wait_thread");
+	debug!(syscall "wait_thread");
 	Process::current()
 		.unwrap()
 		.get_thread(handle as u32)
@@ -591,7 +591,7 @@ extern "C" fn wait_thread(
 }
 
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	debug!("exit");
+	debug!(syscall "exit");
 	#[derive(Clone, Copy)]
 	struct D(*const Process, u8);
 	let proc = Process::current().unwrap();
