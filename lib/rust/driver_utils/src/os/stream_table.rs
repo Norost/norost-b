@@ -59,53 +59,42 @@ impl StreamTable {
 		&self.public
 	}
 
-	pub fn dequeue<'a>(&'a self) -> Option<(Handle, Request)> {
+	pub fn dequeue<'a>(&'a self) -> Option<(Handle, JobId, Request)> {
 		type R = nora_stream_table::Request;
-		let (h, r) = self.queue.borrow_mut().dequeue()?;
+		let (h, id, r) = self.queue.borrow_mut().dequeue()?;
 		let r = match r {
-			R::Read { job_id, amount } => Request::Read { job_id, amount },
-			R::Write { job_id, data } => Request::Write {
-				job_id,
+			R::Read { amount } => Request::Read { amount },
+			R::Write { data } => Request::Write {
 				data: self.get_owned_buf(data),
 			},
-			R::GetMeta { job_id, property } => Request::GetMeta {
-				job_id,
+			R::GetMeta { property } => Request::GetMeta {
 				property: Property(self.get_owned_buf(property)),
 			},
-			R::SetMeta {
-				job_id,
-				property_value,
-			} => Request::SetMeta {
-				job_id,
+			R::SetMeta { property_value } => Request::SetMeta {
 				property_value: PropertyValue(self.get_owned_buf(property_value)),
 			},
-			R::Open { job_id, path } => Request::Open {
-				job_id,
+			R::Open { path } => Request::Open {
 				path: self.get_owned_buf(path),
 			},
-			R::Create { job_id, path } => Request::Create {
-				job_id,
+			R::Create { path } => Request::Create {
 				path: self.get_owned_buf(path),
 			},
-			R::Destroy { job_id, path } => Request::Destroy {
-				job_id,
+			R::Destroy { path } => Request::Destroy {
 				path: self.get_owned_buf(path),
 			},
 			R::Close => Request::Close,
-			R::Seek { job_id, from } => Request::Seek {
-				job_id,
+			R::Seek { from } => Request::Seek {
 				from: match from {
 					nora_stream_table::SeekFrom::Start(n) => SeekFrom::Start(n),
 					nora_stream_table::SeekFrom::Current(n) => SeekFrom::Current(n),
 					nora_stream_table::SeekFrom::End(n) => SeekFrom::End(n),
 				},
 			},
-			R::Share { job_id, share } => Request::Share {
-				job_id,
+			R::Share { share } => Request::Share {
 				share: self.table.open(&share.to_le_bytes()).unwrap(),
 			},
 		};
-		Some((h, r))
+		Some((h, id, r))
 	}
 
 	pub fn enqueue(&self, job_id: JobId, response: Response) {
@@ -114,10 +103,13 @@ impl StreamTable {
 			Response::Error(e) => R::Error(e as _),
 			Response::Amount(n) => R::Amount(n),
 			Response::Position(n) => R::Position(n),
-			Response::Data(d) => R::Slice(Slice {
-				offset: d.offset().try_into().unwrap(),
-				length: d.len().try_into().unwrap(),
-			}),
+			Response::Data(d) => {
+				let d = core::mem::ManuallyDrop::new(d);
+				R::Slice(Slice {
+					offset: d.offset().try_into().unwrap(),
+					length: d.len().try_into().unwrap(),
+				})
+			}
 			Response::Handle(h) => R::Handle(h),
 		};
 		self.queue.borrow_mut().try_enqueue(job_id, r).unwrap();
@@ -151,43 +143,50 @@ impl StreamTable {
 }
 
 pub enum Request<'a> {
-	Read {
-		job_id: JobId,
-		amount: u32,
-	},
-	Write {
-		job_id: JobId,
-		data: Data<'a>,
-	},
-	GetMeta {
-		job_id: JobId,
-		property: Property<'a>,
-	},
-	SetMeta {
-		job_id: JobId,
-		property_value: PropertyValue<'a>,
-	},
-	Open {
-		job_id: JobId,
-		path: Data<'a>,
-	},
+	Read { amount: u32 },
+	Write { data: Data<'a> },
+	GetMeta { property: Property<'a> },
+	SetMeta { property_value: PropertyValue<'a> },
+	Open { path: Data<'a> },
 	Close,
-	Create {
-		job_id: JobId,
-		path: Data<'a>,
-	},
-	Destroy {
-		job_id: JobId,
-		path: Data<'a>,
-	},
-	Seek {
-		job_id: JobId,
-		from: SeekFrom,
-	},
-	Share {
-		job_id: JobId,
-		share: rt::Object,
-	},
+	Create { path: Data<'a> },
+	Destroy { path: Data<'a> },
+	Seek { from: SeekFrom },
+	Share { share: rt::Object },
+}
+
+/// Try using these if borrowck / dropck is frying your brain.
+///
+/// Note that these are all panicking.
+impl<'a> Request<'a> {
+	pub fn into_data(self) -> Data<'a> {
+		match self {
+			Self::Write { data } => data,
+			Self::Open { path } | Self::Create { path } | Self::Destroy { path } => path,
+			_ => panic!("no data or path"),
+		}
+	}
+
+	pub fn into_property(self) -> Property<'a> {
+		match self {
+			Self::GetMeta { property } => property,
+			_ => panic!("not GetMeta"),
+		}
+	}
+
+	pub fn into_property_value(self) -> PropertyValue<'a> {
+		match self {
+			Self::SetMeta { property_value } => property_value,
+			_ => panic!("not SetMeta"),
+		}
+	}
+
+	pub fn into_amount(self) -> u32 {
+		match self {
+			Self::Read { amount } => amount,
+			_ => panic!("not Read"),
+		}
+	}
 }
 
 pub enum Response<'a> {
@@ -204,9 +203,15 @@ pub struct Data<'a> {
 }
 
 impl<'a> Data<'a> {
-	pub fn manual_drop(self) {
-		self.data
-			.manual_drop(self.table.queue.borrow().buffer_head_ref());
+	/// # Note
+	///
+	/// Returns the *total* size of the data, which may be larger than the buffer.
+	pub fn copy_into<'b>(self, buf: &'b mut [u8]) -> (&'b mut [u8], usize) {
+		let l = self.len();
+		let bl = buf.len();
+		let b = &mut buf[..l.min(bl)];
+		self.copy_to(0, b);
+		(b, l)
 	}
 }
 
@@ -219,15 +224,12 @@ impl<'a> Deref for Data<'a> {
 	}
 }
 
-/* Something seems broken with match, drop and lifetimes, try uncommenting this and
- * build virtio_gpu to see the issue
 impl<'a> Drop for Data<'a> {
 	fn drop(&mut self) {
 		core::mem::replace(&mut self.data, self.table.buffers.alloc_empty())
 			.manual_drop(self.table.queue.borrow().buffer_head_ref());
 	}
 }
-*/
 
 pub struct Property<'a>(Data<'a>);
 
@@ -238,10 +240,6 @@ impl<'a> Property<'a> {
 		let buf = &mut buf[..self.0.len().min(l)];
 		self.0.copy_to_untrusted(0, buf);
 		buf
-	}
-
-	pub fn manual_drop(self) {
-		self.0.manual_drop()
 	}
 
 	#[inline(always)]
@@ -264,10 +262,6 @@ impl<'a> PropertyValue<'a> {
 		buf.split_first_mut()
 			.and_then(|(&mut l, b)| (usize::from(l) <= b.len()).then(|| b.split_at_mut(l.into())))
 			.ok_or(InvalidPropertyValue)
-	}
-
-	pub fn manual_drop(self) {
-		self.0.manual_drop()
 	}
 
 	#[inline(always)]

@@ -84,14 +84,15 @@ impl StreamingTable {
 
 	fn submit_job<T, F>(&self, handle: Handle, f: F) -> Ticket<T>
 	where
-		F: FnOnce(&mut ClientQueue, JobId) -> Request,
+		F: FnOnce(&mut ClientQueue) -> Request,
 		AnyTicketWaker: From<TicketWaker<T>>,
 	{
 		let (ticket, ticket_waker) = Ticket::new();
 		self.jobs.lock().insert_with(move |h| {
 			let mut q = self.queue.lock();
-			let r = f(&mut q, JobId::new(h.into_raw().0.try_into().unwrap()));
-			q.try_enqueue(handle, r)
+			let r = f(&mut q);
+			let job_id = JobId::new(h.into_raw().0.try_into().unwrap());
+			q.try_enqueue(handle, job_id, r)
 				.unwrap_or_else(|e| todo!("{:?}", e));
 			ticket_waker.into()
 		});
@@ -232,8 +233,7 @@ impl StreamObject {
 impl Object for StreamObject {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::Open {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::Open {
 				path: tbl.copy_data_from(q, path),
 			})
 		})
@@ -241,8 +241,7 @@ impl Object for StreamObject {
 
 	fn create(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::Create {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::Create {
 				path: tbl.copy_data_from(q, path),
 			})
 		})
@@ -250,8 +249,7 @@ impl Object for StreamObject {
 
 	fn destroy(&self, path: &[u8]) -> Ticket<u64> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::Destroy {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::Destroy {
 				path: tbl.copy_data_from(q, path),
 			})
 		})
@@ -259,15 +257,12 @@ impl Object for StreamObject {
 
 	fn read(self: Arc<Self>, length: usize) -> Ticket<Box<[u8]>> {
 		let amount = length.try_into().unwrap_or(u32::MAX);
-		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |_, job_id| Request::Read { job_id, amount })
-		})
+		self.with_table(|tbl| tbl.submit_job(self.handle, |_| Request::Read { amount }))
 	}
 
 	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::Write {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::Write {
 				data: tbl.copy_data_from(q, data),
 			})
 		})
@@ -275,8 +270,7 @@ impl Object for StreamObject {
 
 	fn get_meta(self: Arc<Self>, property: &TinySlice<u8>) -> Ticket<Box<[u8]>> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::GetMeta {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::GetMeta {
 				property: tbl.copy_data_from(q, property),
 			})
 		})
@@ -284,8 +278,7 @@ impl Object for StreamObject {
 
 	fn set_meta(self: Arc<Self>, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Ticket<u64> {
 		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |q, job_id| Request::SetMeta {
-				job_id,
+			tbl.submit_job(self.handle, |q| Request::SetMeta {
 				property_value: tbl
 					.copy_data_from_scatter(q, &[&[property.len_u8()], property, value]),
 			})
@@ -298,16 +291,13 @@ impl Object for StreamObject {
 			SeekFrom::Current(n) => nora_stream_table::SeekFrom::Current(n),
 			SeekFrom::End(n) => nora_stream_table::SeekFrom::End(n),
 		};
-		self.with_table(|tbl| {
-			tbl.submit_job(self.handle, |_, job_id| Request::Seek { job_id, from })
-		})
+		self.with_table(|tbl| tbl.submit_job(self.handle, |_| Request::Seek { from }))
 	}
 
 	fn share(&self, share: &Arc<dyn Object>) -> Ticket<u64> {
 		self.with_table(|tbl| {
 			if let Some(shared) = tbl.shared.as_ref() {
-				tbl.submit_job(self.handle, |_, job_id| Request::Share {
-					job_id,
+				tbl.submit_job(self.handle, |_| Request::Share {
 					share: shared
 						.lock()
 						.insert(share.clone())
@@ -329,7 +319,7 @@ impl Drop for StreamObject {
 			table
 				.queue
 				.lock()
-				.try_enqueue(self.handle, Request::Close)
+				.try_enqueue(self.handle, JobId::default(), Request::Close)
 				.unwrap_or_else(|e| todo!("{:?}", e));
 			table.notify_singleton.wake_readers();
 		});
