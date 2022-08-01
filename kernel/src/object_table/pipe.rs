@@ -30,6 +30,9 @@ struct PipeOut(Arc<Mutex<PipeInner>>);
 
 impl Object for PipeIn {
 	fn write(self: Arc<Self>, data: &[u8]) -> Ticket<u64> {
+		if data.is_empty() {
+			return 0.into();
+		}
 		let max_len = data.len().min(MAX_SIZE);
 		let data = &data[..max_len];
 		let mut pipe = self.0.lock();

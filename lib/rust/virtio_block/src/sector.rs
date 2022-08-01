@@ -1,7 +1,6 @@
 use core::mem;
 use core::ops::{Deref, DerefMut};
 use core::slice;
-use norostb_kernel as kernel;
 
 /// A single sector. Sectors are 512 bytes large and aligned on a 512 byte boundary.
 ///
@@ -29,24 +28,6 @@ impl Sector {
 		unsafe {
 			let ratio = mem::size_of::<Self>() / mem::size_of::<u8>();
 			slice::from_raw_parts_mut(slice.as_mut_ptr().cast(), slice.len() * ratio)
-		}
-	}
-
-	/// Create a slice of sectors from a slice of pages.
-	pub fn pages_to_sectors<'a>(pages: &'a [kernel::Page]) -> &'a [Self] {
-		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
-		unsafe {
-			let ratio = mem::size_of::<kernel::Page>() / mem::size_of::<Self>();
-			slice::from_raw_parts(pages.as_ptr().cast(), pages.len() * ratio)
-		}
-	}
-
-	/// Create a slice of sectors from a slice of pages.
-	pub fn pages_to_sectors_mut<'a>(pages: &'a mut [kernel::Page]) -> &'a mut [Self] {
-		// SAFETY: the size matches in terms of bytes & the address is properly aligned.
-		unsafe {
-			let ratio = mem::size_of::<kernel::Page>() / mem::size_of::<Self>();
-			slice::from_raw_parts_mut(pages.as_mut_ptr().cast(), pages.len() * ratio)
 		}
 	}
 }

@@ -128,7 +128,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			let t = open(&program.process_root);
 			let proc_root = select(&t, &process_root);
 
-			let binary = drivers.open(program.path.as_bytes()).unwrap();
+			let binary = drivers
+				.open(program.path.as_bytes())
+				.unwrap_or_else(|e| panic!("failed to open {:?}: {:?}", &program.path, e));
 			let r = rt::Process::new(
 				&process_root,
 				&binary,

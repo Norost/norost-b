@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut objects = driver_utils::Arena::new();
 	enum Object {
 		File(String, u64),
+		Dir(String, u64),
 		Query(Vec<String>, usize),
 	}
 
@@ -88,10 +89,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 						path.copy_to(0, &mut buf[..l]);
 						path.manual_drop();
 						match str::from_utf8(&buf[..l]) {
+							Ok("") | Ok("/") => Response::Error(rt::Error::AlreadyExists),
+							Ok(path) if path.bytes().last() == Some(b'/') => {
+								match fs.root_dir().create_dir(&path[..path.len() - 1]) {
+									Ok(_) => Response::Handle(
+										objects.insert(Object::File(path.to_string(), 0u64)),
+									),
+									Err(e) => todo!("{:?}", e),
+								}
+							}
 							Ok(path) => match fs.root_dir().create_file(path) {
-								Ok(_) => Response::Handle(
-									objects.insert(Object::File(path.to_string(), 0u64)),
-								),
+								Ok(mut f) => {
+									f.truncate().unwrap();
+									let h = objects.insert(Object::File(path.to_string(), 0u64));
+									Response::Handle(h)
+								}
 								Err(e) => todo!("{:?}", e),
 							},
 							Err(_) => Response::Error(rt::Error::InvalidData),
@@ -111,6 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							*offset += u64::try_from(len).unwrap();
 							Response::Data(data)
 						}
+						Object::Dir(..) => todo!(),
 						Object::Query(list, index) => {
 							let f = match list.get(*index) {
 								Some(f) => {
@@ -138,7 +151,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							*offset += u64::try_from(l).unwrap();
 							Response::Amount(l.try_into().unwrap())
 						}
-						Object::Query(_, _) => Response::Error(rt::Error::InvalidOperation),
+						Object::Dir(..) | Object::Query(..) => {
+							Response::Error(rt::Error::InvalidOperation)
+						}
 					},
 				),
 				Request::Seek { job_id, from } => (job_id, {
@@ -156,6 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							}
 							Response::Position(*offset)
 						}
+						Object::Dir(..) => todo!(),
 						Object::Query(list, index) => {
 							match from {
 								SeekFrom::Start(n) => *index = n as usize,
@@ -167,12 +183,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 					}
 				}),
 				Request::Close => {
-					objects.remove(handle);
+					objects
+						.remove(handle)
+						.expect("todo: deal with Handle::MAX close");
 					continue;
 				}
 				Request::Share { .. } => todo!(),
 				Request::Destroy { .. } => todo!(),
-				Request::GetMeta { .. } => todo!(),
+				Request::GetMeta { job_id, property } => {
+					let b = property.get(&mut buf);
+					property.manual_drop();
+					(
+						job_id,
+						match (handle, &*b) {
+							(h, b"fs/type") => {
+								let t: Option<&[_]> = if handle == rt::Handle::MAX {
+									Some(b"dir")
+								} else {
+									match &objects[handle] {
+										Object::File(..) => Some(b"file"),
+										Object::Dir(..) => Some(b"dir"),
+										Object::Query(..) => None,
+									}
+								};
+								if let Some(t) = t {
+									let d = tbl.alloc(t.len()).expect("out of buffers");
+									d.copy_from(0, t);
+									Response::Data(d)
+								} else {
+									Response::Error(rt::Error::DoesNotExist)
+								}
+							}
+							(_, _) => Response::Error(rt::Error::DoesNotExist),
+						},
+					)
+				}
 				Request::SetMeta { .. } => todo!(),
 			};
 			tbl.enqueue(job_id, resp);

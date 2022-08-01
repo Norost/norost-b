@@ -149,6 +149,10 @@ impl ServerHandlers for Handlers {
 					.split(|c| c.is_ascii_whitespace())
 					.filter(|s| !s.is_empty());
 				let bin = args.next().unwrap();
+				let bin = match bin {
+					b"scp" => b"drivers/scp", // TODO do this properly with PATH env or whatever
+					b => b,
+				};
 				let shell = process::Command::new(bin)
 					.await
 					.stdin(process::Stdio::piped())

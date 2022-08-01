@@ -15,4 +15,8 @@ disk0:
 	fallocate -l $$((128 * 512)) $@
 	/sbin/mkfs.fat -F 12 $@
 
-.PHONY: kernel boot run
+clean:
+	cargo clean
+	cd tools && (if test -e nora_ssh; then cd nora_ssh && cargo clean; fi)
+
+.PHONY: kernel boot run clean

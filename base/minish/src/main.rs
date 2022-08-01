@@ -17,6 +17,9 @@ fn main() -> std::io::Result<()> {
 
 	loop {
 		let r = term.read(&mut buf)?;
+		if r == 0 {
+			break Ok(());
+		}
 		let mut args = buf[..r]
 			.split(|c| b" \t\n\r".contains(c))
 			.filter(|s| !s.is_empty());
