@@ -47,16 +47,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	loop {
 		tbl.wait();
 		let mut flush = false;
-		while let Some((handle, req)) = tbl.dequeue() {
-			let (job_id, resp) = match req {
-				Request::Open { job_id, path } => (
-					job_id,
-					if handle != rt::Handle::MAX {
+		while let Some((handle, job_id, req)) = tbl.dequeue() {
+			let resp = match req {
+				Request::Open { path } => {
+					(if handle != rt::Handle::MAX {
 						Response::Error(rt::Error::InvalidOperation)
 					} else {
 						let l = path.len();
 						path.copy_to(0, &mut buf[..l]);
-						path.manual_drop();
 						match str::from_utf8(&buf[..l]) {
 							Ok("") => {
 								let entries = fs
@@ -78,16 +76,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							},
 							Err(_) => Response::Error(rt::Error::InvalidData),
 						}
-					},
-				),
-				Request::Create { job_id, path } => (
-					job_id,
-					if handle != rt::Handle::MAX {
+					})
+				}
+				Request::Create { path } => {
+					(if handle != rt::Handle::MAX {
 						Response::Error(rt::Error::InvalidOperation)
 					} else {
 						let l = path.len();
 						path.copy_to(0, &mut buf[..l]);
-						path.manual_drop();
 						match str::from_utf8(&buf[..l]) {
 							Ok("") | Ok("/") => Response::Error(rt::Error::AlreadyExists),
 							Ok(path) if path.bytes().last() == Some(b'/') => {
@@ -108,55 +104,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							},
 							Err(_) => Response::Error(rt::Error::InvalidData),
 						}
-					},
-				),
-				Request::Read { job_id, amount } => (
-					job_id,
-					match &mut objects[handle] {
-						Object::File(path, offset) => {
-							let mut file = fs.root_dir().open_file(path).unwrap();
-							file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-							let len = amount.min(4096) as usize;
-							let len = file.read(&mut buf[..len]).unwrap();
-							let data = tbl.alloc(len).expect("out of buffers");
-							data.copy_from(0, &buf[..len]);
-							*offset += u64::try_from(len).unwrap();
-							Response::Data(data)
-						}
-						Object::Dir(..) => todo!(),
-						Object::Query(list, index) => {
-							let f = match list.get(*index) {
-								Some(f) => {
-									*index += 1;
-									f
-								}
-								None => "",
-							};
-							let data = tbl.alloc(f.len()).expect("out of buffers");
-							data.copy_from(0, f.as_bytes());
-							Response::Data(data)
-						}
-					},
-				),
-				Request::Write { job_id, data } => (
-					job_id,
-					match &mut objects[handle] {
-						Object::File(path, offset) => {
-							let l = data.len();
-							data.copy_to(0, &mut buf[..l]);
-							data.manual_drop();
-							let mut file = fs.root_dir().open_file(path).unwrap();
-							file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
-							let l = file.write(&buf[..l]).unwrap();
-							*offset += u64::try_from(l).unwrap();
-							Response::Amount(l.try_into().unwrap())
-						}
-						Object::Dir(..) | Object::Query(..) => {
-							Response::Error(rt::Error::InvalidOperation)
-						}
-					},
-				),
-				Request::Seek { job_id, from } => (job_id, {
+					})
+				}
+				Request::Read { amount } => match &mut objects[handle] {
+					Object::File(path, offset) => {
+						let mut file = fs.root_dir().open_file(path).unwrap();
+						file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+						let len = amount.min(4096) as usize;
+						let len = file.read(&mut buf[..len]).unwrap();
+						let data = tbl.alloc(len).expect("out of buffers");
+						data.copy_from(0, &buf[..len]);
+						*offset += u64::try_from(len).unwrap();
+						Response::Data(data)
+					}
+					Object::Dir(..) => todo!(),
+					Object::Query(list, index) => {
+						let f = match list.get(*index) {
+							Some(f) => {
+								*index += 1;
+								f
+							}
+							None => "",
+						};
+						let data = tbl.alloc(f.len()).expect("out of buffers");
+						data.copy_from(0, f.as_bytes());
+						Response::Data(data)
+					}
+				},
+				Request::Write { data } => match &mut objects[handle] {
+					Object::File(path, offset) => {
+						let l = data.len();
+						data.copy_to(0, &mut buf[..l]);
+						let mut file = fs.root_dir().open_file(path).unwrap();
+						file.seek(std::io::SeekFrom::Start(*offset)).unwrap();
+						let l = file.write(&buf[..l]).unwrap();
+						*offset += u64::try_from(l).unwrap();
+						Response::Amount(l.try_into().unwrap())
+					}
+					Object::Dir(..) | Object::Query(..) => {
+						Response::Error(rt::Error::InvalidOperation)
+					}
+				},
+				Request::Seek { from } => {
 					use rt::io::SeekFrom;
 					match &mut objects[handle] {
 						Object::File(path, offset) => {
@@ -181,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							Response::Position(*index as _)
 						}
 					}
-				}),
+				}
 				Request::Close => {
 					objects
 						.remove(handle)
@@ -190,33 +179,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				}
 				Request::Share { .. } => todo!(),
 				Request::Destroy { .. } => todo!(),
-				Request::GetMeta { job_id, property } => {
+				Request::GetMeta { property } => {
 					let b = property.get(&mut buf);
-					property.manual_drop();
-					(
-						job_id,
-						match (handle, &*b) {
-							(h, b"fs/type") => {
-								let t: Option<&[_]> = if handle == rt::Handle::MAX {
-									Some(b"dir")
-								} else {
-									match &objects[handle] {
-										Object::File(..) => Some(b"file"),
-										Object::Dir(..) => Some(b"dir"),
-										Object::Query(..) => None,
-									}
-								};
-								if let Some(t) = t {
-									let d = tbl.alloc(t.len()).expect("out of buffers");
-									d.copy_from(0, t);
-									Response::Data(d)
-								} else {
-									Response::Error(rt::Error::DoesNotExist)
+					match (handle, &*b) {
+						(h, b"fs/type") => {
+							let t: Option<&[_]> = if handle == rt::Handle::MAX {
+								Some(b"dir")
+							} else {
+								match &objects[handle] {
+									Object::File(..) => Some(b"file"),
+									Object::Dir(..) => Some(b"dir"),
+									Object::Query(..) => None,
 								}
+							};
+							if let Some(t) = t {
+								let d = tbl.alloc(t.len()).expect("out of buffers");
+								d.copy_from(0, t);
+								Response::Data(d)
+							} else {
+								Response::Error(rt::Error::DoesNotExist)
 							}
-							(_, _) => Response::Error(rt::Error::DoesNotExist),
-						},
-					)
+						}
+						(_, _) => Response::Error(rt::Error::DoesNotExist),
+					}
 				}
 				Request::SetMeta { .. } => todo!(),
 			};

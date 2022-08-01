@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(if_let_guard)]
+#![feature(let_else)]
 #![feature(never_type)]
 #![feature(start)]
 #![feature(type_alias_impl_trait)]
@@ -239,13 +240,12 @@ fn main() {
 		let mut cx = core::task::Context::from_waker(&w);
 
 		// Handle incoming requests
-		while let Some((handle, req)) = table.table.dequeue() {
+		loop {
+			let Some((handle, job_id, req)) = table.table.dequeue() else { break };
 			match req {
-				Request::Open { job_id, path } => {
-					let l = path.len();
-					path.copy_to(0, &mut buf[..l]);
-					path.manual_drop();
-					let path = str::from_utf8(&buf[..l]).unwrap();
+				v @ Request::Open { .. } => {
+					let (path, _) = v.into_data().copy_into(&mut buf);
+					let path = str::from_utf8(path).unwrap();
 					if path == "" || path.bytes().last() == Some(b'/') {
 						// Query
 						assert_eq!(handle, driver_utils::Handle::MAX, "TODO");
@@ -277,10 +277,10 @@ fn main() {
 						}
 					}
 				}
-				Request::Create { job_id, path } => {
+				v @ Request::Create { .. } => {
 					if handle == rt::Handle::MAX {
-						path.copy_to(0, &mut buf[..path.len()]);
-						let path = str::from_utf8(&buf[..path.len()]).unwrap();
+						let (path, _) = v.into_data().copy_into(&mut buf);
+						let path = str::from_utf8(path).unwrap();
 						let mut parts = path.split('/');
 						let source = match parts.next().unwrap() {
 							"default" => iface.ip_addrs()[0].address(),
@@ -344,11 +344,12 @@ fn main() {
 
 						assert!(parts.next().is_none());
 					} else {
+						drop(v);
 						table.error(job_id, Error::InvalidOperation);
 					}
 				}
-				Request::Read { job_id, amount } => {
-					let len = (amount as usize).min(buf.len());
+				v @ Request::Read { .. } => {
+					let len = (v.into_amount() as usize).min(buf.len());
 					match &mut table.objects[handle] {
 						Object::Socket(Socket::TcpListener(_)) => {
 							table.error(job_id, Error::InvalidOperation)
@@ -402,18 +403,16 @@ fn main() {
 						},
 					}
 				}
-				Request::Write { job_id, data } => match &mut table.objects[handle] {
+				v @ Request::Write { .. } => match &mut table.objects[handle] {
 					Object::Socket(Socket::TcpListener(_)) => todo!(),
 					Object::Socket(Socket::TcpConnection(sock)) => {
-						let len = data.len().min(buf.len());
-						data.copy_to(0, &mut buf[..len]);
-						data.manual_drop();
-						match sock.write(&buf[..len], &mut iface) {
+						let (data, _) = v.into_data().copy_into(&mut buf);
+						match sock.write(data, &mut iface) {
 							Ok(l) if l == 0 => {
 								pending_writes.push(PendingWrite {
 									handle,
 									job_id,
-									data: buf[..len].into(),
+									data: (&*data).into(),
 								});
 							}
 							Ok(l) => table.amount(job_id, l),
@@ -438,7 +437,10 @@ fn main() {
 					}
 					continue;
 				}
-				Request::Seek { job_id, .. } => table.error(job_id, Error::InvalidOperation),
+				v @ Request::Seek { .. } => {
+					drop(v);
+					table.error(job_id, Error::InvalidOperation);
+				}
 				Request::GetMeta { .. } => todo!(),
 				Request::SetMeta { .. } => todo!(),
 				Request::Destroy { .. } => todo!(),
