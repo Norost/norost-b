@@ -1,18 +1,19 @@
 extern crate alloc;
 
-use alloc::{boxed::Box, rc::Rc};
-
+use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
 	env,
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	process,
 };
+use clap::Parser;
 use core::{
 	cell::{Cell, RefCell, RefMut},
 	future::Future,
 	ops::{Deref, DerefMut},
 	pin::Pin,
+	str,
 	task::{Context, Poll, Waker},
 };
 use futures::{
@@ -23,23 +24,69 @@ use futures::{
 	stream_select,
 };
 use nora_ssh::{
+	auth::Auth,
 	cipher,
 	server::{IoSet, Server, ServerHandlers, SpawnType},
 	Identifier,
 };
 use rand::{rngs::StdRng, CryptoRng, RngCore, SeedableRng};
+use serde_derive::Deserialize;
 
-fn main() -> ! {
+#[derive(Debug, Deserialize)]
+struct HostKeys {
+	ecdsa: Option<Box<str>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserKeys {
+	ed25519: Option<Box<str>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserConfig {
+	keys: UserKeys,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Config {
+	keys: HostKeys,
+	// TODO figure out a nicer mechanism for this, i.e. one that doesn't require an ever-growing
+	// config file.
+	users: BTreeMap<Box<str>, UserConfig>,
+}
+
+#[derive(Parser, Debug)]
+struct Args {
+	#[clap(value_parser)]
+	config: String,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+	let args = Args::parse();
+
+	let config = std::fs::read(&args.config).unwrap();
+	let config: Config = match toml::from_slice(&config) {
+		Ok(p) => p,
+		Err(e) => Err(format!("ssh: failed to load config: {}", e))?,
+	};
+
+	let key = config.keys.ecdsa.expect("no keys");
+	let key = std::fs::read(&*key).unwrap();
+	let key = std::str::from_utf8(&key).expect("invalid key");
+	let key = key.trim();
+	let key = base85::decode(key).expect("invalid key");
+	let key = ecdsa::SigningKey::<p256::NistP256>::from_bytes(&key).expect("invalid key");
+
 	async_std::task::block_on(async {
-		let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-		let server_secret = ecdsa::SigningKey::<p256::NistP256>::random(&mut rng);
-
 		let addr = (Ipv4Addr::UNSPECIFIED, 22);
 		let listener = TcpListener::bind(addr).await.unwrap();
 		let server = Server::new(
 			Identifier::new(b"SSH-2.0-nora_ssh example").unwrap(),
-			server_secret,
-			Handlers { listener },
+			key,
+			Handlers {
+				listener,
+				users: config.users,
+			},
 		);
 
 		server.start().await
@@ -48,11 +95,40 @@ fn main() -> ! {
 
 struct Handlers {
 	listener: TcpListener,
+	users: BTreeMap<Box<str>, UserConfig>,
 }
 
 struct User {
 	name: Box<str>,
 	shell: Option<Rc<process::Child>>,
+}
+
+enum UserKey {
+	Ed25519(ed25519_dalek::PublicKey),
+}
+
+impl Handlers {
+	async fn get_user_key(&self, user: &[u8], algorithm: &[u8], key: &[u8]) -> Result<UserKey, ()> {
+		let user = core::str::from_utf8(user).map_err(|_| ())?;
+		let user = self.users.get(user).ok_or(())?;
+		let k = match algorithm {
+			b"ssh-ed25519" => user.keys.ed25519.as_ref(),
+			_ => None,
+		}
+		.ok_or(())?;
+		let k = async_std::fs::read(k.clone().into_boxed_bytes())
+			.await
+			.0
+			.map_err(|_| ())?;
+		let k = str::from_utf8(&k).map_err(|_| ())?;
+		let k = base85::decode(k.trim()).ok_or(())?;
+		(key == k)
+			.then(|| {
+				let k = ed25519_dalek::PublicKey::from_bytes((&*k).try_into().unwrap());
+				UserKey::Ed25519(k.unwrap())
+			})
+			.ok_or(())
+	}
 }
 
 #[async_trait::async_trait(?Send)]
@@ -71,11 +147,50 @@ impl ServerHandlers for Handlers {
 		AsyncWrapRW::new(self.listener.accept().await.unwrap().0).split()
 	}
 
-	async fn authenticate<'a>(&self, data: &'a [u8]) -> Result<Self::User, ()> {
-		Ok(User {
-			name: "TODO".into(),
-			shell: None,
-		})
+	async fn public_key_exists<'a>(
+		&self,
+		user: &'a [u8],
+		_service: &'a [u8],
+		algorithm: &'a [u8],
+		key: &'a [u8],
+	) -> Result<(), ()> {
+		self.get_user_key(user, algorithm, key)
+			.await
+			.map(|_| ())
+			.map_err(|_| ())
+	}
+
+	async fn authenticate<'a>(
+		&self,
+		user: &'a [u8],
+		service: &'a [u8],
+		auth: Auth<'a>,
+	) -> Result<Self::User, ()> {
+		match auth {
+			Auth::None => Err(()),
+			Auth::Password(_) => Err(()),
+			Auth::PublicKey {
+				algorithm,
+				key,
+				signature,
+				message,
+			} => {
+				use ed25519_dalek::Verifier;
+				let key = self
+					.get_user_key(user, algorithm, key)
+					.await
+					.map_err(|_| ())?;
+				match key {
+					UserKey::Ed25519(key) => key
+						.verify(message, &signature.try_into().map_err(|_| ())?)
+						.map_err(|_| ())?,
+				}
+				Ok(User {
+					name: core::str::from_utf8(user).unwrap().into(),
+					shell: None,
+				})
+			}
+		}
 	}
 
 	async fn spawn<'a>(
@@ -117,6 +232,10 @@ impl ServerHandlers for Handlers {
 					.split(|c| c.is_ascii_whitespace())
 					.filter(|s| !s.is_empty());
 				let bin = args.next().unwrap();
+				let bin = match bin {
+					b"scp" => b"drivers/scp", // TODO do this properly with PATH env or whatever
+					b => b,
+				};
 				let shell = process::Command::new(bin)
 					.await
 					.stdin(process::Stdio::piped())

@@ -105,7 +105,7 @@ impl Command {
 					true,
 				)?)
 				.chain(rt::process::Process::default_root_handles()),
-			self.args.iter(),
+			[&self.program].into_iter().chain(self.args.iter()),
 			self.env.iter().map(|(a, b)| (a, b)),
 		)?;
 		Ok(Child {

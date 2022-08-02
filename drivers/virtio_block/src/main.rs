@@ -95,10 +95,10 @@ fn main() -> ! {
 		let wait = || poll.read(&mut []).unwrap();
 
 		let mut flush = false;
-		while let Some((handle, req)) = tbl.dequeue() {
-			let (job_id, resp) = match req {
-				Request::Open { job_id, path } => {
-					let r = if handle == Handle::MAX {
+		while let Some((handle, job_id, req)) = tbl.dequeue() {
+			let resp = match req {
+				Request::Open { path } => {
+					if handle == Handle::MAX {
 						if path.len() == 4 && {
 							let mut buf = [0; 4];
 							path.copy_to(0, &mut buf);
@@ -110,42 +110,37 @@ fn main() -> ! {
 						}
 					} else {
 						Response::Error(rt::Error::InvalidOperation)
-					};
-					path.manual_drop();
-					(job_id, r)
+					}
 				}
-				Request::Read { job_id, amount } => {
-					(
-						job_id,
-						if handle == Handle::MAX {
-							Response::Error(rt::Error::InvalidOperation)
-						} else {
-							// TODO how do we with unaligned reads/writes?
-							assert!(amount % SECTOR_SIZE == 0);
-							let amount = amount.min(1 << 13);
-							let offset = data_handles[handle];
+				Request::Read { amount } => {
+					if handle == Handle::MAX {
+						Response::Error(rt::Error::InvalidOperation)
+					} else {
+						// TODO how do we with unaligned reads/writes?
+						assert!(amount % SECTOR_SIZE == 0);
+						let amount = amount.min(1 << 13);
+						let offset = data_handles[handle];
 
-							let data = tbl
-								.alloc(amount.try_into().unwrap())
-								.expect("out of buffers");
-							let sectors = data.blocks().map(|b| virtio::PhysRegion {
-								base: virtio::PhysAddr::new(dma_phys + u64::from(b.0) * 512),
-								size: 512,
-							});
+						let data = tbl
+							.alloc(amount.try_into().unwrap())
+							.expect("out of buffers");
+						let sectors = data.blocks().map(|b| virtio::PhysRegion {
+							base: virtio::PhysAddr::new(dma_phys + u64::from(b.0) * 512),
+							size: 512,
+						});
 
-							let tk = unsafe { dev.read(sectors, offset).unwrap() };
-							// TODO proper async
-							while dev.poll_finished(|t| assert_eq!(t, tk)) != 1 {
-								wait();
-							}
+						let tk = unsafe { dev.read(sectors, offset).unwrap() };
+						// TODO proper async
+						while dev.poll_finished(|t| assert_eq!(t, tk)) != 1 {
+							wait();
+						}
 
-							data_handles[handle] += u64::from(amount / SECTOR_SIZE);
+						data_handles[handle] += u64::from(amount / SECTOR_SIZE);
 
-							Response::Data(data)
-						},
-					)
+						Response::Data(data)
+					}
 				}
-				Request::Write { job_id, data } => {
+				Request::Write { data } => {
 					// TODO ditto
 					assert!(data.len() % Sector::SIZE == 0);
 					let offset = data_handles[handle];
@@ -162,13 +157,11 @@ fn main() -> ! {
 					}
 					let len = data.len();
 
-					data.manual_drop();
-
 					data_handles[handle] += u64::try_from(len / Sector::SIZE).unwrap();
 
-					(job_id, Response::Amount(len.try_into().unwrap()))
+					Response::Amount(len.try_into().unwrap())
 				}
-				Request::Seek { job_id, from } => {
+				Request::Seek { from } => {
 					let offset = match from {
 						rt::io::SeekFrom::Start(n) => n,
 						_ => todo!(),
@@ -176,21 +169,14 @@ fn main() -> ! {
 					// TODO ditto
 					assert!(offset % u64::from(SECTOR_SIZE) == 0);
 					data_handles[handle] = offset / u64::from(SECTOR_SIZE);
-					(job_id, Response::Position(offset))
+					Response::Position(offset)
 				}
 				Request::Close => {
 					data_handles.remove(handle);
 					// The kernel does not expect a response.
 					continue;
 				}
-				Request::Create { job_id, path } => {
-					path.manual_drop();
-					(job_id, Response::Error(rt::Error::InvalidOperation))
-				}
-				Request::Share { .. } => todo!(),
-				Request::GetMeta { .. } => todo!(),
-				Request::SetMeta { .. } => todo!(),
-				Request::Destroy { .. } => todo!(),
+				_ => Response::Error(rt::Error::InvalidOperation),
 			};
 			tbl.enqueue(job_id, resp);
 			flush = true;

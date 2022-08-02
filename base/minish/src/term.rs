@@ -52,6 +52,9 @@ where
 			// Read
 			let prev_len = len;
 			len += self.reader.read(&mut data[len..])?;
+			if len == prev_len {
+				break Ok(0);
+			}
 
 			// Parse backspace & any annoying special characters
 			for i in (prev_len..len).rev() {

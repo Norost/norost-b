@@ -109,13 +109,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		let (res, mut buf) = RefAsyncObject::from(table.notifier()).read(()).await;
 		res.unwrap();
 		let mut tiny_buf = [0; 16];
-		let (handle, req) = table.dequeue().unwrap();
+		let (handle, job_id, req) = table.dequeue().unwrap();
 		let (job_id, resp) = match req {
-			Request::Open { job_id, path } => {
+			Request::Open { path } => {
 				let l = tiny_buf.len();
 				let p = &mut tiny_buf[..l.min(path.len())];
 				path.copy_to(0, p);
-				path.manual_drop();
 				if handle == rt::Handle::MAX && p == b"stream" {
 					(job_id, Response::Handle(readers.borrow_mut().insert(())))
 				} else {
@@ -131,7 +130,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				// The kernel does not expect a response
 				return true;
 			}
-			Request::Read { job_id, amount } => {
+			Request::Read { amount } => {
 				let mut char_buf = char_buf.borrow_mut();
 				if char_buf.is_empty() {
 					// There is currently no data, so delay a response until there is

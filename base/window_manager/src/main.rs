@@ -139,13 +139,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut prop_buf = [0; 511];
 	loop {
 		let mut send_notif = false;
-		while let Some((handle, req)) = table.dequeue() {
-			let (job_id, response) = match req {
-				Request::Create { job_id, path } => (job_id, {
+		while let Some((handle, job_id, req)) = table.dequeue() {
+			let response = match req {
+				Request::Create { path } => {
 					let mut p = [0; 8];
-					let p = &mut p[..path.len()];
-					path.copy_to(0, p);
-					path.manual_drop();
+					let (p, _) = path.copy_into(&mut p);
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size, Default::default()).unwrap();
@@ -171,11 +169,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						}
 						_ => Response::Error(Error::InvalidOperation),
 					}
-				}),
-				Request::GetMeta { job_id, property } => {
+				}
+				Request::GetMeta { property } => {
 					let prop = property.get(&mut prop_buf);
-					property.manual_drop();
-					let r = match (handle, &*prop) {
+					match (handle, &*prop) {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/resolution") => {
 							let rect = manager.window_rect(h, size).unwrap();
@@ -185,16 +182,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							Response::Data(data)
 						}
 						(_, _) => Response::Error(Error::DoesNotExist as _),
-					};
-					(job_id, r)
+					}
 				}
-				Request::SetMeta {
-					job_id,
-					property_value,
-				} => {
+				Request::SetMeta { property_value } => {
 					let (prop, val) = property_value.try_get(&mut prop_buf).unwrap();
-					property_value.into_inner().manual_drop();
-					let r = match (handle, &*prop) {
+					match (handle, &*prop) {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/cmd/fill") => {
 							if let &[r, g, b] = &*val {
@@ -205,30 +197,25 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							}
 						}
 						(_, _) => Response::Error(Error::DoesNotExist as _),
-					};
-					(job_id, r)
+					}
 				}
-				Request::Read { job_id, amount: _ } => (
-					job_id,
-					match handle {
-						Handle::MAX => Response::Error(Error::InvalidOperation),
-						h => {
-							let w = &mut manager.window_mut(handle).unwrap().user_data;
-							if let Some(evt) = w.unread_events.get_mut().pop() {
-								let evt = evt.encode();
-								let data = table.alloc(evt.len()).expect("out of buffers");
-								data.copy_from(0, &evt);
-								Response::Data(data)
-							} else {
-								w.event_listeners.get_mut().push(job_id);
-								continue;
-							}
+				Request::Read { amount: _ } => match handle {
+					Handle::MAX => Response::Error(Error::InvalidOperation),
+					h => {
+						let w = &mut manager.window_mut(handle).unwrap().user_data;
+						if let Some(evt) = w.unread_events.get_mut().pop() {
+							let evt = evt.encode();
+							let data = table.alloc(evt.len()).expect("out of buffers");
+							data.copy_from(0, &evt);
+							Response::Data(data)
+						} else {
+							w.event_listeners.get_mut().push(job_id);
+							continue;
 						}
-					},
-				),
-				Request::Write { job_id, data } => (
-					job_id,
-					match handle {
+					}
+				},
+				Request::Write { data } => {
+					(match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),
 						h => {
 							let window = manager.window(handle).unwrap();
@@ -261,12 +248,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 								.framebuffer
 								.copy_to_untrusted(0, &mut shmem[..draw_rect.area() as usize * 3]);
 							let l = data.len().try_into().unwrap();
-							data.manual_drop();
 							sync_rect(draw_rect);
 							Response::Amount(l)
 						}
-					},
-				),
+					})
+				}
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
@@ -290,17 +276,14 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					continue;
 				}
 				Request::Open { .. } => todo!(),
-				Request::Share { job_id, share } => {
-					let r = match handle {
-						Handle::MAX => Response::Error(Error::InvalidOperation),
-						h => {
-							manager.window_mut(handle).unwrap().user_data.framebuffer =
-								FrameBuffer::wrap(&share);
-							Response::Amount(0)
-						}
-					};
-					(job_id, r)
-				}
+				Request::Share { share } => match handle {
+					Handle::MAX => Response::Error(Error::InvalidOperation),
+					h => {
+						manager.window_mut(handle).unwrap().user_data.framebuffer =
+							FrameBuffer::wrap(&share);
+						Response::Amount(0)
+					}
+				},
 				_ => todo!(),
 			};
 			table.enqueue(job_id, response);

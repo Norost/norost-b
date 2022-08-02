@@ -64,6 +64,14 @@ impl fmt::Write for EmergencyWriter {
 
 #[macro_export]
 macro_rules! debug {
+	(syscall $($args:tt)*) => {{
+		#[cfg(feature = "debug-syscall")]
+		{
+			#[allow(unused_imports)]
+			use core::fmt::Write;
+			writeln!($crate::log::SystemLog::new(), $($args)*).unwrap();
+		}
+	}};
 	($($args:tt)*) => {{
 		#[cfg(feature = "debug")]
 		{

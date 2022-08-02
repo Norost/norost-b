@@ -203,24 +203,22 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut tiny_buf = [0; 32];
 	loop {
 		let mut send_notif = false;
-		while let Some((handle, req)) = tbl.dequeue() {
-			let (job_id, response) = match req {
-				Request::Open { job_id, path } => (job_id, {
+		while let Some((handle, job_id, req)) = tbl.dequeue() {
+			let response = match req {
+				Request::Open { path } => {
 					let mut p = [0; 64];
 					let p = &mut p[..path.len()];
 					path.copy_to(0, p);
-					path.manual_drop();
 					match (handle, &*p) {
 						(Handle::MAX, b"sync") => Response::Handle(SYNC_HANDLE),
 						(Handle::MAX, _) => Response::Error(Error::DoesNotExist as _),
 						_ => Response::Error(Error::InvalidOperation as _),
 					}
-				}),
-				Request::GetMeta { job_id, property } => {
+				}
+				Request::GetMeta { property } => {
 					let prop = property.get(&mut tiny_buf);
 					let data = property.into_inner();
-					data.manual_drop();
-					let r = match (handle, &*prop) {
+					match (handle, &*prop) {
 						(_, b"resolution") => {
 							let (w, h) = (width.to_string(), height.to_string());
 							let data = tbl.alloc(w.len() + 1 + h.len()).expect("out of buffers");
@@ -240,22 +238,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							Response::Data(data)
 						}
 						_ => Response::Error(Error::DoesNotExist),
-					};
-					(job_id, r)
+					}
 				}
-				Request::SetMeta {
-					job_id,
-					property_value,
-				} => {
-					property_value.manual_drop();
-					(job_id, Response::Error(Error::InvalidOperation as _))
-				}
-				Request::Write { job_id, data } => {
+				Request::Write { data } => {
 					let mut d = [0; 64];
 					let d = &mut d[..data.len()];
 					data.copy_to(0, d);
-					data.manual_drop();
-					let r = match handle {
+					match handle {
 						// Blit a specific area
 						SYNC_HANDLE => {
 							if let Ok(d) = d.try_into() {
@@ -308,33 +297,20 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							}
 						}
 						_ => Response::Error(Error::InvalidOperation as _),
-					};
-					(job_id, r)
+					}
 				}
-				Request::Share { job_id, share } => (
-					job_id,
-					match handle {
-						SYNC_HANDLE => match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
-							Err(e) => Response::Error(e as _),
-							Ok((buf, size)) => {
-								command_buf = (buf.cast(), size);
-								Response::Amount(0)
-							}
-						},
-						_ => Response::Error(Error::InvalidOperation as _),
+				Request::Share { share } => match handle {
+					SYNC_HANDLE => match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
+						Err(e) => Response::Error(e as _),
+						Ok((buf, size)) => {
+							command_buf = (buf.cast(), size);
+							Response::Amount(0)
+						}
 					},
-				),
-				Request::Close => match handle {
-					Handle::MAX | SYNC_HANDLE => continue,
-					_ => unreachable!(),
+					_ => Response::Error(Error::InvalidOperation as _),
 				},
-				Request::Create { job_id, path } => {
-					path.manual_drop();
-					(job_id, Response::Error(Error::InvalidOperation as _))
-				}
-				Request::Read { job_id, .. }
-				| Request::Destroy { job_id, .. }
-				| Request::Seek { job_id, .. } => (job_id, Response::Error(Error::InvalidOperation as _)),
+				Request::Close => continue,
+				_ => Response::Error(Error::InvalidOperation as _),
 			};
 			tbl.enqueue(job_id, response);
 			send_notif = true;

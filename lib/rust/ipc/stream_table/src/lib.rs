@@ -126,7 +126,7 @@ impl ServerQueue {
 	}
 
 	#[inline]
-	pub fn dequeue(&mut self) -> Option<(Handle, Request)> {
+	pub fn dequeue(&mut self) -> Option<(Handle, JobId, Request)> {
 		let index = self.base.request_tail_ref().load(Ordering::Acquire);
 		(index != self.request_head.0).then(|| {
 			let r = unsafe { ptr::read_volatile(self.base.request_ptr(self.request_head.0)) };
@@ -141,50 +141,40 @@ impl ServerQueue {
 			type S = SeekFrom;
 			(
 				handle,
+				job_id,
 				match r.ty().unwrap() {
 					T::Read => R::Read {
-						job_id,
 						amount: args.amount(),
 					},
 					T::Write => R::Write {
-						job_id,
 						data: Slice::from_raw(args.slice()),
 					},
 					T::Open => R::Open {
-						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
 					T::GetMeta => R::GetMeta {
-						job_id,
 						property: Slice::from_raw(args.slice()),
 					},
 					T::SetMeta => R::SetMeta {
-						job_id,
 						property_value: Slice::from_raw(args.slice()),
 					},
 					T::Close => R::Close,
 					T::Create => R::Create {
-						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
 					T::Destroy => R::Destroy {
-						job_id,
 						path: Slice::from_raw(args.slice()),
 					},
 					T::SeekStart => R::Seek {
-						job_id,
 						from: S::Start(args.offset_u()),
 					},
 					T::SeekCurrent => R::Seek {
-						job_id,
 						from: S::Current(args.offset_s()),
 					},
 					T::SeekEnd => R::Seek {
-						job_id,
 						from: S::End(args.offset_s() as _),
 					},
 					T::Share => R::Share {
-						job_id,
 						share: args.share(),
 					},
 				},
@@ -220,30 +210,25 @@ impl ClientQueue {
 	///
 	/// This does not check if the queue is full.
 	#[inline]
-	fn enqueue(&mut self, handle: Handle, request: Request) {
+	fn enqueue(&mut self, handle: Handle, job_id: JobId, request: Request) {
 		let mut v = raw::RequestArgs::default();
 		type T = raw::RequestType;
 		type R = Request;
-		let (job_id, ty, ()) = match request {
-			R::Read { job_id, amount } => (job_id, T::Read, v.set_amount(amount)),
-			R::Write { job_id, data } => (job_id, T::Write, v.set_slice(data.into_raw())),
-			R::GetMeta { job_id, property } => {
-				(job_id, T::GetMeta, v.set_slice(property.into_raw()))
-			}
-			R::SetMeta {
-				job_id,
-				property_value,
-			} => (job_id, T::SetMeta, v.set_slice(property_value.into_raw())),
-			R::Open { job_id, path } => (job_id, T::Open, v.set_slice(path.into_raw())),
-			R::Close => (JobId::default(), T::Close, ()),
-			R::Create { job_id, path } => (job_id, T::Create, v.set_slice(path.into_raw())),
-			R::Destroy { job_id, path } => (job_id, T::Destroy, v.set_slice(path.into_raw())),
-			R::Seek { job_id, from } => match from {
-				SeekFrom::Start(f) => (job_id, T::SeekStart, v.set_offset_u(f)),
-				SeekFrom::Current(f) => (job_id, T::SeekCurrent, v.set_offset_s(f)),
-				SeekFrom::End(f) => (job_id, T::SeekEnd, v.set_offset_s(f)),
+		let (ty, ()) = match request {
+			R::Read { amount } => (T::Read, v.set_amount(amount)),
+			R::Write { data } => (T::Write, v.set_slice(data.into_raw())),
+			R::GetMeta { property } => (T::GetMeta, v.set_slice(property.into_raw())),
+			R::SetMeta { property_value } => (T::SetMeta, v.set_slice(property_value.into_raw())),
+			R::Open { path } => (T::Open, v.set_slice(path.into_raw())),
+			R::Close => (T::Close, ()),
+			R::Create { path } => (T::Create, v.set_slice(path.into_raw())),
+			R::Destroy { path } => (T::Destroy, v.set_slice(path.into_raw())),
+			R::Seek { from } => match from {
+				SeekFrom::Start(f) => (T::SeekStart, v.set_offset_u(f)),
+				SeekFrom::Current(f) => (T::SeekCurrent, v.set_offset_s(f)),
+				SeekFrom::End(f) => (T::SeekEnd, v.set_offset_s(f)),
 			},
-			R::Share { job_id, share } => (job_id, T::Share, v.set_share(share)),
+			R::Share { share } => (T::Share, v.set_share(share)),
 		};
 		let mut r = raw::Request::default();
 		r.set_ty(ty);
@@ -258,10 +243,15 @@ impl ClientQueue {
 	}
 
 	#[inline]
-	pub fn try_enqueue(&mut self, handle: Handle, request: Request) -> Result<(), Full> {
+	pub fn try_enqueue(
+		&mut self,
+		handle: Handle,
+		job_id: JobId,
+		request: Request,
+	) -> Result<(), Full> {
 		let server_head = self.base.request_head_ref().load(Ordering::Relaxed);
 		(server_head != (self.request_tail - Wrapping(REQUESTS_MASK + 1)).0)
-			.then(|| self.enqueue(handle, request))
+			.then(|| self.enqueue(handle, job_id, request))
 			.ok_or(Full)
 	}
 
@@ -296,43 +286,16 @@ pub enum SeekFrom {
 }
 
 pub enum Request {
-	Read {
-		job_id: JobId,
-		amount: u32,
-	},
-	Write {
-		job_id: JobId,
-		data: Slice,
-	},
-	GetMeta {
-		job_id: JobId,
-		property: Slice,
-	},
-	SetMeta {
-		job_id: JobId,
-		property_value: Slice,
-	},
-	Open {
-		job_id: JobId,
-		path: Slice,
-	},
+	Read { amount: u32 },
+	Write { data: Slice },
+	GetMeta { property: Slice },
+	SetMeta { property_value: Slice },
+	Open { path: Slice },
 	Close,
-	Create {
-		job_id: JobId,
-		path: Slice,
-	},
-	Destroy {
-		job_id: JobId,
-		path: Slice,
-	},
-	Seek {
-		job_id: JobId,
-		from: SeekFrom,
-	},
-	Share {
-		job_id: JobId,
-		share: Handle,
-	},
+	Create { path: Slice },
+	Destroy { path: Slice },
+	Seek { from: SeekFrom },
+	Share { share: Handle },
 }
 
 pub enum Response {

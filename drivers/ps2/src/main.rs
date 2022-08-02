@@ -60,45 +60,34 @@ async fn main() -> ! {
 			tbl_notify.read(()).await.0.unwrap();
 			let mut flush = false;
 			const KEYBOARD_STREAM_HANDLE: rt::Handle = rt::Handle::MAX - 1;
-			while let Some((handle, req)) = tbl.dequeue() {
-				let (job_id, resp) = match req {
-					Request::Open { job_id, path } => (job_id, {
+			while let Some((handle, job_id, req)) = tbl.dequeue() {
+				let resp = match req {
+					Request::Open { path } => {
 						let l = path.len();
 						path.copy_to(0, &mut buf[..l]);
-						path.manual_drop();
 						if &buf[..l] == b"keyboard/stream" {
 							Response::Handle(KEYBOARD_STREAM_HANDLE)
 						} else {
 							Response::Error(rt::Error::DoesNotExist)
 						}
-					}),
-					Request::Read { job_id, amount } => (
-						job_id,
-						match handle {
-							rt::Handle::MAX => Response::Error(rt::Error::InvalidOperation),
-							KEYBOARD_STREAM_HANDLE => {
-								if amount < 4 {
-									Response::Error(rt::Error::InvalidData)
-								} else if let Some((job_id, d)) = dev1.add_reader(job_id, &mut buf)
-								{
-									let mut data = tbl.alloc(d.len()).expect("out of buffers");
-									data.copy_from(0, d);
-									Response::Data(data)
-								} else {
-									continue;
-								}
+					}
+					Request::Read { amount } => match handle {
+						rt::Handle::MAX => Response::Error(rt::Error::InvalidOperation),
+						KEYBOARD_STREAM_HANDLE => {
+							if amount < 4 {
+								Response::Error(rt::Error::InvalidData)
+							} else if let Some((job_id, d)) = dev1.add_reader(job_id, &mut buf) {
+								let mut data = tbl.alloc(d.len()).expect("out of buffers");
+								data.copy_from(0, d);
+								Response::Data(data)
+							} else {
+								continue;
 							}
-							_ => unreachable!(),
-						},
-					),
+						}
+						_ => unreachable!(),
+					},
 					Request::Close => continue,
-					Request::Create { job_id, .. }
-					| Request::Destroy { job_id, .. }
-					| Request::Seek { job_id, .. }
-					| Request::Share { job_id, .. }
-					| Request::Write { job_id, .. }
-					| Request::GetMeta { job_id, .. }
-					| Request::SetMeta { job_id, .. } => (job_id, Response::Error(rt::Error::InvalidOperation)),
+					_ => Response::Error(rt::Error::InvalidOperation),
 				};
 				tbl.enqueue(job_id, resp);
 				flush = true;

@@ -118,45 +118,39 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let mut flushed @ mut dirty = false;
 	loop {
 		let mut flush = false;
-		while let Some((handle, req)) = table.dequeue() {
-			let (job_id, resp) = match req {
-				Request::Open { job_id, path } => {
+		while let Some((handle, job_id, req)) = table.dequeue() {
+			let resp = match req {
+				Request::Open { path } => {
 					let mut p = [0; 16];
 					let p = &mut p[..path.len()];
 					path.copy_to(0, p);
-					let resp = match &*p {
+					match &*p {
 						b"write" => Response::Handle(WRITE_HANDLE),
 						_ => Response::Error(Error::DoesNotExist),
-					};
-					path.manual_drop();
-					(job_id, resp)
+					}
 				}
-				Request::Write { job_id, data } => {
-					let r = match handle {
-						WRITE_HANDLE => {
-							let l = data.len().min(1024);
-							let mut v = Vec::with_capacity(l);
-							data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
-							unsafe { v.set_len(l) }
-							for c in v {
-								match parser.add(c) {
-									None => continue,
-									Some(Action::PushChar(c)) => rasterizer.push_char(c),
-									Some(Action::PopChar) => rasterizer.pop_char(),
-									Some(Action::NewLine) => rasterizer.new_line(),
-									Some(Action::ClearLine) => rasterizer.clear_line(),
-								}
-								dirty = true;
+				Request::Write { data } => match handle {
+					WRITE_HANDLE => {
+						let l = data.len().min(1024);
+						let mut v = Vec::with_capacity(l);
+						data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
+						unsafe { v.set_len(l) }
+						for c in v {
+							match parser.add(c) {
+								None => continue,
+								Some(Action::PushChar(c)) => rasterizer.push_char(c),
+								Some(Action::PopChar) => rasterizer.pop_char(),
+								Some(Action::NewLine) => rasterizer.new_line(),
+								Some(Action::ClearLine) => rasterizer.clear_line(),
 							}
-
-							let len = data.len().try_into().unwrap();
-							Response::Amount(len)
+							dirty = true;
 						}
-						_ => Response::Error(Error::InvalidOperation),
-					};
-					data.manual_drop();
-					(job_id, r)
-				}
+
+						let len = data.len().try_into().unwrap();
+						Response::Amount(len)
+					}
+					_ => Response::Error(Error::InvalidOperation),
+				},
 				Request::Write { .. } => todo!(),
 				Request::Close => match handle {
 					// Exit
