@@ -71,7 +71,7 @@ file_root = ""
 
 [program.ssh]
 path = "ssh"
-args = [ "drivers/ssh.toml" ]
+args = [ "drivers/ssh_conf/ssh.toml" ]
 after = [ "net" ]
 file_root = ""
 net_root = "net"

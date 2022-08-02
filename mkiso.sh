@@ -30,9 +30,8 @@ cp target/$TARGET_KERNEL/$build_dir/nora $O/boot/nora
 cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
-cp init.toml      $A/init.toml
-cp ssh.toml       $A/ssh.toml
-cp ssh_ecdsa.priv $A/ssh_ecdsa.priv
+cp init.toml $A/init.toml
+cp -r ssh    $A/ssh_conf
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then

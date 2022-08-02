@@ -46,7 +46,7 @@ exclude = [
 [profile.dev]
 split-debuginfo = 'unpacked'
 panic = "abort"
-opt-level = 's'
+opt-level = 1
 
 [profile.release]
 split-debuginfo = 'unpacked'
