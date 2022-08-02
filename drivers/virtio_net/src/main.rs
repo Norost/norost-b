@@ -186,6 +186,10 @@ fn main() {
 							table.data(p.job_id, &buf[..l]);
 							pending_reads.swap_remove(i);
 						}
+						Err(smoltcp::Error::Illegal) | Err(smoltcp::Error::Finished) => {
+							table.error(p.job_id, Error::Unknown);
+							pending_reads.swap_remove(i);
+						}
 						Err(e) => todo!("{:?}", e),
 					}
 				}
