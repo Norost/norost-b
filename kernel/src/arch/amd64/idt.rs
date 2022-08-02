@@ -1,7 +1,4 @@
-use core::{
-	arch::{asm, global_asm},
-	mem,
-};
+use core::{arch::asm, mem};
 
 pub macro __swap_gs() {
 	"cmp DWORD PTR [rsp + 8], 8",

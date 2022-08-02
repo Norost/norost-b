@@ -1,5 +1,5 @@
 use super::*;
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc};
+use alloc::collections::VecDeque;
 use core::cell::RefCell;
 use driver_utils::os::stream_table::JobId;
 use scancodes::{
@@ -8,7 +8,6 @@ use scancodes::{
 };
 
 pub struct Keyboard {
-	port: Port,
 	readers: RefCell<VecDeque<JobId>>,
 	events: RefCell<LossyRingBuffer<Event>>,
 	buf: RefCell<TinyBuf>,
@@ -93,7 +92,6 @@ impl Keyboard {
 		ps2.read_port_data_with_acknowledge().unwrap();
 
 		Self {
-			port,
 			events: Default::default(),
 			readers: Default::default(),
 			buf: Default::default(),

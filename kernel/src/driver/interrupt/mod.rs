@@ -8,7 +8,6 @@ use crate::{
 	arch,
 	object_table::{Error, Object, Root, Ticket, TicketWaker},
 	sync::SpinLock,
-	util,
 };
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::{mem, str};

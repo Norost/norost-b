@@ -10,12 +10,6 @@ use async_std::{
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	println,
 };
-use core::{
-	future::Future,
-	pin::Pin,
-	task::{Context, Poll},
-	time::Duration,
-};
 use futures::{
 	future::{self, Either},
 	stream::StreamExt,
@@ -45,8 +39,8 @@ async fn main() -> ! {
 			let (res, buf) = c.read(Vec::with_capacity(2048)).await;
 			let mut headers = [""; 128];
 			let (mut resp, keep_alive) = match res {
-				Ok(l) if l == 0 => return, // Client closed the connection prematurely
-				Ok(l) => match mhttp::RequestParser::parse(&buf, &mut headers) {
+				Ok(0) => return, // Client closed the connection prematurely
+				Ok(_) => match mhttp::RequestParser::parse(&buf, &mut headers) {
 					Ok((req, _)) => handle_client(Vec::new(), req).await,
 					Err(_) => bad_request(buf, false),
 				},

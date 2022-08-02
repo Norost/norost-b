@@ -117,7 +117,7 @@ pub enum AnyTicketValue {
 }
 
 macro_rules! any_ticket {
-	($t:ty => $v:ident, $f:ident) => {
+	($t:ty => $v:ident) => {
 		impl From<Ticket<$t>> for AnyTicket {
 			fn from(t: Ticket<$t>) -> Self {
 				Self::$v(t)
@@ -136,16 +136,6 @@ macro_rules! any_ticket {
 			}
 		}
 
-		impl AnyTicketWaker {
-			#[cfg_attr(debug_assertions, track_caller)]
-			pub fn $f(self) -> TicketWaker<$t> {
-				match self {
-					Self::$v(t) => t,
-					_ => unreachable!(),
-				}
-			}
-		}
-
 		impl From<$t> for Ticket<$t> {
 			fn from(v: $t) -> Self {
 				Self::new_complete(Ok(v))
@@ -153,9 +143,9 @@ macro_rules! any_ticket {
 		}
 	};
 }
-any_ticket!(Arc<dyn Object> => Object, into_object);
-any_ticket!(u64 => U64, into_u64);
-any_ticket!(Box<[u8]> => Data, into_data);
+any_ticket!(Arc<dyn Object> => Object);
+any_ticket!(u64 => U64);
+any_ticket!(Box<[u8]> => Data);
 
 impl AnyTicketWaker {
 	pub fn complete_err(self, err: Error) {

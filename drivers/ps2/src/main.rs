@@ -35,7 +35,7 @@ fn start(_: isize, _: *const *const u8) -> isize {
 }
 
 async fn main() -> ! {
-	let (mut ps2, [dev1, dev2]) = Ps2::init();
+	let (mut ps2, [dev1, _dev2]) = Ps2::init();
 	let mut buf = [0; 16];
 
 	let dev1 = dev1.unwrap();
@@ -60,7 +60,7 @@ async fn main() -> ! {
 			tbl_notify.read(()).await.0.unwrap();
 			let mut flush = false;
 			const KEYBOARD_STREAM_HANDLE: rt::Handle = rt::Handle::MAX - 1;
-			while let Some((handle, job_id, req)) = tbl.dequeue() {
+			while let Some((handle, mut job_id, req)) = tbl.dequeue() {
 				let resp = match req {
 					Request::Open { path } => {
 						let l = path.len();
@@ -76,8 +76,9 @@ async fn main() -> ! {
 						KEYBOARD_STREAM_HANDLE => {
 							if amount < 4 {
 								Response::Error(rt::Error::InvalidData)
-							} else if let Some((job_id, d)) = dev1.add_reader(job_id, &mut buf) {
-								let mut data = tbl.alloc(d.len()).expect("out of buffers");
+							} else if let Some((id, d)) = dev1.add_reader(job_id, &mut buf) {
+								job_id = id;
+								let data = tbl.alloc(d.len()).expect("out of buffers");
 								data.copy_from(0, d);
 								Response::Data(data)
 							} else {
@@ -99,7 +100,7 @@ async fn main() -> ! {
 		loop {
 			dev1_intr.read(()).await.0.unwrap();
 			if let Some((job_id, d)) = dev1.handle_interrupt(&mut ps2, &mut buf) {
-				let mut data = tbl.alloc(d.len()).expect("out of buffers");
+				let data = tbl.alloc(d.len()).expect("out of buffers");
 				data.copy_from(0, d);
 				tbl.enqueue(job_id, Response::Data(data));
 				tbl.flush();
@@ -300,9 +301,9 @@ impl Ps2 {
 	fn install_interrupt(&mut self, port: Port) -> rt::Object {
 		// Configure interrupt
 		use driver_utils::os::interrupt;
-		let (irq, i) = match port {
-			Port::P1 => (1, 0),
-			Port::P2 => (4, 1),
+		let irq = match port {
+			Port::P1 => 1,
+			Port::P2 => 4,
 		};
 		let intr = interrupt::allocate(Some(irq), interrupt::TriggerMode::Level);
 
@@ -321,7 +322,7 @@ impl Ps2 {
 		intr
 	}
 
-	pub fn init() -> (Self, [Option<Box<dyn Device>>; 2]) {
+	fn init() -> (Self, [Option<Box<dyn Device>>; 2]) {
 		// https://wiki.osdev.org/%228042%22_PS/2_Controller#Initialising_the_PS.2F2_Controller
 
 		let mut slf = Self {

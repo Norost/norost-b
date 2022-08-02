@@ -3,33 +3,19 @@ extern crate alloc;
 use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
-	env,
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	process,
 };
 use clap::Parser;
-use core::{
-	cell::{Cell, RefCell, RefMut},
-	future::Future,
-	ops::{Deref, DerefMut},
-	pin::Pin,
-	str,
-	task::{Context, Poll, Waker},
-};
-use futures::{
-	future::{FusedFuture, FutureExt},
-	io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf},
-	pin_mut, select,
-	stream::{FuturesUnordered, StreamExt},
-	stream_select,
-};
+use core::str;
+use futures::io::{AsyncReadExt, ReadHalf, WriteHalf};
 use nora_ssh::{
 	auth::Auth,
 	cipher,
 	server::{IoSet, Server, ServerHandlers, SpawnType},
 	Identifier,
 };
-use rand::{rngs::StdRng, CryptoRng, RngCore, SeedableRng};
+use rand::rngs::StdRng;
 use serde_derive::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -99,7 +85,6 @@ struct Handlers {
 }
 
 struct User {
-	name: Box<str>,
 	shell: Option<Rc<process::Child>>,
 }
 
@@ -163,7 +148,7 @@ impl ServerHandlers for Handlers {
 	async fn authenticate<'a>(
 		&self,
 		user: &'a [u8],
-		service: &'a [u8],
+		_service: &'a [u8],
 		auth: Auth<'a>,
 	) -> Result<Self::User, ()> {
 		match auth {
@@ -185,10 +170,7 @@ impl ServerHandlers for Handlers {
 						.verify(message, &signature.try_into().map_err(|_| ())?)
 						.map_err(|_| ())?,
 				}
-				Ok(User {
-					name: core::str::from_utf8(user).unwrap().into(),
-					shell: None,
-				})
+				Ok(User { shell: None })
 			}
 		}
 	}
@@ -197,7 +179,7 @@ impl ServerHandlers for Handlers {
 		&self,
 		user: &'a mut Self::User,
 		ty: SpawnType<'a>,
-		data: &'a [u8],
+		_data: &'a [u8],
 	) -> Result<IoSet<Self::Stdin, Self::Stdout, Self::Stderr>, ()> {
 		let wait = |child: Rc<process::Child>| async move {
 			child.wait().await.unwrap().code().unwrap_or(0) as u32

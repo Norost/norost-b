@@ -24,11 +24,7 @@ mod window;
 mod workspace;
 
 use alloc::vec::Vec;
-use core::{
-	cell::RefCell,
-	ptr::{self, NonNull},
-	str,
-};
+use core::{cell::RefCell, ptr::NonNull};
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use math::{Point, Rect, Size};
 use rt::io::{Error, Handle};
@@ -59,8 +55,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let sync = root.open(b"gpu/sync").unwrap();
 	let res = {
 		let mut b = [0; 8];
-		let l = sync
-			.get_meta(b"bin/resolution".into(), (&mut b).into())
+		sync.get_meta(b"bin/resolution".into(), (&mut b).into())
 			.unwrap();
 		ipc_gpu::Resolution::decode(b)
 	};
@@ -106,7 +101,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		)
 		.unwrap();
 	};
-	let mut fill = |shmem: &mut [u8], rect: math::Rect, color: [u8; 3]| {
+	let fill = |shmem: &mut [u8], rect: math::Rect, color: [u8; 3]| {
 		let t = rect.size();
 		assert!(t.x <= size.x && t.y <= size.y, "rect out of bounds");
 		assert!(t.area() * 3 <= shmem.len() as u64, "shmem too small");
@@ -120,17 +115,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		sync_rect(rect);
 	};
 
-	let colors = [
-		[255, 0, 0],
-		[0, 255, 0],
-		[0, 0, 255],
-		[255, 255, 0],
-		[0, 255, 255],
-		[255, 0, 255],
-	];
-
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
+	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
 	root.create(b"window_manager")
 		.unwrap()
 		.share(table.public())
@@ -148,7 +134,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size, Default::default()).unwrap();
 							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-							for ((w, ww), c) in manager.windows().zip(&colors) {
+							for (w, ww) in manager.windows() {
 								let rect = manager.window_rect(w, size).unwrap();
 								let evt = ipc_wm::Resolution {
 									x: rect.size().x,
@@ -162,7 +148,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 									let data = table.alloc(evt.len()).expect("out of buffers");
 									data.copy_from(0, &evt);
 									table.enqueue(id, Response::Data(data));
-									send_notif = true;
 								}
 							}
 							Response::Handle(h)
@@ -201,7 +186,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				Request::Read { amount: _ } => match handle {
 					Handle::MAX => Response::Error(Error::InvalidOperation),
-					h => {
+					_ => {
 						let w = &mut manager.window_mut(handle).unwrap().user_data;
 						if let Some(evt) = w.unread_events.get_mut().pop() {
 							let evt = evt.encode();
@@ -215,13 +200,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				},
 				Request::Write { data } => {
-					(match handle {
+					match handle {
 						Handle::MAX => Response::Error(Error::InvalidOperation),
 						h => {
 							let window = manager.window(handle).unwrap();
 							let mut header = [0; 12];
 							data.copy_to(0, &mut header);
-							let display = Rect::from_size(Point::ORIGIN, size);
 							let rect = manager.window_rect(h, size).unwrap();
 							let draw = ipc_wm::Flush::decode(header);
 							let draw_size = draw.size;
@@ -251,12 +235,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							sync_rect(draw_rect);
 							Response::Amount(l)
 						}
-					})
+					}
 				}
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
-					for ((w, ww), c) in manager.windows().zip(&colors) {
+					for (w, ww) in manager.windows() {
 						let rect = manager.window_rect(w, size).unwrap();
 						let evt = ipc_wm::Resolution {
 							x: rect.size().x,
@@ -278,7 +262,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				Request::Open { .. } => todo!(),
 				Request::Share { share } => match handle {
 					Handle::MAX => Response::Error(Error::InvalidOperation),
-					h => {
+					_ => {
 						manager.window_mut(handle).unwrap().user_data.framebuffer =
 							FrameBuffer::wrap(&share);
 						Response::Amount(0)
@@ -354,12 +338,6 @@ struct Events {
 }
 
 impl Events {
-	fn push(&mut self, e: ipc_wm::Event) {
-		match e {
-			ipc_wm::Event::Resize(r) => self.resize = Some(r),
-		}
-	}
-
 	fn pop(&mut self) -> Option<ipc_wm::Event> {
 		self.resize.take().map(ipc_wm::Event::Resize)
 	}

@@ -3,14 +3,14 @@
 //!
 //! Using [`Read`]/[`Write`] directly is recommended to avoid redundant allocations & copies.
 
-use crate::io::{Read, Seek, Write};
+use crate::io::{Read, Write};
 use alloc::vec::Vec;
 use core::{
 	future::Future,
 	pin::Pin,
 	task::{ready, Context, Poll},
 };
-use futures_io::{AsyncRead, AsyncSeek, AsyncWrite, Error, ErrorKind};
+use futures_io::{AsyncRead, AsyncWrite, Error, ErrorKind};
 
 #[pin_project::pin_project]
 pub struct AsyncWrapR<T: Read<Vec<u8>>> {

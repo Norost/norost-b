@@ -122,57 +122,6 @@ impl fmt::Debug for MemoryRegion {
 }
 
 #[repr(C)]
-struct RawDriver {
-	/// Start address of the ELF file.
-	pub address: u32,
-	/// Size of the ELF file in bytes.
-	pub size: u32,
-	/// Offset to the name of the driver.
-	pub name_offset: u16,
-}
-
-/// A driver to load at boot.
-pub struct Driver<'a> {
-	info: &'a Info,
-	inner: &'a RawDriver,
-}
-
-impl<'a> Driver<'a> {
-	/// Return the raw binary contents of the driver.
-	///
-	/// # Safety
-	///
-	/// It is up to the caller to ensure the region is still accessible.
-	pub unsafe fn as_slice<'b>(&self) -> &'b [u8] {
-		unsafe {
-			let a = crate::memory::r#virtual::phys_to_virt(self.inner.address.into());
-			core::slice::from_raw_parts(a, self.inner.size.try_into().unwrap())
-		}
-	}
-
-	/// The name of the driver.
-	pub fn name(&self) -> &'a [u8] {
-		self.info.get_str(self.inner.name_offset)
-	}
-}
-
-impl fmt::Debug for Driver<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct(stringify!(Driver))
-			.field("name", &ByteStr::new(self.name()))
-			.field(
-				"range",
-				&format_args!(
-					"{:#x}..{:#x}",
-					self.inner.address,
-					self.inner.address + self.inner.size
-				),
-			)
-			.finish()
-	}
-}
-
-#[repr(C)]
 struct RawInitProgram {
 	driver: u16,
 	args_offset: u16,

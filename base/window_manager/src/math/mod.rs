@@ -13,12 +13,10 @@ pub struct Point {
 impl Point {
 	pub const ORIGIN: Self = Self::new(0, 0);
 
-	#[inline(always)]
 	pub const fn new(x: u32, y: u32) -> Self {
 		Self { x, y }
 	}
 
-	#[inline(always)]
 	pub const fn into_vector(self) -> Vector {
 		Vector::new(self.x as _, self.y as _)
 	}
@@ -31,12 +29,9 @@ pub struct Vector {
 }
 
 impl Vector {
-	pub const X: Self = Self::new(1, 0);
-	pub const Y: Self = Self::new(0, 1);
 	pub const ZERO: Self = Self::new(0, 0);
 	pub const ONE: Self = Self::new(1, 1);
 
-	#[inline(always)]
 	pub const fn new(x: i32, y: i32) -> Self {
 		Self { x, y }
 	}
@@ -49,19 +44,14 @@ pub struct Size {
 }
 
 impl Size {
-	pub const ZERO: Self = Self::new(0, 0);
-
-	#[inline(always)]
 	pub const fn new(x: u32, y: u32) -> Self {
 		Self { x, y }
 	}
 
-	#[inline(always)]
 	pub const fn into_vector(self) -> Vector {
 		Vector::new(self.x as _, self.y as _)
 	}
 
-	#[inline]
 	pub const fn area(self) -> u64 {
 		self.x as u64 * self.y as u64
 	}
@@ -72,7 +62,6 @@ macro_rules! impl_op {
 		impl $op<$r> for $l {
 			type Output = $out;
 
-			#[inline(always)]
 			fn $fn(self, rhs: $r) -> Self::Output {
 				$out::new(
 					self.x.$wrap_fn(rhs.x as _) as _,
@@ -83,7 +72,6 @@ macro_rules! impl_op {
 	};
 	($l:ident $r:ident $wrap_fn:ident = $opa:ident.$fna:ident) => {
 		impl $opa<$r> for $l {
-			#[inline(always)]
 			fn $fna(&mut self, rhs: $r) {
 				self.x = self.x.$wrap_fn(rhs.x as _);
 				self.y = self.y.$wrap_fn(rhs.y as _);
@@ -116,7 +104,6 @@ impl_op!(Point Point Vector wrapping_sub | Sub.sub);
 impl Neg for Vector {
 	type Output = Self;
 
-	#[inline(always)]
 	fn neg(self) -> Self {
 		Self::ZERO - self
 	}

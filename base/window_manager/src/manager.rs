@@ -1,7 +1,7 @@
 use crate::{
 	math::{Rect, Size, Vector},
 	window::{GlobalWindowParams, PathIter, Window},
-	workspace::{Direction, NewWorkspaceError, Workspace},
+	workspace::{NewWorkspaceError, Workspace},
 };
 use alloc::boxed::Box;
 use driver_utils::{Arena, Handle};
@@ -73,14 +73,9 @@ impl<U> Manager<U> {
 	pub fn windows(&self) -> impl Iterator<Item = (Handle, &Window<U>)> + '_ {
 		self.windows.iter()
 	}
-
-	pub fn windows_mut(&mut self) -> impl Iterator<Item = (Handle, &mut Window<U>)> + '_ {
-		self.windows.iter_mut()
-	}
 }
 
 #[derive(Debug)]
 pub enum NewManagerError {
-	NoFileRoot,
 	NewWorkspace(NewWorkspaceError),
 }

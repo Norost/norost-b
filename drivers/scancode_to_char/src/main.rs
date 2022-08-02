@@ -5,10 +5,7 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
-use async_std::{
-	io::{Read, Write},
-	object::{AsyncObject, RefAsyncObject},
-};
+use async_std::{io::Read, object::RefAsyncObject};
 use core::{
 	cell::{Cell, RefCell},
 	future::Future,
@@ -16,7 +13,7 @@ use core::{
 	time::Duration,
 };
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use norostb_kernel::{error::Error, object::Pow2Size, RWX};
+use norostb_kernel::{error::Error, object::Pow2Size};
 use rt_default as _;
 
 #[start]
@@ -106,7 +103,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	};
 
 	let do_job = || async {
-		let (res, mut buf) = RefAsyncObject::from(table.notifier()).read(()).await;
+		let (res, _buf) = RefAsyncObject::from(table.notifier()).read(()).await;
 		res.unwrap();
 		let mut tiny_buf = [0; 16];
 		let (handle, job_id, req) = table.dequeue().unwrap();
@@ -130,7 +127,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				// The kernel does not expect a response
 				return true;
 			}
-			Request::Read { amount } => {
+			Request::Read { amount: _ } => {
 				let mut char_buf = char_buf.borrow_mut();
 				if char_buf.is_empty() {
 					// There is currently no data, so delay a response until there is
@@ -140,7 +137,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					return false;
 				} else {
 					let l = tiny_buf.len();
-					let mut b = &mut tiny_buf[..l.min(char_buf.len())];
+					let b = &mut tiny_buf[..l.min(char_buf.len())];
 					for w in b.iter_mut() {
 						*w = char_buf.pop_front().unwrap();
 					}

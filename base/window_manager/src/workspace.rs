@@ -1,5 +1,5 @@
 use crate::{
-	math::{Point, Ratio, Rect, Size, Vector},
+	math::{Point, Ratio, Rect, Size},
 	window::PathIter,
 };
 use core::{fmt, mem};
@@ -229,7 +229,9 @@ impl fmt::Debug for Path {
 
 #[derive(Clone, Copy)]
 pub enum Direction {
+	#[allow(dead_code)]
 	Left,
+	#[allow(dead_code)]
 	Up,
 	Right,
 	Down,
