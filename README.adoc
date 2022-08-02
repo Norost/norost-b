@@ -1,0 +1,63 @@
+= Norost B Operating System
+
+image::https://static.salt-inc.org/norost/norost-v0.2a.jpg[Rust FTW]
+
+Norost B is an object-oriented OS built around a microkernel.
+It is mainly focused on isolating processes from the rest of the system to improve
+security, portability &and; scaling.
+
+https://norost.com[Website]
+
+link::DESIGN.adoc[Design rationale]
+
+link::Documentation[Documentation]
+
+== Features
+
+=== Object-oriented interface
+* Object-oriented kernel API
+** Files, network sockets ... are all objects.
+** Any process can create new objects.
+** IPC is performed via operations on objects.
+** Processes can only perform operations on objects they have a handle to.
+* Asynchronous I/O (completion model with shared ring queues)
+* Preemptable kernel & userland
+* Networking (IP, TCP, UDP, DHCP, ICMP)
+* GUI with tiling window manager
+
+== Supported architectures
+
+|===
+| Architecture | Supported
+
+| x86
+| &cross;
+
+| x64
+| &check;
+
+| RISC-V
+| &cross;
+|===
+
+== Supported hardware
+
+=== Storage
+
+* VIRTIO block devices
+
+=== Graphics
+
+* VIRTIO GPU
+* Intel HD Graphics (very poorly, only on specific laptops with specific boot settings)
+
+=== Human Interface Devices (HID)
+
+* PS/2 keyboard
+
+== Building
+
+link::thirdparty/rust[You will need a patched Rust compiler.]
+
+Once the compiler is properly configured, `mkiso.sh` will create a bootable image.
+`run.sh` will run the OS in QEMU.

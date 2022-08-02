@@ -1,9 +1,9 @@
-# Design
+= Design
 
 This document elaborates on some design decisions & the motivation behind them.
 
 
-## Microkernel
+== Microkernel
 
 The main reason is to make it trivial to replace drivers, which is useful when isolating
 processes. e.g. any network operations could be proxied through a firewall, which can be
@@ -13,16 +13,18 @@ Another is to allow high-performance applications to directly integrate drivers,
 database could directly communicate with disks, reducing overhead & latency significantly.
 
 
-## I/O
+== I/O
 
 There are four "levels" of API, going from ease and genericity of use to performance:
 
+|===
 | Level         | Minimal | Application agnostic | Device agnostic |
-|---------------|---------|----------------------|-----------------|
+
 | Synchronous   | &check; | &check;              | &check;         |
 | Asynchronous  | &cross; | &check;              | &check;         |
 | Shared memory | &cross; | &cross;              | &check;         |
 | Integrated    | &cross; | &cross;              | &cross;         |
+|===
 
 The synchronous is the simplest and easiest to use.
 
@@ -41,7 +43,7 @@ compiler to perform more extensive optimizations and reducing the amount of
 context and privilige switches.
 
 
-### Asynchronous I/O
+=== Asynchronous I/O
 
 So far, asynchronous I/O using ring buffers seems to be the best-performing on modern
 hardware, since it reduces privilege & context switches associated with blocking I/O.
@@ -55,7 +57,7 @@ added (`do_io`). It reduces the size of simple programs, makes the runtime
 lighter and is slightly more performant.
 
 
-#### Readiness vs completion
+==== Readiness vs completion
 
 There are two common ways to handle asynchronous I/O. One is based on readiness, where
 the server sends a message that an operation can be performed, and the other is based
@@ -68,7 +70,7 @@ the moment a request is sent. Since reducing latency is a great concern the I/O 
 the latter model.
 
 
-##### Owned buffers
+===== Owned buffers
 
 A subtle disadvantage of the latter model is that cancellation is not implicit: with
 a readiness-based model an operation can be "cancelled" by simply ignoring the ready
@@ -83,7 +85,7 @@ avoid redundant allocations & deallocations the queue returns the buffer to the 
 when it is done with it.
 
 
-## Object-oriented interface
+== Object-oriented interface
 
 A minimal but powerful OO interface makes it easy to isolate & scale processes.
 For example, a job server can run a compile run on many different machines by
@@ -92,7 +94,7 @@ local machine will pick any machine as appropriate. It can also provide a file
 table which will gather outputs from any processes to a central location.
 
 
-## Multi-stage bootloader
+== Multi-stage bootloader
 
 While there are many powerful bootloaders, they also still leave much setup work
 to the kernel such as setting up the page tables. To simplify things & reduce the
@@ -102,9 +104,9 @@ the kernel ELF binary & can pass any drivers to the kernel. It also tells the ke
 which memory regions are free & useable as regular volatile RAM.
 
 
-## Thread API
+== Thread API
 
-### Killing threads
+=== Killing threads
 
 There is no way to kill threads nor will a way ever be provided.
 Killing threads abruptly is risky since it may leave resources in a locked state.
