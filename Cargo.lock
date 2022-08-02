@@ -575,6 +575,7 @@ dependencies = [
 [[package]]
 name = "getrandom"
 version = "0.2.7"
+source = "git+https://git.sr.ht/~demindiro/getrandom#a67c5b78ebfb94ae8185a330cc8fc836fb475a34"
 dependencies = [
  "cfg-if",
  "libc",
@@ -813,6 +814,7 @@ dependencies = [
 [[package]]
 name = "nora_ssh"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/nora_ssh#388bdfaa5371ad57bece08afe8c859d1fe50f0b4"
 dependencies = [
  "async-trait",
  "digest 0.10.3",
@@ -831,6 +833,7 @@ dependencies = [
 [[package]]
 name = "nora_ssh_core"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/nora_ssh#388bdfaa5371ad57bece08afe8c859d1fe50f0b4"
 dependencies = [
  "chacha20",
  "digest 0.10.3",
@@ -875,6 +878,7 @@ dependencies = [
 [[package]]
 name = "norost_ipc_spec"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/norost_ipc_spec#b953ec903a9ccb0536fdd9580b6e141428abd125"
 dependencies = [
  "norost_ipc_spec_proc",
 ]
@@ -882,6 +886,7 @@ dependencies = [
 [[package]]
 name = "norost_ipc_spec_proc"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/norost_ipc_spec#b953ec903a9ccb0536fdd9580b6e141428abd125"
 dependencies = [
  "litrs",
  "quote",

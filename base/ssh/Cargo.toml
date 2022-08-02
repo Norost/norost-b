@@ -17,7 +17,7 @@ default-features = false
 features = ["std"]
 
 [dependencies.nora_ssh]
-git = "https://github.com/Demindiro/nora_ssh"
+git = "https://git.sr.ht/~demindiro/nora_ssh"
 features = ["no_send"]
 
 [dependencies.toml]

@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies.norost_ipc_spec]
-path = "../../../../../../compilers/norost_ipc_spec/spec"
+git = "https://git.sr.ht/~demindiro/norost_ipc_spec"
