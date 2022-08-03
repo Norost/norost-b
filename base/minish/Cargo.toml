@@ -3,7 +3,7 @@ cargo-features = ["per-package-target"]
 [package]
 name = "minish"
 description = "Minimal shell with basic utilities built-in"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 default-target = "x86_64-unknown-norostb"
 
