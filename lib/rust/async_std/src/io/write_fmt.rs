@@ -1,4 +1,4 @@
-use super::{Buf, Result, Write};
+use super::{Result, Write};
 use alloc::vec::Vec;
 use core::{
 	future::Future,

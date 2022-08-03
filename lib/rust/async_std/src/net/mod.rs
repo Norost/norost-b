@@ -1,6 +1,5 @@
 use crate::{io, AsyncObject};
 use alloc::format;
-use core::{pin::Pin, task::Context};
 
 pub use no_std_net::*;
 

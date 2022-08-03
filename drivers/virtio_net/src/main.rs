@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::{format, vec::Vec};
 
 use async_std::{
-	io::{Read, Write},
+	io::Read,
 	net::Ipv6Addr,
 	object::{AsyncObject, RefAsyncObject},
 };
@@ -22,11 +22,9 @@ use core::{
 	future::Future,
 	pin::Pin,
 	str::{self, FromStr},
-	task::Poll,
 	time::Duration,
 };
-use driver_utils::os::stream_table::{Data, JobId, Request, Response, StreamTable};
-use futures::stream::{FuturesUnordered, StreamExt};
+use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use rt::Error;
 use smoltcp::wire;
 use tcp::{TcpConnection, TcpListener};

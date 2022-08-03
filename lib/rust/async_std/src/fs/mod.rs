@@ -1,6 +1,6 @@
 use crate::{
 	io::{Buf, Read},
-	object::{file_root, RefAsyncObject},
+	object::file_root,
 	AsyncObject,
 };
 use alloc::vec::Vec;

@@ -137,14 +137,6 @@ impl Process {
 		f(&mut self.objects.lock())
 	}
 
-	/// Operate on a reference to an object.
-	pub fn object_apply<R, F>(&self, handle: Handle, f: F) -> Option<R>
-	where
-		F: FnOnce(&Arc<dyn Object>) -> R,
-	{
-		self.objects.lock().get(unerase_handle(handle)).map(f)
-	}
-
 	/// Create a new object from another object.
 	pub fn object_transform_new<R, F>(&self, handle: Handle, f: F) -> Option<Result<Handle, R>>
 	where

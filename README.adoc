@@ -1,0 +1,89 @@
+= Norost B Operating System
+
+image::https://static.salt-inc.org/norost/norost-v0.2a.jpg[Rust FTW]
+
+Norost B is an object-oriented OS built around a microkernel.
+It is mainly focused on isolating processes from the rest of the system to improve
+security, portability &and; scaling.
+
+https://norost.com[Website]
+
+link::DESIGN.adoc[Design rationale]
+
+link::Documentation[Documentation]
+
+== Features
+
+=== Object-oriented interface
+
+Files, network sockets ... are all objects and have a common API.
+This keeps the interface simple & comprehensible while providing a great amount of flexibility
+and power.
+
+Any process can create new objects.
+IPC is performed via operations on objects.
+
+Processes can only perform operations on objects they have a handle to.
+This makes it trivial to isolate processes from the rest of the system by simply giving it only
+handles to objects it needs.
+
+==== Synchronous & Asynchronous I/O (completion model with shared ring queues)
+
+Minimal applications can use the synchronous API to keep the binary small while more advanced
+applications can take advantage of asynchronous I/O to more efficiently perform batch work.
+
+Applications can also take advantage of shared memory with specialized I/O structures to further
+reduce overhead.
+
+==== Networking
+
+Some basic support for networking is present.
+A basic SSH server and HTTP server are available.
+
+==== GUI
+
+Applications can allocate a window and draw any arbitrary pixels to it.
+The tiling window manager automatically handles layout to optimize screen estate.
+
+==== Other
+
+The kernel is nearly fully preemptible.
+
+Most drivers are outside the kernel, which makes it easier to replace and/or stub them.
+
+== Supported architectures
+
+|===
+| Architecture | Supported
+
+| x86
+| &cross;
+
+| x64
+| &check; with SSE and AVX2
+
+| RISC-V
+| &cross;
+|===
+
+== Supported hardware
+
+=== Storage
+
+* VIRTIO block devices
+
+=== Graphics
+
+* VIRTIO GPU
+* Intel HD Graphics (very poorly, only on specific laptops with specific boot settings)
+
+=== Human Interface Devices (HID)
+
+* PS/2 keyboard
+
+== Building
+
+link::thirdparty/rust[You will need a patched Rust compiler.]
+
+Once the compiler is properly configured, `mkiso.sh` will create a bootable image.
+`run.sh` will run the OS in QEMU.

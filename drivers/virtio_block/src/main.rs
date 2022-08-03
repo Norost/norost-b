@@ -25,7 +25,7 @@ fn main() -> ! {
 
 	let dev_handle = {
 		let s = b" 1af4:1001";
-		let mut it = file_root.open(b"pci/info").unwrap();
+		let it = file_root.open(b"pci/info").unwrap();
 		let mut buf = [0; 64];
 		loop {
 			let l = it.read(&mut buf).unwrap();

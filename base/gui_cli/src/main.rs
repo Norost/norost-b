@@ -7,13 +7,9 @@ extern crate alloc;
 
 mod rasterizer;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
-use core::ptr::NonNull;
+use alloc::vec::Vec;
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use fontdue::{
-	layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle, WrapStyle},
-	Font, FontSettings,
-};
+use fontdue::{Font, FontSettings};
 use rt::{Error, Handle};
 
 const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
@@ -40,14 +36,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 
-	let fonts = &[Font::from_bytes(
-		FONT,
-		FontSettings {
-			scale: 160.0,
-			..Default::default()
-		},
-	)
-	.unwrap()];
 	let font = Font::from_bytes(
 		FONT,
 		FontSettings {
@@ -56,7 +44,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		},
 	)
 	.unwrap();
-	let mut rasterizer = rasterizer::Rasterizer::new(font, 20);
+	let mut rasterizer = rasterizer::Rasterizer::new(font);
 
 	let window = root.create(b"window_manager/window").unwrap();
 
@@ -102,15 +90,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.unwrap();
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let mut table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
+	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
 	root.create(b"gui_cli")
 		.unwrap()
 		.share(table.public())
 		.unwrap();
 
 	const WRITE_HANDLE: Handle = Handle::MAX - 1;
-
-	let mut cur_line = String::new();
 
 	let mut parser = Parser {
 		state: ParserState::Idle,
@@ -151,13 +137,18 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 					_ => Response::Error(Error::InvalidOperation),
 				},
-				Request::Write { .. } => todo!(),
 				Request::Close => match handle {
 					// Exit
 					WRITE_HANDLE => return 0,
 					_ => unreachable!(),
 				},
-				e => todo!(),
+				Request::Read { .. } => todo!(),
+				Request::GetMeta { .. } => todo!(),
+				Request::SetMeta { .. } => todo!(),
+				Request::Create { .. } => todo!(),
+				Request::Destroy { .. } => todo!(),
+				Request::Seek { .. } => todo!(),
+				Request::Share { .. } => todo!(),
 			};
 			table.enqueue(job_id, resp);
 			flush = true;
@@ -168,7 +159,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		} else if flushed {
 			// TODO lazy hack, add some kind of table.wait_until instead (i.e. use
 			// async I/O queue).
-			for i in 0..10 {
+			for _ in 0..10 {
 				rt::thread::yield_now();
 			}
 			flushed = false;

@@ -1,6 +1,5 @@
-use crate::{io, queue, AsyncObject};
+use crate::{io, AsyncObject};
 use alloc::vec::Vec;
-use core::future::Future;
 
 pub struct ChildStdin(pub(super) AsyncObject);
 pub struct ChildStdout(pub(super) AsyncObject);

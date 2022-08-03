@@ -6,7 +6,7 @@ use io_queue_rt::{Full, Pow2Size, Queue};
 static IO_QUEUE_KEY: rt::tls::AtomicKey = rt::tls::AtomicKey::default();
 
 /// Try to submit a request, blocking & retrying if the queue is full.
-pub fn submit<F, B, R>(f: F, mut buf: B) -> R
+pub fn submit<F, B, R>(f: F, buf: B) -> R
 where
 	F: Fn(&'static Queue, B) -> Result<R, Full<B>>,
 	B: Buf,
@@ -15,7 +15,7 @@ where
 }
 
 /// Try to submit a request, blocking & retrying if the queue is full.
-pub fn submit_mut<F, B, R>(f: F, mut buf: B) -> R
+pub fn submit_mut<F, B, R>(f: F, buf: B) -> R
 where
 	F: Fn(&'static Queue, B) -> Result<R, Full<B>>,
 	B: BufMut,

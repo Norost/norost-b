@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(const_trait_impl)]
-#![feature(ready_macro)]
 #![deny(unused_must_use)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

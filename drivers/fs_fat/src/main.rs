@@ -1,7 +1,7 @@
 #![feature(norostb)]
 #![feature(seek_stream_len)]
 
-use driver_utils::os::stream_table::{Data, Request, Response, StreamTable};
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use rt::io::Pow2Size;
 use std::{
 	fs,
@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut objects = driver_utils::Arena::new();
 	enum Object {
 		File(String, u64),
+		#[allow(dead_code)]
 		Dir(String, u64),
 		Query(Vec<String>, usize),
 	}
@@ -50,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		while let Some((handle, job_id, req)) = tbl.dequeue() {
 			let resp = match req {
 				Request::Open { path } => {
-					(if handle != rt::Handle::MAX {
+					if handle != rt::Handle::MAX {
 						Response::Error(rt::Error::InvalidOperation)
 					} else {
 						let l = path.len();
@@ -76,10 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							},
 							Err(_) => Response::Error(rt::Error::InvalidData),
 						}
-					})
+					}
 				}
 				Request::Create { path } => {
-					(if handle != rt::Handle::MAX {
+					if handle != rt::Handle::MAX {
 						Response::Error(rt::Error::InvalidOperation)
 					} else {
 						let l = path.len();
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 							},
 							Err(_) => Response::Error(rt::Error::InvalidData),
 						}
-					})
+					}
 				}
 				Request::Read { amount } => match &mut objects[handle] {
 					Object::File(path, offset) => {
@@ -179,30 +180,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				}
 				Request::Share { .. } => todo!(),
 				Request::Destroy { .. } => todo!(),
-				Request::GetMeta { property } => {
-					let b = property.get(&mut buf);
-					match (handle, &*b) {
-						(h, b"fs/type") => {
-							let t: Option<&[_]> = if handle == rt::Handle::MAX {
-								Some(b"dir")
-							} else {
-								match &objects[handle] {
-									Object::File(..) => Some(b"file"),
-									Object::Dir(..) => Some(b"dir"),
-									Object::Query(..) => None,
-								}
-							};
-							if let Some(t) = t {
-								let d = tbl.alloc(t.len()).expect("out of buffers");
-								d.copy_from(0, t);
-								Response::Data(d)
-							} else {
-								Response::Error(rt::Error::DoesNotExist)
+				Request::GetMeta { property } => match &*property.get(&mut buf) {
+					b"fs/type" => {
+						let t: Option<&[_]> = if handle == rt::Handle::MAX {
+							Some(b"dir")
+						} else {
+							match &objects[handle] {
+								Object::File(..) => Some(b"file"),
+								Object::Dir(..) => Some(b"dir"),
+								Object::Query(..) => None,
 							}
+						};
+						if let Some(t) = t {
+							let d = tbl.alloc(t.len()).expect("out of buffers");
+							d.copy_from(0, t);
+							Response::Data(d)
+						} else {
+							Response::Error(rt::Error::DoesNotExist)
 						}
-						(_, _) => Response::Error(rt::Error::DoesNotExist),
 					}
-				}
+					_ => Response::Error(rt::Error::DoesNotExist),
+				},
 				Request::SetMeta { .. } => todo!(),
 			};
 			tbl.enqueue(job_id, resp);

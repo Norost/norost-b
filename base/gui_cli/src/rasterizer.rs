@@ -2,9 +2,9 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{ptr::NonNull, slice};
 use fontdue::{
 	layout::{CoordinateSystem, GlyphRasterConfig, Layout, LayoutSettings, TextStyle, WrapStyle},
-	Font, Metrics,
+	Font,
 };
-use hashbrown::hash_map::{Entry, HashMap};
+use hashbrown::hash_map::HashMap;
 
 struct Letters {
 	font: Font,
@@ -12,7 +12,7 @@ struct Letters {
 }
 
 impl Letters {
-	fn new(font: Font, max_height: u16) -> Self {
+	fn new(font: Font) -> Self {
 		Self {
 			font,
 			cache: Default::default(),
@@ -33,9 +33,9 @@ pub struct Rasterizer {
 }
 
 impl Rasterizer {
-	pub fn new(font: Font, max_height: u16) -> Self {
+	pub fn new(font: Font) -> Self {
 		Self {
-			letters: Letters::new(font, max_height),
+			letters: Letters::new(font),
 			lines: Default::default(),
 			min_y: 0,
 		}

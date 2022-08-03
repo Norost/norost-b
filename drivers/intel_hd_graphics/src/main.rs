@@ -17,6 +17,8 @@
 #![feature(start)]
 #![feature(inline_const)]
 #![feature(slice_as_chunks)]
+// FIXME clean this crate up
+#![allow(dead_code, unreachable_code, unused_variables, unused_mut)]
 
 extern crate alloc;
 
@@ -572,7 +574,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 				Request::SetMeta { property_value } => {
-					(Response::Error(Error::InvalidOperation as _))
+					Response::Error(Error::InvalidOperation as _)
 				}
 				Request::Write { data } => {
 					let mut d = [0; 64];
@@ -617,7 +619,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				},
 				Request::Create { path } => (Response::Error(Error::InvalidOperation as _)),
 				Request::Read { .. } | Request::Destroy { .. } | Request::Seek { .. } => {
-					(Response::Error(Error::InvalidOperation as _))
+					Response::Error(Error::InvalidOperation as _)
 				}
 			};
 			flush = true;

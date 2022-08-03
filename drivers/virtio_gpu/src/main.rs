@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::ToString, vec::Vec};
 use core::{ptr::NonNull, str};
-use driver_utils::os::stream_table::{Data, Request, Response, StreamTable};
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
 
@@ -136,7 +136,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let scanout_id = 0;
 	let scanout_resource_id = 1.try_into().unwrap();
 	let rect = Rect::new(0, 0, width.try_into().unwrap(), height.try_into().unwrap());
-	let ret = unsafe {
+	unsafe {
 		let tk = dev
 			.create_resource_2d(
 				scanout_resource_id,
@@ -154,7 +154,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			.init_scanout(scanout_id, scanout_resource_id, rect, &mut buf)
 			.unwrap();
 		wait_tk(&mut dev, tk);
-	};
+	}
 
 	// Draw colors
 	for y in 0..height {
@@ -185,7 +185,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	// Create table
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 4096 }).unwrap();
-	let mut tbl = StreamTable::new(&tbl_buf, 64.try_into().unwrap(), 1024 - 1);
+	let tbl = StreamTable::new(&tbl_buf, 64.try_into().unwrap(), 1024 - 1);
 
 	rt::io::file_root()
 		.unwrap()
@@ -217,7 +217,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				Request::GetMeta { property } => {
 					let prop = property.get(&mut tiny_buf);
-					let data = property.into_inner();
 					match (handle, &*prop) {
 						(_, b"resolution") => {
 							let (w, h) = (width.to_string(), height.to_string());

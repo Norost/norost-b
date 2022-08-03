@@ -46,22 +46,10 @@ struct Return {
 
 static mut VGA: Option<vga::Text> = None;
 
-fn alloc_str(arg: &[u8]) -> u16 {
-	let layout = Layout::from_size_align(1 + arg.len(), 1).unwrap();
-	let s = unsafe { slice::from_raw_parts_mut(alloc(layout), layout.size()) };
-	s[1..arg.len() + 1].copy_from_slice(arg);
-	s[0] = arg.len().try_into().unwrap();
-	alloc::offset(s.as_ptr())
-}
-
 fn alloc_slice<T>(count: usize) -> (u16, &'static mut [T]) {
 	let layout = Layout::new::<T>().repeat(count).unwrap();
 	let s = unsafe { slice::from_raw_parts_mut::<T>(alloc(layout.0).cast(), count) };
 	(alloc::offset(s.as_ptr().cast()), s)
-}
-
-fn from_utf8(s: &[u8]) -> &str {
-	str::from_utf8(s).unwrap_or("<invalid utf-8>")
 }
 
 #[export_name = "main"]

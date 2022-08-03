@@ -1,7 +1,6 @@
 use core::{
 	cell::RefCell,
 	mem::{self, ManuallyDrop},
-	num::NonZeroUsize,
 	ptr::NonNull,
 };
 use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
@@ -18,7 +17,6 @@ struct DevInner<'d> {
 	dma_virt: NonNull<Packet>,
 	/// First half are for RX packets, second half for TX.
 	dma_phys: u64,
-	dma_size: NonZeroUsize,
 	/// Bitmap of available RX packets.
 	rx_avail_map: u64,
 	/// Bitmap of available TX packets.
@@ -47,8 +45,8 @@ impl<'d> DevInner<'d> {
 pub struct Dev<'d>(RefCell<DevInner<'d>>);
 
 impl<'d> Dev<'d> {
-	pub fn new(mut virtio: virtio_net::Device<'d>) -> Self {
-		let (dma_virt, dma_phys, dma_size) = driver_utils::dma::alloc_dma(
+	pub fn new(virtio: virtio_net::Device<'d>) -> Self {
+		let (dma_virt, dma_phys, _dma_size) = driver_utils::dma::alloc_dma(
 			(mem::size_of::<Packet>() * (MAX_TX_PKT + MAX_RX_PKT))
 				.try_into()
 				.unwrap(),
@@ -61,7 +59,6 @@ impl<'d> Dev<'d> {
 				virtio,
 				dma_virt,
 				dma_phys,
-				dma_size,
 				rx_avail_map: 0x00ff,
 				tx_avail_map: 0xff00,
 			}

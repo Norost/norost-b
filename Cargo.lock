@@ -26,7 +26,7 @@ dependencies = [
 
 [[package]]
 name = "arena"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-alloc",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "async_completion"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "autocfg"
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "driver_fs_fat"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "fatfs",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "driver_intel_hd_graphics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "ipc_gpu",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "driver_ps2"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "futures-util",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "driver_scancode_to_char"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "norost_async_std",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "driver_utils"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arena",
  "nora_stream_table",
@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "driver_virtio_block"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "norost_rt_default",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "driver_virtio_gpu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "ipc_gpu",
@@ -575,6 +575,7 @@ dependencies = [
 [[package]]
 name = "getrandom"
 version = "0.2.7"
+source = "git+https://git.sr.ht/~demindiro/getrandom#a67c5b78ebfb94ae8185a330cc8fc836fb475a34"
 dependencies = [
  "cfg-if",
  "libc",
@@ -594,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "gui_cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "fontdue",
@@ -636,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "image_viewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ipc_window_manager",
  "jpeg-decoder",
@@ -655,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "init"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norostb_rt",
  "norostb_rt_alloc",
@@ -675,21 +676,21 @@ dependencies = [
 
 [[package]]
 name = "ipc_gpu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norost_ipc_spec",
 ]
 
 [[package]]
 name = "ipc_window_manager"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norost_ipc_spec",
 ]
 
 [[package]]
 name = "jail"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norostb_rt",
  "norostb_rt_alloc",
@@ -758,7 +759,7 @@ checksum = "34334252b387adb910abcc2afcf6a27eb04c6615a5838598e9b2c918f5005290"
 
 [[package]]
 name = "minish"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "term",
 ]
@@ -771,7 +772,7 @@ checksum = "43794a0ace135be66a25d3ae77d41b91615fb68ae937f904090203e81f755b65"
 
 [[package]]
 name = "nora"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "acpi",
  "arena",
@@ -793,7 +794,7 @@ checksum = "280db64d556ef447ff253df2bb152b94b6e87ef9c7ca7996a60e520291b512c0"
 
 [[package]]
 name = "nora_io_queue"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "compiler_builtins",
  "norostb_kernel",
@@ -803,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "nora_io_queue_rt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arena",
  "async_completion",
@@ -813,6 +814,7 @@ dependencies = [
 [[package]]
 name = "nora_ssh"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/nora_ssh#388bdfaa5371ad57bece08afe8c859d1fe50f0b4"
 dependencies = [
  "async-trait",
  "digest 0.10.3",
@@ -831,6 +833,7 @@ dependencies = [
 [[package]]
 name = "nora_ssh_core"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/nora_ssh#388bdfaa5371ad57bece08afe8c859d1fe50f0b4"
 dependencies = [
  "chacha20",
  "digest 0.10.3",
@@ -844,14 +847,14 @@ dependencies = [
 
 [[package]]
 name = "nora_stream_table"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norost_ipc_spec",
 ]
 
 [[package]]
 name = "noraboot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "compiler_builtins",
  "rsdp",
@@ -859,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "norost_async_std"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async_completion",
  "futures-core",
@@ -875,6 +878,7 @@ dependencies = [
 [[package]]
 name = "norost_ipc_spec"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/norost_ipc_spec#b953ec903a9ccb0536fdd9580b6e141428abd125"
 dependencies = [
  "norost_ipc_spec_proc",
 ]
@@ -882,6 +886,7 @@ dependencies = [
 [[package]]
 name = "norost_ipc_spec_proc"
 version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/norost_ipc_spec#b953ec903a9ccb0536fdd9580b6e141428abd125"
 dependencies = [
  "litrs",
  "quote",
@@ -889,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "norost_rt_default"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "norostb_rt",
  "norostb_rt_alloc",
@@ -897,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "norostb_kernel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "compiler_builtins",
  "rustc-std-workspace-core",
@@ -905,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "norostb_rt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cfg-if",
  "compiler_builtins",
@@ -916,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "norostb_rt_alloc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "compiler_builtins",
  "norostb_kernel",
@@ -959,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "pci"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nora_endian",
  "volatile",
@@ -1162,7 +1167,7 @@ checksum = "f2cc38e8fa666e2de3c4aba7edeb5ffc5246c1c2ed0e3d17e560aeeba736b23f"
 
 [[package]]
 name = "scancodes"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "sec1"
@@ -1258,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "ssh"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base85",
@@ -1277,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "static_http_server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures",
  "mhttp",
@@ -1396,7 +1401,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "virtio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nora_endian",
  "pci",
@@ -1405,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "virtio_block"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "memoffset",
  "nora_endian",
@@ -1416,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "virtio_gpu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nora_endian",
  "pci",
@@ -1426,7 +1431,7 @@ dependencies = [
 
 [[package]]
 name = "virtio_net"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nora_endian",
  "pci",
@@ -1436,7 +1441,7 @@ dependencies = [
 
 [[package]]
 name = "volatile"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "wasi"
@@ -1468,7 +1473,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "window_manager"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "driver_utils",
  "ipc_gpu",

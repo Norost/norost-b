@@ -1,9 +1,5 @@
 use super::{Child, ChildStderr, ChildStdin, ChildStdout, Stdio, StdioTy};
-use crate::{
-	io,
-	object::{file_root, RefAsyncObject},
-	AsyncObject,
-};
+use crate::{io, object::file_root};
 use alloc::{boxed::Box, vec::Vec};
 use core::mem;
 

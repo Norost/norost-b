@@ -14,7 +14,7 @@ use alloc::{
 	vec::Vec,
 };
 use arena::Arena;
-use core::{mem, ptr::NonNull, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 use nora_stream_table::{Buffers, ClientQueue, JobId, Request, Slice};
 use norostb_kernel::{io::SeekFrom, object::Pow2Size, syscall::Handle};
 

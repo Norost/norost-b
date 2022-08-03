@@ -36,24 +36,6 @@ pm!(PermissionMaskX X);
 pm!(PermissionMaskRW RW);
 pm!(PermissionMaskRX RX);
 
-pub fn mask_permissions(obj: Arc<dyn MemoryObject>, rwx: RWX) -> Option<Arc<dyn MemoryObject>> {
-	if rwx == RWX::RWX {
-		return Some(obj);
-	}
-	let perm = obj.page_permissions();
-	if perm.is_subset_of(rwx) {
-		return Some(obj);
-	}
-	Some(match perm.intersection(rwx)? {
-		RWX::R => Arc::new(PermissionMaskR(obj)),
-		RWX::W => Arc::new(PermissionMaskW(obj)),
-		RWX::X => Arc::new(PermissionMaskX(obj)),
-		RWX::RW => Arc::new(PermissionMaskRW(obj)),
-		RWX::RX => Arc::new(PermissionMaskRX(obj)),
-		RWX::RWX => unreachable!(),
-	})
-}
-
 pub fn mask_permissions_object(obj: Arc<dyn Object>, rwx: RWX) -> Option<Arc<dyn Object>> {
 	if rwx == RWX::RWX {
 		return Some(obj);
