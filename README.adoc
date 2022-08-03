@@ -8,9 +8,9 @@ security, portability &and; scaling.
 
 https://norost.com[Website]
 
-link::DESIGN.adoc[Design rationale]
+link:DESIGN.adoc[Design rationale]
 
-link::Documentation[Documentation]
+link:Documentation[Documentation]
 
 == Features
 
@@ -83,7 +83,7 @@ Most drivers are outside the kernel, which makes it easier to replace and/or stu
 
 == Building
 
-link::thirdparty/rust[You will need a patched Rust compiler.]
+link:thirdparty/rust[You will need a patched Rust compiler.]
 
 Once the compiler is properly configured, `mkiso.sh` will create a bootable image.
 `run.sh` will run the OS in QEMU.
