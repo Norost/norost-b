@@ -91,15 +91,22 @@ realm64:
 	mov rax, cr3
 	mov cr3, rax
 
+	# Use top of alloc buffer as stack for kernel.
+	mov rax, rsp
+	mov rsp, rdi
+	add rsp, 1 << 16
+
 	# Jump to kernel entry
-	jmp		rsp
+	# We use call as the stack must be 16-byte aligned *before* calling.
+	call rax
+	ud2
 
 _gdt_ptr64:
 	.word	8 * 3 - 1
 	.long	_gdt
 	.long	0xffffc000
 
-.section	.bss.stack
+.section .bss.stack
 	.p2align 2
 stack_bottom:
 	.zero	0x1000 - 8 # Those 8 bytes over the page border keep me up at night
