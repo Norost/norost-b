@@ -15,15 +15,41 @@ link::Documentation[Documentation]
 == Features
 
 === Object-oriented interface
-* Object-oriented kernel API
-** Files, network sockets ... are all objects.
-** Any process can create new objects.
-** IPC is performed via operations on objects.
-** Processes can only perform operations on objects they have a handle to.
-* Asynchronous I/O (completion model with shared ring queues)
-* Preemptable kernel & userland
-* Networking (IP, TCP, UDP, DHCP, ICMP)
-* GUI with tiling window manager
+
+Files, network sockets ... are all objects and have a common API.
+This keeps the interface simple & comprehensible while providing a great amount of flexibility
+and power.
+
+Any process can create new objects.
+IPC is performed via operations on objects.
+
+Processes can only perform operations on objects they have a handle to.
+This makes it trivial to isolate processes from the rest of the system by simply giving it only
+handles to objects it needs.
+
+==== Synchronous & Asynchronous I/O (completion model with shared ring queues)
+
+Minimal applications can use the synchronous API to keep the binary small while more advanced
+applications can take advantage of asynchronous I/O to more efficiently perform batch work.
+
+Applications can also take advantage of shared memory with specialized I/O structures to further
+reduce overhead.
+
+==== Networking
+
+Some basic support for networking is present.
+A basic SSH server and HTTP server are available.
+
+==== GUI
+
+Applications can allocate a window and draw any arbitrary pixels to it.
+The tiling window manager automatically handles layout to optimize screen estate.
+
+==== Other
+
+The kernel is nearly fully preemptible.
+
+Most drivers are outside the kernel, which makes it easier to replace and/or stub them.
 
 == Supported architectures
 
@@ -34,7 +60,7 @@ link::Documentation[Documentation]
 | &cross;
 
 | x64
-| &check;
+| &check; with SSE and AVX2
 
 | RISC-V
 | &cross;
