@@ -18,12 +18,12 @@ database could directly communicate with disks, reducing overhead & latency sign
 There are four "levels" of API, going from ease and genericity of use to performance:
 
 |===
-| Level         | Minimal | Application agnostic | Device agnostic |
+| Level         | Minimal | Application agnostic | Device agnostic
 
-| Synchronous   | &check; | &check;              | &check;         |
-| Asynchronous  | &cross; | &check;              | &check;         |
-| Shared memory | &cross; | &cross;              | &check;         |
-| Integrated    | &cross; | &cross;              | &cross;         |
+| Synchronous   | &check; | &check;              | &check;
+| Asynchronous  | &cross; | &check;              | &check;
+| Shared memory | &cross; | &cross;              | &check;
+| Integrated    | &cross; | &cross;              | &cross;
 |===
 
 The synchronous is the simplest and easiest to use.
@@ -115,5 +115,6 @@ These resources cannot ever be unlocked since the contents will be in an undefin
 If you must signal that a thread must exit, use a flag or channel of sorts.
 
 Further reading:
+
 * https://internals.rust-lang.org/t/thread-cancel-support/3056/14
 * https://reddit.com/r/rust/comments/nwbtsz/help_understanding_how_to_start_and_stop_threads/
