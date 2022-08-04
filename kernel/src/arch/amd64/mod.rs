@@ -156,7 +156,13 @@ pub unsafe fn init() {
 		pic::init();
 
 		// Setup TSS
-		TSS.set_ist(1.try_into().unwrap(), DOUBLE_FAULT_STACK.as_ptr().cast());
+		TSS.set_ist(
+			1.try_into().unwrap(),
+			DOUBLE_FAULT_STACK
+				.as_ptr()
+				.add(DOUBLE_FAULT_STACK.len())
+				.cast(),
+		);
 
 		// Setup GDT
 		GDT.write(gdt::GDT::new(&TSS));
