@@ -14,9 +14,11 @@ mod tss;
 pub mod r#virtual;
 
 use crate::driver::apic;
-use core::arch::asm;
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::{
+	arch::asm,
+	mem::MaybeUninit,
+	sync::atomic::{AtomicU8, Ordering},
+};
 pub use gdt::GDT;
 pub use idt::{Handler, IDTEntry};
 pub use scheduler::yield_current_thread;
@@ -39,6 +41,11 @@ static mut GDT_PTR: MaybeUninit<gdt::GDTPointer> = MaybeUninit::uninit();
 
 static mut IDT: idt::IDT = idt::IDT::new();
 static mut IDT_PTR: MaybeUninit<idt::IDTPointer> = MaybeUninit::uninit();
+
+#[derive(Clone, Copy)]
+#[repr(align(16))]
+struct E([u8; 16]);
+static mut DOUBLE_FAULT_STACK: [E; 16] = [E([0; 16]); 16];
 
 const IRQ_STUB_OFFSET: usize = 33;
 #[export_name = "irq_handler_table"]
@@ -143,16 +150,13 @@ pub mod pic {
 }
 
 pub unsafe fn init() {
-	extern "C" {
-		static _stack_top: [usize; 0];
-	}
 	unsafe {
 		// Remap IBM-PC interrupts
 		// Even if the PIC is disabled it may generate spurious interrupts apparently *sigh*
 		pic::init();
 
 		// Setup TSS
-		TSS.set_ist(1.try_into().unwrap(), _stack_top.as_ptr());
+		TSS.set_ist(1.try_into().unwrap(), DOUBLE_FAULT_STACK.as_ptr().cast());
 
 		// Setup GDT
 		GDT.write(gdt::GDT::new(&TSS));

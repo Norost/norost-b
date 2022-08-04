@@ -49,7 +49,7 @@ mod sync;
 mod time;
 mod util;
 
-#[export_name = "main"]
+#[export_name = "_start"]
 pub extern "C" fn main(boot_info: &'static mut boot::Info) -> ! {
 	unsafe {
 		driver::early_init(boot_info);
