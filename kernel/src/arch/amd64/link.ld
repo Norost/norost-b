@@ -4,23 +4,28 @@ SECTIONS
 {
 	. = 0xffff800000000000;
  
-	.text BLOCK(4K) : ALIGN(4K)
+	.text :
 	{
 		KEEP(*(.text.idt))
 		*(.text .text.*)
 	}
  
-	.rodata BLOCK(4K) : ALIGN(4K)
+	.rodata :
 	{
 		*(.rodata .rodata.*)
 	}
+
+	. = ALIGN(4K);
  
-	.data BLOCK(4K) : ALIGN(4K)
+	.data :
 	{
 		*(.data .data.*)
 	}
+
+	/* FIXME this shouldn't be necessary */
+	. = ALIGN(4K);
  
-	.bss BLOCK(4K) : ALIGN(4K)
+	.bss :
 	{
 		*(COMMON)
 		*(.bss .bss.*)
