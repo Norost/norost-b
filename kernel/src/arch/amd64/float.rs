@@ -1,4 +1,7 @@
-use core::arch::x86_64::{_xrstor64, _xsave64, _xsetbv};
+use core::{
+	arch::x86_64::{_xrstor64, _xsave64, _xsetbv},
+	mem,
+};
 
 const X87_STATE: u64 = 1 << 0;
 
@@ -41,6 +44,13 @@ const HWP_STATE: u8 = 16;
 #[allow(dead_code)]
 const XCOMP_BV: u8 = 63;
 
+const MXCSR_PRECISION_MASK: u32 = 1 << 12;
+const MXCSR_UNDERFLOW_MASK: u32 = 1 << 11;
+const MXCSR_OVERFLOW_MASK: u32 = 1 << 10;
+const MXCSR_DIVIDE_BY_ZERO_MASK: u32 = 1 << 9;
+const MXCSR_DENORMAL_OPERATION_MASK: u32 = 1 << 8;
+const MXCSR_INVALID_OPERATION_MASK: u32 = 1 << 8;
+
 // Keep things simple and just save everything.
 //
 // I originally tried to have separate states for XMM/YMM/... to optimize memory usage but
@@ -76,13 +86,49 @@ impl FloatStorage {
 	}
 }
 
-#[derive(Default)]
-pub struct LegacyRegion([u128; 32]);
+#[repr(C)]
+pub struct LegacyRegion {
+	_stuff: u128,
+	fpu_dp: u64,
+	mxcsr: u32,
+	mxcsr_mask: u32,
+	mm: [u128; 8],
+	xmm: [u128; 16],
+	_reserved: [u128; 6],
+}
+
+const _: () = assert!(mem::size_of::<LegacyRegion>() == 512);
+
+impl Default for LegacyRegion {
+	fn default() -> Self {
+		Self {
+			_stuff: 0,
+			fpu_dp: 0,
+			// default MXCSR on Linux (doing nothing but execute divss in a loop):
+			//   (gdb) p $mxcsr
+			//   $1 = [ IE IM DM ZM OM UM PM ]
+			// without divss:
+			//   $1 = [ IM DM ZM OM UM PM ]
+			mxcsr: MXCSR_INVALID_OPERATION_MASK
+				| MXCSR_DENORMAL_OPERATION_MASK
+				| MXCSR_DIVIDE_BY_ZERO_MASK
+				| MXCSR_OVERFLOW_MASK
+				| MXCSR_UNDERFLOW_MASK
+				| MXCSR_PRECISION_MASK,
+			mxcsr_mask: 0,
+			mm: [0; 8],
+			xmm: [0; 16],
+			_reserved: [0; 6],
+		}
+	}
+}
 
 #[derive(Default)]
+#[repr(C)]
 pub struct XSaveHeader([u128; 4]);
 
 #[derive(Default)]
+#[repr(C)]
 pub struct AvxRegion([u128; 16]);
 
 extern "C" fn handle_device_not_available(_rip: *const ()) {

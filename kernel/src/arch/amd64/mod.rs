@@ -196,7 +196,7 @@ pub unsafe fn init() {
 		IDT.set(16, wrap_idt!(rip handle_x87_fpe));
 		IDT.set(17, wrap_idt!(error rip handle_alignment_check));
 		IDT.set(18, wrap_idt!(rip handle_machine_check));
-		IDT.set(19, wrap_idt!(rip handle_simd_fpe));
+		IDT.set(19, wrap_idt!(error rip handle_simd_fpe));
 		IDT.set(20, wrap_idt!(rip handle_virtualization_exception));
 		IDT.set(21, wrap_idt!(error rip handle_control_protection_exception));
 		// 22 to 27 are reserved
@@ -341,9 +341,13 @@ extern "C" fn handle_machine_check(rip: *const ()) {
 	halt();
 }
 
-extern "C" fn handle_simd_fpe(rip: *const ()) {
+extern "C" fn handle_simd_fpe(n: u32, rip: *const ()) {
 	fatal!("SIMD FPE!");
+	fatal!("  N  :     {:#x}", n);
 	fatal!("  RIP:     {:p}", rip);
+	fatal!("  MXCSR:   {:#08x}", unsafe {
+		core::arch::x86_64::_mm_getcsr()
+	});
 	halt();
 }
 
