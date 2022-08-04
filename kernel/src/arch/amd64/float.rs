@@ -49,7 +49,7 @@ const MXCSR_UNDERFLOW_MASK: u32 = 1 << 11;
 const MXCSR_OVERFLOW_MASK: u32 = 1 << 10;
 const MXCSR_DIVIDE_BY_ZERO_MASK: u32 = 1 << 9;
 const MXCSR_DENORMAL_OPERATION_MASK: u32 = 1 << 8;
-const MXCSR_INVALID_OPERATION_MASK: u32 = 1 << 8;
+const MXCSR_INVALID_OPERATION_MASK: u32 = 1 << 7;
 
 // Keep things simple and just save everything.
 //
