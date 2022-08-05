@@ -3,7 +3,7 @@
 ./mkiso.sh || exit $?
 make disk0 || exit $?
 
-#cpu="--enable-kvm -cpu host"
+cpu="-cpu max"
 
 [ -z ${CPU+x} ] || cpu="-cpu $CPU"
 
