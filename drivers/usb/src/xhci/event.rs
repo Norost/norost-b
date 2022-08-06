@@ -15,6 +15,7 @@ use xhci::{
 pub enum Event {
 	PortStatusChange { port: NonZeroU8 },
 	CommandCompletion { id: u64, slot: NonZeroU8 },
+	Transfer { id: u64, slot: NonZeroU8 },
 }
 
 pub struct Table {
@@ -101,7 +102,10 @@ impl Table {
 				},
 				Allowed::Doorbell(_) => todo!(),
 				Allowed::MfindexWrap(_) => todo!(),
-				Allowed::TransferEvent(_) => todo!(),
+				Allowed::TransferEvent(c) => Event::Transfer {
+					id: c.trb_pointer(),
+					slot: c.slot_id().try_into().unwrap(),
+				},
 				Allowed::HostController(_) => todo!(),
 				Allowed::PortStatusChange(_) => todo!(),
 				Allowed::BandwidthRequest(_) => todo!(),

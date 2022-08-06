@@ -348,6 +348,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_usb_hid"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "norost_rt_default",
+ "norostb_rt",
+]
+
+[[package]]
 name = "driver_utils"
 version = "0.2.0"
 dependencies = [

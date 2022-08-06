@@ -113,7 +113,6 @@ impl Xhci {
 		}
 
 		// QEMU is buggy and doesn't generate PSCEs at reset unless we reset the ports, so do that.
-		rt::dbg!();
 		if errata.no_psce_on_reset() {
 			for i in 0..regs.port_register_set.len() {
 				regs.port_register_set.update_volatile_at(i, |c| {
@@ -121,7 +120,6 @@ impl Xhci {
 				});
 			}
 		}
-		rt::dbg!();
 
 		Ok(Self {
 			event_ring,
@@ -145,6 +143,15 @@ impl Xhci {
 
 	pub fn init_device(&mut self, port: NonZeroU8) -> Result<device::WaitReset, &'static str> {
 		device::init(port, self)
+	}
+
+	fn ring(&mut self, slot: u8, stream: u16, target: u8) {
+		// SAFETY: 0 is a valid value for a doorbell and Register is repr(transparent) of u32.
+		// Annoyingly, the xhci crate doesn't provide a Default impl or anything for it, so
+		// TODO make a PR
+		let mut v = unsafe { mem::transmute::<_, xhci::registers::doorbell::Register>(0u32) };
+		v.set_doorbell_stream_id(stream).set_doorbell_target(target);
+		self.registers.doorbell.write_volatile_at(slot.into(), v);
 	}
 }
 

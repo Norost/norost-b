@@ -1,5 +1,5 @@
 use super::{event::Event, ring, Xhci};
-use crate::dma::Dma;
+use crate::{dma::Dma, requests::Request};
 use core::{marker::PhantomData, mem, num::NonZeroU8, ptr::NonNull};
 use driver_utils::dma;
 use xhci::{
@@ -33,48 +33,52 @@ pub struct Device {
 }
 
 impl Device {
-	pub fn test(&mut self, ctrl: &mut Xhci) {
-		rt::dbg!(self.slot, self.port);
-		// software will issue USB GET_DESCRIPTOR requests
-		let mut tr_enqueue_i = 0;
-		let (data_ptr, data_phys, _) =
-			driver_utils::dma::alloc_dma(64.try_into().unwrap()).unwrap();
-		self.transfer_ring.enqueue(transfer::Allowed::SetupStage(
-			*transfer::SetupStage::new()
-				.set_request_type(0b1000_0000)
-				.set_transfer_type(transfer::TransferType::Out)
-				.set_request(GET_DESCRIPTOR)
-				.set_value(DESCRIPTOR_STRING | 1)
-				.set_index(0)
-				.set_length(64),
-		));
-		self.transfer_ring.enqueue(transfer::Allowed::Isoch(
-			*transfer::Isoch::new()
-				.set_data_buffer_pointer(data_phys)
-				// FIXME qemu crashes if this is less than length in SetupStage
-				.set_trb_transfer_length(64)
-				.set_chain_bit(),
-		));
-		self.transfer_ring.enqueue(transfer::Allowed::StatusStage(
-			*transfer::StatusStage::new()
-				.set_interrupter_target(0)
-				.set_interrupt_on_completion(),
-		));
-		rt::dbg!();
+	pub fn send_request(
+		&mut self,
+		ctrl: &mut Xhci,
+		interrupter: u16,
+		request: Request,
+	) -> Result<ring::EntryId, ring::Full> {
+		let req = request.into_raw();
+		self.transfer_ring
+			.enqueue(transfer::Allowed::SetupStage(
+				*transfer::SetupStage::new()
+					.set_request_type(req.request_type)
+					.set_transfer_type(transfer::TransferType::Out)
+					.set_request(req.request)
+					.set_value(req.value)
+					.set_index(req.index)
+					.set_length(req.buffer_len),
+			))
+			.unwrap_or_else(|_| todo!("undo enqueue"));
+		self.transfer_ring
+			.enqueue(transfer::Allowed::Isoch(
+				*transfer::Isoch::new()
+					.set_data_buffer_pointer(req.buffer_phys)
+					// FIXME qemu crashes if this is less than length in SetupStage
+					.set_trb_transfer_length(req.buffer_len.into())
+					.set_chain_bit(),
+			))
+			.unwrap_or_else(|_| todo!("undo enqueue"));
+		let id = self
+			.transfer_ring
+			.enqueue(transfer::Allowed::StatusStage(
+				*transfer::StatusStage::new()
+					.set_interrupter_target(interrupter)
+					.set_interrupt_on_completion(),
+			))
+			.unwrap_or_else(|_| todo!("undo enqueue"));
+		ctrl.ring(self.slot.get(), 0, 1);
 		ctrl.registers
 			.doorbell
 			.update_volatile_at(self.slot.get().into(), |c| {
 				c.set_doorbell_stream_id(0).set_doorbell_target(1);
 			});
-		rt::dbg!();
-		let len = unsafe { data_ptr.cast::<u8>().as_ptr().read_volatile() };
-		let str_len = (len - 2) / 2;
-		let s = unsafe {
-			core::slice::from_raw_parts(data_ptr.cast::<u16>().as_ptr().add(1), str_len.into())
-		};
-		for c in char::decode_utf16(s.iter().copied()) {
-			rt::dbg!(c);
-		}
+		Ok(id)
+	}
+
+	pub fn slot(&self) -> NonZeroU8 {
+		self.slot
 	}
 }
 
@@ -173,13 +177,11 @@ impl AllocSlot {
 		ctrl.dcbaap.set(slot.into(), output_dev_context.as_phys());
 
 		// Issue an Address Device Command for the Device Slot
-		rt::dbg!();
 		let e = ctrl.enqueue_command(command::Allowed::AddressDevice(
 			*command::AddressDevice::new()
 				.set_slot_id(slot.get())
 				.set_input_context_pointer(input_context.as_phys()),
 		))?;
-		rt::dbg!();
 		Ok((
 			e,
 			SetAddress {

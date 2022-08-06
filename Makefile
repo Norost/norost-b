@@ -11,7 +11,7 @@ boot:
 run:
 	./run.sh
 
-disk0:
+disk0 usb0:
 	fallocate -l $$((128 * 512)) $@
 	/sbin/mkfs.fat -F 12 $@
 
