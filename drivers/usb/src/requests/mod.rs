@@ -27,6 +27,28 @@ pub enum DescriptorResult<'a> {
 	String(DescriptorStringIter<'a>),
 }
 
+macro_rules! into {
+	($v:ident $iv:ident $f:ident) => {
+		pub fn $f(self) -> Option<$iv> {
+			match self {
+				Self::$v(v) => Some(v),
+				_ => None,
+			}
+		}
+	};
+}
+
+impl<'a> DescriptorResult<'a> {
+	into!(Device Device into_device);
+	into!(Configuration Configuration into_configuration);
+	pub fn into_string(self) -> Option<DescriptorStringIter<'a>> {
+		match self {
+			Self::String(v) => Some(v),
+			_ => None,
+		}
+	}
+}
+
 #[derive(Debug)]
 // repr(C) so the compiler doesn't try to optimize layout and subsequently deoptimizes decode.
 #[repr(C)]
@@ -142,6 +164,16 @@ impl Iterator for DescriptorStringIter<'_> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().copied().map(u16::from_le_bytes)
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		(self.len(), Some(self.len()))
+	}
+}
+
+impl ExactSizeIterator for DescriptorStringIter<'_> {
+	fn len(&self) -> usize {
+		self.0.len()
 	}
 }
 

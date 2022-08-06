@@ -3,7 +3,6 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
 

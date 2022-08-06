@@ -57,7 +57,7 @@ install base    init               init
 #install base    gui_cli            gui_cli
 #install base    image_viewer       image_viewer
 #install base    jail               jail
-#install base    minish             minish
+install base    minish             minish
 #install base    ssh                ssh
 #install base    static_http_server static_http_server
 #install base    window_manager     window_manager
