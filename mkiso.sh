@@ -31,6 +31,7 @@ cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
 cp init.toml $A/init.toml
+cp usb.scf   $A/usb.scf
 cp -r ssh    $A/ssh_conf
 
 if [ "$1" == --release ] # stuff's broken otherwise
@@ -50,6 +51,7 @@ install () {
 #install drivers ps2                driver_ps2
 #install drivers scancode_to_char   driver_scancode_to_char
 install drivers usb                driver_usb
+install drivers usb_kbd            driver_usb_kbd
 #install drivers virtio_block       driver_virtio_block
 #install drivers virtio_gpu         driver_virtio_gpu
 #install drivers virtio_net         driver_virtio_net

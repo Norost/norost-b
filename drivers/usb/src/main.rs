@@ -6,10 +6,14 @@
 #![feature(array_chunks)]
 #![feature(alloc_layout_extra)]
 #![feature(nonnull_slice_from_raw_parts)]
+#![feature(result_option_inspect)]
+#![feature(closure_lifetime_binder)]
 
 extern crate alloc;
 
+mod config;
 mod dma;
+mod loader;
 mod requests;
 mod xhci;
 
@@ -26,12 +30,7 @@ fn start(_: isize, _: *const *const u8) -> isize {
 
 fn main() -> ! {
 	let file_root = rt::io::file_root().expect("no file root");
-	/*
-	let table_name = rt::args::Args::new()
-		.skip(1)
-		.next()
-		.expect("expected table name");
-	*/
+	let conf = config::parse(&file_root.open(b"drivers/usb.scf").unwrap());
 
 	let dev = {
 		let s = b" 1b36:000d";
@@ -58,6 +57,7 @@ fn main() -> ! {
 
 	let mut devs = BTreeMap::default();
 	let mut jobs = BTreeMap::<u64, Job>::default();
+	let mut load_driver = BTreeMap::<u64, LoadDriver>::default();
 
 	let (tbl_buf, tbl_buf_phys) =
 		driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
@@ -87,22 +87,98 @@ fn main() -> ! {
 						init_dev_addr.push(e);
 					} else if let Some(i) = init_dev_addr.iter().position(|(i, _)| *i == id) {
 						let d = init_dev_addr.swap_remove(i).1.finish();
-						devs.entry(d.slot())
+						let d = devs
+							.entry(d.slot())
 							.and_modify(|_| panic!("slot already occupied"))
 							.or_insert(d);
+						let buf = dma::Dma::new_slice(64).unwrap_or_else(|_| todo!());
+						let e = d
+							.send_request(
+								&mut ctrl,
+								0,
+								requests::Request::GetDescriptor {
+									buffer: &buf,
+									ty: requests::GetDescriptor::Device,
+								},
+							)
+							.unwrap_or_else(|_| todo!());
+						load_driver.insert(e, LoadDriver { buf, base: None });
 					} else {
 						todo!()
 					}
 				}
 				Event::Transfer { id, slot } => {
 					let dev = devs.get_mut(&slot).unwrap();
-					if let Some((job_id, resp)) = jobs
-						.remove(&id)
-						.unwrap()
-						.progress(&mut jobs, &mut ctrl, dev, &tbl)
-					{
-						tbl.enqueue(job_id, resp);
-						tbl.flush();
+					if let Some(j) = jobs.remove(&id) {
+						if let Some((job_id, resp)) = j.progress(&mut jobs, &mut ctrl, dev, &tbl) {
+							tbl.enqueue(job_id, resp);
+							tbl.flush();
+						}
+					} else if let Some(mut j) = load_driver.remove(&id) {
+						let b = unsafe { j.buf.as_ref() };
+						let mut it = requests::decode(b);
+						match it.next().unwrap() {
+							requests::DescriptorResult::Device(info) => {
+								j.base = Some((info.class, info.subclass, info.protocol));
+								if info.class == 0 && info.subclass == 0 {
+									let e = dev
+										.send_request(
+											&mut ctrl,
+											0,
+											requests::Request::GetDescriptor {
+												buffer: &j.buf,
+												ty: requests::GetDescriptor::Configuration {
+													index: 0,
+												},
+											},
+										)
+										.unwrap_or_else(|_| todo!());
+									load_driver.insert(e, j);
+								} else {
+									// TODO
+								}
+							}
+							requests::DescriptorResult::Configuration(info) => {
+								let base = j.base.unwrap();
+								let mut n = usize::from(info.num_interfaces);
+								while n > 0 {
+									match it.next().unwrap() {
+										requests::DescriptorResult::Interface(i) => {
+											let intf = (i.class, i.subclass, i.protocol);
+											let driver =
+												conf.get_driver(base, intf).expect("no driver");
+											use rt::process::Process;
+											let proc = Process::new_by_name(
+												driver,
+												Process::default_handles(),
+												None::<&[u8]>.into_iter(),
+												rt::args::Env::new(),
+											)
+											.expect("yay");
+											n += usize::from(i.num_endpoints);
+										}
+										requests::DescriptorResult::Endpoint(e) => {
+											rt::dbg!(e);
+										}
+										requests::DescriptorResult::Unknown { ty, .. } => {
+											rt::dbg!(ty);
+											n += 1;
+										}
+										requests::DescriptorResult::Invalid => {
+											todo!("invalid descr")
+										}
+										requests::DescriptorResult::Truncated { length } => {
+											todo!("fetch more ({})", length)
+										}
+										_ => todo!("unexpected"),
+									}
+									n -= 1;
+								}
+							}
+							_ => unreachable!(),
+						}
+					} else {
+						unreachable!()
 					}
 				}
 			}
@@ -224,10 +300,7 @@ impl Job {
 		match &self.state {
 			JobState::WaitDeviceInfo => {
 				let b = unsafe { self.buf.as_ref() };
-				let info = requests::DescriptorResult::decode(b)
-					.unwrap_or_else(|_| todo!())
-					.into_device()
-					.unwrap();
+				let info = requests::DescriptorResult::decode(b).into_device().unwrap();
 				let id = dev
 					.send_request(
 						ctrl,
@@ -246,10 +319,7 @@ impl Job {
 			}
 			JobState::WaitDeviceName { info: _ } => {
 				let b = unsafe { self.buf.as_ref() };
-				let s = requests::DescriptorResult::decode(b)
-					.unwrap_or_else(|_| todo!())
-					.into_string()
-					.unwrap();
+				let s = requests::DescriptorResult::decode(b).into_string().unwrap();
 				let name = tbl.alloc(s.len()).expect("out of buffers");
 				for (i, mut c) in s.enumerate() {
 					if c > 127 {
@@ -261,4 +331,9 @@ impl Job {
 			}
 		}
 	}
+}
+
+struct LoadDriver {
+	base: Option<(u8, u8, u8)>,
+	buf: dma::Dma<[u8]>,
 }

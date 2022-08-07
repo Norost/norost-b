@@ -341,6 +341,7 @@ name = "driver_usb"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "pci",
@@ -348,7 +349,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "driver_usb_hid"
+name = "driver_usb_kbd"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
@@ -837,6 +838,10 @@ dependencies = [
  "async_completion",
  "nora_io_queue",
 ]
+
+[[package]]
+name = "nora_scf"
+version = "0.1.0"
 
 [[package]]
 name = "nora_ssh"

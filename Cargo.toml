@@ -12,7 +12,7 @@ members = [
 	"drivers/virtio_gpu",
 	"drivers/virtio_net",
 	"drivers/usb",
-	"drivers/usb_hid",
+	"drivers/usb_kbd",
 	"lib/rust/arena",
 	"lib/rust/async_completion",
 	"lib/rust/async_std",

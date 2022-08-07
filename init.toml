@@ -29,6 +29,7 @@ file_root = ""
 [program.usb]
 path = "usb"
 file_root = ""
+process_root = "process"
 
 [program.virtio_blk]
 disabled = true

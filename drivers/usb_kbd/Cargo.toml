@@ -1,10 +1,7 @@
 [package]
-name = "driver_usb"
+name = "driver_usb_kbd"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies.pci]
-path = "../../lib/rust/pci"
 
 [dependencies.rt]
 package = "norostb_rt"
@@ -18,9 +15,3 @@ path = "../../lib/rust/rt_default"
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc", "accessor"]
-
-[dependencies.xhci]
-version = "0.8"
-
-[dependencies.nora_scf]
-path = "../../../lib/nora_scf"

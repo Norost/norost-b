@@ -20,6 +20,23 @@ impl Process {
 		)
 	}
 
+	pub fn new_by_name<'a>(
+		name: impl AsRef<[u8]>,
+		objects: impl Iterator<Item = (u32, impl Into<RefObject<'a>>)>,
+		args: impl Iterator<Item = impl AsRef<[u8]>>,
+		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+	) -> io::Result<Self> {
+		Self::new(
+			io::process_root().ok_or(io::Error::CantCreateObject)?,
+			&io::file_root()
+				.ok_or(io::Error::CantCreateObject)?
+				.open(name.as_ref())?,
+			objects.map(|(i, o)| (i, o.into())),
+			args,
+			env,
+		)
+	}
+
 	fn new_inner<'a>(
 		process_root: RefObject<'_>,
 		binary_elf: RefObject<'_>,

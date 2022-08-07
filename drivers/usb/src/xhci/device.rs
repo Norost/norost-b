@@ -213,7 +213,7 @@ fn calc_packet_size(speed: u8) -> u16 {
 		LOW_SPEED => 8,
 		HIGH_SPEED => 64,
 		SUPERSPEED_GEN1_X1 | SUPERSPEED_GEN2_X1 | SUPERSPEED_GEN1_X2 | SUPERSPEED_GEN2_X2 => 512,
-		FULL_SPEED => todo!("use GET_DESCRIPTOR to get packet size"),
+		FULL_SPEED => 1337, // TODO todo!("use GET_DESCRIPTOR to get packet size"),
 		n => unimplemented!("unknown speed {}", n),
 	}
 }
