@@ -33,7 +33,13 @@ where
 
 impl<T> Dma<T> {
 	pub fn new() -> Result<Self, rt::Error> {
-		let (ptr, phys, _) = dma::alloc_dma(mem::size_of::<T>().try_into().unwrap())?;
+		let (ptr, phys) = match mem::size_of::<T>().try_into() {
+			Ok(l) => {
+				let (a, b, _) = dma::alloc_dma(l)?;
+				(a, b)
+			}
+			Err(_) => (NonNull::dangling(), 0),
+		};
 		Ok(Self {
 			ptr: ptr.cast(),
 			phys,
@@ -45,7 +51,13 @@ impl<T> Dma<T> {
 impl<T> Dma<[T]> {
 	pub fn new_slice(len: usize) -> Result<Self, rt::Error> {
 		let (layout, _) = Layout::new::<T>().repeat(len).unwrap();
-		let (ptr, phys, _) = dma::alloc_dma(layout.size().try_into().unwrap())?;
+		let (ptr, phys) = match layout.size().try_into() {
+			Ok(l) => {
+				let (a, b, _) = dma::alloc_dma(l)?;
+				(a, b)
+			}
+			Err(_) => (NonNull::dangling(), 0),
+		};
 		Ok(Self {
 			ptr: NonNull::slice_from_raw_parts(ptr.cast(), len),
 			phys,

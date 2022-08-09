@@ -15,3 +15,6 @@ path = "../../lib/rust/rt_default"
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc", "accessor"]
+
+[dependencies.ipc_usb]
+path = "../../lib/rust/ipc/usb"

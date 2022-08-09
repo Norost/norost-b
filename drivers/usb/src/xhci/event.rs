@@ -8,14 +8,27 @@ use core::{
 use driver_utils::dma;
 use xhci::{
 	registers::InterruptRegisterSet,
-	ring::trb::{event::Allowed, Link},
+	ring::trb::{
+		event::{Allowed, CompletionCode},
+		Link,
+	},
 };
 
 #[derive(Debug)]
 pub enum Event {
-	PortStatusChange { port: NonZeroU8 },
-	CommandCompletion { id: u64, slot: NonZeroU8 },
-	Transfer { id: u64, slot: NonZeroU8 },
+	PortStatusChange {
+		port: NonZeroU8,
+	},
+	CommandCompletion {
+		id: u64,
+		slot: NonZeroU8,
+		code: Result<CompletionCode, u8>,
+	},
+	Transfer {
+		id: u64,
+		slot: NonZeroU8,
+		code: Result<CompletionCode, u8>,
+	},
 }
 
 pub struct Table {
@@ -105,6 +118,7 @@ impl Table {
 				Allowed::TransferEvent(c) => Event::Transfer {
 					id: c.trb_pointer(),
 					slot: c.slot_id().try_into().unwrap(),
+					code: c.completion_code(),
 				},
 				Allowed::HostController(_) => todo!(),
 				Allowed::PortStatusChange(_) => todo!(),
@@ -112,6 +126,7 @@ impl Table {
 				Allowed::CommandCompletion(c) => Event::CommandCompletion {
 					id: c.command_trb_pointer(),
 					slot: c.slot_id().try_into().unwrap(),
+					code: c.completion_code(),
 				},
 				Allowed::DeviceNotification(_) => todo!(),
 			})

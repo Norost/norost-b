@@ -91,18 +91,20 @@ pub struct Empty;
 pub trait TrbEntry: private::Sealed {
 	fn into_raw(self) -> [u32; 4];
 }
-impl private::Sealed for trb::command::Allowed {}
-impl private::Sealed for trb::transfer::Allowed {}
-impl TrbEntry for trb::command::Allowed {
-	fn into_raw(self) -> [u32; 4] {
-		self.into_raw()
-	}
+
+macro_rules! impl_trb {
+	($t:ty) => {
+		impl private::Sealed for $t {}
+		impl TrbEntry for $t {
+			fn into_raw(self) -> [u32; 4] {
+				self.into_raw()
+			}
+		}
+	};
 }
-impl TrbEntry for trb::transfer::Allowed {
-	fn into_raw(self) -> [u32; 4] {
-		self.into_raw()
-	}
-}
+impl_trb!(trb::command::Allowed);
+impl_trb!(trb::transfer::Allowed);
+impl_trb!(trb::transfer::Normal);
 
 pub type EntryId = u64;
 

@@ -353,6 +353,7 @@ name = "driver_usb_kbd"
 version = "0.1.0"
 dependencies = [
  "driver_utils",
+ "ipc_usb",
  "norost_rt_default",
  "norostb_rt",
 ]
@@ -708,6 +709,10 @@ version = "0.2.0"
 dependencies = [
  "norost_ipc_spec",
 ]
+
+[[package]]
+name = "ipc_usb"
+version = "0.1.0"
 
 [[package]]
 name = "ipc_window_manager"

@@ -2,7 +2,8 @@
 
 #![no_std]
 #![feature(start)]
-#![feature(inline_const)]
+#![feature(inline_const, const_option)]
+#![feature(let_else)]
 #![feature(array_chunks)]
 #![feature(alloc_layout_extra)]
 #![feature(nonnull_slice_from_raw_parts)]
@@ -48,16 +49,12 @@ fn main() -> ! {
 		}
 	};
 
-	use self::xhci::Event;
 	let mut ctrl = xhci::Xhci::new(dev).unwrap();
 
-	let mut init_dev_wait = Vec::new();
-	let mut init_dev_alloc = Vec::<(_, xhci::device::AllocSlot)>::new();
-	let mut init_dev_addr = Vec::<(_, xhci::device::SetAddress)>::new();
-
-	let mut devs = BTreeMap::default();
 	let mut jobs = BTreeMap::<u64, Job>::default();
 	let mut load_driver = BTreeMap::<u64, LoadDriver>::default();
+
+	let mut conf_driver = BTreeMap::default();
 
 	let (tbl_buf, tbl_buf_phys) =
 		driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
@@ -71,62 +68,46 @@ fn main() -> ! {
 	let mut objects = driver_utils::Arena::new();
 
 	loop {
-		if let Some(e) = ctrl.dequeue_event() {
+		while let Some(e) = ctrl.poll() {
+			use self::xhci::Event;
 			match e {
-				Event::PortStatusChange { port } => {
-					let wait = ctrl.init_device(port).unwrap();
-					init_dev_wait.push(wait);
+				Event::NewDevice { slot } => {
+					let e = ctrl
+						.send_request(
+							slot,
+							requests::Request::GetDescriptor {
+								buffer: dma::Dma::new_slice(64).unwrap_or_else(|_| todo!()),
+								ty: requests::GetDescriptor::Device,
+							},
+						)
+						.unwrap_or_else(|_| todo!());
+					load_driver.insert(e, LoadDriver { base: None });
 				}
-				Event::CommandCompletion { id, slot } => {
-					if let Some(i) = init_dev_alloc.iter().position(|(i, _)| *i == id) {
-						let e = init_dev_alloc
-							.swap_remove(i)
-							.1
-							.init(&mut ctrl, slot)
-							.unwrap_or_else(|_| todo!());
-						init_dev_addr.push(e);
-					} else if let Some(i) = init_dev_addr.iter().position(|(i, _)| *i == id) {
-						let d = init_dev_addr.swap_remove(i).1.finish();
-						let d = devs
-							.entry(d.slot())
-							.and_modify(|_| panic!("slot already occupied"))
-							.or_insert(d);
-						let buf = dma::Dma::new_slice(64).unwrap_or_else(|_| todo!());
-						let e = d
-							.send_request(
-								&mut ctrl,
-								0,
-								requests::Request::GetDescriptor {
-									buffer: &buf,
-									ty: requests::GetDescriptor::Device,
-								},
-							)
-							.unwrap_or_else(|_| todo!());
-						load_driver.insert(e, LoadDriver { buf, base: None });
-					} else {
-						todo!()
-					}
-				}
-				Event::Transfer { id, slot } => {
-					let dev = devs.get_mut(&slot).unwrap();
+				Event::Transfer {
+					slot,
+					id,
+					buffer,
+					code,
+				} => {
 					if let Some(j) = jobs.remove(&id) {
-						if let Some((job_id, resp)) = j.progress(&mut jobs, &mut ctrl, dev, &tbl) {
+						if let Some((job_id, resp)) =
+							j.progress(&mut jobs, &mut ctrl, slot, buffer.unwrap(), &tbl)
+						{
 							tbl.enqueue(job_id, resp);
 							tbl.flush();
 						}
 					} else if let Some(mut j) = load_driver.remove(&id) {
-						let b = unsafe { j.buf.as_ref() };
-						let mut it = requests::decode(b);
+						let buffer = buffer.unwrap();
+						let mut it = requests::decode(unsafe { buffer.as_ref() });
 						match it.next().unwrap() {
 							requests::DescriptorResult::Device(info) => {
 								j.base = Some((info.class, info.subclass, info.protocol));
 								if info.class == 0 && info.subclass == 0 {
-									let e = dev
+									let e = ctrl
 										.send_request(
-											&mut ctrl,
-											0,
+											slot,
 											requests::Request::GetDescriptor {
-												buffer: &j.buf,
+												buffer,
 												ty: requests::GetDescriptor::Configuration {
 													index: 0,
 												},
@@ -138,32 +119,32 @@ fn main() -> ! {
 									// TODO
 								}
 							}
-							requests::DescriptorResult::Configuration(info) => {
+							requests::DescriptorResult::Configuration(config) => {
+								rt::dbg!(&config);
 								let base = j.base.unwrap();
-								let mut n = usize::from(info.num_interfaces);
+								let mut n = usize::from(config.num_interfaces);
+								let mut driver = None;
+								let mut endpoints = Vec::new();
 								while n > 0 {
 									match it.next().unwrap() {
 										requests::DescriptorResult::Interface(i) => {
+											rt::dbg!(&i);
 											let intf = (i.class, i.subclass, i.protocol);
-											let driver =
-												conf.get_driver(base, intf).expect("no driver");
-											use rt::process::Process;
-											let proc = Process::new_by_name(
-												driver,
-												Process::default_handles(),
-												None::<&[u8]>.into_iter(),
-												rt::args::Env::new(),
-											)
-											.expect("yay");
-											n += usize::from(i.num_endpoints);
+											if driver.is_none() {
+												n += usize::from(i.num_endpoints);
+												conf.get_driver(base, intf)
+													.map(|d| driver = Some((d, i)));
+											} else {
+												break;
+											}
 										}
 										requests::DescriptorResult::Endpoint(e) => {
-											rt::dbg!(e);
+											rt::dbg!(&e);
+											if driver.is_some() {
+												endpoints.push(e)
+											}
 										}
-										requests::DescriptorResult::Unknown { ty, .. } => {
-											rt::dbg!(ty);
-											n += 1;
-										}
+										requests::DescriptorResult::Unknown { ty, .. } => continue,
 										requests::DescriptorResult::Invalid => {
 											todo!("invalid descr")
 										}
@@ -174,20 +155,59 @@ fn main() -> ! {
 									}
 									n -= 1;
 								}
+
+								let (driver, interface) = driver.expect("no driver");
+								rt::dbg!();
+								if driver == b"drivers/usb_kbd" {
+									let id = ctrl
+										.send_request(
+											slot,
+											requests::Request::SetConfiguration {
+												value: config.index_configuration,
+											},
+										)
+										.unwrap_or_else(|_| todo!());
+									ctrl.configure_device(
+										slot,
+										xhci::DeviceConfig {
+											config,
+											interface,
+											endpoints,
+										},
+									)
+									.unwrap_or_else(|_| todo!());
+									conf_driver.insert(id, slot);
+								}
+								rt::dbg!();
+
+								use rt::process::Process;
+								let proc = Process::new_by_name(
+									driver,
+									Process::default_handles(),
+									None::<&[u8]>.into_iter(),
+									rt::args::Env::new(),
+								)
+								.expect("yay");
 							}
 							_ => unreachable!(),
 						}
+					} else if let Some(slot) = conf_driver.remove(&id) {
+						rt::dbg!("done configuring");
 					} else {
-						unreachable!()
+						let buf = buffer.unwrap();
+						let p = alloc::format!("{:?}", unsafe { buf.as_ref() });
+						rt::dbg!(p);
+						ctrl.transfer(slot, 3.try_into().unwrap(), buf, true);
+
+						//unreachable!()
 					}
 				}
-			}
-		}
-
-		for i in (0..init_dev_wait.len()).rev() {
-			if let Some(Ok(e)) = init_dev_wait[i].poll(&mut ctrl) {
-				init_dev_alloc.push(e);
-				init_dev_wait.swap_remove(i);
+				Event::DeviceConfigured { slot, .. } => {
+					for _ in 0..16 {
+						let buf = dma::Dma::new_slice(8).unwrap();
+						ctrl.transfer(slot, 3.try_into().unwrap(), buf, true);
+					}
+				}
 			}
 		}
 
@@ -222,20 +242,16 @@ fn main() -> ! {
 						b.copy_from(0, s);
 						Response::Data(b)
 					}
-					Object::List { slot } => loop {
-						if *slot == 255 {
-							break Response::Data(tbl.alloc(0).unwrap());
+					Object::List { slot } => {
+						if let Some(s) = ctrl.next_slot(NonZeroU8::new(*slot)) {
+							*slot = s.get();
+							Job::get_info(&mut jobs, &mut ctrl, s, job_id);
+							continue 'req;
 						} else {
-							*slot += 1;
-							let r: NonZeroU8 = (*slot).try_into().unwrap();
-							if let Some((_, dev)) = devs.range_mut(r..).next() {
-								Job::get_info(&mut jobs, &mut ctrl, dev, job_id);
-								continue 'req;
-							} else {
-								*slot = 255;
-							}
+							*slot = 255;
+							Response::Data(tbl.alloc(0).unwrap())
 						}
-					},
+					}
 				},
 				Request::Close => {
 					objects.remove(handle);
@@ -254,7 +270,6 @@ fn main() -> ! {
 struct Job {
 	state: JobState,
 	job_id: JobId,
-	buf: dma::Dma<[u8]>,
 }
 
 enum JobState {
@@ -266,16 +281,14 @@ impl Job {
 	fn get_info(
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
-		dev: &mut xhci::device::Device,
+		slot: NonZeroU8,
 		job_id: JobId,
 	) {
-		let buf = dma::Dma::new_slice(64).unwrap();
-		let id = dev
+		let id = ctrl
 			.send_request(
-				ctrl,
-				0,
+				slot,
 				requests::Request::GetDescriptor {
-					buffer: &buf,
+					buffer: dma::Dma::new_slice(64).unwrap(),
 					ty: requests::GetDescriptor::Device,
 				},
 			)
@@ -285,7 +298,6 @@ impl Job {
 			Self {
 				state: JobState::WaitDeviceInfo,
 				job_id,
-				buf,
 			},
 		);
 	}
@@ -294,19 +306,19 @@ impl Job {
 		mut self,
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
-		dev: &mut xhci::device::Device,
+		slot: NonZeroU8,
+		buf: dma::Dma<[u8]>,
 		tbl: &'a StreamTable,
 	) -> Option<(JobId, Response<'a>)> {
+		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
 		match &self.state {
 			JobState::WaitDeviceInfo => {
-				let b = unsafe { self.buf.as_ref() };
-				let info = requests::DescriptorResult::decode(b).into_device().unwrap();
-				let id = dev
+				let info = res.into_device().unwrap();
+				let id = ctrl
 					.send_request(
-						ctrl,
-						0,
+						slot,
 						requests::Request::GetDescriptor {
-							buffer: &self.buf,
+							buffer: buf,
 							ty: requests::GetDescriptor::String {
 								index: info.index_product,
 							},
@@ -318,8 +330,7 @@ impl Job {
 				None
 			}
 			JobState::WaitDeviceName { info: _ } => {
-				let b = unsafe { self.buf.as_ref() };
-				let s = requests::DescriptorResult::decode(b).into_string().unwrap();
+				let s = res.into_string().unwrap();
 				let name = tbl.alloc(s.len()).expect("out of buffers");
 				for (i, mut c) in s.enumerate() {
 					if c > 127 {
@@ -335,5 +346,4 @@ impl Job {
 
 struct LoadDriver {
 	base: Option<(u8, u8, u8)>,
-	buf: dma::Dma<[u8]>,
 }

@@ -2,27 +2,25 @@
 //!
 //! [1]: https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf
 
-pub mod device;
+mod device;
 mod errata;
 mod event;
 mod ring;
 
 use errata::Errata;
 
-use alloc::vec::Vec;
+use crate::{dma::Dma, requests};
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::{
 	mem,
 	num::{NonZeroU8, NonZeroUsize},
 	ptr::NonNull,
 	time::Duration,
 };
-use driver_utils::dma;
 use xhci::{
 	registers::operational::DeviceContextBaseAddressArrayPointerRegister, ring::trb::command,
 	Registers,
 };
-
-pub use event::Event;
 
 const PCI_CLASS: u8 = 0x0c;
 const PCI_SUBCLASS: u8 = 0x03;
@@ -35,6 +33,10 @@ pub struct Xhci {
 	command_ring: ring::Ring<command::Allowed>,
 	registers: Registers<driver_utils::accessor::Identity>,
 	dcbaap: DeviceContextBaseAddressArray,
+	devices: BTreeMap<NonZeroU8, device::Device>,
+	pending_commands: BTreeMap<ring::EntryId, PendingCommand>,
+	transfers: BTreeMap<ring::EntryId, Dma<[u8]>>,
+	wait_device_reset: Vec<device::WaitReset>,
 }
 
 impl Xhci {
@@ -126,10 +128,14 @@ impl Xhci {
 			command_ring,
 			registers: regs,
 			dcbaap,
+			devices: Default::default(),
+			pending_commands: Default::default(),
+			transfers: Default::default(),
+			wait_device_reset: Default::default(),
 		})
 	}
 
-	pub fn enqueue_command(&mut self, cmd: command::Allowed) -> Result<ring::EntryId, ring::Full> {
+	fn enqueue_command(&mut self, cmd: command::Allowed) -> Result<ring::EntryId, ring::Full> {
 		let e = self.command_ring.enqueue(cmd)?;
 		self.registers.doorbell.update_volatile_at(0, |c| {
 			c.set_doorbell_stream_id(0).set_doorbell_target(0);
@@ -137,12 +143,109 @@ impl Xhci {
 		Ok(e)
 	}
 
-	pub fn dequeue_event(&mut self) -> Option<Event> {
-		self.event_ring.dequeue()
+	pub fn send_request(
+		&mut self,
+		slot: NonZeroU8,
+		req: crate::requests::Request,
+	) -> Result<ring::EntryId, ring::Full> {
+		let mut req = req.into_raw();
+		let id = self.devices.get_mut(&slot).unwrap().send_request(0, &req)?;
+		self.ring(slot.get(), 0, 1);
+		req.buffer.take().map(|b| self.transfers.insert(id, b));
+		Ok(id)
 	}
 
-	pub fn init_device(&mut self, port: NonZeroU8) -> Result<device::WaitReset, &'static str> {
-		device::init(port, self)
+	pub fn transfer(
+		&mut self,
+		slot: NonZeroU8,
+		endpoint: u8,
+		data: Dma<[u8]>,
+		notify: bool,
+	) -> Result<ring::EntryId, ring::Full> {
+		let id = self
+			.devices
+			.get_mut(&slot)
+			.expect("no device at slot")
+			.transfer(endpoint, notify.then(|| 0), &data)?;
+		self.ring(slot.get(), 0, 3);
+		self.transfers.insert(id, data);
+		Ok(id)
+	}
+
+	pub fn configure_device(
+		&mut self,
+		slot: NonZeroU8,
+		config: DeviceConfig,
+	) -> Result<ring::EntryId, ring::Full> {
+		let (cmd, buf) = self
+			.devices
+			.get_mut(&slot)
+			.expect("no device")
+			.configure(0, config);
+		core::mem::forget(buf); // FIXME
+		self.enqueue_command(cmd).inspect(|&id| {
+			self.pending_commands
+				.insert(id, PendingCommand::ConfigureDev);
+		})
+	}
+
+	pub fn poll(&mut self) -> Option<Event> {
+		for i in 0..self.wait_device_reset.len() {
+			if let Some((cmd, e)) = self.wait_device_reset[i].poll(&mut self.registers) {
+				self.wait_device_reset.swap_remove(i);
+				let id = self.enqueue_command(cmd).unwrap_or_else(|_| todo!());
+				self.pending_commands
+					.insert(id, PendingCommand::AllocSlot(e));
+				if self.wait_device_reset.is_empty() {
+					// Free the memory as wait_device_reset should only be very uncommonly used
+					// anyways.
+					self.wait_device_reset = Vec::new();
+				}
+			}
+		}
+		loop {
+			return Some(match self.event_ring.dequeue()? {
+				event::Event::PortStatusChange { port } => {
+					let e = device::init(port, self).unwrap();
+					self.wait_device_reset.push(e);
+					continue;
+				}
+				event::Event::CommandCompletion { id, slot, code } => {
+					match self.pending_commands.remove(&id).unwrap() {
+						PendingCommand::AllocSlot(mut e) => {
+							let (id, e) = e.init(self, slot).unwrap_or_else(|_| todo!());
+							self.pending_commands
+								.insert(id, PendingCommand::SetAddress(e));
+							continue;
+						}
+						PendingCommand::SetAddress(e) => {
+							let d = e.finish();
+							let d = self
+								.devices
+								.entry(d.slot())
+								.and_modify(|_| panic!("slot already occupied"))
+								.or_insert(d);
+							Event::NewDevice { slot: d.slot() }
+						}
+						PendingCommand::ConfigureDev => Event::DeviceConfigured { id, slot, code },
+					}
+				}
+				event::Event::Transfer { id, slot, code } => Event::Transfer {
+					id,
+					slot,
+					buffer: self.transfers.remove(&id),
+					code,
+				},
+			});
+		}
+	}
+
+	/// Get the next slot after the given slot.
+	pub fn next_slot(&self, slot: Option<NonZeroU8>) -> Option<NonZeroU8> {
+		slot.map_or(0, |n| n.get())
+			.checked_add(1)
+			.and_then(|n| self.devices.range(NonZeroU8::new(n).unwrap()..).next())
+			.map(|(k, _)| *k)
 	}
 
 	fn ring(&mut self, slot: u8, stream: u16, target: u8) {
@@ -156,24 +259,49 @@ impl Xhci {
 }
 
 struct DeviceContextBaseAddressArray {
-	ptr: NonNull<u64>,
-	phys: u64,
+	storage: Dma<[u64; 256]>,
 }
 
 impl DeviceContextBaseAddressArray {
 	fn new() -> Result<Self, rt::Error> {
-		let (ptr, phys, _) = dma::alloc_dma(2048.try_into().unwrap())?;
-		Ok(Self {
-			ptr: ptr.cast(),
-			phys,
-		})
+		Dma::new().map(|storage| Self { storage })
 	}
 
 	fn install(&self, reg: &mut DeviceContextBaseAddressArrayPointerRegister) {
-		reg.set(self.phys)
+		reg.set(self.storage.as_phys())
 	}
 
 	fn set(&mut self, slot: NonZeroU8, phys: u64) {
-		unsafe { self.ptr.as_ptr().add(slot.get().into()).write(phys) }
+		unsafe { self.storage.as_mut()[usize::from(slot.get())] = phys }
 	}
+}
+
+enum PendingCommand {
+	AllocSlot(device::AllocSlot),
+	SetAddress(device::SetAddress),
+	ConfigureDev,
+}
+
+pub enum Event {
+	NewDevice {
+		slot: NonZeroU8,
+	},
+	Transfer {
+		slot: NonZeroU8,
+		buffer: Option<Dma<[u8]>>,
+		id: ring::EntryId,
+		code: Result<xhci::ring::trb::event::CompletionCode, u8>,
+	},
+	DeviceConfigured {
+		slot: NonZeroU8,
+		id: ring::EntryId,
+		code: Result<xhci::ring::trb::event::CompletionCode, u8>,
+	},
+}
+
+pub struct DeviceConfig {
+	pub config: requests::Configuration,
+	pub interface: requests::Interface,
+	// TODO avoid allocation
+	pub endpoints: Vec<requests::Endpoint>,
 }
