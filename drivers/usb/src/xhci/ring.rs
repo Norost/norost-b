@@ -1,18 +1,16 @@
+use crate::dma::Dma;
 use core::{
 	marker::PhantomData,
 	num::{NonZeroUsize, Wrapping},
 	ptr::NonNull,
 };
-use driver_utils::dma;
 use xhci::ring::trb;
 
 pub struct Ring<T>
 where
 	T: TrbEntry,
 {
-	ptr: NonNull<[u32; 4]>,
-	phys: u64,
-	size: NonZeroUsize,
+	buf: Dma<[[u32; 4]]>,
 	dequeue_index: Wrapping<usize>,
 	enqueue_index: Wrapping<usize>,
 	_marker: PhantomData<T>,
@@ -23,12 +21,8 @@ where
 	T: TrbEntry,
 {
 	pub fn new() -> Result<Self, rt::Error> {
-		// xHCI assumes at least 4 KiB page sizes.
-		let (ptr, phys, size) = dma::alloc_dma(4096.try_into().unwrap())?;
 		Ok(Self {
-			ptr: ptr.cast(),
-			phys,
-			size,
+			buf: Dma::new_slice(256).unwrap(),
 			dequeue_index: Wrapping(0),
 			enqueue_index: Wrapping(0),
 			_marker: PhantomData,
@@ -41,9 +35,9 @@ where
 	}
 
 	fn enqueue_inner(&mut self, item: [u32; 4]) -> Result<EntryId, Full> {
-		if self.enqueue_index.0 >= self.size.get() - 1 {
+		if self.enqueue_index.0 >= self.buf.len() - 1 {
 			let item = trb::Link::new()
-				.set_ring_segment_pointer(self.phys)
+				.set_ring_segment_pointer(self.buf.as_phys())
 				.into_raw();
 			self.enqueue_raw(item)?;
 			self.enqueue_index.0 = 0;
@@ -52,36 +46,31 @@ where
 	}
 
 	fn enqueue_raw(&mut self, mut item: [u32; 4]) -> Result<EntryId, Full> {
-		if self.enqueue_index == self.dequeue_index + Wrapping(self.size.get()) {
+		if self.enqueue_index == self.dequeue_index + Wrapping(self.buf.len()) {
 			return Err(Full);
 		}
 		item[3] |= 1; // Set cycle bit
 		let i = self.enqueue_index.0;
 		// TODO ensure we don't set the cycle bit before the entry has been fully written.
 		// We should try to do this in an efficient way, e.g. a single XMM store is atomic.
-		unsafe { self.ptr.as_ptr().add(i).write(item) }
+		unsafe { self.buf.as_mut()[i] = item }
 		self.enqueue_index += 1;
-		Ok(self.phys + i as u64 * 16)
+		Ok(self.buf.as_phys() + i as u64 * 16)
 	}
 
 	pub fn mark_dequeued(&mut self) {
 		unsafe {
 			// Clear cycle bit
-			self.ptr
-				.as_ptr()
-				.add(self.dequeue_index.0)
-				.cast::<u32>()
-				.add(3)
-				.write(0);
+			self.buf.as_mut()[self.dequeue_index.0][3] = 0;
 			self.dequeue_index.0 += 1;
-			if self.dequeue_index.0 >= self.size.get() {
+			if self.dequeue_index.0 >= self.buf.len() {
 				self.dequeue_index.0 = 0;
 			}
 		}
 	}
 
 	pub fn as_phys(&self) -> u64 {
-		self.phys
+		self.buf.as_phys()
 	}
 }
 

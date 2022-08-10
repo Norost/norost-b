@@ -29,6 +29,11 @@ where
 	pub fn as_phys(&self) -> u64 {
 		self.phys
 	}
+
+	pub fn into_raw(self) -> (NonNull<T>, u64) {
+		let s = mem::ManuallyDrop::new(self);
+		(s.ptr, s.phys)
+	}
 }
 
 impl<T> Dma<T> {

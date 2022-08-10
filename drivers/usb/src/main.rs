@@ -6,7 +6,7 @@
 #![feature(let_else)]
 #![feature(array_chunks)]
 #![feature(alloc_layout_extra)]
-#![feature(nonnull_slice_from_raw_parts)]
+#![feature(nonnull_slice_from_raw_parts, ptr_metadata, slice_ptr_get)]
 #![feature(result_option_inspect)]
 #![feature(closure_lifetime_binder)]
 

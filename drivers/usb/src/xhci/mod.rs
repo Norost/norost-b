@@ -58,7 +58,7 @@ impl Xhci {
 		// 4.2 Host Controller Initialization
 		let dcbaap = DeviceContextBaseAddressArray::new().unwrap_or_else(|_| todo!());
 		let command_ring = ring::Ring::new().unwrap_or_else(|_| todo!());
-		let event_ring = event::Table::new().unwrap_or_else(|_| todo!());
+		let mut event_ring = event::Table::new().unwrap_or_else(|_| todo!());
 		{
 			// After Chip Hardware Reset ...
 			regs.operational.usbcmd.update_volatile(|c| {
@@ -97,16 +97,18 @@ impl Xhci {
 			// Initialize each active interrupter by:
 
 			// Defining the Event Ring:
-			regs.interrupt_register_set
-				.update_volatile_at(0, |c| event_ring.install(c));
+			event_ring.install(regs.interrupt_register_set.interrupter_mut(0));
 
 			regs.operational.usbcmd.update_volatile(|c| {
 				c.set_interrupter_enable();
 			});
 
-			regs.interrupt_register_set.update_volatile_at(0, |c| {
-				c.iman.set_interrupt_enable();
-			});
+			regs.interrupt_register_set
+				.interrupter_mut(0)
+				.iman
+				.update_volatile(|c| {
+					c.set_interrupt_enable();
+				});
 
 			// Write the USBCMD (5.4.1) to turn the host controller ON
 			regs.operational.usbcmd.update_volatile(|c| {
@@ -204,7 +206,14 @@ impl Xhci {
 			}
 		}
 		loop {
-			return Some(match self.event_ring.dequeue()? {
+			let evt = if let Some(evt) = self.event_ring.dequeue() {
+				self.event_ring
+					.inform(self.registers.interrupt_register_set.interrupter_mut(0));
+				evt
+			} else {
+				return None;
+			};
+			return Some(match evt {
 				event::Event::PortStatusChange { port } => {
 					let e = device::init(port, self).unwrap();
 					self.wait_device_reset.push(e);

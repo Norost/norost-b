@@ -1558,8 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "xhci"
-version = "0.8.5"
-source = "git+https://github.com/Demindiro/xhci/?branch=fix-try_from-type-range#1fb109ffb1bb806464e47b4a61ce1385310f52e2"
+version = "0.8.6"
 dependencies = [
  "accessor",
  "bit_field",

@@ -1,17 +1,16 @@
+use crate::dma::Dma;
 use alloc::vec::Vec;
 use core::{
 	marker::PhantomData,
-	num::{NonZeroU16, NonZeroU8, NonZeroUsize, Wrapping},
+	num::{NonZeroU16, NonZeroU8, NonZeroUsize},
 	ptr::NonNull,
 	sync::atomic,
 };
 use driver_utils::dma;
+use xhci::accessor::{marker::ReadWrite, Mapper};
 use xhci::{
-	registers::InterruptRegisterSet,
-	ring::trb::{
-		event::{Allowed, CompletionCode},
-		Link,
-	},
+	registers::runtime::Interrupter,
+	ring::trb::event::{Allowed, CompletionCode},
 };
 
 #[derive(Debug)]
@@ -32,28 +31,25 @@ pub enum Event {
 }
 
 pub struct Table {
-	ptr: NonNull<SegmentEntry>,
-	phys: u64,
-	capacity: NonZeroUsize,
-	dequeue_ptr: NonNull<[u32; 4]>,
-	_marker: PhantomData<SegmentEntry>,
-	segments: Vec<Segment>,
+	buf: Dma<[SegmentEntry]>,
+	dequeue_segment: u8,
+	dequeue_index: u16,
+	segments: Vec<NonNull<[u32; 4]>>,
+	cycle_state_bit_on: bool,
+	_marker: PhantomData<(SegmentEntry, Allowed)>,
 }
 
 impl Table {
 	pub fn new() -> Result<Self, rt::Error> {
-		// xHCI assumes at least 4 KiB page sizes.
-		let (ptr, phys, size) = dma::alloc_dma(4096.try_into().unwrap())?;
 		let mut s = Self {
-			ptr: ptr.cast(),
-			phys,
-			capacity: (size.get() / 16).try_into().unwrap(),
-			dequeue_ptr: NonNull::dangling(),
-			_marker: PhantomData,
+			buf: Dma::new_slice(256).unwrap(),
+			dequeue_segment: 0,
+			dequeue_index: 0,
 			segments: Vec::new(),
+			cycle_state_bit_on: true,
+			_marker: PhantomData,
 		};
-		s.add_segment();
-		s.dequeue_ptr = s.segments[0].ptr;
+		s.add_segment()?;
 		Ok(s)
 	}
 
@@ -61,54 +57,48 @@ impl Table {
 		if self.segments.len() < self.segments.capacity() {
 			todo!();
 		}
-		let (segm, base, size) = Segment::new()?;
+		let (ptr, base) = Dma::<[[u32; 4]]>::new_slice(256)?.into_raw();
+		let (ptr, size) = ptr.to_raw_parts();
 		unsafe {
-			self.ptr
-				.as_ptr()
-				.add(self.segments.len())
-				.write(SegmentEntry {
-					base,
-					size: size.get().try_into().unwrap_or(u16::MAX),
-					_reserved: [0; 3],
-				});
+			self.buf.as_mut()[self.segments.len()] = SegmentEntry {
+				base,
+				size: size.try_into().unwrap(),
+				_reserved: [0; 3],
+			};
 		}
-		self.segments.push(segm);
+		self.segments.push(ptr.cast());
 		Ok(())
 	}
 
 	pub fn dequeue(&mut self) -> Option<Event> {
 		unsafe {
 			atomic::fence(atomic::Ordering::Acquire);
-			let evt = self.dequeue_ptr.as_ptr().read();
+			// Do a raw read as we can't guarantee the controller won't write to
+			// the other entries while we hold a reference.
+			let evt = unsafe {
+				self.segments[usize::from(self.dequeue_segment)]
+					.as_ptr()
+					.add(usize::from(self.dequeue_index))
+					.read()
+			};
 
-			if evt[3] & 1 == 0 {
-				// cycle bit is not set
+			if (evt[3] & 1 == 0) == self.cycle_state_bit_on {
 				return None;
 			}
 
-			if let Ok(link) = Link::try_from(evt) {
-				let phys = link.ring_segment_pointer();
-				assert_eq!(
-					self.phys, phys,
-					"xHCI controller did not link to start of ring"
-				);
-
-				// Find the corresponding virt ptr
-				let mut it = self.iter();
-				loop {
-					let (e, s) = it.next().expect("phys address is not part of any segment");
-					// TODO is it safe to assume all xHCI controllers are sane and will start
-					// from the base of a segment?
-					if e.base == phys {
-						drop(it);
-						self.dequeue_ptr = s.ptr;
-						break;
-					}
-				}
-
-				return self.dequeue();
+			self.dequeue_index += 1;
+			let len = unsafe { self.buf.as_ref()[usize::from(self.dequeue_segment)].size };
+			if self.dequeue_index >= len {
+				self.dequeue_index = 0;
+				let next_segm = usize::from(self.dequeue_segment) + 1;
+				self.dequeue_segment = if next_segm >= self.segments.len() {
+					self.cycle_state_bit_on = !self.cycle_state_bit_on;
+					0
+				} else {
+					next_segm as _
+				};
 			}
-			self.dequeue_ptr = NonNull::new(self.dequeue_ptr.as_ptr().add(1)).unwrap();
+
 			Some(match Allowed::try_from(evt).expect("invalid event") {
 				Allowed::PortStatusChange(p) => Event::PortStatusChange {
 					port: p.port_id().try_into().unwrap(),
@@ -120,7 +110,7 @@ impl Table {
 					slot: c.slot_id().try_into().unwrap(),
 					code: c.completion_code(),
 				},
-				Allowed::HostController(_) => todo!(),
+				Allowed::HostController(e) => todo!("{:?}", e),
 				Allowed::PortStatusChange(_) => todo!(),
 				Allowed::BandwidthRequest(_) => todo!(),
 				Allowed::CommandCompletion(c) => Event::CommandCompletion {
@@ -136,27 +126,27 @@ impl Table {
 	/// # Panics
 	///
 	/// There are no segments.
-	pub fn install(&self, reg: &mut InterruptRegisterSet) {
-		let (e, _) = self.get(0).expect("no segments");
+	pub fn install(&mut self, mut reg: Interrupter<'_, impl Mapper + Clone, ReadWrite>) {
+		// Reset to start
+		self.dequeue_index = 0;
+		self.dequeue_segment = 0;
+		assert!(self.segments.len() > 0, "no segments");
 		// Program the Interrupter Event Ring Segment Table Size
-		reg.erstsz.set(self.segments.len().try_into().unwrap());
+		reg.erstsz
+			.update_volatile(|c| c.set(self.segments.len().try_into().unwrap()));
 		// Program the Interrupter Event Ring Dequeue Pointer
-		reg.erdp.set_event_ring_dequeue_pointer(e.base);
+		reg.erdp.update_volatile(|c| {
+			c.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base })
+		});
 		// Program the Interrupter Event Ring Segment Table Base Address
-		reg.erstba.set(self.phys);
+		reg.erstba.update_volatile(|c| c.set(self.buf.as_phys()));
 	}
 
-	fn get(&self, index: usize) -> Option<(&SegmentEntry, &Segment)> {
-		let s = self.segments.get(index)?;
-		let e = unsafe { &*self.ptr.as_ptr().add(index) };
-		Some((e, s))
-	}
-
-	fn iter(&self) -> impl Iterator<Item = (&SegmentEntry, &Segment)> {
-		self.segments
-			.iter()
-			.enumerate()
-			.map(|(i, s)| unsafe { (&*self.ptr.as_ptr().add(i), s) })
+	pub fn inform(&self, mut reg: Interrupter<'_, impl Mapper + Clone, ReadWrite>) {
+		let phys = unsafe { self.buf.as_ref()[usize::from(self.dequeue_segment)].base };
+		let phys = phys + u64::from(self.dequeue_index) * 16;
+		reg.erdp
+			.update_volatile(|c| c.set_event_ring_dequeue_pointer(phys));
 	}
 }
 
@@ -165,24 +155,4 @@ struct SegmentEntry {
 	base: u64,
 	size: u16,
 	_reserved: [u16; 3],
-}
-
-struct Segment {
-	ptr: NonNull<[u32; 4]>,
-	_marker: PhantomData<Allowed>,
-}
-
-impl Segment {
-	fn new() -> Result<(Self, u64, NonZeroUsize), rt::Error> {
-		// xHCI assumes at least 4 KiB page sizes.
-		let (ptr, phys, size) = dma::alloc_dma(4096.try_into().unwrap())?;
-		Ok((
-			Self {
-				ptr: ptr.cast(),
-				_marker: PhantomData,
-			},
-			phys,
-			size,
-		))
-	}
 }
