@@ -50,6 +50,14 @@ impl Object {
 		})
 	}
 
+	pub fn read_exact(&self, buf: &mut [u8]) -> io::Result<()> {
+		let mut l = 0;
+		while l < buf.len() {
+			l += io::read(self.0, &mut buf[l..])?;
+		}
+		Ok(())
+	}
+
 	#[inline]
 	pub fn write(&self, data: &[u8]) -> io::Result<usize> {
 		io::write(self.0, data)

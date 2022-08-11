@@ -107,8 +107,8 @@ impl<'a> DeviceDriver<'a> {
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
 	) -> rt::io::Result<Self> {
-		let (stdin, proc_stdin) = rt::Object::new(rt::NewObject::Pipe)?;
-		let (proc_stdout, stdout) = rt::Object::new(rt::NewObject::Pipe)?;
+		let (stdin, proc_stdin) = rt::Object::new(rt::NewObject::MessagePipe)?;
+		let (proc_stdout, stdout) = rt::Object::new(rt::NewObject::MessagePipe)?;
 
 		let mut arg = [0; 2 * 6 + 5];
 		let ((a, b, c), (d, e, f)) = (base, interface);
