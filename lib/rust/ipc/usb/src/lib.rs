@@ -1,6 +1,33 @@
 #![no_std]
 
-pub const PACKET_TY_REQUEST: u8 = 0;
+pub const SEND_TY_REQUEST: u8 = 0;
+pub const SEND_TY_INTR_IN_ENQUEUE_NUM: u8 = 1;
+
+pub const RECV_TY_INTR_IN: u8 = 1;
+
+pub fn send_intr_in_enqueue_num<R>(ep: u8, num: u16, f: impl FnOnce(&[u8]) -> R) -> R {
+	assert!((1..16).contains(&ep));
+	let [a, b] = num.to_le_bytes();
+	f(&[SEND_TY_INTR_IN_ENQUEUE_NUM, ep, a, b])
+}
+
+pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
+	let f = |i, j| msg.get(i..j).ok_or("truncated message");
+	let fe = |i| msg.get(i..).ok_or("truncated message");
+	let f1 = |i| f(i, i + 1).map(|l| l[0]);
+	let f2 = |i| f(i, i + 2).map(|l| u16::from_le_bytes(l.try_into().unwrap()));
+	Ok(match f1(0)? {
+		RECV_TY_INTR_IN => Recv::IntrIn {
+			ep: f1(1)?,
+			data: fe(2)?,
+		},
+		_ => return Err("unknown message type"),
+	})
+}
+
+pub enum Recv<'a> {
+	IntrIn { ep: u8, data: &'a [u8] },
+}
 
 #[repr(C)]
 pub struct Request {
@@ -38,7 +65,7 @@ impl Request {
 
 	pub fn to_raw(&self, buf: &mut [u8]) -> usize {
 		assert!(buf.len() >= 9, "buffer too small");
-		buf[0] = PACKET_TY_REQUEST;
+		buf[0] = SEND_TY_REQUEST;
 		buf[1] = self.ty;
 		buf[2] = self.request;
 		buf[3..=4].copy_from_slice(&self.value.to_le_bytes());

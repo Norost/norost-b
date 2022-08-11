@@ -55,6 +55,14 @@ impl Object {
 		io::write(self.0, data)
 	}
 
+	pub fn write_all(&self, data: &[u8]) -> io::Result<()> {
+		let mut l = 0;
+		while l < data.len() {
+			l += io::write(self.0, &data[l..])?;
+		}
+		Ok(())
+	}
+
 	#[inline]
 	pub fn get_meta(
 		&self,

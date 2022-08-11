@@ -14,13 +14,15 @@ extern crate alloc;
 
 mod config;
 mod dma;
+mod driver;
 mod loader;
 mod requests;
 mod xhci;
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use core::num::NonZeroU8;
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
+use io_queue_rt::{Pow2Size, Queue};
 use rt::{Error, Handle};
 use rt_default as _;
 
@@ -49,12 +51,15 @@ fn main() -> ! {
 		}
 	};
 
+	let queue = Queue::new(Pow2Size::P5, Pow2Size::P7).unwrap();
 	let mut ctrl = xhci::Xhci::new(dev).unwrap();
+	let mut drivers = driver::Drivers::new(&queue);
 
 	let mut jobs = BTreeMap::<u64, Job>::default();
 	let mut load_driver = BTreeMap::<u64, LoadDriver>::default();
 
 	let mut conf_driver = BTreeMap::default();
+	let mut wait_finish_config = BTreeMap::default();
 
 	let (tbl_buf, tbl_buf_phys) =
 		driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
@@ -85,6 +90,7 @@ fn main() -> ! {
 				}
 				Event::Transfer {
 					slot,
+					endpoint,
 					id,
 					buffer,
 					code,
@@ -133,7 +139,7 @@ fn main() -> ! {
 											if driver.is_none() {
 												n += usize::from(i.num_endpoints);
 												conf.get_driver(base, intf)
-													.map(|d| driver = Some((d, i)));
+													.map(|d| driver = Some((d, i, intf)));
 											} else {
 												break;
 											}
@@ -156,18 +162,22 @@ fn main() -> ! {
 									n -= 1;
 								}
 
-								let (driver, interface) = driver.expect("no driver");
-								rt::dbg!();
-								if driver == b"drivers/usb_kbd" {
-									let id = ctrl
-										.send_request(
-											slot,
-											requests::Request::SetConfiguration {
-												value: config.index_configuration,
-											},
-										)
-										.unwrap_or_else(|_| todo!());
-									ctrl.configure_device(
+								let (driver, interface, intf) = driver.expect("no driver");
+
+								drivers.load_driver(slot, driver, base, intf);
+
+								let id = ctrl
+									.send_request(
+										slot,
+										requests::Request::SetConfiguration {
+											value: config.index_configuration,
+										},
+									)
+									.unwrap_or_else(|_| todo!());
+								conf_driver.insert(id, slot);
+
+								let id = ctrl
+									.configure_device(
 										slot,
 										xhci::DeviceConfig {
 											config,
@@ -176,18 +186,7 @@ fn main() -> ! {
 										},
 									)
 									.unwrap_or_else(|_| todo!());
-									conf_driver.insert(id, slot);
-								}
-								rt::dbg!();
-
-								use rt::process::Process;
-								let proc = Process::new_by_name(
-									driver,
-									Process::default_handles(),
-									None::<&[u8]>.into_iter(),
-									rt::args::Env::new(),
-								)
-								.expect("yay");
+								wait_finish_config.insert(id, ());
 							}
 							_ => unreachable!(),
 						}
@@ -195,14 +194,37 @@ fn main() -> ! {
 						rt::dbg!("done configuring");
 					} else {
 						let buf = buffer.unwrap();
-						let p = alloc::format!("{:?}", unsafe { buf.as_ref() });
-						rt::dbg!(p);
-						ctrl.transfer(slot, 3.try_into().unwrap(), buf, true);
+						assert!(endpoint & 1 == 1);
+						drivers
+							.send(
+								slot,
+								driver::Message::NotifyInterrupt {
+									endpoint: endpoint >> 1,
+									data: unsafe { buf.as_ref() },
+								},
+							)
+							.unwrap();
+						ctrl.transfer(slot, endpoint, buf, true);
 
 						//unreachable!()
 					}
 				}
-				Event::DeviceConfigured { slot, .. } => {
+				Event::DeviceConfigured { slot, id, code } => {
+					let driver = wait_finish_config.remove(&id).unwrap();
+				}
+			}
+		}
+
+		queue.poll();
+		queue.process();
+		while let Some(evt) = drivers.dequeue() {
+			use driver::Event;
+			match evt {
+				Event::QueueInterruptInEntries {
+					slot,
+					endpoint,
+					count,
+				} => {
 					for _ in 0..16 {
 						let buf = dma::Dma::new_slice(8).unwrap();
 						ctrl.transfer(slot, 3.try_into().unwrap(), buf, true);

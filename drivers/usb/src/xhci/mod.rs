@@ -239,9 +239,15 @@ impl Xhci {
 						PendingCommand::ConfigureDev => Event::DeviceConfigured { id, slot, code },
 					}
 				}
-				event::Event::Transfer { id, slot, code } => Event::Transfer {
+				event::Event::Transfer {
+					id,
+					endpoint,
+					slot,
+					code,
+				} => Event::Transfer {
 					id,
 					slot,
+					endpoint,
 					buffer: self.transfers.remove(&id),
 					code,
 				},
@@ -297,6 +303,7 @@ pub enum Event {
 	},
 	Transfer {
 		slot: NonZeroU8,
+		endpoint: u8,
 		buffer: Option<Dma<[u8]>>,
 		id: ring::EntryId,
 		code: Result<xhci::ring::trb::event::CompletionCode, u8>,

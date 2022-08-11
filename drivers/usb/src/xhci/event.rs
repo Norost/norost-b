@@ -26,6 +26,7 @@ pub enum Event {
 	Transfer {
 		id: u64,
 		slot: NonZeroU8,
+		endpoint: u8,
 		code: Result<CompletionCode, u8>,
 	},
 }
@@ -107,6 +108,7 @@ impl Table {
 				Allowed::MfindexWrap(_) => todo!(),
 				Allowed::TransferEvent(c) => Event::Transfer {
 					id: c.trb_pointer(),
+					endpoint: c.endpoint_id(),
 					slot: c.slot_id().try_into().unwrap(),
 					code: c.completion_code(),
 				},

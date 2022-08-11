@@ -24,3 +24,10 @@ version = "0.8"
 
 [dependencies.nora_scf]
 path = "../../../lib/nora_scf"
+
+[dependencies.ipc_usb]
+path = "../../lib/rust/ipc/usb"
+
+[dependencies.io_queue_rt]
+package = "nora_io_queue_rt"
+path = "../../lib/rust/io_queue_rt"

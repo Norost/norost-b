@@ -6,6 +6,8 @@ use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 const MAX_SIZE: usize = 1 << 16;
 
 /// Create a new unidirectional pipe.
+///
+/// The first object is the input, the second is the output.
 pub fn new() -> [Arc<dyn Object>; 2] {
 	let inner = Arc::new(Mutex::default());
 	[Arc::new(PipeIn(inner.clone())), Arc::new(PipeOut(inner))]
