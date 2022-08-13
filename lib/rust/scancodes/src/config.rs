@@ -56,11 +56,42 @@ pub struct Config {
 	raw: RawMap,
 	translate_caps: BTreeMap<KeyCode, KeyCode>,
 	translate_altgr: BTreeMap<KeyCode, KeyCode>,
+	translate_altgr_caps: BTreeMap<KeyCode, KeyCode>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Modifiers {
+	pub altgr: bool,
+	pub caps: bool,
+	pub num: bool,
 }
 
 impl Config {
-	pub fn map_raw(&self, scancode: &[u8]) -> Option<KeyCode> {
+	pub fn raw(&self, scancode: &[u8]) -> Option<KeyCode> {
 		self.raw.get(scancode)
+	}
+
+	pub fn modified(&self, raw: KeyCode, modifiers: Modifiers) -> Option<KeyCode> {
+		use {KeyCode::*, SpecialKeyCode::*};
+		let k = match (modifiers.altgr, modifiers.caps) {
+			(true, true) => self.translate_altgr_caps.get(&raw).copied(),
+			(true, false) => self.translate_altgr.get(&raw).copied(),
+			(false, true) => match raw {
+				Unicode(c @ 'a'..='z') => Some(Unicode(c.to_ascii_uppercase())),
+				_ => self.translate_caps.get(&raw).copied(),
+			},
+			(false, false) => None,
+		};
+		k.or_else(|| {
+			Some(match raw {
+				Special(KeypadSlash) => Unicode('/'),
+				Special(KeypadStar) => Unicode('*'),
+				Special(KeypadMinus) => Unicode('-'),
+				Special(KeypadPlus) => Unicode('+'),
+				Special(KeypadEnter) => Unicode('\n'),
+				k => k,
+			})
+		})
 	}
 }
 
@@ -112,7 +143,7 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 				// TODO somehow log or return *warning* if a duplicate key is found
 				let _ = prev;
 			},
-			s @ b"caps" | s @ b"altgr" => loop {
+			s @ b"caps" | s @ b"altgr" | s @ b"altgr+caps" => loop {
 				match next()? {
 					Token::Begin => {}
 					Token::End => break,
@@ -124,6 +155,7 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 				let prev = match s {
 					b"caps" => cfg.translate_caps.insert(source, target),
 					b"altgr" => cfg.translate_altgr.insert(source, target),
+					b"altgr+caps" => cfg.translate_altgr_caps.insert(source, target),
 					_ => unreachable!(),
 				};
 				// TODO ditto

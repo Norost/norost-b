@@ -23,5 +23,5 @@ exec qemu-system-x86_64 \
 	-s \
 	"$@"
 	#-device usb-mouse \
-	-device usb-kbd \
 	-device usb-storage,drive=usb0 \
+	-device usb-kbd \

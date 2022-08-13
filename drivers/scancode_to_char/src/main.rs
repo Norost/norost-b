@@ -41,7 +41,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let char_buf = RefCell::new(VecDeque::new());
 	let readers = RefCell::new(driver_utils::Arena::new());
 	let pending_read = Cell::new(None);
-	let shifts = Cell::new(0);
 
 	let do_read = || async {
 		use scancodes::{Event, KeyCode, SpecialKeyCode};
@@ -53,25 +52,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		let evt = u32::from_le_bytes(buf[..].try_into().unwrap());
 		let chr = match Event::try_from(evt).unwrap() {
 			Event::Press(KeyCode::Unicode(c)) => Some(c),
-			Event::Release(KeyCode::Unicode(_)) => None,
-			Event::Press(KeyCode::Special(c)) => {
-				match c {
-					SpecialKeyCode::RightShift | SpecialKeyCode::LeftShift => {
-						shifts.set(shifts.get() + 1)
-					}
-					_ => {}
-				}
-				None
-			}
-			Event::Release(KeyCode::Special(c)) => {
-				match c {
-					SpecialKeyCode::RightShift | SpecialKeyCode::LeftShift => {
-						shifts.set(shifts.get() - 1)
-					}
-					_ => {}
-				}
-				None
-			}
+			_ => None,
 		};
 		if let Some(chr) = chr {
 			let mut b = [0; 4];
