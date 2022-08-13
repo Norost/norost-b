@@ -236,16 +236,29 @@ fn main() -> ! {
 		#[derive(Debug)]
 		enum Object {
 			Root { i: u8 },
-			List { slot: u8 },
+			ListDevices { slot: u8 },
+			ListHandlers { index: usize },
 		}
 
 		'req: while let Some((handle, job_id, req)) = tbl.dequeue() {
-			let mut buf = [0; 8];
+			let mut buf = [0; 64];
 			let resp = match req {
 				Request::Open { path } => match (handle, &*path.copy_into(&mut buf).0) {
 					(Handle::MAX, b"") => Response::Handle(objects.insert(Object::Root { i: 0 })),
-					(Handle::MAX, b"list") | (Handle::MAX, b"list/") => {
-						Response::Handle(objects.insert(Object::List { slot: 0 }))
+					(Handle::MAX, b"devices") | (Handle::MAX, b"devices/") => {
+						Response::Handle(objects.insert(Object::ListDevices { slot: 0 }))
+					}
+					(Handle::MAX, b"handlers") | (Handle::MAX, b"handlers/") => {
+						Response::Handle(objects.insert(Object::ListHandlers { index: 0 }))
+					}
+					(Handle::MAX, p) if p.starts_with(b"handlers/") => {
+						let p = &p["handlers/".len()..];
+						rt::dbg!(core::str::from_utf8(p));
+						if let Some(h) = drivers.handler(p) {
+							Response::Object(h)
+						} else {
+							Response::Error(Error::DoesNotExist)
+						}
 					}
 					(_, p) => todo!("{:?}", core::str::from_utf8(p)),
 					_ => Response::Error(Error::DoesNotExist),
@@ -253,7 +266,8 @@ fn main() -> ! {
 				Request::Read { amount } => match &mut objects[handle] {
 					Object::Root { i } => {
 						let s: &[u8] = match i {
-							0 => b"list",
+							0 => b"devices",
+							1 => b"handlers",
 							_ => {
 								*i -= 1;
 								b""
@@ -264,13 +278,24 @@ fn main() -> ! {
 						b.copy_from(0, s);
 						Response::Data(b)
 					}
-					Object::List { slot } => {
+					Object::ListDevices { slot } => {
 						if let Some(s) = ctrl.next_slot(NonZeroU8::new(*slot)) {
 							*slot = s.get();
 							Job::get_info(&mut jobs, &mut ctrl, s, job_id);
 							continue 'req;
 						} else {
 							*slot = 255;
+							Response::Data(tbl.alloc(0).unwrap())
+						}
+					}
+					Object::ListHandlers { index } => {
+						if let Some((k, _)) = drivers.handler_at(*index) {
+							*index += 1;
+							let buf = tbl.alloc(k.len()).expect("out of buffers");
+							buf.copy_from(0, k);
+							Response::Data(buf)
+						} else {
+							*index = usize::MAX;
 							Response::Data(tbl.alloc(0).unwrap())
 						}
 					}
@@ -331,7 +356,7 @@ impl Job {
 		slot: NonZeroU8,
 		buf: dma::Dma<[u8]>,
 		tbl: &'a StreamTable,
-	) -> Option<(JobId, Response<'a>)> {
+	) -> Option<(JobId, Response<'a, 'static>)> {
 		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
 		match &self.state {
 			JobState::WaitDeviceInfo => {

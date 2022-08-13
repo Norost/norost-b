@@ -1,10 +1,11 @@
 use super::{Error, Object, Ticket, TicketWaker};
 use crate::sync::Mutex;
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, sync::Arc};
 
 // 64 KiB should be a reasonable soft limit.
 const SOFT_TOTAL_BYTE_LIMIT: usize = 1 << 16;
 const PACKET_MAX_SIZE: usize = 1 << 16;
+const MAX_SHARE: usize = 8;
 const WRITE_CLOSED: u8 = 1;
 const READ_CLOSED: u8 = 2;
 
@@ -30,6 +31,10 @@ struct PipeInner {
 	wake_read: VecDeque<(usize, TicketWaker<Box<[u8]>>)>,
 	wake_write: VecDeque<TicketWaker<u64>>,
 	flags: u8,
+	/// Objects that are being shared.
+	share: VecDeque<Arc<dyn Object>>,
+	wake_share: VecDeque<TicketWaker<u64>>,
+	wake_open: VecDeque<TicketWaker<Arc<dyn Object>>>,
 }
 
 struct PipeIn(Arc<Mutex<PipeInner>>);
@@ -63,6 +68,21 @@ impl Object for PipeIn {
 			t
 		}
 	}
+
+	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
+		let mut pipe = self.0.lock();
+		if let Some(w) = pipe.wake_open.pop_front() {
+			w.complete(Ok(object.clone()));
+			0.into()
+		} else if pipe.share.len() < MAX_SHARE {
+			pipe.share.push_back(object.clone());
+			0.into()
+		} else {
+			let (t, w) = Ticket::new();
+			pipe.wake_share.push_back(w);
+			t
+		}
+	}
 }
 
 impl Object for PipeOut {
@@ -87,6 +107,21 @@ impl Object for PipeOut {
 			pipe.wake_read.push_back((length, w));
 			return t;
 		})
+	}
+
+	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
+		if !path.is_empty() {
+			return Error::InvalidData.into();
+		}
+		let mut pipe = self.0.lock();
+		if let Some(obj) = pipe.share.pop_front() {
+			pipe.wake_share.pop_front().map(|o| o.complete(Ok(0)));
+			obj.into()
+		} else {
+			let (t, w) = Ticket::new();
+			pipe.wake_open.push_back(w);
+			t
+		}
 	}
 }
 

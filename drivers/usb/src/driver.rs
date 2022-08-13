@@ -1,17 +1,18 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use core::{
 	future::Future,
 	num::NonZeroU8,
 	pin::Pin,
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
-use io_queue_rt::{Pow2Size, Queue, Read, Write};
+use io_queue_rt::{Open, Pow2Size, Queue, Read, Share, Write};
 
 const MSG_SIZE: usize = 32;
 
 pub struct Drivers<'a> {
 	queue: &'a Queue,
 	drivers: BTreeMap<NonZeroU8, DeviceDriver<'a>>,
+	handlers: BTreeMap<Box<[u8]>, rt::Object>,
 }
 
 impl<'a> Drivers<'a> {
@@ -19,6 +20,7 @@ impl<'a> Drivers<'a> {
 		Self {
 			queue,
 			drivers: Default::default(),
+			handlers: Default::default(),
 		}
 	}
 
@@ -26,11 +28,18 @@ impl<'a> Drivers<'a> {
 		let wk = self.make_waker();
 		let mut cx = Context::from_waker(&wk);
 		for (&slot, driver) in self.drivers.iter_mut() {
-			if let Poll::Ready((res, buf)) = Pin::new(&mut driver.read_task).poll(&mut cx) {
+			if let Some(share) = driver.share_task.as_mut() {
+				if let Poll::Ready((res, ())) = Pin::new(share).poll(&mut cx) {
+					let obj = rt::Object::from_raw(res.unwrap());
+					self.handlers
+						.insert((*b"usb_keyboard_share_test_yay").into(), obj);
+					driver.share_task = None;
+				}
+			} else if let Poll::Ready((res, buf)) = Pin::new(&mut driver.read_task).poll(&mut cx) {
 				res.unwrap();
 				rt::dbg!(&buf);
 				let evt = match *buf.get(0).unwrap_or_else(|| todo!("invalid msg")) {
-					ipc_usb::SEND_TY_INTR_IN_ENQUEUE_NUM => Event::QueueInterruptInEntries {
+					ipc_usb::SEND_TY_INTR_IN_ENQUEUE_NUM => Some(Event::QueueInterruptInEntries {
 						slot,
 						endpoint: *buf.get(1).unwrap_or_else(|| todo!("invalid msg")),
 						count: u16::from_le_bytes(
@@ -39,11 +48,22 @@ impl<'a> Drivers<'a> {
 								.try_into()
 								.unwrap(),
 						),
-					},
+					}),
+					ipc_usb::SEND_TY_PUBLIC_OBJECT => {
+						assert!(driver.share_task.is_none(), "share already in progress");
+						driver.share_task = Some(
+							self.queue
+								.submit_open(driver.stdout.as_raw(), ())
+								.unwrap_or_else(|e| todo!("{:?}", e)),
+						);
+						None
+					}
 					_ => todo!("invalid msg"),
 				};
 				driver.read_task = read(&self.queue, &driver.stdout, buf);
-				return Some(evt);
+				if let Some(evt) = evt {
+					return Some(evt);
+				}
 			}
 		}
 		None
@@ -78,6 +98,18 @@ impl<'a> Drivers<'a> {
 		Ok(())
 	}
 
+	pub fn handler<'h>(&'h self, name: &[u8]) -> Option<rt::RefObject<'h>> {
+		self.handlers.get(name).map(Into::into)
+	}
+
+	pub fn handler_at(&self, index: usize) -> Option<(&[u8], &rt::Object)> {
+		self.handlers
+			.iter()
+			.skip(index)
+			.next()
+			.map(|(k, v)| (&**k, v))
+	}
+
 	fn make_waker(&self) -> Waker {
 		fn clone(p: *const ()) -> RawWaker {
 			RawWaker::new(p, &VTABLE)
@@ -98,6 +130,7 @@ struct DeviceDriver<'a> {
 	stdout: rt::Object,
 	read_task: Read<'a, Vec<u8>>,
 	write_tasks: Vec<Write<'a, Vec<u8>>>,
+	share_task: Option<Open<'a, ()>>,
 }
 
 impl<'a> DeviceDriver<'a> {
@@ -133,6 +166,9 @@ impl<'a> DeviceDriver<'a> {
 		if let Some(o) = rt::io::stderr() {
 			p.add_object(rt::args::ID_STDERR, &o)?;
 		}
+		if let Some(o) = rt::io::file_root() {
+			p.add_object(rt::args::ID_FILE_ROOT, &o)?;
+		}
 
 		let process = p.spawn()?;
 		let read_task = read(queue, &stdout, Vec::with_capacity(MSG_SIZE));
@@ -143,6 +179,7 @@ impl<'a> DeviceDriver<'a> {
 			stdout,
 			read_task,
 			write_tasks: Default::default(),
+			share_task: Default::default(),
 		})
 	}
 }

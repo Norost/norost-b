@@ -8,6 +8,7 @@ pub use norostb_kernel::{
 
 use crate::RefObject;
 use core::{
+	fmt,
 	mem::{self, MaybeUninit},
 	ptr::NonNull,
 	sync::atomic::Ordering,
@@ -217,4 +218,24 @@ pub fn close(handle: Handle) {
 		handle,
 		op: DoIoOp::Close,
 	});
+}
+
+#[doc(hidden)]
+pub fn _print_str(s: &str) {
+	let _ = stdout().map(|o| o.write_all(s.as_bytes()));
+}
+
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments<'_>) {
+	let _ = stdout().map(|o| o.write_fmt(args));
+}
+
+#[doc(hidden)]
+pub fn _eprint_str(s: &str) {
+	let _ = stderr().map(|o| o.write_all(s.as_bytes()));
+}
+
+#[doc(hidden)]
+pub fn _eprint(args: fmt::Arguments<'_>) {
+	let _ = stderr().map(|o| o.write_fmt(args));
 }

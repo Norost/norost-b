@@ -59,7 +59,8 @@ where
 			// Parse backspace & any annoying special characters
 			for i in (prev_len..len).rev() {
 				match data[i] {
-					0x7f => {
+					// 0x7f = delete, 0x8 = backspace
+					0x7f | 0x8 => {
 						data.copy_within(i + 1.., i.saturating_sub(1));
 						len = len.saturating_sub(2);
 					}

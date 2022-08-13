@@ -5,6 +5,8 @@ stderr = "system/log"
 [program.minish]
 path = "minish"
 file_root = ""
+stdin = "keyboard/stream"
+after = [ "keyboard" ]
 
 [program.fs_fat]
 disabled = true
@@ -60,12 +62,10 @@ file_root = "file"
 net_root = "net"
 
 [program.ps2]
-disabled = true
 path = "ps2"
 file_root = ""
 
 [program.scancode_to_char]
-disabled = true
 path = "scancode_to_char"
 args = [ "keyboard", "ps2/keyboard/stream" ]
 after = [ "ps2/keyboard/stream" ]

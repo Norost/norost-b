@@ -17,6 +17,7 @@ mod keyboard;
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::boxed::Box;
 use async_std::{
+	fs,
 	io::{Read, Write},
 	object::RefAsyncObject,
 	task,
@@ -324,7 +325,6 @@ impl Ps2 {
 
 	fn init() -> (Self, [Option<Box<dyn Device>>; 2]) {
 		// https://wiki.osdev.org/%228042%22_PS/2_Controller#Initialising_the_PS.2F2_Controller
-
 		let mut slf = Self {
 			io: PortIo::new().unwrap(),
 		};

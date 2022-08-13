@@ -2,16 +2,14 @@ use super::*;
 use alloc::collections::VecDeque;
 use core::cell::RefCell;
 use driver_utils::os::stream_table::JobId;
-use scancodes::{
-	scanset::ps2::{scanset2_decode, DecodeError},
-	Event,
-};
+use scancodes::{config::Config, Event};
 
 pub struct Keyboard {
 	readers: RefCell<VecDeque<JobId>>,
 	events: RefCell<LossyRingBuffer<Event>>,
 	buf: RefCell<TinyBuf>,
 	interrupt: rt::Object,
+	config: Config,
 }
 
 enum KeyboardCommand {
@@ -34,12 +32,12 @@ struct TinyBuf {
 	index: u8,
 }
 
-impl<T: ~const Default> const Default for LossyRingBuffer<T> {
+impl<T: Default + Copy> Default for LossyRingBuffer<T> {
 	fn default() -> Self {
 		Self {
 			push: 0,
 			pop: 0,
-			data: [const { Default::default() }; 128],
+			data: [Default::default(); 128],
 		}
 	}
 }
@@ -64,6 +62,30 @@ impl<T: Copy> LossyRingBuffer<T> {
 
 impl Keyboard {
 	pub fn init(ps2: &mut Ps2, port: Port) -> Self {
+		let config = {
+			let f = rt::io::file_root()
+				.unwrap()
+				.open(b"drivers/scanset2.scf")
+				.unwrap();
+			let len = f
+				.seek(rt::io::SeekFrom::End(0))
+				.unwrap()
+				.try_into()
+				.unwrap();
+			f.seek(rt::io::SeekFrom::Start(0)).unwrap();
+			let mut buf = alloc::vec::Vec::with_capacity(len);
+			let mut offt = 0;
+			while offt < len {
+				offt += f
+					.read_uninit(&mut buf.spare_capacity_mut()[offt..])
+					.unwrap()
+					.0
+					.len();
+			}
+			unsafe { buf.set_len(len) };
+			scancodes::config::parse(&buf).expect("failed to parse config")
+		};
+
 		// Use scancode set 2 since it's the only set that should be supported on all systems.
 		ps2.write_raw_port_command(port, KeyboardCommand::GetSetScanCodeSet as u8)
 			.unwrap();
@@ -96,6 +118,7 @@ impl Keyboard {
 			readers: Default::default(),
 			buf: Default::default(),
 			interrupt,
+			config,
 		}
 	}
 }
@@ -108,7 +131,7 @@ impl Device for Keyboard {
 	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])> {
 		if let Some(e) = self.events.borrow_mut().pop() {
 			let buf = &mut buf[..4];
-			buf.copy_from_slice(&<[u8; 4]>::from(e));
+			buf.copy_from_slice(&u32::from(e).to_le_bytes());
 			Some((reader, buf))
 		} else {
 			self.readers.borrow_mut().push_back(reader);
@@ -131,25 +154,28 @@ impl Device for Keyboard {
 		buf.buf[usize::from(buf.index)] = b;
 		buf.index += 1;
 
-		let seq = &buf.buf[..buf.index.into()];
-		match scanset2_decode(seq) {
-			Ok(code) => {
-				buf.index = 0;
-				if let Some(id) = self.readers.borrow_mut().pop_front() {
-					let out_buf = &mut out_buf[..4];
-					out_buf.copy_from_slice(&<[u8; 4]>::from(code));
-					Some((id, out_buf))
-				} else {
-					self.events.borrow_mut().push(code);
-					None
-				}
-			}
-			Err(DecodeError::Incomplete) => None,
-			Err(DecodeError::NotRecognized) => {
-				log!("scancode {:x?} is not recognized", seq);
-				buf.index = 0;
+		let mut seq = &buf.buf[..buf.index.into()];
+		let mut release = seq[0] == 0xf0;
+		if release {
+			seq = &seq[1..];
+		}
+		if let Some(code) = self.config.map_raw(seq) {
+			let code = if release {
+				Event::Release(code)
+			} else {
+				Event::Press(code)
+			};
+			buf.index = 0;
+			if let Some(id) = self.readers.borrow_mut().pop_front() {
+				let out_buf = &mut out_buf[..4];
+				out_buf.copy_from_slice(&u32::from(code).to_le_bytes());
+				Some((id, out_buf))
+			} else {
+				self.events.borrow_mut().push(code);
 				None
 			}
+		} else {
+			None
 		}
 	}
 }

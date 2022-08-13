@@ -1,275 +1,208 @@
-//! Standard keyboard scancodes & scansets.
+//! # Standard keyboard keycodes.
+//!
+//! ## Keycode format
+//!
+//! Keycodes are represented as 21-bit characters and a special bit.
+//!
+//! Characters equal or below `0x10ffff` directly map to their corresponding Unicode character.
+//! Characters above `0x10ffff` map to the keycodes defined below:
+//!
+//! | Character(s)          | Keycode(s) |
+//! | --------------------- | ---------- |
+//! | `0x110000`-`0x110018` | F0-F24     |
+//!
+//! ## Event format
+//!
+//! An event is a 32-bit little-endian number.
+//!
+//! | Bit(s) | Description |
+//! | ------ | ----------- |
+//! | 31:24  | Modifiers   |
+//! | 23:22  | Reserved    |
+//! | 21     | Pressed     |
+//! | 20:0   | Character   |
+//!
+//! ### Modifier format
+//!
+//! | Bit | Description |
+//! | --- | ----------- |
+//! | 7   | Left Ctrl   |
+//! | 6   | Left Shift  |
+//! | 5   | Left Alt    |
+//! | 4   | Left GUI    |
+//! | 3   | Right Ctrl  |
+//! | 2   | Right Shift |
+//! | 1   | Right Alt   |
+//! | 0   | Right GUI   |
 
 #![no_std]
 #![feature(const_convert, const_trait_impl, const_try)]
-#![feature(variant_count)]
 
-pub mod scanset;
+#[cfg(feature = "config")]
+pub mod config;
 
-#[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
-pub enum ScanCode {
-	A,
-	B,
-	C,
-	D,
-	E,
-	F,
-	G,
-	H,
-	I,
-	J,
-	K,
-	L,
-	M,
-	N,
-	O,
-	P,
-	Q,
-	R,
-	S,
-	T,
-	U,
-	V,
-	W,
-	X,
-	Y,
-	Z,
-	N0,
-	N1,
-	N2,
-	N3,
-	N4,
-	N5,
-	N6,
-	N7,
-	N8,
-	N9,
-	F0,
-	F1,
-	F2,
-	F3,
-	F4,
-	F5,
-	F6,
-	F7,
-	F8,
-	F9,
-	F10,
-	F11,
-	F12,
-	Escape,
-	Minus,
-	Equal,
-	Backspace,
-	Tab,
-	Enter,
-	LeftControl,
-	RightControl,
-	BackTick,
-	ForwardTick,
-	BackSlash,
-	ForwardSlash,
-	OpenSquareBracket,
-	CloseSquareBracket,
-	OpenRoundBracket,
-	CloseRoundBracket,
-	OpenAngleBracket,
-	CloseAngleBracket,
-	OpenCurlyBracket,
-	CloseCurlyBracket,
-	LeftAlt,
-	RightAlt,
-	CapsLock,
-	NumberLock,
-	ScrollLock,
-	LeftShift,
-	RightShift,
-	LeftGui,
-	RightGui,
-	SingleQuote,
-	DoubleQuote,
-	Dot,
-	Comma,
-	Colon,
-	Semicolon,
-	Space,
-	PrintScreen,
-	Pause,
-	Insert,
-	Delete,
-	Home,
-	End,
-	Apps,
-	PageUp,
-	PageDown,
-	UpArrow,
-	DownArrow,
-	LeftArrow,
-	RightArrow,
-	KeypadN0,
-	KeypadN1,
-	KeypadN2,
-	KeypadN3,
-	KeypadN4,
-	KeypadN5,
-	KeypadN6,
-	KeypadN7,
-	KeypadN8,
-	KeypadN9,
-	KeypadDivide,
-	KeypadEnter,
-	KeypadStar,
-	KeypadPlus,
-	KeypadMinus,
-	KeypadDot,
+use core::fmt;
+
+macro_rules! special_keycode {
+	{ $($k:ident $v:literal)* } => {
+		#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+		#[non_exhaustive]
+		pub enum SpecialKeyCode { $($k,)* }
+
+		impl From<SpecialKeyCode> for u32 {
+			fn from(k: SpecialKeyCode) -> Self {
+				use SpecialKeyCode::*;
+				0x110000 | match k {
+					$($k => $v,)*
+				}
+			}
+		}
+
+		#[derive(Debug)]
+		pub struct InvalidSpecialKeyCode;
+
+		impl TryFrom<u32> for SpecialKeyCode {
+			type Error = InvalidSpecialKeyCode;
+
+			fn try_from(n: u32) -> Result<Self, Self::Error> {
+				use SpecialKeyCode::*;
+				Ok(match n.checked_sub(0x110000).ok_or(InvalidSpecialKeyCode)? {
+					$($v => $k,)*
+					_ => return Err(InvalidSpecialKeyCode),
+				})
+			}
+		}
+	};
 }
 
-impl ScanCode {
-	/// Convert a scancode to an alphabet character.
-	pub fn alphabet_to_char(self) -> Option<char> {
-		Some(match self {
-			Self::A => 'a',
-			Self::B => 'b',
-			Self::C => 'c',
-			Self::D => 'd',
-			Self::E => 'e',
-			Self::F => 'f',
-			Self::G => 'g',
-			Self::H => 'h',
-			Self::I => 'i',
-			Self::J => 'j',
-			Self::K => 'k',
-			Self::L => 'l',
-			Self::M => 'm',
-			Self::N => 'n',
-			Self::O => 'o',
-			Self::P => 'p',
-			Self::Q => 'q',
-			Self::R => 'r',
-			Self::S => 's',
-			Self::T => 't',
-			Self::U => 'u',
-			Self::V => 'v',
-			Self::W => 'w',
-			Self::X => 'x',
-			Self::Y => 'y',
-			Self::Z => 'z',
-			_ => return None,
-		})
-	}
+special_keycode! {
+	F0 0x0
+	F1 0x1
+	F2 0x2
+	F3 0x3
+	F4 0x4
+	F5 0x5
+	F6 0x6
+	F7 0x7
+	F8 0x8
+	F9 0x9
+	F10 0xa
+	F11 0xb
+	F12 0xc
+	F13 0xd
+	F14 0xe
+	F15 0xf
+	F16 0x10
+	F17 0x11
+	F18 0x12
+	F19 0x13
+	F20 0x14
+	F21 0x15
+	F22 0x16
+	F23 0x17
+	F24 0x18
+	PrintScreen 0x19
+	ScrollLock 0x1a
+	Pause 0x1b
+	CapsLock 0x1c
+	UpArrow 0x1d
+	DownArrow 0x1e
+	LeftArrow 0x1f
+	RightArrow 0x20
 
-	/// Convert a scancode to a bracket character.
-	pub fn bracket_to_char(self) -> Option<char> {
-		Some(match self {
-			Self::OpenRoundBracket => '(',
-			Self::OpenSquareBracket => '[',
-			Self::OpenAngleBracket => '<',
-			Self::OpenCurlyBracket => '{',
-			Self::CloseRoundBracket => ')',
-			Self::CloseSquareBracket => ']',
-			Self::CloseAngleBracket => '>',
-			Self::CloseCurlyBracket => '}',
-			_ => return None,
-		})
-	}
+	Insert 0x21
+	Home 0x22
+	End 0x23
+	Menu 0x24
+	PageUp 0x25
+	PageDown 0x26
 
-	/// Convert a scancode to a number character
-	pub fn number_to_char(self) -> Option<char> {
-		Some(match self {
-			Self::N0 | Self::KeypadN0 => '0',
-			Self::N1 | Self::KeypadN1 => '1',
-			Self::N2 | Self::KeypadN2 => '2',
-			Self::N3 | Self::KeypadN3 => '3',
-			Self::N4 | Self::KeypadN4 => '4',
-			Self::N5 | Self::KeypadN5 => '5',
-			Self::N6 | Self::KeypadN6 => '6',
-			Self::N7 | Self::KeypadN7 => '7',
-			Self::N8 | Self::KeypadN8 => '8',
-			Self::N9 | Self::KeypadN9 => '9',
-			_ => return None,
-		})
-	}
+	LeftControl 0x30
+	LeftShift 0x31
+	Alt 0x32
+	LeftGui 0x33
+	RightControl 0x34
+	RightShift 0x35
+	AltGr 0x36
+	RightGui 0x37
 
-	/// Whether the scancode cooresponds to a key normally located on a numpad.
-	pub fn is_keypad(self) -> bool {
+	KeypadN0 0x40
+	KeypadN1 0x41
+	KeypadN2 0x42
+	KeypadN3 0x43
+	KeypadN4 0x44
+	KeypadN5 0x45
+	KeypadN6 0x46
+	KeypadN7 0x47
+	KeypadN8 0x48
+	KeypadN9 0x49
+	KeypadNumLock 0x50
+	KeypadSlash 0x51
+	KeypadStar 0x52
+	KeypadPlus 0x53
+	KeypadMinus 0x54
+	KeypadEnter 0x55
+	KeypadDot 0x56
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum KeyCode {
+	Unicode(char),
+	Special(SpecialKeyCode),
+}
+
+impl fmt::Debug for KeyCode {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::KeypadN0
-			| Self::KeypadN1
-			| Self::KeypadN2
-			| Self::KeypadN3
-			| Self::KeypadN4
-			| Self::KeypadN5
-			| Self::KeypadN6
-			| Self::KeypadN7
-			| Self::KeypadN8
-			| Self::KeypadN9
-			| Self::KeypadDot
-			| Self::KeypadStar
-			| Self::KeypadMinus
-			| Self::KeypadPlus
-			| Self::KeypadDivide
-			| Self::KeypadEnter => true,
-			_ => false,
+			Self::Unicode(c) => c.fmt(f),
+			Self::Special(c) => c.fmt(f),
 		}
 	}
 }
 
-impl const Default for ScanCode {
+impl Default for KeyCode {
 	fn default() -> Self {
-		Self::A
+		Self::Unicode('\0')
 	}
 }
 
-impl const From<ScanCode> for u32 {
-	fn from(code: ScanCode) -> u32 {
-		code as u32
-	}
-}
-
-impl const From<ScanCode> for [u8; 4] {
-	fn from(code: ScanCode) -> [u8; 4] {
-		u32::from(code).to_le_bytes()
+impl From<KeyCode> for u32 {
+	fn from(k: KeyCode) -> Self {
+		match k {
+			KeyCode::Unicode(c) => c as _,
+			KeyCode::Special(c) => c.into(),
+		}
 	}
 }
 
 #[derive(Debug)]
-pub struct InvalidScanCode;
+pub struct InvalidKeyCode;
 
-impl const TryFrom<u32> for ScanCode {
-	type Error = InvalidScanCode;
+impl TryFrom<u32> for KeyCode {
+	type Error = InvalidKeyCode;
 
 	fn try_from(n: u32) -> Result<Self, Self::Error> {
-		// FIXME I can't be arsed right now.
-		if (n as usize) < core::mem::variant_count::<Self>() {
-			unsafe { core::mem::transmute(n as u8) }
+		Ok(if n < 0x110000 {
+			KeyCode::Unicode(char::try_from(n).map_err(|_| InvalidKeyCode)?)
 		} else {
-			Err(InvalidScanCode)
-		}
-	}
-}
-
-impl const TryFrom<[u8; 4]> for ScanCode {
-	type Error = InvalidScanCode;
-
-	fn try_from(n: [u8; 4]) -> Result<Self, Self::Error> {
-		u32::from_le_bytes(n).try_into()
+			KeyCode::Special(SpecialKeyCode::try_from(n).map_err(|_| InvalidKeyCode)?)
+		})
 	}
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
-	Release(ScanCode),
-	Press(ScanCode),
+	Release(KeyCode),
+	Press(KeyCode),
 }
 
-impl const Default for Event {
+impl Default for Event {
 	fn default() -> Self {
 		Self::Release(Default::default())
 	}
 }
 
-impl const From<Event> for u32 {
+impl From<Event> for u32 {
 	fn from(evt: Event) -> u32 {
 		match evt {
 			Event::Release(code) => (0 << 31) | u32::from(code),
@@ -278,28 +211,18 @@ impl const From<Event> for u32 {
 	}
 }
 
-impl const From<Event> for [u8; 4] {
-	fn from(evt: Event) -> [u8; 4] {
-		u32::from(evt).to_le_bytes()
-	}
-}
+#[derive(Debug)]
+pub struct InvalidEvent;
 
-impl const TryFrom<u32> for Event {
-	type Error = InvalidScanCode;
+impl TryFrom<u32> for Event {
+	type Error = InvalidEvent;
 
 	fn try_from(n: u32) -> Result<Self, Self::Error> {
+		let k = KeyCode::try_from(n & !(1 << 31)).map_err(|_| InvalidEvent)?;
 		Ok(if n & (1 << 31) == 0 {
-			Event::Release(ScanCode::try_from(n)?)
+			Event::Release(k)
 		} else {
-			Event::Press(ScanCode::try_from(n & !(1 << 31))?)
+			Event::Press(k)
 		})
-	}
-}
-
-impl const TryFrom<[u8; 4]> for Event {
-	type Error = InvalidScanCode;
-
-	fn try_from(n: [u8; 4]) -> Result<Self, Self::Error> {
-		u32::from_le_bytes(n).try_into()
 	}
 }

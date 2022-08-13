@@ -111,6 +111,7 @@ impl StreamTable {
 				})
 			}
 			Response::Handle(h) => R::Handle(h),
+			Response::Object(o) => R::Share(self.table.share(&o).unwrap() as _),
 		};
 		self.queue.borrow_mut().try_enqueue(job_id, r).unwrap();
 	}
@@ -189,12 +190,13 @@ impl<'a> Request<'a> {
 	}
 }
 
-pub enum Response<'a> {
+pub enum Response<'a, 'b> {
 	Error(rt::Error),
 	Amount(u32),
 	Position(u64),
 	Data(Data<'a>),
 	Handle(Handle),
+	Object(rt::RefObject<'b>),
 }
 
 pub struct Data<'a> {

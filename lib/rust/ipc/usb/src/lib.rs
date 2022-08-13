@@ -2,6 +2,7 @@
 
 pub const SEND_TY_REQUEST: u8 = 0;
 pub const SEND_TY_INTR_IN_ENQUEUE_NUM: u8 = 1;
+pub const SEND_TY_PUBLIC_OBJECT: u8 = 2;
 
 pub const RECV_TY_INTR_IN: u8 = 1;
 
@@ -9,6 +10,10 @@ pub fn send_intr_in_enqueue_num<R>(ep: u8, num: u16, f: impl FnOnce(&[u8]) -> R)
 	assert!((1..16).contains(&ep));
 	let [a, b] = num.to_le_bytes();
 	f(&[SEND_TY_INTR_IN_ENQUEUE_NUM, ep, a, b])
+}
+
+pub fn send_public_object<R>(f: impl FnOnce(&[u8]) -> R) -> R {
+	f(&[SEND_TY_PUBLIC_OBJECT])
 }
 
 pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
