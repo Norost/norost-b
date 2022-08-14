@@ -30,10 +30,10 @@ cp target/$TARGET_KERNEL/$build_dir/nora $O/boot/nora
 cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
-cp init.toml $A/init.toml
-cp usb.scf   $A/usb.scf
+cp init.scf $A/init.scf
+cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
-cp -r ssh    $A/ssh_conf
+cp -r ssh $A/ssh_conf
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then

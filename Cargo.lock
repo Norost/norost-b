@@ -690,11 +690,10 @@ dependencies = [
 name = "init"
 version = "0.2.0"
 dependencies = [
+ "nora_scf",
+ "norost_rt_default",
  "norostb_rt",
  "norostb_rt_alloc",
- "serde",
- "serde_derive",
- "toml",
 ]
 
 [[package]]

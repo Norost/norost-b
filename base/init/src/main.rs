@@ -1,74 +1,130 @@
+#![no_std]
 #![feature(btree_drain_filter)]
+#![feature(start)]
 
+extern crate alloc;
+
+use alloc::{collections::BTreeMap, vec::Vec};
+use core::time::Duration;
 use norostb_rt as rt;
-use serde_derive::Deserialize;
-use std::collections::BTreeMap;
+use rt_default as _;
 
-#[derive(Debug, Deserialize)]
-struct Programs {
-	program: BTreeMap<String, Program>,
-	stdin: String,
-	stdout: String,
-	stderr: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Program {
-	disabled: Option<bool>,
-	path: String,
-	args: Option<Vec<String>>,
-	env: Option<BTreeMap<String, String>>,
-	after: Option<Vec<String>>,
-	file_root: Option<String>,
-	net_root: Option<String>,
-	process_root: Option<String>,
-	stdin: Option<String>,
-	stdout: Option<String>,
-	stderr: Option<String>,
+#[derive(Default)]
+struct Program<'a> {
+	path: &'a [u8],
+	args: Vec<&'a [u8]>,
+	env: BTreeMap<&'a [u8], &'a [u8]>,
+	after: Vec<&'a [u8]>,
+	file_root: Option<&'a [u8]>,
+	net_root: Option<&'a [u8]>,
+	process_root: Option<&'a [u8]>,
+	stdin: Option<&'a [u8]>,
+	stdout: Option<&'a [u8]>,
+	stderr: Option<&'a [u8]>,
 }
 
 macro_rules! log {
-	($fmt:tt $(,)?) => {
-		println!(concat!("[{}] ", $fmt), rt::time::Monotonic::now())
-	};
-	($fmt:tt, $($arg:tt)*) => {
-		println!(concat!("[{}] ", $fmt), rt::time::Monotonic::now(), $($arg)*)
+	($($arg:tt)+) => {
+		rt::eprintln!($($arg)+)
 	};
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+	main()
+}
+
+fn main() -> ! {
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
-	let root = rt::Object::from_raw(0);
+	let root = rt::Object::from_raw(0 << 24 | 0);
+	let stdout @ stderr = root
+		.open(b"system/log")
+		.map(|o| rt::RefObject::from_raw(o.into_raw()))
+		.ok();
+	rt::io::set_stdout(stdout);
+	rt::io::set_stderr(stderr);
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
 
 	// Read arguments
-	log!("Parsing drivers/init.toml");
-	let args = drivers.open(b"init.toml").unwrap();
-	let args_len = args.seek(rt::io::SeekFrom::End(0)).unwrap();
-	args.seek(rt::io::SeekFrom::Start(0)).unwrap();
-	let mut args_buf = Vec::new();
-	args_buf.resize(args_len.try_into().unwrap(), 0);
-	args.read(&mut args_buf).unwrap();
-	let Programs {
-		program: mut programs,
-		stdin: stdin_path,
-		stdout: stdout_path,
-		stderr: stderr_path,
-	} = match toml::from_slice(&args_buf) {
-		Ok(p) => p,
-		Err(e) => {
-			eprintln!("{}", e);
-			std::process::exit(1);
+	let cfg = drivers.open(b"init.scf").unwrap();
+	let len = usize::try_from(cfg.seek(rt::io::SeekFrom::End(0)).unwrap()).unwrap();
+	let (ptr, len2) = cfg.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
+	assert!(len2 >= len);
+	let cfg = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
+	let mut it = scf::parse(cfg).map(Result::unwrap);
+
+	use scf::Token;
+	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> &'a [u8] {
+		match it.next() {
+			Some(Token::Str(s)) => s,
+			_ => panic!("expected string"),
 		}
+	}
+	let is_begin = |it: &mut dyn Iterator<Item = Token>| match it.next() {
+		Some(Token::End) => false,
+		Some(Token::Begin) => true,
+		_ => panic!("expected '(' or ')'"),
 	};
+
+	let mut stdin_path @ mut stdout_path @ mut stderr_path = None;
+	let mut programs = Vec::new();
+	'c: while let Some(tk) = it.next() {
+		rt::dbg!(tk);
+		assert!(tk == Token::Begin);
+		match get_str(&mut it) {
+			b"stdin" => stdin_path = Some(get_str(&mut it)),
+			b"stdout" => stdout_path = Some(get_str(&mut it)),
+			b"stderr" => stderr_path = Some(get_str(&mut it)),
+			b"programs" => {
+				while is_begin(&mut it) {
+					let mut p = Program::default();
+					p.path = get_str(&mut it);
+					let mut disabled = false;
+					rt::println!("program");
+					'p: while is_begin(&mut it) {
+						match get_str(&mut it) {
+							b"disabled" => disabled = true,
+							b"stdin" => p.stdin = Some(get_str(&mut it)),
+							b"stdout" => p.stdout = Some(get_str(&mut it)),
+							b"stderr" => p.stderr = Some(get_str(&mut it)),
+							b"file_root" => p.file_root = Some(get_str(&mut it)),
+							b"net_root" => p.net_root = Some(get_str(&mut it)),
+							b"process_root" => p.process_root = Some(get_str(&mut it)),
+							a @ b"args" | a @ b"after" => loop {
+								match it.next() {
+									Some(Token::Str(s)) => match a {
+										b"args" => p.args.push(s),
+										b"after" => p.after.push(s),
+										_ => unreachable!(),
+									},
+									Some(Token::End) => continue 'p,
+									_ => panic!("expected ')' or string"),
+								}
+							},
+							s => panic!("unknown property {:?}", s),
+						}
+						assert!(it.next() == Some(Token::End));
+					}
+					if !disabled {
+						programs.push(p);
+					}
+				}
+				continue 'c;
+			}
+			_ => panic!("unknown section"),
+		}
+		assert!(it.next() == Some(Token::End));
+	}
+	let stdin_path = stdin_path.unwrap();
+	let stdout_path = stdout_path.unwrap();
+	let stderr_path = stderr_path.unwrap();
 
 	// Open stdin, stdout, stderr
 	// Try to share stdin/out/err handles as it reduces the real amount of handles used by the
 	// kernel and the servers.
-	let open =
-		|p: &str| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p.as_bytes()).unwrap());
+	let open = |p: &[u8]| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p).unwrap());
 	let stdin = open(&stdin_path);
 	let stdout = if stdout_path == stdin_path {
 		stdin
@@ -86,23 +142,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	rt::io::set_stdout(Some(stdout));
 	rt::io::set_stderr(Some(stderr));
 
-	programs.retain(|_, p| !p.disabled.unwrap_or(false));
-
 	// Launch programs
 	log!("Launching {} programs", programs.len());
 	while !programs.is_empty() {
-		programs.retain(|name, program| {
-			for f in program.after.as_ref().iter().flat_map(|i| i.iter()) {
+		programs.retain(|program| {
+			for f in program.after.iter() {
 				// TODO open is inefficient.
-				if root.open(f.as_bytes()).is_err() {
+				if root.open(f).is_err() {
 					return true;
 				}
 			}
 
-			let open = |base: &Option<String>| match base.as_deref() {
+			let open = |base: &Option<&[u8]>| match base {
 				None => None,
-				Some("") => Some(None),
-				Some(path) => Some(Some(root.open(path.as_bytes()).expect(&path))),
+				Some(b"") => Some(None),
+				Some(path) => Some(Some(root.open(path).unwrap())),
 			};
 			fn select<'a>(
 				base: &'a Option<Option<rt::Object>>,
@@ -129,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			let proc_root = select(&t, &process_root);
 
 			let binary = drivers
-				.open(program.path.as_bytes())
+				.open(program.path)
 				.unwrap_or_else(|e| panic!("failed to open {:?}: {:?}", &program.path, e));
 			let r = rt::Process::new(
 				&process_root,
@@ -143,28 +197,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 				.chain(file_root.map(|r| (rt::args::ID_FILE_ROOT, r)))
 				.chain(net_root.map(|r| (rt::args::ID_NET_ROOT, r)))
 				.chain(proc_root.map(|r| (rt::args::ID_PROCESS_ROOT, r))),
-				[name]
+				[program.path]
 					.into_iter()
-					.chain(program.args.iter().flat_map(|i| i.iter()))
-					.map(|s| s.as_bytes()),
-				program
-					.env
-					.iter()
-					.flat_map(|i| i.iter())
-					.map(|(k, v)| (k.as_bytes(), v.as_bytes())),
+					.chain(program.args.iter().copied()),
+				program.env.iter(),
 			);
 			match r {
-				Ok(_) => log!("Launched {:?}", name),
-				Err(e) => log!("Failed to launch {:?}: {:?}", name, e),
+				Ok(_) => log!("Launched {:?}", program.path),
+				Err(e) => log!("Failed to launch {:?}: {:?}", program.path, e),
 			}
 
 			false
 		});
 		// TODO poll for changes instead of busy waiting.
-		rt::thread::sleep(std::time::Duration::from_millis(1));
+		rt::thread::sleep(Duration::from_millis(1));
 	}
 
 	log!("Finished init");
 
-	Ok(())
+	rt::exit(0);
 }
