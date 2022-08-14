@@ -25,8 +25,6 @@ fn main() -> ! {
 	ipc_usb::send_public_object(|d| stdout.write(d)).unwrap();
 	stdout.share(&public_out).unwrap();
 
-	public_in.write_all(b"halal ahkbar").unwrap();
-
 	loop {
 		let mut buf = [0; 32];
 		let len = stdin.read(&mut buf).unwrap();
