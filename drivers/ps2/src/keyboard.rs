@@ -123,8 +123,6 @@ impl Keyboard {
 			.unwrap();
 		ps2.read_port_data_with_acknowledge().unwrap();
 
-		rt::dbg!(&config);
-
 		Self {
 			events: Default::default(),
 			readers: Default::default(),

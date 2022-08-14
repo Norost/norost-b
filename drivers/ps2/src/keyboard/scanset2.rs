@@ -1,3 +1,6 @@
+/// ## References
+///
+/// (USB HID to PS/2)[https://web.archive.org/web/20030701121507/http://microsoft.com/hwdev/download/tech/input/translate.pdf]
 use core::mem;
 
 /// PS/2 Scanset2 to USB HID translator
@@ -12,7 +15,13 @@ enum State {
 	#[default]
 	None,
 	Escape,
-	LongEscape,
+	LongEscape(PauseState),
+}
+
+#[derive(Clone, Copy)]
+enum PauseState {
+	Wait14,
+	Wait77,
 }
 
 impl Translator {
@@ -29,30 +38,39 @@ impl Translator {
 				if !matches!(self.state, State::None) {
 					log!("long escape sequence sent when state is not none");
 				}
-				self.state = State::LongEscape;
+				self.state = State::LongEscape(PauseState::Wait14);
 				None
 			}
 			0xf0 => {
-				self.release.then(|| log!("release already set"));
+				if self.release && !matches!(self.state, State::LongEscape(_)) {
+					log!("release already set");
+				}
 				self.release = true;
 				None
 			}
 			_ => {
 				let b = match self.state {
 					State::None => translate_single(byte),
+					State::Escape if byte == 0x12 => {
+						// Just ignore, I'm done with this multi-scancode bullshit.
+						// (This is prepended to print screen, which is E0 7C)
+						self.state = State::None;
+						return None;
+					}
 					State::Escape => translate_escaped(byte),
-					State::LongEscape => todo!(),
+					State::LongEscape(PauseState::Wait14) if byte == 0x14 => {
+						self.state = State::LongEscape(PauseState::Wait77);
+						return None;
+					}
+					State::LongEscape(PauseState::Wait77) if byte == 0x77 => Some(0x48),
+					State::LongEscape(_) => None,
 				};
 				if let Some(b) = b {
 					buf[0] = b;
 					self.state = State::None;
 					Some((mem::take(&mut self.release), &buf[..1]))
 				} else {
-					match self.state {
-						State::None => log!("unknown sequence [{:02x}]", byte),
-						State::Escape => log!("unknown sequence [e0 {:02x}]", byte),
-						State::LongEscape => todo!(),
-					}
+					log!("unknown sequence");
 					self.state = State::None;
 					self.release = false;
 					None

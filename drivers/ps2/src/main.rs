@@ -7,9 +7,9 @@
 extern crate alloc;
 
 macro_rules! log {
-	($($arg:tt)+) => {{
-		let _ = rt::io::stderr().map(|o| core::writeln!(o, $($arg)+));
-	}};
+	($($arg:tt)+) => {
+		rt::eprintln!($($arg)+)
+	};
 }
 
 mod keyboard;
