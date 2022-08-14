@@ -67,8 +67,10 @@ file_root = ""
 
 [program.scancode_to_char]
 path = "scancode_to_char"
-args = [ "keyboard", "ps2/keyboard/stream" ]
-after = [ "ps2/keyboard/stream" ]
+#args = [ "keyboard", "ps2/keyboard/stream" ]
+#after = [ "ps2/keyboard/stream" ]
+args = [ "keyboard", "usb/handlers/usb_keyboard_share_test_yay" ]
+after = [ "usb/handlers/usb_keyboard_share_test_yay" ]
 file_root = ""
 
 [program.ssh]
