@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ./mkiso.sh $MKISO_ARGS || exit $?
-make disk0 || exit $?
+make disk0 usb0 || exit
 
 cpu="--enable-kvm -cpu host"
 
@@ -12,11 +12,16 @@ exec qemu-system-x86_64 \
 	-m 256M \
 	-machine q35 \
 	-drive format=raw,media=cdrom,file=norost.iso \
-	-serial mon:stdio \
 	-drive file=disk0,format=raw,if=none,id=disk0 \
+	-drive file=usb0,format=raw,if=none,id=usb0 \
+	-serial mon:stdio \
 	-device virtio-blk-pci,drive=disk0 \
 	-netdev user,id=net0,hostfwd=tcp::5555-:80,hostfwd=tcp::2222-:22 \
 	-device virtio-net-pci,netdev=net0 \
+	-device qemu-xhci \
+	-device usb-kbd \
 	-vga virtio \
 	-s \
 	"$@"
+	#-device usb-mouse \
+	-device usb-storage,drive=usb0 \

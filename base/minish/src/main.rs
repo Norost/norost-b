@@ -1,4 +1,5 @@
 #![feature(let_else)]
+#![feature(saturating_int_impl)]
 
 mod term;
 

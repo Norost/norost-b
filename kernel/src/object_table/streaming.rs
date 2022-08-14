@@ -35,6 +35,8 @@ pub struct StreamingTable {
 	/// The maximum amount of memory a single request may allocate **minus one**.
 	// FIXME this can overflow on 32-bit architectures when adding +1
 	max_request_mem: u32,
+	/// Outgoing shared objects.
+	share_out: Mutex<Arena<Arc<dyn Object>, ()>>,
 }
 
 pub enum NewStreamingTableError {
@@ -79,6 +81,7 @@ impl StreamingTable {
 				..Default::default()
 			}),
 			max_request_mem,
+			share_out: Default::default(),
 		}))
 	}
 
@@ -138,10 +141,17 @@ impl StreamingTable {
 			let job = j.remove(job_id).unwrap_or_else(|| todo!("invalid job id"));
 			match resp.get() {
 				Ok(v) => match job {
-					AnyTicketWaker::Object(w) => w.complete(Ok(Arc::new(StreamObject {
-						table: Arc::downgrade(self),
-						handle: v as _,
-					}))),
+					AnyTicketWaker::Object(w) => w.complete(Ok(if v & 1 << 32 != 0 {
+						self.share_out
+							.lock()
+							.remove(arena::Handle::from_raw(v as u32 as _, ()))
+							.unwrap()
+					} else {
+						Arc::new(StreamObject {
+							table: Arc::downgrade(self),
+							handle: v as _,
+						})
+					})),
 					AnyTicketWaker::Data(w) => {
 						let s = resp.as_slice().unwrap();
 						let buf = self.buffer_mem.get(s);
@@ -179,6 +189,11 @@ impl Object for StreamingTable {
 			}
 			_ => Err(Error::InvalidData),
 		})
+	}
+
+	fn share(&self, object: &Arc<dyn Object>) -> Ticket<u64> {
+		let h = self.share_out.lock().insert(object.clone());
+		(h.into_raw().0 as u64).into()
 	}
 
 	fn memory_object(self: Arc<Self>) -> Option<Arc<dyn MemoryObject>> {

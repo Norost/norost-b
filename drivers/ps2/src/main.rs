@@ -7,9 +7,9 @@
 extern crate alloc;
 
 macro_rules! log {
-	($($arg:tt)+) => {{
-		let _ = rt::io::stderr().map(|o| core::writeln!(o, $($arg)+));
-	}};
+	($($arg:tt)+) => {
+		rt::eprintln!($($arg)+)
+	};
 }
 
 mod keyboard;
@@ -17,10 +17,12 @@ mod keyboard;
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::boxed::Box;
 use async_std::{
+	fs,
 	io::{Read, Write},
 	object::RefAsyncObject,
 	task,
 };
+use core::time::Duration;
 use driver_utils::os::{
 	portio::PortIo,
 	stream_table::{JobId, Request, Response, StreamTable},
@@ -138,13 +140,14 @@ const PORT_TEST_CLOCK_STUCK_HIGH: u8 = 0x02;
 const PORT_TEST_DATA_STUCK_LOW: u8 = 0x03;
 const PORT_TEST_DATA_STUCK_HIGH: u8 = 0x04;
 
+const PORT_SELF_TEST_PASSED: u8 = 0xaa;
 const PORT_ACKNOWLEDGE: u8 = 0xfa;
 const PORT_RESEND: u8 = 0xfe;
 
 const DEVICE_MF2_KEYBOARD: u8 = 0xab;
 
 // TODO determine what a reasonable timeout is.
-const TIMEOUT: u32 = 100_000;
+const TIMEOUT_MS: u32 = 100;
 
 enum Command {
 	ReadControllerConfiguration = 0x20,
@@ -191,6 +194,7 @@ enum PortCommand {
 	Identify = 0xf2,
 	EnableScanning = 0xf4,
 	DisableScanning = 0xf5,
+	Reset = 0xff,
 }
 
 #[derive(Debug, PartialEq)]
@@ -229,10 +233,11 @@ pub struct Ps2 {
 
 impl Ps2 {
 	fn write_command(&self, cmd: Command) -> Result<(), Timeout> {
-		for _ in 0..TIMEOUT {
+		for _ in 0..TIMEOUT_MS {
 			if self.io.in8(STATUS) & STATUS_INPUT_FULL == 0 {
 				return Ok(self.io.out8(COMMAND, cmd as u8));
 			}
+			rt::thread::sleep(Duration::from_millis(1));
 		}
 		Err(Timeout)
 	}
@@ -244,19 +249,21 @@ impl Ps2 {
 	}
 
 	fn read_data(&self) -> Result<u8, Timeout> {
-		for _ in 0..TIMEOUT {
+		for _ in 0..TIMEOUT_MS {
 			if self.io.in8(STATUS) & STATUS_OUTPUT_FULL != 0 {
 				return Ok(self.io.in8(DATA));
 			}
+			rt::thread::sleep(Duration::from_millis(1));
 		}
 		Err(Timeout)
 	}
 
 	fn write_data(&self, byte: u8) -> Result<(), Timeout> {
-		for _ in 0..TIMEOUT {
+		for _ in 0..TIMEOUT_MS {
 			if self.io.in8(STATUS) & STATUS_INPUT_FULL == 0 {
 				return Ok(self.io.out8(DATA, byte));
 			}
+			rt::thread::sleep(Duration::from_millis(1));
 		}
 		Err(Timeout)
 	}
@@ -324,7 +331,6 @@ impl Ps2 {
 
 	fn init() -> (Self, [Option<Box<dyn Device>>; 2]) {
 		// https://wiki.osdev.org/%228042%22_PS/2_Controller#Initialising_the_PS.2F2_Controller
-
 		let mut slf = Self {
 			io: PortIo::new().unwrap(),
 		};
@@ -398,12 +404,27 @@ impl Ps2 {
 			}
 
 			// Initialize drivers for any detected PS/2 devices
-			for (i, port) in [Port::P1]
+			for (i, (port, enable_cmd)) in [(Port::P1, Command::EnablePort1)]
 				.into_iter()
-				.chain(two_channels.then(|| Port::P2))
+				.chain(two_channels.then(|| (Port::P2, Command::EnablePort2)))
 				.enumerate()
 			{
-				slf.write_command(Command::EnablePort1).unwrap();
+				slf.write_command(enable_cmd).unwrap();
+
+				// Reset to clear buffer
+				slf.write_port_command(port, PortCommand::Reset).unwrap();
+				slf.read_port_data_with_acknowledge().unwrap();
+				assert!(
+					slf.read_port_data().unwrap() == PORT_SELF_TEST_PASSED,
+					"reset & self test failed"
+				);
+
+				// FIXME resetting the device does not seem to actually clear the buffer, or
+				// at least, there is a single lingering byte.
+				// Reading now works well enough as long as the user doesn't mash the keyboard
+				// really fast.
+				let _ = slf.read_port_data();
+
 				slf.write_port_command(port, PortCommand::DisableScanning)
 					.unwrap();
 				slf.read_port_data_with_acknowledge().unwrap();

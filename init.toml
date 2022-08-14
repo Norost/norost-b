@@ -3,16 +3,13 @@ stdout = "system/log"
 stderr = "system/log"
 
 [program.minish]
-disabled = true
 path = "minish"
 file_root = ""
-#after = [ "gui_cli", "keyboard/stream" ]
-#after = [ "keyboard/stream" ]
-#stdin = "keyboard/stream"
-#stdout = "gui_cli/write"
-#stderr = "gui_cli/write"
+stdin = "keyboard/stream"
+after = [ "keyboard" ]
 
 [program.fs_fat]
+disabled = true
 path = "fs_fat"
 args = [ "file", "disk/data" ]
 target = "file"
@@ -31,7 +28,13 @@ path = "image_viewer"
 after = [ "window_manager" ]
 file_root = ""
 
+[program.usb]
+path = "usb"
+file_root = ""
+process_root = "process"
+
 [program.virtio_blk]
+disabled = true
 path = "virtio_block"
 args = [ "disk" ]
 target = "disk"
@@ -45,6 +48,7 @@ target = "net"
 file_root = ""
 
 [program.virtio_net]
+disabled = true
 path = "virtio_net"
 args = [ "net" ]
 target = "net"
@@ -58,18 +62,19 @@ file_root = "file"
 net_root = "net"
 
 [program.ps2]
-disabled = true
 path = "ps2"
 file_root = ""
 
 [program.scancode_to_char]
-disabled = true
 path = "scancode_to_char"
-args = [ "keyboard", "ps2/keyboard/stream" ]
-after = [ "ps2/keyboard/stream" ]
+#args = [ "keyboard", "ps2/keyboard/stream" ]
+#after = [ "ps2/keyboard/stream" ]
+args = [ "keyboard", "usb/handlers/usb_keyboard_share_test_yay" ]
+after = [ "usb/handlers/usb_keyboard_share_test_yay" ]
 file_root = ""
 
 [program.ssh]
+disabled = true
 path = "ssh"
 args = [ "drivers/ssh_conf/ssh.toml" ]
 after = [ "net" ]

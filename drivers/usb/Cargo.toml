@@ -1,0 +1,33 @@
+[package]
+name = "driver_usb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.pci]
+path = "../../lib/rust/pci"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"
+
+[dependencies.driver_utils]
+path = "../../lib/rust/driver_utils"
+default-features = false
+features = ["alloc", "accessor"]
+
+[dependencies.xhci]
+version = "0.8"
+
+[dependencies.nora_scf]
+path = "../../../lib/nora_scf"
+
+[dependencies.ipc_usb]
+path = "../../lib/rust/ipc/usb"
+
+[dependencies.io_queue_rt]
+package = "nora_io_queue_rt"
+path = "../../lib/rust/io_queue_rt"

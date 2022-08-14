@@ -41,62 +41,31 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let char_buf = RefCell::new(VecDeque::new());
 	let readers = RefCell::new(driver_utils::Arena::new());
 	let pending_read = Cell::new(None);
-	let shifts = Cell::new(0);
 
 	let do_read = || async {
-		use scancodes::{Event, ScanCode};
+		use scancodes::{Event, KeyCode, SpecialKeyCode};
 		// FIXME https://github.com/rust-lang/rust/issues/99385
 		// It *was* fine up until recently. Imma keep using it for now...
 		let (res, mut buf) = input.read(Vec::with_capacity(4)).await;
 		res.unwrap();
 		assert_eq!(buf.len(), 4, "incomplete scancode");
-		let chr = match Event::try_from(<[u8; 4]>::try_from(&buf[..]).unwrap()).unwrap() {
-			Event::Press(ScanCode::LeftShift) | Event::Press(ScanCode::RightShift) => {
-				shifts.set(shifts.get() + 1);
-				None
-			}
-			Event::Release(ScanCode::LeftShift) | Event::Release(ScanCode::RightShift) => {
-				shifts.set(shifts.get() - 1);
-				None
-			}
-			Event::Press(s) => match s {
-				ScanCode::Backspace => Some(0x7f), // DEL
-				ScanCode::Enter => Some(b'\n'),
-				ScanCode::ForwardSlash => Some(b'/'),
-				ScanCode::BackSlash => Some(b'\\'),
-				ScanCode::Colon => Some(b':'),
-				ScanCode::Semicolon => Some(b';'),
-				ScanCode::Comma => Some(b','),
-				ScanCode::Dot => Some(b'.'),
-				ScanCode::SingleQuote => Some(b'\''),
-				ScanCode::DoubleQuote => Some(b'"'),
-				ScanCode::Space => Some(b' '),
-				ScanCode::Minus if shifts.get() == 0 => Some(b'-'),
-				ScanCode::Minus if shifts.get() > 0 => Some(b'_'),
-				s => s
-					.alphabet_to_char()
-					.or_else(|| s.bracket_to_char())
-					.or_else(|| s.number_to_char())
-					.map(|c| {
-						if shifts.get() > 0 {
-							c.to_ascii_uppercase() as u8
-						} else {
-							c as u8
-						}
-					}),
-			},
-			Event::Release(_) => None,
+		let evt = u32::from_le_bytes(buf[..].try_into().unwrap());
+		let chr = match Event::try_from(evt).unwrap() {
+			Event::Press(KeyCode::Unicode(c)) => Some(c),
+			_ => None,
 		};
 		if let Some(chr) = chr {
+			let mut b = [0; 4];
+			let chr = chr.encode_utf8(&mut b).as_bytes();
 			if let Some(job_id) = pending_read.take() {
 				buf.clear();
-				let data = table.alloc(1).expect("out of buffers");
-				data.copy_from(0, &[chr]);
+				let data = table.alloc(chr.len()).expect("out of buffers");
+				data.copy_from(0, chr);
 				table.enqueue(job_id, Response::Data(data));
 				table.flush();
 				return true;
 			} else {
-				char_buf.borrow_mut().push_back(chr);
+				char_buf.borrow_mut().extend(chr);
 			}
 		}
 		false

@@ -4,5 +4,6 @@ target/
 isodir/
 *.iso
 disk0
+usb0
 .gdb_history
 $

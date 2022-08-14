@@ -20,6 +20,23 @@ impl Process {
 		)
 	}
 
+	pub fn new_by_name<'a>(
+		name: impl AsRef<[u8]>,
+		objects: impl Iterator<Item = (u32, impl Into<RefObject<'a>>)>,
+		args: impl Iterator<Item = impl AsRef<[u8]>>,
+		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+	) -> io::Result<Self> {
+		Self::new(
+			io::process_root().ok_or(io::Error::CantCreateObject)?,
+			&io::file_root()
+				.ok_or(io::Error::CantCreateObject)?
+				.open(name.as_ref())?,
+			objects.map(|(i, o)| (i, o.into())),
+			args,
+			env,
+		)
+	}
+
 	fn new_inner<'a>(
 		process_root: RefObject<'_>,
 		binary_elf: RefObject<'_>,
@@ -134,4 +151,98 @@ impl Process {
 
 pub struct ExitStatus {
 	pub code: u8,
+}
+
+pub struct Builder {
+	builder: Object,
+	objects_share: Option<Object>,
+	objects: Vec<(u32, Handle)>,
+	args: Vec<u8>,
+	args_count: u16,
+	env: Vec<u8>,
+	env_count: u16,
+}
+
+impl Builder {
+	pub fn new() -> io::Result<Self> {
+		io::process_root()
+			.ok_or(io::Error::CantCreateObject)?
+			.create(b"new")
+			.map(|builder| Self {
+				builder,
+				objects_share: None,
+				objects: Default::default(),
+				args: Default::default(),
+				args_count: Default::default(),
+				env: Default::default(),
+				env_count: Default::default(),
+			})
+	}
+
+	pub fn set_binary_by_name(&mut self, name: &[u8]) -> io::Result<()> {
+		self.set_binary(
+			&io::file_root()
+				.ok_or(io::Error::CantCreateObject)?
+				.open(name)?,
+		)
+	}
+
+	pub fn set_binary(&mut self, binary: &Object) -> io::Result<()> {
+		self.builder.open(b"binary")?.share(binary).map(|_| ())
+	}
+
+	pub fn add_object(&mut self, id: u32, object: &Object) -> io::Result<()> {
+		if self.objects_share.is_none() {
+			self.objects_share = Some(self.builder.open(b"objects")?);
+		}
+		let handle = self.objects_share.as_mut().unwrap().share(object)? as _;
+		self.objects.push((id, handle));
+		Ok(())
+	}
+
+	pub fn add_args<I>(&mut self, args: I) -> io::Result<()>
+	where
+		I: IntoIterator,
+		I::IntoIter: ExactSizeIterator,
+		<I::IntoIter as Iterator>::Item: AsRef<[u8]>,
+	{
+		let args = args.into_iter();
+		if let Some(n) = usize::from(self.args_count)
+			.checked_add(args.len())
+			.and_then(|n| u16::try_from(n).ok())
+		{
+			for a in args {
+				let l = u16::try_from(a.as_ref().len()).map_err(|_| io::Error::CantCreateObject)?;
+				self.args.extend_from_slice(&l.to_le_bytes());
+				self.args.extend_from_slice(a.as_ref());
+			}
+			self.args_count = n;
+			Ok(())
+		} else {
+			Err(io::Error::CantCreateObject)
+		}
+	}
+
+	pub fn spawn(self) -> io::Result<Process> {
+		let mut stack = Vec::new();
+
+		// objects
+		stack.extend_from_slice(&(self.objects.len() as u32).to_le_bytes());
+		for (t, h) in self.objects {
+			stack.extend_from_slice(&t.to_le_bytes());
+			stack.extend_from_slice(&h.to_le_bytes());
+		}
+
+		// args
+		stack.extend_from_slice(&self.args_count.to_le_bytes());
+		stack.extend_from_slice(&self.args);
+
+		// env
+		stack.extend_from_slice(&self.env_count.to_le_bytes());
+		stack.extend_from_slice(&self.env);
+
+		self.builder.open(b"stack")?.write(&stack)?;
+
+		self.builder.create(b"spawn").map(Process)
+	}
 }

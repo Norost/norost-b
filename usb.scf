@@ -1,0 +1,14 @@
+; https://www.usb.org/defined-class-codes
+;
+; Format:
+;	(usb-drivers
+;		(<class> <subclass> <protocol>
+;			(<class> <subclass> <protocol> <driver>) ..) ..)
+;
+; Numbers are in hex format and at most two digits.
+
+(usb-drivers
+	(0 0 0
+		(3 1 1 "drivers/usb_kbd")
+		(3 1 2 "drivers/usb_mouse")
+		(8 6 50 "drivers/usb_storage")))

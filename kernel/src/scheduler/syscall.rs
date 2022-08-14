@@ -8,8 +8,8 @@ use crate::{
 		Page,
 	},
 	object_table::{
-		pipe, Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable, SubRange,
-		TinySlice,
+		message_pipe, pipe, Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable,
+		SubRange, TinySlice,
 	},
 	scheduler::{self, process::Process, Thread},
 	util::{erase_handle, unerase_handle},
@@ -332,6 +332,9 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 			.unwrap_or(Err(Error::InvalidObject))
 			.map(|o| [o, u32::MAX]),
 		NewObject::Pipe => proc.add_objects(pipe::new()).map_err(|e| match e {}),
+		NewObject::MessagePipe => proc
+			.add_objects(message_pipe::new())
+			.map_err(|e| match e {}),
 	}
 	.map_or_else(
 		|e| Return {

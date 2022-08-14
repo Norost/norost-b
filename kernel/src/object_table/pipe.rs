@@ -6,6 +6,8 @@ use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
 const MAX_SIZE: usize = 1 << 16;
 
 /// Create a new unidirectional pipe.
+///
+/// The first object is the input, the second is the output.
 pub fn new() -> [Arc<dyn Object>; 2] {
 	let inner = Arc::new(Mutex::default());
 	[Arc::new(PipeIn(inner.clone())), Arc::new(PipeOut(inner))]
@@ -15,8 +17,7 @@ pub fn new() -> [Arc<dyn Object>; 2] {
 struct PipeInner {
 	buf: VecDeque<u8>,
 	// Use VecDequeue so we preserve the read/write order.
-	wake_read: VecDeque<TicketWaker<Box<[u8]>>>,
-	// FIXME avoid intermediate allocation
+	wake_read: VecDeque<(usize, TicketWaker<Box<[u8]>>)>,
 	wake_write: VecDeque<(Box<[u8]>, TicketWaker<u64>)>,
 	flags: u8,
 }
@@ -33,23 +34,37 @@ impl Object for PipeIn {
 		if data.is_empty() {
 			return 0.into();
 		}
-		let max_len = data.len().min(MAX_SIZE);
-		let data = &data[..max_len];
+
 		let mut pipe = self.0.lock();
-		Ticket::new_complete(if pipe.flags & READ_CLOSED != 0 {
-			Ok(0)
-		} else if let Some(w) = pipe.wake_read.pop_front() {
-			w.complete(Ok(data.into()));
-			Ok(max_len as _)
-		} else if pipe.buf.len() < MAX_SIZE {
-			let len = data.len().min(MAX_SIZE - pipe.buf.len());
-			pipe.buf.extend(&data[..len]);
-			Ok(len as _)
+		if pipe.flags & READ_CLOSED != 0 {
+			return 0.into();
+		}
+
+		let mut offt = 0;
+
+		while let Some((max_len, w)) = pipe.wake_read.pop_front() {
+			let max_len = max_len.min(data.len());
+			w.complete(Ok(data[offt..][..max_len].into()));
+			offt += max_len;
+			if offt == data.len() {
+				return (offt as u64).into();
+			}
+		}
+		let data = &data[offt..];
+
+		let max_enqueue = data.len().min(MAX_SIZE - pipe.buf.len());
+		pipe.buf.extend(&data[..max_enqueue]);
+		let data = &data[max_enqueue..];
+		offt += max_enqueue;
+
+		if offt > 0 {
+			(offt as u64).into()
 		} else {
+			let max_len = data.len().min(MAX_SIZE - pipe.buf.len());
 			let (t, w) = Ticket::new();
-			pipe.wake_write.push_back((data.into(), w));
-			return t;
-		})
+			pipe.wake_write.push_back((data[..max_len].into(), w));
+			t
+		}
 	}
 }
 
@@ -79,7 +94,7 @@ impl Object for PipeOut {
 			Ok([].into())
 		} else {
 			let (t, w) = Ticket::new();
-			pipe.wake_read.push_back(w);
+			pipe.wake_read.push_back((length.min(MAX_SIZE), w));
 			return t;
 		})
 	}
@@ -91,7 +106,7 @@ impl Drop for PipeIn {
 		pipe.flags |= WRITE_CLOSED;
 		pipe.wake_read
 			.drain(..)
-			.for_each(|w| w.complete(Ok([].into())))
+			.for_each(|(_, w)| w.complete(Ok([].into())))
 	}
 }
 

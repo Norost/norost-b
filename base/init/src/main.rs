@@ -102,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			let open = |base: &Option<String>| match base.as_deref() {
 				None => None,
 				Some("") => Some(None),
-				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
+				Some(path) => Some(Some(root.open(path.as_bytes()).expect(&path))),
 			};
 			fn select<'a>(
 				base: &'a Option<Option<rt::Object>>,

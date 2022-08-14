@@ -1,3 +1,4 @@
+use core::num::Saturating;
 use std::io::{self, Read, Write};
 use term::{color::Color, Attr, Error, Terminal};
 
@@ -59,9 +60,18 @@ where
 			// Parse backspace & any annoying special characters
 			for i in (prev_len..len).rev() {
 				match data[i] {
-					0x7f => {
-						data.copy_within(i + 1.., i.saturating_sub(1));
-						len = len.saturating_sub(2);
+					// 0x7f = delete, 0x8 = backspace
+					0x7f | 0x8 => {
+						let mut offt = Saturating(i);
+						// include backspace char
+						offt -= 1;
+						// include UTF-8 char
+						while offt.0 > 0 && data.get(offt.0).map_or(false, |c| c >> 6 == 0b10) {
+							offt -= 1;
+						}
+						// remove
+						data.copy_within(i + 1.., offt.0);
+						len = len.saturating_sub(i - offt.0 + 1);
 					}
 					// Please don't break my terminal tyvm
 					0x1b => {

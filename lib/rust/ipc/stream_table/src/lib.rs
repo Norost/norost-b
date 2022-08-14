@@ -106,6 +106,7 @@ impl ServerQueue {
 			Response::Amount(a) => v.set_amount(a),
 			Response::Raw(a) => v.set_raw(a),
 			Response::Slice(s) => v.set_slice(s.into_raw()),
+			Response::Share(h) => v.set_raw(1u64 << 32 | u64::from(h)),
 		};
 		let mut r = raw::Response::default();
 		r.set_id(job_id);
@@ -305,6 +306,7 @@ pub enum Response {
 	Amount(u32),
 	Raw(u64),
 	Slice(Slice),
+	Share(u32),
 }
 
 pub struct AnyResponse(u64);
