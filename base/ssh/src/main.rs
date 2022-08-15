@@ -239,27 +239,26 @@ fn parse_config(path: &str) -> Config {
 		Some(Token::End) => false,
 		_ => panic!("expected '(' or ')'"),
 	};
-	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> Option<&'a [u8]> {
+	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> Option<&'a str> {
 		it.next().and_then(|o| o.into_str())
 	};
 
 	while let Some(tk) = it.next() {
 		assert!(tk == Token::Begin);
 		match get_str(&mut it).expect("expected section name") {
-			b"keys" => {
+			"keys" => {
 				while is_begin(&mut it) {
 					let algo = get_str(&mut it).expect("expected key algorithm");
 					let path = get_str(&mut it).expect("expected key path");
-					let path = core::str::from_utf8(path).unwrap();
 					let prev = match algo {
-						b"ecdsa" => cfg.host_keys.ecdsa.replace(read_key_ecdsa(path)),
+						"ecdsa" => cfg.host_keys.ecdsa.replace(read_key_ecdsa(path)),
 						s => panic!("unknown key algorithm {:?}", s),
 					};
 					assert!(prev.is_none(), "key defined twice");
 					assert!(it.next() == Some(Token::End));
 				}
 			}
-			b"users" => {
+			"users" => {
 				while is_begin(&mut it) {
 					let user = get_str(&mut it).expect("expected user name");
 					let mut c = UserConfig::default();
@@ -267,13 +266,13 @@ fn parse_config(path: &str) -> Config {
 						let algo = get_str(&mut it).expect("expected key algorithm");
 						let path = get_str(&mut it).expect("expected key path");
 						let prev = match algo {
-							b"ed25519" => c.ed25519.replace(path.into()),
+							"ed25519" => c.ed25519.replace(path.as_bytes().into()),
 							s => panic!("unknown key algorithm {:?}", s),
 						};
 						assert!(prev.is_none(), "key defined twice");
 						assert!(it.next() == Some(Token::End));
 					}
-					let prev = cfg.users.insert(user.into(), c);
+					let prev = cfg.users.insert(user.as_bytes().into(), c);
 					assert!(prev.is_none(), "user defined twice");
 				}
 			}

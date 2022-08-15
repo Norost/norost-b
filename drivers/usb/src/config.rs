@@ -30,7 +30,7 @@ pub fn parse(config: &rt::Object) -> Config {
 	let mut drivers = BTreeMap::default();
 	let mut it = nora_scf::parse(&buf);
 
-	let s = for<'a, 'b> |it: &'b mut nora_scf::Iter<'a>| -> &'a [u8] {
+	let s = for<'a, 'b> |it: &'b mut nora_scf::Iter<'a>| -> &'a str {
 		it.next().unwrap().unwrap().into_str().unwrap()
 	};
 
@@ -44,7 +44,7 @@ pub fn parse(config: &rt::Object) -> Config {
 	while let Some(tk) = it.next().map(Result::unwrap) {
 		match tk {
 			Token::Begin => {
-				assert_eq!(it.next(), Some(Ok(Token::Str(b"usb-drivers"))));
+				assert_eq!(it.next(), Some(Ok(Token::Str("usb-drivers"))));
 				match it.next().unwrap().unwrap() {
 					Token::Begin => {
 						let base = trips(&mut it);
@@ -53,7 +53,8 @@ pub fn parse(config: &rt::Object) -> Config {
 								Token::Begin => {
 									let intf = trips(&mut it);
 									let driver = s(&mut it);
-									let prev = drivers.insert((base, intf), Box::from(driver));
+									let prev =
+										drivers.insert((base, intf), Box::from(driver.as_bytes()));
 									assert!(
 										prev.is_none(),
 										"already specified for {:?}",
@@ -85,14 +86,14 @@ impl Config {
 	}
 }
 
-fn parse_hex_u8(s: &[u8]) -> Option<u8> {
+fn parse_hex_u8(s: &str) -> Option<u8> {
 	let f = |c| match c {
 		b'0'..=b'9' => Some(c - b'0'),
 		b'a'..=b'f' => Some(c - b'a' + 10),
 		b'A'..=b'F' => Some(c - b'A' + 10),
 		_ => None,
 	};
-	match s {
+	match s.as_bytes() {
 		&[a] => f(a),
 		&[a, b] => Some(f(a)? << 4 | f(b)?),
 		_ => None,

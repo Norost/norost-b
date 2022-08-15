@@ -56,7 +56,7 @@ fn main() -> ! {
 	let mut it = scf::parse(cfg).map(Result::unwrap);
 
 	use scf::Token;
-	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> &'a [u8] {
+	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> &'a str {
 		match it.next() {
 			Some(Token::Str(s)) => s,
 			_ => panic!("expected string"),
@@ -74,29 +74,29 @@ fn main() -> ! {
 		rt::dbg!(tk);
 		assert!(tk == Token::Begin);
 		match get_str(&mut it) {
-			b"stdin" => stdin_path = Some(get_str(&mut it)),
-			b"stdout" => stdout_path = Some(get_str(&mut it)),
-			b"stderr" => stderr_path = Some(get_str(&mut it)),
-			b"programs" => {
+			"stdin" => stdin_path = Some(get_str(&mut it)),
+			"stdout" => stdout_path = Some(get_str(&mut it)),
+			"stderr" => stderr_path = Some(get_str(&mut it)),
+			"programs" => {
 				while is_begin(&mut it) {
 					let mut p = Program::default();
-					p.path = get_str(&mut it);
+					p.path = get_str(&mut it).as_bytes();
 					let mut disabled = false;
 					rt::println!("program");
 					'p: while is_begin(&mut it) {
 						match get_str(&mut it) {
-							b"disabled" => disabled = true,
-							b"stdin" => p.stdin = Some(get_str(&mut it)),
-							b"stdout" => p.stdout = Some(get_str(&mut it)),
-							b"stderr" => p.stderr = Some(get_str(&mut it)),
-							b"file_root" => p.file_root = Some(get_str(&mut it)),
-							b"net_root" => p.net_root = Some(get_str(&mut it)),
-							b"process_root" => p.process_root = Some(get_str(&mut it)),
-							a @ b"args" | a @ b"after" => loop {
+							"disabled" => disabled = true,
+							"stdin" => p.stdin = Some(get_str(&mut it).as_bytes()),
+							"stdout" => p.stdout = Some(get_str(&mut it).as_bytes()),
+							"stderr" => p.stderr = Some(get_str(&mut it).as_bytes()),
+							"file_root" => p.file_root = Some(get_str(&mut it).as_bytes()),
+							"net_root" => p.net_root = Some(get_str(&mut it).as_bytes()),
+							"process_root" => p.process_root = Some(get_str(&mut it).as_bytes()),
+							a @ "args" | a @ "after" => loop {
 								match it.next() {
 									Some(Token::Str(s)) => match a {
-										b"args" => p.args.push(s),
-										b"after" => p.after.push(s),
+										"args" => p.args.push(s.as_bytes()),
+										"after" => p.after.push(s.as_bytes()),
 										_ => unreachable!(),
 									},
 									Some(Token::End) => continue 'p,
@@ -117,9 +117,9 @@ fn main() -> ! {
 		}
 		assert!(it.next() == Some(Token::End));
 	}
-	let stdin_path = stdin_path.unwrap();
-	let stdout_path = stdout_path.unwrap();
-	let stderr_path = stderr_path.unwrap();
+	let stdin_path = stdin_path.unwrap().as_bytes();
+	let stdout_path = stdout_path.unwrap().as_bytes();
+	let stderr_path = stderr_path.unwrap().as_bytes();
 
 	// Open stdin, stdout, stderr
 	// Try to share stdin/out/err handles as it reduces the real amount of handles used by the
