@@ -1,8 +1,0 @@
-# Just an example :)
-
-[keys]
-# Key generated from StdRng::seed_from_u64(0)
-ecdsa = "drivers/ssh_conf/ssh_ecdsa.priv"
-
-[users.test.keys]
-ed25519 = "drivers/ssh_conf/ssh_test_ed25519.pub"

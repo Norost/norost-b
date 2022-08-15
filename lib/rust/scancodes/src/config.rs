@@ -103,20 +103,16 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 	let mut cfg = Config::default();
 
 	let assert_tk = |tk, eq| (tk == eq).then(|| ()).ok_or(Error::UnexpectedToken);
-	let get_str = |tk| {
-		if let Token::Str(s) = tk {
-			Ok(s)
-		} else {
-			Err(Error::UnexpectedToken)
-		}
-	};
+	fn get_str(tk: Token<'_>) -> Result<&str, Error<'_>> {
+		tk.into_str().ok_or(Error::UnexpectedToken)
+	}
 	let mut next = || it.next().transpose().map_err(Error::Syntax);
 
 	while let Some(tk) = next()? {
 		let mut next = || next()?.ok_or(Error::ExpectedToken);
 		assert_tk(tk, Token::Begin)?;
 		match get_str(next()?)? {
-			b"raw" => loop {
+			"raw" => loop {
 				match next()? {
 					Token::Begin => {}
 					Token::End => break,
@@ -143,7 +139,7 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 				// TODO somehow log or return *warning* if a duplicate key is found
 				let _ = prev;
 			},
-			s @ b"caps" | s @ b"altgr" | s @ b"altgr+caps" => loop {
+			s @ "caps" | s @ "altgr" | s @ "altgr+caps" => loop {
 				match next()? {
 					Token::Begin => {}
 					Token::End => break,
@@ -153,9 +149,9 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 				let source = parse_keycode(get_str(next()?)?)?;
 				assert_tk(next()?, Token::End)?;
 				let prev = match s {
-					b"caps" => cfg.translate_caps.insert(source, target),
-					b"altgr" => cfg.translate_altgr.insert(source, target),
-					b"altgr+caps" => cfg.translate_altgr_caps.insert(source, target),
+					"caps" => cfg.translate_caps.insert(source, target),
+					"altgr" => cfg.translate_altgr.insert(source, target),
+					"altgr+caps" => cfg.translate_altgr_caps.insert(source, target),
 					_ => unreachable!(),
 				};
 				// TODO ditto
@@ -172,90 +168,90 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 pub enum Error<'a> {
 	ExpectedToken,
 	UnexpectedToken,
-	UnknownSection(&'a [u8]),
-	UnknownKeyCode(&'a [u8]),
+	UnknownSection(&'a str),
+	UnknownKeyCode(&'a str),
 	Syntax(scf::Error),
 	InvalidByte,
 	InvalidUtf8,
 	ScancodeTooLong,
 }
 
-fn parse_keycode(s: &[u8]) -> Result<KeyCode, Error> {
+fn parse_keycode(s: &str) -> Result<KeyCode, Error> {
 	use KeyCode::*;
 	use SpecialKeyCode::*;
 	Ok(match s {
-		b"backspace" => Unicode('\x08'),
-		b"space" => Unicode(' '),
-		b"tab" => Unicode('\t'),
-		b"capslock" => Special(CapsLock),
-		b"lshift" => Special(LeftShift),
-		b"rshift" => Special(RightShift),
-		b"lgui" => Special(LeftGui),
-		b"rgui" => Special(RightGui),
-		b"lctrl" => Special(LeftControl),
-		b"rctrl" => Special(RightControl),
-		b"alt" => Special(Alt),
-		b"altgr" => Special(AltGr),
-		b"menu" => Special(Menu),
-		b"enter" => Unicode('\n'),
-		b"esc" => Unicode('\x1b'),
-		b"f0" => Special(F0),
-		b"f1" => Special(F1),
-		b"f2" => Special(F2),
-		b"f3" => Special(F3),
-		b"f4" => Special(F4),
-		b"f5" => Special(F5),
-		b"f6" => Special(F6),
-		b"f7" => Special(F7),
-		b"f8" => Special(F8),
-		b"f9" => Special(F9),
-		b"f10" => Special(F10),
-		b"f11" => Special(F11),
-		b"f12" => Special(F12),
-		b"f13" => Special(F13),
-		b"f14" => Special(F14),
-		b"f15" => Special(F15),
-		b"f16" => Special(F16),
-		b"f17" => Special(F17),
-		b"f18" => Special(F18),
-		b"f19" => Special(F19),
-		b"f20" => Special(F20),
-		b"f21" => Special(F21),
-		b"f22" => Special(F22),
-		b"f23" => Special(F23),
-		b"f24" => Special(F24),
-		b"printscreen" => Special(PrintScreen),
-		b"scrollock" => Special(ScrollLock),
-		b"insert" => Special(Insert),
-		b"home" => Special(Home),
-		b"pageup" => Special(PageUp),
-		b"pagedown" => Special(PageDown),
-		b"delete" => Unicode('\x7f'),
-		b"end" => Special(End),
-		b"up" => Special(UpArrow),
-		b"left" => Special(LeftArrow),
-		b"down" => Special(DownArrow),
-		b"right" => Special(RightArrow),
-		b"kpnumlock" => Special(KeypadNumLock),
-		b"kp/" => Special(KeypadSlash),
-		b"kp*" => Special(KeypadStar),
-		b"kp-" => Special(KeypadMinus),
-		b"kp+" => Special(KeypadPlus),
-		b"kpenter" => Special(KeypadEnter),
-		b"kp." => Special(KeypadDot),
-		b"kp0" => Special(KeypadN0),
-		b"kp1" => Special(KeypadN1),
-		b"kp2" => Special(KeypadN2),
-		b"kp3" => Special(KeypadN3),
-		b"kp4" => Special(KeypadN4),
-		b"kp5" => Special(KeypadN5),
-		b"kp6" => Special(KeypadN6),
-		b"kp7" => Special(KeypadN7),
-		b"kp8" => Special(KeypadN8),
-		b"kp9" => Special(KeypadN9),
-		b"pause" => Special(Pause),
+		"backspace" => Unicode('\x08'),
+		"space" => Unicode(' '),
+		"tab" => Unicode('\t'),
+		"capslock" => Special(CapsLock),
+		"lshift" => Special(LeftShift),
+		"rshift" => Special(RightShift),
+		"lgui" => Special(LeftGui),
+		"rgui" => Special(RightGui),
+		"lctrl" => Special(LeftControl),
+		"rctrl" => Special(RightControl),
+		"alt" => Special(Alt),
+		"altgr" => Special(AltGr),
+		"menu" => Special(Menu),
+		"enter" => Unicode('\n'),
+		"esc" => Unicode('\x1b'),
+		"f0" => Special(F0),
+		"f1" => Special(F1),
+		"f2" => Special(F2),
+		"f3" => Special(F3),
+		"f4" => Special(F4),
+		"f5" => Special(F5),
+		"f6" => Special(F6),
+		"f7" => Special(F7),
+		"f8" => Special(F8),
+		"f9" => Special(F9),
+		"f10" => Special(F10),
+		"f11" => Special(F11),
+		"f12" => Special(F12),
+		"f13" => Special(F13),
+		"f14" => Special(F14),
+		"f15" => Special(F15),
+		"f16" => Special(F16),
+		"f17" => Special(F17),
+		"f18" => Special(F18),
+		"f19" => Special(F19),
+		"f20" => Special(F20),
+		"f21" => Special(F21),
+		"f22" => Special(F22),
+		"f23" => Special(F23),
+		"f24" => Special(F24),
+		"printscreen" => Special(PrintScreen),
+		"scrollock" => Special(ScrollLock),
+		"insert" => Special(Insert),
+		"home" => Special(Home),
+		"pageup" => Special(PageUp),
+		"pagedown" => Special(PageDown),
+		"delete" => Unicode('\x7f'),
+		"end" => Special(End),
+		"up" => Special(UpArrow),
+		"left" => Special(LeftArrow),
+		"down" => Special(DownArrow),
+		"right" => Special(RightArrow),
+		"kpnumlock" => Special(KeypadNumLock),
+		"kp/" => Special(KeypadSlash),
+		"kp*" => Special(KeypadStar),
+		"kp-" => Special(KeypadMinus),
+		"kp+" => Special(KeypadPlus),
+		"kpenter" => Special(KeypadEnter),
+		"kp." => Special(KeypadDot),
+		"kp0" => Special(KeypadN0),
+		"kp1" => Special(KeypadN1),
+		"kp2" => Special(KeypadN2),
+		"kp3" => Special(KeypadN3),
+		"kp4" => Special(KeypadN4),
+		"kp5" => Special(KeypadN5),
+		"kp6" => Special(KeypadN6),
+		"kp7" => Special(KeypadN7),
+		"kp8" => Special(KeypadN8),
+		"kp9" => Special(KeypadN9),
+		"pause" => Special(Pause),
 		b => {
-			let mut s = str::from_utf8(b).map_err(|_| Error::InvalidUtf8)?.chars();
+			let mut s = b.chars();
 			let c = s.next().ok_or(Error::UnknownKeyCode(b))?;
 			if !s.next().is_none() {
 				Err(Error::UnknownKeyCode(b))?;
@@ -265,7 +261,7 @@ fn parse_keycode(s: &[u8]) -> Result<KeyCode, Error> {
 	})
 }
 
-fn parse_hex_u8(s: &[u8]) -> Result<u8, Error> {
+fn parse_hex_u8(s: &str) -> Result<u8, Error> {
 	let f = |c| {
 		Ok(match c {
 			b'0'..=b'9' => c - b'0',
@@ -274,7 +270,7 @@ fn parse_hex_u8(s: &[u8]) -> Result<u8, Error> {
 			_ => return Err(Error::InvalidByte),
 		})
 	};
-	match s {
+	match s.as_bytes() {
 		&[a] => f(a),
 		&[a, b] => Ok(f(a)? << 4 | f(b)?),
 		_ => Err(Error::InvalidByte),

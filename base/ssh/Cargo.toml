@@ -20,8 +20,9 @@ features = ["std"]
 git = "https://git.sr.ht/~demindiro/nora_ssh"
 features = ["no_send"]
 
-[dependencies.toml]
-version = "0.5"
+[dependencies.scf]
+package = "nora_scf"
+path = "../../../lib/nora_scf"
 
 [dependencies.serde]
 version = "1.0"

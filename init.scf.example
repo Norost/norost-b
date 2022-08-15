@@ -1,0 +1,82 @@
+(stdin "uart/0")
+(stdout "system/log")
+(stderr "system/log")
+
+(program
+	(minish
+		(path "minish")
+		(file_root "")
+		(stdin "keyboard/stream")
+		(after "keyboard"))
+	(fs_fat
+		(disabled)
+		(path "fs_fat")
+		(args "file" "disk/data")
+		(target "file")
+		(after "disk/data")
+		(file_root ""))
+	(gui_cli
+		(disabled)
+		(path "gui_cli")
+		(after "window_manager")
+		(file_root ""))
+	(image_viewer
+		(disabled)
+		(path "image_viewer")
+		(after "window_manager")
+		(file_root ""))
+	(usb
+		(path "usb")
+		(file_root "")
+		(process_root "process"))
+	(virtio_blk
+		(disabled)
+		(path "virtio_block")
+		(args "disk")
+		(target "disk")
+		(file_root ""))
+	(virtio_gpu
+		(disabled)
+		(path "virtio_gpu")
+		(args "gpu")
+		(target "net")
+		(file_root ""))
+	(virtio_net
+		(disabled)
+		(path "virtio_net")
+		(args "net")
+		(target "net")
+		(file_root ""))
+	(static_http_server
+		(disabled)
+		(path "static_http_server")
+		(after "file" "net")
+		(file_root "file")
+		(net_root "net"))
+	(ps2
+		(path ps2)
+		(file_root ""))
+	(scancode_to_char
+		(path "scancode_to_char")
+		;(args "keyboard" "ps2/keyboard/stream")
+		;(after "ps2/keyboard/stream")
+		(args "keyboard" "usb/handlers/usb_keyboard_share_test_yay")
+		(after "usb/handlers/usb_keyboard_share_test_yay" ])
+		(file_root ""))
+	(ssh
+		(disabled)
+		(path ssh)
+		(args drivers/ssh_conf/ssh.scf)
+		(after net)
+		(file_root "")
+		(net_root "net")
+		(process_root "process"))
+	(intel_hd_graphics
+		(disabled)
+		(path intel_hd_graphics)
+		(file_root ""))
+	(window_manager
+		(disabled)
+		(path window_manager)
+		(after "gpu/sync")
+		(file_root "")))

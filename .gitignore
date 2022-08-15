@@ -7,3 +7,4 @@ disk0
 usb0
 .gdb_history
 $
+init.scf
