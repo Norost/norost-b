@@ -82,6 +82,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// no reallocations are necessary.
 	let boot_info = || unsafe { bi::BootInfo::new(arg) };
 
+	let mut memory_top = None;
+
 	// Find initfs, kernel & RSDP but just count amount of drivers & ignore the rest
 	for e in boot_info() {
 		match e {
@@ -99,13 +101,30 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				}
 				m => panic!("unknown module type: {:?}", core::str::from_utf8(m)),
 			},
-			bi::Info::MemoryMap(_) => {}
+			bi::Info::MemoryMap(m) => {
+				let _ = writeln!(Stdout, "multiboot2: memory map");
+				assert!(
+					memory_top.is_none(),
+					"memory map has already been specified"
+				);
+				let mut max = 0;
+				for e in m.entries {
+					let _ = writeln!(
+						Stdout,
+						"  {:#10x} {:#10x} {:05}",
+						e.base_address, e.length, e.typ
+					);
+					max = max.max(e.base_address + e.length);
+				}
+				memory_top = Some(max - 1);
+			}
 			bi::Info::AcpiRsdp(r) => rsdp = Some(r),
 		}
 	}
 
 	let kernel = kernel.expect("No kernel");
 	let initfs = initfs.expect("No initfs");
+	let memory_top = memory_top.expect("no memory map");
 	let _ = writeln!(Stdout, "kernel: {:#x} - {:#x}", kernel.start, kernel.end);
 	let _ = writeln!(Stdout, "initfs: {:#x} - {:#x}", initfs.start, initfs.end);
 	info.rsdp.write(*rsdp.expect("no RSDP found"));
@@ -188,12 +207,10 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		}
 	};
 
-	// Determine (guess) the maximum valid physical address & count the amount of regions
-	let mut memory_top = 0;
+	// Count the amount of regions
 	let mut memory_regions_count = 0;
 	iter_regions(&mut |region| {
 		assert!(region.size > 0, "empty region makes no sense");
-		memory_top = memory_top.max(region.base + region.size - 1);
 		memory_regions_count += 1;
 	});
 

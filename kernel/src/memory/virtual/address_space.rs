@@ -1,9 +1,6 @@
 use crate::{
 	arch::r#virtual,
-	memory::{
-		r#virtual::{PPN, RWX},
-		Page,
-	},
+	memory::{r#virtual::RWX, Page},
 	{scheduler::MemoryObject, sync::SpinLock},
 };
 use alloc::{sync::Arc, vec::Vec};
@@ -245,22 +242,6 @@ impl AddressSpace {
 		unsafe { self.mmu_address_space.activate() }
 	}
 
-	/// Identity-map a physical frame.
-	///
-	/// # Returns
-	///
-	/// `true` if a new mapping has been added, `false` otherwise.
-	///
-	/// # Panics
-	///
-	/// `size` must be a multiple of the page size.
-	pub fn identity_map(ppn: PPN, size: usize) -> Result<bool, IdentityMapError> {
-		assert_eq!(size % Page::SIZE, 0);
-		unsafe {
-			r#virtual::add_identity_mapping(ppn.as_phys(), size).map_err(IdentityMapError::Arch)
-		}
-	}
-
 	/// Activate the default address space.
 	///
 	/// # Safety
@@ -270,9 +251,4 @@ impl AddressSpace {
 	pub unsafe fn activate_default() {
 		unsafe { r#virtual::AddressSpace::activate_default() }
 	}
-}
-
-#[derive(Debug)]
-pub enum IdentityMapError {
-	Arch(r#virtual::IdentityMapError),
 }

@@ -8,7 +8,7 @@
 
 use crate::{
 	driver::apic::local_apic,
-	memory::r#virtual::{add_identity_mapping, phys_to_virt},
+	memory::r#virtual::phys_to_virt,
 	object_table::{self, Root},
 	sync::SpinLock,
 };
@@ -50,7 +50,6 @@ where
 
 	let phys = pci.physical_address(0, 0, 0, 0).unwrap();
 	let size = 256 * 32 * 8 * 4096;
-	unsafe { add_identity_mapping(phys.try_into().unwrap(), size).unwrap() };
 	let virt = unsafe { NonNull::new(phys_to_virt(phys.try_into().unwrap())).unwrap() };
 
 	let mut pci = unsafe { Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]) };
@@ -86,16 +85,6 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 					let table = h.full_base_address(table.into()).expect("bar");
 					let table = table.try_as_mmio().expect("mmio bar") + u64::from(table_offset);
 
-					let (pending_offset, pending) = msix.pending();
-					let pending = h.full_base_address(pending.into()).expect("bar");
-					let pending =
-						pending.try_as_mmio().expect("mmio bar") + u64::from(pending_offset);
-
-					use crate::memory::frame::PPN;
-					use crate::memory::r#virtual::AddressSpace;
-
-					let ppn = PPN::try_from_usize((table & !0xfff).try_into().unwrap()).unwrap();
-					AddressSpace::identity_map(ppn, 4096).unwrap();
 					let table = unsafe { phys_to_virt(table) };
 					let table = unsafe {
 						core::slice::from_raw_parts_mut(
@@ -103,12 +92,6 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 							table_size,
 						)
 					};
-
-					let pending_ppn =
-						PPN::try_from_usize((pending & !0xfff).try_into().unwrap()).unwrap();
-					if pending_ppn != ppn {
-						AddressSpace::identity_map(pending_ppn, 4096).unwrap();
-					}
 
 					for e in table.iter_mut() {
 						let irq;
