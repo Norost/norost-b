@@ -18,29 +18,6 @@ use nora_ssh::{
 use rand::rngs::StdRng;
 use serde_derive::Deserialize;
 
-#[derive(Debug, Deserialize)]
-struct HostKeys {
-	ecdsa: Option<Box<str>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UserKeys {
-	ed25519: Option<Box<str>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UserConfig {
-	keys: UserKeys,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Config {
-	keys: HostKeys,
-	// TODO figure out a nicer mechanism for this, i.e. one that doesn't require an ever-growing
-	// config file.
-	users: BTreeMap<Box<str>, UserConfig>,
-}
-
 #[derive(Parser, Debug)]
 struct Args {
 	#[clap(value_parser)]
@@ -50,25 +27,14 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let args = Args::parse();
 
-	let config = std::fs::read(&args.config).unwrap();
-	let config: Config = match toml::from_slice(&config) {
-		Ok(p) => p,
-		Err(e) => Err(format!("ssh: failed to load config: {}", e))?,
-	};
-
-	let key = config.keys.ecdsa.expect("no keys");
-	let key = std::fs::read(&*key).unwrap();
-	let key = std::str::from_utf8(&key).expect("invalid key");
-	let key = key.trim();
-	let key = base85::decode(key).expect("invalid key");
-	let key = ecdsa::SigningKey::<p256::NistP256>::from_bytes(&key).expect("invalid key");
+	let config = parse_config(&args.config);
 
 	async_std::task::block_on(async {
 		let addr = (Ipv4Addr::UNSPECIFIED, 22);
 		let listener = TcpListener::bind(addr).await.unwrap();
 		let server = Server::new(
 			Identifier::new(b"SSH-2.0-nora_ssh example").unwrap(),
-			key,
+			config.host_keys.ecdsa.expect("no host key"),
 			Handlers {
 				listener,
 				users: config.users,
@@ -81,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 struct Handlers {
 	listener: TcpListener,
-	users: BTreeMap<Box<str>, UserConfig>,
+	users: BTreeMap<Box<[u8]>, UserConfig>,
 }
 
 struct User {
@@ -94,17 +60,13 @@ enum UserKey {
 
 impl Handlers {
 	async fn get_user_key(&self, user: &[u8], algorithm: &[u8], key: &[u8]) -> Result<UserKey, ()> {
-		let user = core::str::from_utf8(user).map_err(|_| ())?;
 		let user = self.users.get(user).ok_or(())?;
 		let k = match algorithm {
-			b"ssh-ed25519" => user.keys.ed25519.as_ref(),
+			b"ssh-ed25519" => user.ed25519.as_ref(),
 			_ => None,
 		}
 		.ok_or(())?;
-		let k = async_std::fs::read(k.clone().into_boxed_bytes())
-			.await
-			.0
-			.map_err(|_| ())?;
+		let k = async_std::fs::read(k.clone()).await.0.map_err(|_| ())?;
 		let k = str::from_utf8(&k).map_err(|_| ())?;
 		let k = base85::decode(k.trim()).ok_or(())?;
 		(key == k)
@@ -244,4 +206,92 @@ impl ServerHandlers for Handlers {
 			}
 		}
 	}
+}
+
+#[derive(Default)]
+struct HostKeys {
+	ecdsa: Option<ecdsa::SigningKey<p256::NistP256>>,
+}
+
+// Just as an example
+//
+// Realistically, the server should load the key only when appropriate
+#[derive(Default)]
+struct Config {
+	host_keys: HostKeys,
+	users: BTreeMap<Box<[u8]>, UserConfig>,
+}
+
+#[derive(Default)]
+struct UserConfig {
+	ed25519: Option<Box<[u8]>>,
+}
+
+fn parse_config(path: &str) -> Config {
+	let cfg = std::fs::read(path).unwrap();
+	let mut it = scf::parse(&cfg).map(Result::unwrap);
+
+	let mut cfg = Config::default();
+
+	use scf::Token;
+	let is_begin = |it: &mut dyn Iterator<Item = Token<'_>>| match it.next() {
+		Some(Token::Begin) => true,
+		Some(Token::End) => false,
+		_ => panic!("expected '(' or ')'"),
+	};
+	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> Option<&'a [u8]> {
+		it.next().and_then(|o| o.into_str())
+	};
+
+	while let Some(tk) = it.next() {
+		assert!(tk == Token::Begin);
+		match get_str(&mut it).expect("expected section name") {
+			b"keys" => {
+				while is_begin(&mut it) {
+					let algo = get_str(&mut it).expect("expected key algorithm");
+					let path = get_str(&mut it).expect("expected key path");
+					let path = core::str::from_utf8(path).unwrap();
+					let prev = match algo {
+						b"ecdsa" => cfg.host_keys.ecdsa.replace(read_key_ecdsa(path)),
+						s => panic!("unknown key algorithm {:?}", s),
+					};
+					assert!(prev.is_none(), "key defined twice");
+					assert!(it.next() == Some(Token::End));
+				}
+			}
+			b"users" => {
+				while is_begin(&mut it) {
+					let user = get_str(&mut it).expect("expected user name");
+					let mut c = UserConfig::default();
+					while is_begin(&mut it) {
+						let algo = get_str(&mut it).expect("expected key algorithm");
+						let path = get_str(&mut it).expect("expected key path");
+						let prev = match algo {
+							b"ed25519" => c.ed25519.replace(path.into()),
+							s => panic!("unknown key algorithm {:?}", s),
+						};
+						assert!(prev.is_none(), "key defined twice");
+						assert!(it.next() == Some(Token::End));
+					}
+					let prev = cfg.users.insert(user.into(), c);
+					assert!(prev.is_none(), "user defined twice");
+				}
+			}
+			s => panic!("unknown section {:?}", s),
+		}
+	}
+
+	cfg
+}
+
+fn read_key(path: &str) -> Vec<u8> {
+	let key = std::fs::read(&*path).unwrap();
+	let key = std::str::from_utf8(&key).expect("invalid key");
+	let key = key.trim();
+	base85::decode(key).expect("invalid key")
+}
+
+fn read_key_ecdsa(path: &str) -> ecdsa::SigningKey<p256::NistP256> {
+	let key = read_key(path);
+	ecdsa::SigningKey::from_bytes(&key).expect("invalid key")
 }
