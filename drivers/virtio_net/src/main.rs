@@ -26,6 +26,7 @@ use core::{
 };
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use rt::Error;
+use rt_default as _;
 use smoltcp::wire;
 use tcp::{TcpConnection, TcpListener};
 use udp::UdpSocket;

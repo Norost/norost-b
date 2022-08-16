@@ -37,7 +37,6 @@ members = [
 	"base/gui_cli",
 	"base/image_viewer",
 	"base/init",
-	"base/jail",
 	"base/minish",
 	"base/ssh",
 	"base/static_http_server",

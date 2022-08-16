@@ -17,7 +17,7 @@ version = "0.3"
 optional = true
 
 [features]
-default = ["std", "alloc", "rt"]
+default = ["alloc", "rt"]
 std = []
 alloc = []
 rt = []
