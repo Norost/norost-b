@@ -4,6 +4,8 @@ pub mod apic;
 pub mod hpet;
 #[cfg(feature = "driver-interrupt")]
 mod interrupt;
+#[cfg(feature = "driver-mem")]
+mod mem;
 #[cfg(feature = "driver-pci")]
 pub mod pci;
 #[cfg(feature = "driver-pic")]
@@ -48,6 +50,9 @@ pub unsafe fn init(boot: &boot::Info) {
 		rtc::init();
 
 		uart::init();
+
+		#[cfg(feature = "driver-mem")]
+		mem::init(boot);
 	}
 }
 
@@ -62,4 +67,7 @@ pub fn post_init(root: &Root) {
 
 	#[cfg(feature = "driver-interrupt")]
 	interrupt::post_init(root);
+
+	#[cfg(feature = "driver-mem")]
+	mem::post_init(root);
 }
