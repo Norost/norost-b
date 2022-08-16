@@ -55,6 +55,32 @@ impl Xhci {
 			xhci::Registers::new(mmio_ptr.as_ptr() as _, driver_utils::accessor::Identity)
 		};
 
+		// 4.22.1 Pre-OS to OS Handoff Synchronization
+		{
+			use xhci::extended_capabilities::{ExtendedCapability, List};
+			let ext = unsafe {
+				List::new(
+					mmio_ptr.as_ptr() as _,
+					regs.capability.hccparams1.read_volatile(),
+					driver_utils::accessor::Identity,
+				)
+			};
+			for e in ext.into_iter().flat_map(|mut l| l.into_iter()) {
+				match e {
+					Ok(ExtendedCapability::UsbLegacySupport(mut c)) => {
+						// Wait for BIOS to yield control
+						c.usblegsup.update_volatile(|c| {
+							c.set_hc_os_owned_semaphore();
+						});
+						while c.usblegsup.read_volatile().hc_bios_owned_semaphore() {
+							rt::thread::sleep(core::time::Duration::from_millis(1));
+						}
+					}
+					_ => {}
+				}
+			}
+		}
+
 		// 4.2 Host Controller Initialization
 		let dcbaap = DeviceContextBaseAddressArray::new().unwrap_or_else(|_| todo!());
 		let command_ring = ring::Ring::new().unwrap_or_else(|_| todo!());

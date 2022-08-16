@@ -126,7 +126,6 @@ fn main() -> ! {
 								}
 							}
 							requests::DescriptorResult::Configuration(config) => {
-								rt::dbg!(&config);
 								let base = j.base.unwrap();
 								let mut n = usize::from(config.num_interfaces);
 								let mut driver = None;
@@ -134,7 +133,6 @@ fn main() -> ! {
 								while n > 0 {
 									match it.next().unwrap() {
 										requests::DescriptorResult::Interface(i) => {
-											rt::dbg!(&i);
 											let intf = (i.class, i.subclass, i.protocol);
 											if driver.is_none() {
 												n += usize::from(i.num_endpoints);
@@ -145,7 +143,6 @@ fn main() -> ! {
 											}
 										}
 										requests::DescriptorResult::Endpoint(e) => {
-											rt::dbg!(&e);
 											if driver.is_some() {
 												endpoints.push(e)
 											}
@@ -164,7 +161,7 @@ fn main() -> ! {
 
 								let (driver, interface, intf) = driver.expect("no driver");
 
-								drivers.load_driver(slot, driver, base, intf);
+								drivers.load_driver(slot, driver, base, intf).unwrap();
 
 								let id = ctrl
 									.send_request(
@@ -253,7 +250,6 @@ fn main() -> ! {
 					}
 					(Handle::MAX, p) if p.starts_with(b"handlers/") => {
 						let p = &p["handlers/".len()..];
-						rt::dbg!(core::str::from_utf8(p));
 						if let Some(h) = drivers.handler(p) {
 							Response::Object(h)
 						} else {
