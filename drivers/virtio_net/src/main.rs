@@ -44,7 +44,7 @@ fn start(_: isize, _: *const *const u8) -> isize {
 
 fn main() {
 	let file_root = rt::io::file_root().unwrap();
-	let table_name = rt::args::Args::new()
+	let table_name = rt::args::args()
 		.skip(1)
 		.next()
 		.expect("expected table name");

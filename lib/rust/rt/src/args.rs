@@ -1,4 +1,7 @@
-use crate::sync::{Mutex, MutexGuard};
+use crate::{
+	sync::{Mutex, MutexGuard},
+	RefObject,
+};
 use alloc::{
 	alloc::AllocError,
 	borrow::Cow,
@@ -9,6 +12,10 @@ use core::ptr::{self, NonNull};
 use core::slice;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
+// See note in lib.rs
+#[export_name = "__rt_args_handles"]
+#[linkage = "weak"]
+static HANDLES: AtomicPtr<u32> = AtomicPtr::new(ptr::null_mut());
 // See note in lib.rs
 #[export_name = "__rt_args_args_and_env"]
 #[linkage = "weak"]
@@ -32,7 +39,7 @@ pub struct Args {
 }
 
 impl Args {
-	pub fn new() -> Self {
+	fn new() -> Self {
 		NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed)).map_or(
 			Self {
 				count: 0,
@@ -144,7 +151,7 @@ impl Env {
 		map
 	}
 
-	pub fn new() -> Self {
+	fn new() -> Self {
 		// "The returned iterator contains a snapshot of the process’s environment variables ..." &
 		// "Modifications to environment variables afterwards will not be reflected ..."
 		// means we need to clone it, or at least use some kind of CoW.
@@ -175,6 +182,9 @@ impl Env {
 /// Must be called exactly once during runtime initialization.
 pub(crate) unsafe fn init(arguments: Option<NonNull<u8>>) {
 	let Some(arguments) = arguments else { return };
+
+	HANDLES.store(arguments.cast::<u32>().as_ptr(), Ordering::Relaxed);
+
 	// Parse handles
 	unsafe {
 		let mut arguments = arguments.as_ptr().cast::<u32>();
@@ -209,4 +219,48 @@ unsafe fn get_str<'a>(ptr: *const u8) -> (&'a [u8], *const u8) {
 		unsafe { slice::from_raw_parts(ptr, len) },
 		ptr.wrapping_add(len),
 	)
+}
+
+/// Iterator over all objects that have been passed to this program.
+pub struct Handles {
+	ptr: NonNull<[u32; 2]>,
+	count: u32,
+}
+
+impl Iterator for Handles {
+	type Item = (u32, RefObject<'static>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.count.checked_sub(1).map(|n| {
+			self.count = n;
+			unsafe {
+				let [id, h] = self.ptr.as_ptr().read();
+				self.ptr = NonNull::new_unchecked(self.ptr.as_ptr().add(1));
+				(id, RefObject::from_raw(h))
+			}
+		})
+	}
+}
+
+pub fn handles() -> Handles {
+	NonNull::new(HANDLES.load(Ordering::Relaxed)).map_or(
+		Handles {
+			ptr: NonNull::dangling(),
+			count: 0,
+		},
+		|ptr| unsafe {
+			Handles {
+				ptr: NonNull::new_unchecked(ptr.as_ptr().add(1).cast()),
+				count: ptr.as_ptr().read(),
+			}
+		},
+	)
+}
+
+pub fn args() -> Args {
+	Args::new()
+}
+
+pub fn env() -> Env {
+	Env::new()
 }

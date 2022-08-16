@@ -18,7 +18,7 @@ use rt_default as _;
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
-	let mut args = rt::args::Args::new().skip(1);
+	let mut args = rt::args::args().skip(1);
 	let table_name = args.next().expect("expected table path");
 	let input = args.next().expect("expected input object path");
 

@@ -35,7 +35,7 @@ macro_rules! log {
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
-	let table_name = rt::args::Args::new()
+	let table_name = rt::args::args()
 		.skip(1)
 		.next()
 		.expect("expected table path");

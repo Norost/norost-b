@@ -163,7 +163,7 @@ impl Drop for Object {
 }
 
 /// An object by "reference" but with less indirection.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct RefObject<'a> {
 	handle: Handle,
 	_marker: PhantomData<&'a Object>,

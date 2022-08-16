@@ -47,6 +47,10 @@ fn main() -> ! {
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
 
+	for a in rt::args::handles() {
+		rt::dbg!(a);
+	}
+
 	// Read arguments
 	let cfg = drivers.open(b"init.scf").unwrap();
 	let len = usize::try_from(cfg.seek(rt::io::SeekFrom::End(0)).unwrap()).unwrap();
@@ -71,7 +75,6 @@ fn main() -> ! {
 	let mut stdin_path @ mut stdout_path @ mut stderr_path = None;
 	let mut programs = Vec::new();
 	'c: while let Some(tk) = it.next() {
-		rt::dbg!(tk);
 		assert!(tk == Token::Begin);
 		match get_str(&mut it) {
 			"stdin" => stdin_path = Some(get_str(&mut it)),
@@ -82,7 +85,6 @@ fn main() -> ! {
 					let mut p = Program::default();
 					p.path = get_str(&mut it);
 					let mut disabled = false;
-					rt::println!("program");
 					'p: while is_begin(&mut it) {
 						match get_str(&mut it) {
 							"disabled" => disabled = true,
