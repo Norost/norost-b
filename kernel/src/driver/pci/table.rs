@@ -15,6 +15,13 @@ impl Object for PciTable {
 				query: Query {
 					index: AtomicU32::new(0),
 				},
+				extended: false,
+			})),
+			b"xinfo" | b"xinfo/" => Ok(Arc::new(Info {
+				query: Query {
+					index: AtomicU32::new(0),
+				},
+				extended: true,
 			})),
 			_ => path_to_bdf(path)
 				.and_then(|(bus, dev, func)| {
@@ -35,7 +42,7 @@ struct Query {
 }
 
 impl Query {
-	fn next(&self) -> Option<((u16, u16), (u8, u8, u8))> {
+	fn next(&self) -> Option<((u16, u16), (u8, u8, u8), (u8, u8, u8))> {
 		let pci = super::PCI.lock();
 		let pci = pci.as_ref().unwrap();
 		loop {
@@ -45,7 +52,8 @@ impl Query {
 			}
 			let (bus, dev, func) = n_to_bdf(i.into()).unwrap();
 			if let Some(d) = pci.get(bus, dev, func) {
-				return Some(((d.vendor_id(), d.device_id()), (bus, dev, func)));
+				let class = (d.class_code(), d.subclass(), d.programming_interface());
+				return Some(((d.vendor_id(), d.device_id()), class, (bus, dev, func)));
 			}
 		}
 		None
@@ -58,7 +66,7 @@ impl Object for Query {
 		Ticket::new_complete(if length < 2 + 1 + 2 + 1 + 1 {
 			Err(Error::Unknown)
 		} else {
-			Ok(self.next().map_or([].into(), |(_, (b, d, f))| {
+			Ok(self.next().map_or([].into(), |(_, _, (b, d, f))| {
 				bdf_to_string(b, d, f).into_bytes().into()
 			}))
 		})
@@ -67,6 +75,7 @@ impl Object for Query {
 
 struct Info {
 	query: Query,
+	extended: bool,
 }
 
 impl Object for Info {
@@ -74,12 +83,13 @@ impl Object for Info {
 		// bb:dd.f vvvv:dddd
 		Ticket::new_complete(if length < (2 + 1 + 2 + 1 + 1) + 1 + (4 + 1 + 4) {
 			Err(Error::Unknown)
-		} else if let Some(((v, d), (bus, dev, func))) = self.query.next() {
-			Ok(
-				(bdf_to_string(bus, dev, func) + " " + &vendor_device_id_to_str(v, d))
-					.into_bytes()
-					.into(),
-			)
+		} else if let Some(((v, d), class, (bus, dev, func))) = self.query.next() {
+			let mut s = bdf_to_string(bus, dev, func) + " " + &vendor_device_id_to_str(v, d);
+			if self.extended {
+				let (c, sc, i) = class;
+				s += &*format!(" {:02x}/{:02x}/{:02x}", c, sc, i);
+			}
+			Ok(s.into_bytes().into())
 		} else {
 			Ok([].into())
 		})

@@ -31,6 +31,7 @@ cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
 cp init.scf $A/init.scf
+cp pci.scf $A/pci.scf
 cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
 cp -r ssh $A/ssh_conf
@@ -49,12 +50,13 @@ install () {
 
 #install drivers fs_fat             driver_fs_fat
 #install drivers intel_hd_graphics  driver_intel_hd_graphics
+install drivers pci                driver_pci
 install drivers ps2                driver_ps2
 install drivers scancode_to_char   driver_scancode_to_char
 install drivers usb                driver_usb
 install drivers usb_kbd            driver_usb_kbd
-#install drivers virtio_block       driver_virtio_block
-#install drivers virtio_gpu         driver_virtio_gpu
+install drivers virtio_block       driver_virtio_block
+install drivers virtio_gpu         driver_virtio_gpu
 install drivers virtio_net         driver_virtio_net
 install base    init               init
 #install base    gui_cli            gui_cli

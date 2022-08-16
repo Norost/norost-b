@@ -1,0 +1,196 @@
+#![no_std]
+#![feature(closure_lifetime_binder)]
+#![feature(start)]
+
+extern crate alloc;
+
+use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use rt_default as _;
+
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+	main()
+}
+
+fn main() -> ! {
+	let file_root = rt::io::file_root().unwrap();
+	let cfg = load_config();
+	let pci = file_root.open(b"pci").unwrap();
+	let list = pci.open(b"xinfo").unwrap();
+	loop {
+		let mut b = [0; 32];
+		let n = list.read(&mut b).unwrap();
+		if n == 0 {
+			break;
+		}
+		let b = core::str::from_utf8(&b[..n]).unwrap();
+		let (loc, id_class) = b.split_once(' ').unwrap();
+		let (id, class) = id_class.split_once(' ').unwrap();
+		let (v, d) = id.split_once(':').unwrap();
+		let (v, d) = (parse_hex_u16(v).unwrap(), parse_hex_u16(d).unwrap());
+		let mut it = class.split('/');
+		let mut f = || parse_hex_u8(it.next().unwrap()).unwrap();
+		let class = (f(), f(), f());
+		assert!(it.next().is_none());
+
+		let process_root = rt::io::process_root().unwrap();
+		if let Some(d) = cfg
+			.drivers_by_id
+			.get(&(v, d))
+			.or_else(|| cfg.drivers_by_class.get(&class))
+		{
+			if let Err(e) = (|| {
+				let mut b = rt::process::Builder::new()?;
+				b.set_binary_by_name(d.path.as_bytes())?;
+				b.add_args([loc, d.name.as_deref().unwrap_or(loc)])?;
+				if let Some(o) = rt::io::stderr() {
+					b.add_object(rt::args::ID_STDERR, &o)?;
+				}
+				b.add_object(rt::args::ID_FILE_ROOT, &file_root)?;
+				b.add_object(rt::args::ID_PROCESS_ROOT, &process_root)?;
+				b.spawn()
+			})() {
+				rt::eprintln!("failed to launch driver {:?}: {:?}", d.path, e);
+			} else {
+				rt::eprintln!("launched driver {:?} for {}", d.path, loc);
+			}
+		} else {
+			rt::eprintln!("no driver for {:04x}:{:04x}", v, d);
+		}
+	}
+	todo!();
+}
+
+#[derive(Default)]
+struct Config {
+	drivers_by_id: BTreeMap<(u16, u16), Driver>,
+	drivers_by_class: BTreeMap<(u8, u8, u8), Driver>,
+}
+
+struct Driver {
+	path: Box<str>,
+	name: Option<Box<str>>,
+}
+
+fn load_config() -> Config {
+	let file_root = rt::io::file_root().unwrap();
+	let cfg = rt::args::args().skip(1).next().expect("pci object");
+	let cfg = file_root.open(cfg).unwrap();
+	let len = cfg
+		.seek(rt::io::SeekFrom::End(0))
+		.unwrap()
+		.try_into()
+		.unwrap();
+	cfg.seek(rt::io::SeekFrom::Start(0)).unwrap();
+	let mut buf = Vec::with_capacity(len);
+	while buf.len() < len {
+		let l = cfg.read_uninit(buf.spare_capacity_mut()).unwrap().0.len();
+		unsafe { buf.set_len(buf.len() + l) }
+	}
+	let mut cfg = Config::default();
+	let mut it = scf::parse(&buf).map(Result::unwrap);
+
+	let is_begin = |it: &mut dyn Iterator<Item = Token<'_>>| match it.next() {
+		Some(Token::Begin) => true,
+		Some(Token::End) => false,
+		_ => panic!("expected '(' or ')'"),
+	};
+	let get_str = for<'a, 'b> |it: &'b mut dyn Iterator<Item = Token<'a>>| -> Option<&'a str> {
+		it.next().and_then(|tk| tk.into_str())
+	};
+
+	let parse_driver = |it: &mut dyn Iterator<Item = Token<'_>>| {
+		let path = get_str(it).expect("expected driver path");
+		let mut name = None;
+		while is_begin(it) {
+			match get_str(it).expect("expected property name") {
+				"name" => {
+					let prev = name.replace(get_str(it).expect("expected property name"));
+					assert!(prev.is_none(), "multiple names for driver");
+					assert!(it.next() == Some(Token::End));
+				}
+				s => panic!("unknown property {:?}", s),
+			}
+		}
+		Driver {
+			path: path.into(),
+			name: name.map(|n| n.into()),
+		}
+	};
+
+	use scf::Token;
+	while let Some(tk) = it.next() {
+		assert!(tk == Token::Begin);
+		match get_str(&mut it).expect("section name") {
+			"id" => {
+				while is_begin(&mut it) {
+					let vendor = parse_hex_u16(get_str(&mut it).expect("expected vendor ID"))
+						.expect("invalid vendor ID");
+					while is_begin(&mut it) {
+						let device = parse_hex_u16(get_str(&mut it).expect("expected device ID"))
+							.expect("invalid device ID");
+						let prev = cfg
+							.drivers_by_id
+							.insert((vendor, device), parse_driver(&mut it));
+						assert!(
+							prev.is_none(),
+							"multiple drivers for {:04x}:{:04x}",
+							vendor,
+							device
+						);
+					}
+				}
+			}
+			"class" => {
+				while is_begin(&mut it) {
+					let class = parse_hex_u8(get_str(&mut it).expect("expected class"))
+						.expect("invalid class");
+					let subclass = parse_hex_u8(get_str(&mut it).expect("expected subclass"))
+						.expect("invalid subclass");
+					let interface = parse_hex_u8(get_str(&mut it).expect("expected interface"))
+						.expect("invalid interface");
+					let prev = cfg
+						.drivers_by_class
+						.insert((class, subclass, interface), parse_driver(&mut it));
+					assert!(
+						prev.is_none(),
+						"multiple drivers for {:02x} {:02x} {:02x}",
+						class,
+						subclass,
+						interface
+					);
+				}
+			}
+			s => panic!("unknown section {:?}", s),
+		}
+	}
+
+	cfg
+}
+
+fn parse_hex_u8(n: &str) -> Option<u8> {
+	let f = |n| {
+		Some(match n {
+			b'0'..=b'9' => n - b'0',
+			b'a'..=b'f' => n - b'a' + 10,
+			b'A'..=b'F' => n - b'A' + 10,
+			_ => return None,
+		})
+	};
+	match n.as_bytes() {
+		&[a] => f(a),
+		&[a, b] => Some(f(a)? << 4 | f(b)?),
+		_ => None,
+	}
+}
+
+fn parse_hex_u16(n: &str) -> Option<u16> {
+	let f = |n| parse_hex_u8(n).map(u16::from);
+	if n.len() <= 2 {
+		f(n)
+	} else if n.len() <= 4 {
+		Some(f(n.get(..2)?)? << 8 | f(n.get(2..)?)?)
+	} else {
+		None
+	}
+}

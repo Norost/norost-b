@@ -1,0 +1,14 @@
+(id
+	(1af4
+		(1000 "drivers/virtio_net"
+			(name "net"))
+		(1001 "drivers/virtio_block"
+			(name "disk"))
+		(1050 "drivers/virtio_gpu"
+			(name "gpu")))
+	(8086
+		(1616 "drivers/intel_hd_graphics")))
+
+(class
+	(0c 03 30 "drivers/usb"
+		(name "usb")))

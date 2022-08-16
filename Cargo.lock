@@ -313,6 +313,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_pci"
+version = "0.1.0"
+dependencies = [
+ "nora_scf",
+ "norost_rt_default",
+ "norostb_rt",
+ "norostb_rt_alloc",
+]
+
+[[package]]
 name = "driver_ps2"
 version = "0.2.0"
 dependencies = [

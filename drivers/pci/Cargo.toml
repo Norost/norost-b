@@ -1,0 +1,20 @@
+[package]
+name = "driver_pci"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_alloc]
+package = "norostb_rt_alloc"
+path = "../../lib/rust/rt_alloc"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"
+
+[dependencies.scf]
+package = "nora_scf"
+path = "../../../lib/nora_scf"
