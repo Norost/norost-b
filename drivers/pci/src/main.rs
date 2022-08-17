@@ -48,6 +48,7 @@ fn main() -> ! {
 				}
 				b.add_object(b"file", &file_root)?;
 				b.add_object(b"process", &process_root)?;
+				b.add_object(b"pci", &pci.open(loc.as_ref())?)?;
 				b.spawn()
 			})() {
 				rt::eprintln!("failed to launch driver {:?}: {:?}", d.path, e);

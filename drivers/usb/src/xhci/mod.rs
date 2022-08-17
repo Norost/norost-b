@@ -22,12 +22,6 @@ use xhci::{
 	Registers,
 };
 
-const PCI_CLASS: u8 = 0x0c;
-const PCI_SUBCLASS: u8 = 0x03;
-const PCI_INTERFACE: u8 = 0x30;
-
-fn is_interface() {}
-
 pub struct Xhci {
 	event_ring: event::Table,
 	command_ring: ring::Ring<command::Allowed>,
@@ -40,7 +34,7 @@ pub struct Xhci {
 }
 
 impl Xhci {
-	pub fn new(dev: rt::Object) -> Result<Self, &'static str> {
+	pub fn new(dev: &rt::Object) -> Result<Self, &'static str> {
 		let errata = Errata::get(0x1b36, 0x000d);
 
 		let poll = dev.open(b"poll").unwrap();

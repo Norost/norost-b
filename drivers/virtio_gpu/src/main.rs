@@ -42,22 +42,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let root = rt::io::file_root().unwrap();
 	let it = root.open(b"pci/info").unwrap();
-	let dev = loop {
-		let mut r = [0; 32];
-		let l = it.read(&mut r).unwrap();
-		if l == 0 {
-			log!("no VirtIO GPU device found");
-			return 1;
-		}
-		let s = str::from_utf8(&r[..l]).unwrap();
-		let (loc, id) = s.split_once(' ').unwrap();
-		if id == "1af4:1050" {
-			let mut path = Vec::from(*b"pci/");
-			path.extend(loc.as_bytes());
-			break path;
-		}
-	};
-	let dev = root.open(&dev).unwrap();
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
 	let poll = dev.open(b"poll").unwrap();
 	let pci = dev
 		.map_object(None, rt::io::RWX::R, 0, usize::MAX)

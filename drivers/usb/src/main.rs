@@ -35,24 +35,13 @@ fn main() -> ! {
 	let file_root = rt::io::file_root().expect("no file root");
 	let conf = config::parse(&file_root.open(b"drivers/usb.scf").unwrap());
 
-	let dev = {
-		let s = b" 1b36:000d";
-		let mut it = file_root.open(b"pci/info").unwrap();
-		let mut buf = [0; 64];
-		loop {
-			let l = it.read(&mut buf).unwrap();
-			assert!(l != 0, "device not found");
-			let dev = &buf[..l];
-			if dev.ends_with(s) {
-				let mut path = Vec::from(*b"pci/");
-				path.extend(&dev[..7]);
-				break file_root.open(&path).unwrap();
-			}
-		}
-	};
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
 
 	let queue = Queue::new(Pow2Size::P5, Pow2Size::P7).unwrap();
-	let mut ctrl = xhci::Xhci::new(dev).unwrap();
+	let mut ctrl = xhci::Xhci::new(&dev).unwrap();
 	let mut drivers = driver::Drivers::new(&queue);
 
 	let mut jobs = BTreeMap::<u64, Job>::default();
