@@ -44,10 +44,10 @@ fn main() -> ! {
 				b.set_binary_by_name(d.path.as_bytes())?;
 				b.add_args([loc, d.name.as_deref().unwrap_or(loc)])?;
 				if let Some(o) = rt::io::stderr() {
-					b.add_object(rt::args::ID_STDERR, &o)?;
+					b.add_object(b"err", &o)?;
 				}
-				b.add_object(rt::args::ID_FILE_ROOT, &file_root)?;
-				b.add_object(rt::args::ID_PROCESS_ROOT, &process_root)?;
+				b.add_object(b"file", &file_root)?;
+				b.add_object(b"process", &process_root)?;
 				b.spawn()
 			})() {
 				rt::eprintln!("failed to launch driver {:?}: {:?}", d.path, e);

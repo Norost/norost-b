@@ -184,26 +184,23 @@ fn main() -> ! {
 			let t = open(&program.process_root);
 			let proc_root = select(&t, &process_root);
 
-			let binary = drivers
-				.open(program.path.as_bytes())
-				.unwrap_or_else(|e| panic!("failed to open {:?}: {:?}", &program.path, e));
-			let r = rt::Process::new(
-				&process_root,
-				&binary,
-				[
-					(rt::args::ID_STDIN, stdin),
-					(rt::args::ID_STDOUT, stdout),
-					(rt::args::ID_STDERR, stderr),
-				]
-				.into_iter()
-				.chain(file_root.map(|r| (rt::args::ID_FILE_ROOT, r)))
-				.chain(net_root.map(|r| (rt::args::ID_NET_ROOT, r)))
-				.chain(proc_root.map(|r| (rt::args::ID_PROCESS_ROOT, r))),
-				[program.path]
-					.into_iter()
-					.chain(program.args.iter().copied()),
-				program.env.iter(),
-			);
+			let r = (|| {
+				let bin = drivers.open(program.path.as_bytes())?;
+				let mut b = rt::process::Builder::new_with(&process_root)?;
+				b.set_binary(&bin)?;
+				b.add_object(b"in", &stdin)?;
+				b.add_object(b"out", &stdout)?;
+				b.add_object(b"err", &stderr)?;
+				file_root.map(|r| b.add_object(b"file", &r)).transpose()?;
+				net_root.map(|r| b.add_object(b"net", &r)).transpose()?;
+				proc_root
+					.map(|r| b.add_object(b"process", &r))
+					.transpose()?;
+				b.add_args(&[program.path])?;
+				b.add_args(&program.args)?;
+				// TODO env
+				b.spawn()
+			})();
 			match r {
 				Ok(_) => log!("Launched {:?}", program.path),
 				Err(e) => log!("Failed to launch {:?}: {:?}", program.path, e),

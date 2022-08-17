@@ -1,111 +1,9 @@
-use crate::{args, io, Handle, Object, RefObject};
+use crate::{io, Handle, Object};
 use alloc::vec::Vec;
 
 pub struct Process(Object);
 
 impl Process {
-	pub fn new<'a>(
-		process_root: impl Into<RefObject<'a>>,
-		binary_elf: impl Into<RefObject<'a>>,
-		objects: impl Iterator<Item = (u32, impl Into<RefObject<'a>>)>,
-		args: impl Iterator<Item = impl AsRef<[u8]>>,
-		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
-	) -> io::Result<Self> {
-		Self::new_inner(
-			process_root.into(),
-			binary_elf.into(),
-			objects.map(|(i, o)| (i, o.into())),
-			args,
-			env,
-		)
-	}
-
-	pub fn new_by_name<'a>(
-		name: impl AsRef<[u8]>,
-		objects: impl Iterator<Item = (u32, impl Into<RefObject<'a>>)>,
-		args: impl Iterator<Item = impl AsRef<[u8]>>,
-		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
-	) -> io::Result<Self> {
-		Self::new(
-			io::process_root().ok_or(io::Error::CantCreateObject)?,
-			&io::file_root()
-				.ok_or(io::Error::CantCreateObject)?
-				.open(name.as_ref())?,
-			objects.map(|(i, o)| (i, o.into())),
-			args,
-			env,
-		)
-	}
-
-	fn new_inner<'a>(
-		process_root: RefObject<'_>,
-		binary_elf: RefObject<'_>,
-		objects: impl Iterator<Item = (u32, RefObject<'a>)>,
-		args: impl Iterator<Item = impl AsRef<[u8]>>,
-		env: impl Iterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
-	) -> io::Result<Self> {
-		let f = |n| u16::try_from(n).unwrap().to_ne_bytes();
-		let proc = process_root.create(b"new")?;
-		let mut stack = Vec::new();
-
-		// binary
-		proc.open(b"binary")?.share(&binary_elf)?;
-
-		// objects
-		{
-			let proc_objects = proc.open(b"objects")?;
-			let i = stack.len();
-			let mut l = 0u32;
-			stack.extend(0u32.to_ne_bytes());
-			for (ty, h) in objects {
-				let t = io::share(proc_objects.as_raw(), h.as_raw())?;
-				let t = Handle::try_from(t).unwrap();
-				stack.extend(ty.to_ne_bytes());
-				stack.extend(t.to_ne_bytes());
-				l += 1;
-			}
-			stack[i..i + 4].copy_from_slice(&l.to_ne_bytes());
-			debug_assert_eq!(
-				stack.len(),
-				i + 4 + l as usize * 8,
-				"stack has unexpected size"
-			);
-		}
-
-		// args
-		{
-			let i = stack.len();
-			let mut l = 0;
-			stack.extend(f(0));
-			for a in args {
-				stack.extend(f(a.as_ref().len()));
-				stack.extend(a.as_ref());
-				l += 1;
-			}
-			stack[i..i + 2].copy_from_slice(&f(l));
-		}
-
-		// env
-		{
-			let i = stack.len();
-			let mut l = 0;
-			stack.extend(f(0));
-			for (k, v) in env {
-				stack.extend(f(k.as_ref().len()));
-				stack.extend(k.as_ref());
-				stack.extend(f(v.as_ref().len()));
-				stack.extend(v.as_ref());
-				l += 1;
-			}
-			stack[i..i + 2].copy_from_slice(&f(l));
-		}
-
-		proc.open(b"stack")?.write(&stack)?;
-
-		proc.create(b"spawn").map(Self)
-	}
-
-	#[inline(always)]
 	pub fn as_object(&self) -> &Object {
 		&self.0
 	}
@@ -120,33 +18,6 @@ impl Process {
 		self.0.get_meta(b"bin/wait".into(), (&mut v).into())?;
 		Ok(ExitStatus { code: v[1] })
 	}
-
-	#[inline]
-	pub fn default_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
-		Self::default_stdio_handles().chain(Self::default_root_handles())
-	}
-
-	#[inline]
-	pub fn default_root_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
-		[
-			(args::ID_FILE_ROOT, io::file_root()),
-			(args::ID_NET_ROOT, io::net_root()),
-			(args::ID_PROCESS_ROOT, io::process_root()),
-		]
-		.into_iter()
-		.flat_map(|(ty, h)| h.map(|h| (ty, h)))
-	}
-
-	#[inline]
-	pub fn default_stdio_handles<'a>() -> impl Iterator<Item = (u32, RefObject<'a>)> {
-		[
-			(args::ID_STDIN, io::stdin()),
-			(args::ID_STDOUT, io::stdout()),
-			(args::ID_STDERR, io::stderr()),
-		]
-		.into_iter()
-		.flat_map(|(ty, h)| h.map(|h| (ty, h)))
-	}
 }
 
 pub struct ExitStatus {
@@ -156,7 +27,8 @@ pub struct ExitStatus {
 pub struct Builder {
 	builder: Object,
 	objects_share: Option<Object>,
-	objects: Vec<(u32, Handle)>,
+	objects: Vec<u8>,
+	objects_count: u16,
 	args: Vec<u8>,
 	args_count: u16,
 	env: Vec<u8>,
@@ -165,18 +37,21 @@ pub struct Builder {
 
 impl Builder {
 	pub fn new() -> io::Result<Self> {
-		io::process_root()
-			.ok_or(io::Error::CantCreateObject)?
-			.create(b"new")
-			.map(|builder| Self {
-				builder,
-				objects_share: None,
-				objects: Default::default(),
-				args: Default::default(),
-				args_count: Default::default(),
-				env: Default::default(),
-				env_count: Default::default(),
-			})
+		let r = io::process_root().ok_or(io::Error::CantCreateObject)?;
+		Self::new_with(&r)
+	}
+
+	pub fn new_with(process_root: &Object) -> io::Result<Self> {
+		process_root.create(b"new").map(|builder| Self {
+			builder,
+			objects_share: None,
+			objects: Default::default(),
+			objects_count: Default::default(),
+			args: Default::default(),
+			args_count: Default::default(),
+			env: Default::default(),
+			env_count: Default::default(),
+		})
 	}
 
 	pub fn set_binary_by_name(&mut self, name: &[u8]) -> io::Result<()> {
@@ -188,15 +63,56 @@ impl Builder {
 	}
 
 	pub fn set_binary(&mut self, binary: &Object) -> io::Result<()> {
-		self.builder.open(b"binary")?.share(binary).map(|_| ())
+		self.set_binary_raw(binary.as_raw())
 	}
 
-	pub fn add_object(&mut self, id: u32, object: &Object) -> io::Result<()> {
+	pub fn set_binary_raw(&mut self, binary: Handle) -> io::Result<()> {
+		io::share(self.builder.open(b"binary")?.as_raw(), binary).map(|_| ())
+	}
+
+	pub fn add_object(&mut self, name: &[u8], object: &Object) -> io::Result<()> {
+		self.add_object_raw(name, object.as_raw())
+	}
+
+	pub fn add_object_raw(&mut self, name: &[u8], object: Handle) -> io::Result<()> {
 		if self.objects_share.is_none() {
 			self.objects_share = Some(self.builder.open(b"objects")?);
 		}
-		let handle = self.objects_share.as_mut().unwrap().share(object)? as _;
-		self.objects.push((id, handle));
+		let handle = io::share(self.objects_share.as_mut().unwrap().as_raw(), object)? as u32;
+		inc(&mut self.objects_count)?;
+		add_str(&mut self.objects, name)?;
+		self.objects.extend_from_slice(&handle.to_le_bytes());
+		Ok(())
+	}
+
+	pub fn add_default_objects(&mut self) -> io::Result<()> {
+		self.add_default_stdio_objects()?;
+		self.add_default_root_objects()
+	}
+
+	pub fn add_default_root_objects(&mut self) -> io::Result<()> {
+		for (name, obj) in [
+			("file", io::file_root()),
+			("net", io::net_root()),
+			("process", io::process_root()),
+		] {
+			if let Some(obj) = obj {
+				self.add_object(name.as_bytes(), &obj)?;
+			}
+		}
+		Ok(())
+	}
+
+	pub fn add_default_stdio_objects(&mut self) -> io::Result<()> {
+		for (name, obj) in [
+			("in", io::stdin()),
+			("out", io::stdout()),
+			("err", io::stderr()),
+		] {
+			if let Some(obj) = obj {
+				self.add_object(name.as_bytes(), &obj)?;
+			}
+		}
 		Ok(())
 	}
 
@@ -227,11 +143,8 @@ impl Builder {
 		let mut stack = Vec::new();
 
 		// objects
-		stack.extend_from_slice(&(self.objects.len() as u32).to_le_bytes());
-		for (t, h) in self.objects {
-			stack.extend_from_slice(&t.to_le_bytes());
-			stack.extend_from_slice(&h.to_le_bytes());
-		}
+		stack.extend_from_slice(&self.objects_count.to_le_bytes());
+		stack.extend_from_slice(&self.objects);
 
 		// args
 		stack.extend_from_slice(&self.args_count.to_le_bytes());
@@ -245,4 +158,20 @@ impl Builder {
 
 		self.builder.create(b"spawn").map(Process)
 	}
+}
+
+fn add_str(buf: &mut Vec<u8>, s: &[u8]) -> io::Result<()> {
+	u16::try_from(s.len())
+		.map(|l| {
+			buf.extend_from_slice(&l.to_le_bytes());
+			buf.extend_from_slice(s);
+		})
+		.map_err(|_| io::Error::InvalidData)
+}
+
+fn inc(counter: &mut u16) -> io::Result<()> {
+	counter
+		.checked_add(1)
+		.ok_or(io::Error::CantCreateObject)
+		.map(|c| *counter = c)
 }
