@@ -28,6 +28,13 @@ pub type PPNBox = u32;
 #[cfg(feature = "mem-max-256m")]
 pub type PPNBox = u16;
 
+#[cfg(not(any(feature = "mem-max-16t", feature = "mem-max-256m")))]
+pub type AtomicPPNBox = core::sync::atomic::AtomicU64;
+#[cfg(all(feature = "mem-max-16t", not(feature = "mem-max-256m")))]
+pub type AtomicPPNBox = core::sync::atomic::AtomicU32;
+#[cfg(feature = "mem-max-256m")]
+pub type AtomicPPNBox = core::sync::atomic::AtomicU16;
+
 static DEFAULT: SpinLock<chain::Chain> = SpinLock::new(chain::Chain::new());
 
 impl PPN {

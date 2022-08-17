@@ -22,12 +22,6 @@ use xhci::{
 	Registers,
 };
 
-const PCI_CLASS: u8 = 0x0c;
-const PCI_SUBCLASS: u8 = 0x03;
-const PCI_INTERFACE: u8 = 0x30;
-
-fn is_interface() {}
-
 pub struct Xhci {
 	event_ring: event::Table,
 	command_ring: ring::Ring<command::Allowed>,
@@ -40,7 +34,7 @@ pub struct Xhci {
 }
 
 impl Xhci {
-	pub fn new(dev: rt::Object) -> Result<Self, &'static str> {
+	pub fn new(dev: &rt::Object) -> Result<Self, &'static str> {
 		let errata = Errata::get(0x1b36, 0x000d);
 
 		let poll = dev.open(b"poll").unwrap();
@@ -54,6 +48,32 @@ impl Xhci {
 		let mut regs = unsafe {
 			xhci::Registers::new(mmio_ptr.as_ptr() as _, driver_utils::accessor::Identity)
 		};
+
+		// 4.22.1 Pre-OS to OS Handoff Synchronization
+		{
+			use xhci::extended_capabilities::{ExtendedCapability, List};
+			let ext = unsafe {
+				List::new(
+					mmio_ptr.as_ptr() as _,
+					regs.capability.hccparams1.read_volatile(),
+					driver_utils::accessor::Identity,
+				)
+			};
+			for e in ext.into_iter().flat_map(|mut l| l.into_iter()) {
+				match e {
+					Ok(ExtendedCapability::UsbLegacySupport(mut c)) => {
+						// Wait for BIOS to yield control
+						c.usblegsup.update_volatile(|c| {
+							c.set_hc_os_owned_semaphore();
+						});
+						while c.usblegsup.read_volatile().hc_bios_owned_semaphore() {
+							rt::thread::sleep(core::time::Duration::from_millis(1));
+						}
+					}
+					_ => {}
+				}
+			}
+		}
 
 		// 4.2 Host Controller Initialization
 		let dcbaap = DeviceContextBaseAddressArray::new().unwrap_or_else(|_| todo!());

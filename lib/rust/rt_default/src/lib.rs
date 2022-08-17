@@ -7,7 +7,7 @@
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
 
 fn name() -> &'static str {
-	rt::args::Args::new()
+	rt::args::args()
 		.next()
 		.and_then(|s| core::str::from_utf8(s).ok())
 		.unwrap_or("??")

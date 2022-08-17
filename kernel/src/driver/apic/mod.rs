@@ -26,7 +26,6 @@ where
 	}
 
 	local_apic::init();
-	io_apic::init();
 
 	enable_apic();
 }

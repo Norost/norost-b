@@ -35,24 +35,13 @@ fn main() -> ! {
 	let file_root = rt::io::file_root().expect("no file root");
 	let conf = config::parse(&file_root.open(b"drivers/usb.scf").unwrap());
 
-	let dev = {
-		let s = b" 1b36:000d";
-		let mut it = file_root.open(b"pci/info").unwrap();
-		let mut buf = [0; 64];
-		loop {
-			let l = it.read(&mut buf).unwrap();
-			assert!(l != 0, "device not found");
-			let dev = &buf[..l];
-			if dev.ends_with(s) {
-				let mut path = Vec::from(*b"pci/");
-				path.extend(&dev[..7]);
-				break file_root.open(&path).unwrap();
-			}
-		}
-	};
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
 
 	let queue = Queue::new(Pow2Size::P5, Pow2Size::P7).unwrap();
-	let mut ctrl = xhci::Xhci::new(dev).unwrap();
+	let mut ctrl = xhci::Xhci::new(&dev).unwrap();
 	let mut drivers = driver::Drivers::new(&queue);
 
 	let mut jobs = BTreeMap::<u64, Job>::default();
@@ -126,7 +115,6 @@ fn main() -> ! {
 								}
 							}
 							requests::DescriptorResult::Configuration(config) => {
-								rt::dbg!(&config);
 								let base = j.base.unwrap();
 								let mut n = usize::from(config.num_interfaces);
 								let mut driver = None;
@@ -134,7 +122,6 @@ fn main() -> ! {
 								while n > 0 {
 									match it.next().unwrap() {
 										requests::DescriptorResult::Interface(i) => {
-											rt::dbg!(&i);
 											let intf = (i.class, i.subclass, i.protocol);
 											if driver.is_none() {
 												n += usize::from(i.num_endpoints);
@@ -145,7 +132,6 @@ fn main() -> ! {
 											}
 										}
 										requests::DescriptorResult::Endpoint(e) => {
-											rt::dbg!(&e);
 											if driver.is_some() {
 												endpoints.push(e)
 											}
@@ -164,7 +150,7 @@ fn main() -> ! {
 
 								let (driver, interface, intf) = driver.expect("no driver");
 
-								drivers.load_driver(slot, driver, base, intf);
+								drivers.load_driver(slot, driver, base, intf).unwrap();
 
 								let id = ctrl
 									.send_request(
@@ -253,7 +239,6 @@ fn main() -> ! {
 					}
 					(Handle::MAX, p) if p.starts_with(b"handlers/") => {
 						let p = &p["handlers/".len()..];
-						rt::dbg!(core::str::from_utf8(p));
 						if let Some(h) = drivers.handler(p) {
 							Response::Object(h)
 						} else {

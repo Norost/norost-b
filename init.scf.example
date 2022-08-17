@@ -25,28 +25,6 @@
 		(path "image_viewer")
 		(after "window_manager")
 		(file_root ""))
-	(usb
-		(path "usb")
-		(file_root "")
-		(process_root "process"))
-	(virtio_blk
-		(disabled)
-		(path "virtio_block")
-		(args "disk")
-		(target "disk")
-		(file_root ""))
-	(virtio_gpu
-		(disabled)
-		(path "virtio_gpu")
-		(args "gpu")
-		(target "net")
-		(file_root ""))
-	(virtio_net
-		(disabled)
-		(path "virtio_net")
-		(args "net")
-		(target "net")
-		(file_root ""))
 	(static_http_server
 		(disabled)
 		(path "static_http_server")
@@ -71,10 +49,6 @@
 		(file_root "")
 		(net_root "net")
 		(process_root "process"))
-	(intel_hd_graphics
-		(disabled)
-		(path intel_hd_graphics)
-		(file_root ""))
 	(window_manager
 		(disabled)
 		(path window_manager)

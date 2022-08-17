@@ -1,6 +1,5 @@
 use super::RegRW;
-use crate::memory::frame::PPN;
-use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
+use crate::memory::r#virtual::phys_to_virt;
 
 #[repr(C)]
 struct IoApic {
@@ -46,12 +45,6 @@ pub unsafe fn mask_irq(irq: u8, enable: bool) {
 	unsafe {
 		write(i, read(i) & !(1 << 16) | u32::from(enable) << 16);
 	}
-}
-
-pub(super) fn init() {
-	// Ensure the I/O APIC registers are mapped.
-	let a = PPN::try_from_usize(io_apic_address().try_into().unwrap()).unwrap();
-	AddressSpace::identity_map(a, 4096).unwrap();
 }
 
 /// Read a register from the IoApic

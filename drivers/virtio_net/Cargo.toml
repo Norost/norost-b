@@ -12,7 +12,6 @@ smoltcp = { version = "*", default-features = false, features = ["alloc", "proto
 virtio = { path = "../../lib/rust/virtio" }
 virtio_net = { path = "../../lib/rust/virtio_net" }
 pci = { path = "../../lib/rust/pci" }
-futures = "0.3"
 
 [dependencies.async_std]
 package = "norost_async_std"
@@ -21,6 +20,18 @@ path = "../../lib/rust/async_std"
 [dependencies.async-trait]
 version = "0.1"
 
+[dependencies.futures]
+version = "0.3"
+default-features = false
+
 [dependencies.rt]
 package = "norostb_rt"
 path = "../../lib/rust/rt"
+
+[dependencies.rt_alloc]
+package = "norostb_rt_alloc"
+path = "../../lib/rust/rt_alloc"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"

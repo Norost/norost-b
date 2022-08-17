@@ -177,7 +177,7 @@ pub struct HeaderCommon {
 	pub status: VolatileCell<u16le>,
 
 	revision_id: VolatileCell<u8>,
-	prog_if: VolatileCell<u8>,
+	programming_interface: VolatileCell<u8>,
 	subclass: VolatileCell<u8>,
 	class_code: VolatileCell<u8>,
 
@@ -216,7 +216,7 @@ impl HeaderCommon {
 	get_volatile!(command -> u16);
 	get_volatile!(status -> u16);
 	get_volatile!(revision_id -> u8);
-	get_volatile!(prog_if -> u8);
+	get_volatile!(programming_interface -> u8);
 	get_volatile!(subclass -> u8);
 	get_volatile!(class_code -> u8);
 	get_volatile!(cache_line_size -> u8);
@@ -242,7 +242,7 @@ impl fmt::Debug for HeaderCommon {
 			.field("command", &format_args!("0b{:016b}", self.command()))
 			.field("status", &format_args!("0b{:016b}", self.status()))
 			.field("revision_id", &self.revision_id())
-			.field("prog_if", &self.prog_if())
+			.field("programming_interface", &self.programming_interface())
 			.field("subclass", &self.subclass())
 			.field("class_code", &self.class_code())
 			.field("cache_line_size", &self.cache_line_size())
@@ -440,6 +440,14 @@ pub enum Header<'a> {
 	Unknown(&'a HeaderCommon),
 }
 
+macro_rules! common {
+	($name:ident $ty:ty) => {
+		pub fn $name(&self) -> $ty {
+			self.common().$name.get().into()
+		}
+	};
+}
+
 impl<'a> Header<'a> {
 	pub fn common(&self) -> &'a HeaderCommon {
 		match self {
@@ -449,13 +457,11 @@ impl<'a> Header<'a> {
 		}
 	}
 
-	pub fn vendor_id(&self) -> u16 {
-		self.common().vendor_id.get().into()
-	}
-
-	pub fn device_id(&self) -> u16 {
-		self.common().device_id.get().into()
-	}
+	common!(vendor_id u16);
+	common!(device_id u16);
+	common!(programming_interface u8);
+	common!(subclass u8);
+	common!(class_code u8);
 
 	/// Return the capability structures attached to this header.
 	pub fn capabilities(&self) -> CapabilityIter<'a> {

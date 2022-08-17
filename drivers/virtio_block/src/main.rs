@@ -18,32 +18,17 @@ fn start(_: isize, _: *const *const u8) -> isize {
 
 fn main() -> ! {
 	let file_root = rt::io::file_root().expect("no file root");
-	let table_name = rt::args::Args::new()
+	let table_name = rt::args::args()
 		.skip(1)
 		.next()
 		.expect("expected table name");
 
-	let dev_handle = {
-		let s = b" 1af4:1001";
-		let it = file_root.open(b"pci/info").unwrap();
-		let mut buf = [0; 64];
-		loop {
-			let l = it.read(&mut buf).unwrap();
-			assert!(l != 0, "device not found");
-			let dev = &buf[..l];
-			if dev.ends_with(s) {
-				let mut path = Vec::from(*b"pci/");
-				path.extend(&dev[..7]);
-				break file_root.open(&path).unwrap();
-			}
-		}
-	};
-
-	let poll = dev_handle.open(b"poll").unwrap();
-	let pci_config = dev_handle
-		.map_object(None, rt::RWX::R, 0, usize::MAX)
-		.unwrap()
-		.0;
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
+	let poll = dev.open(b"poll").unwrap();
+	let pci_config = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap().0;
 
 	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
 
@@ -55,8 +40,7 @@ fn main() -> ! {
 					assert!(bar < 6);
 					let mut s = *b"bar0";
 					s[3] += bar;
-					dev_handle
-						.open(&s)
+					dev.open(&s)
 						.unwrap()
 						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
 						.unwrap()

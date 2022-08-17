@@ -26,6 +26,7 @@ use core::{
 };
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use rt::Error;
+use rt_default as _;
 use smoltcp::wire;
 use tcp::{TcpConnection, TcpListener};
 use udp::UdpSocket;
@@ -44,46 +45,32 @@ fn start(_: isize, _: *const *const u8) -> isize {
 
 fn main() {
 	let file_root = rt::io::file_root().unwrap();
-	let table_name = rt::args::Args::new()
+	let table_name = rt::args::args()
 		.skip(1)
 		.next()
 		.expect("expected table name");
 
-	let dev_handle = {
-		let s = b" 1af4:1000";
-		let it = file_root.open(b"pci/info").unwrap();
-		let mut buf = [0; 64];
-		loop {
-			let l = it.read(&mut buf).unwrap();
-			assert!(l != 0, "device not found");
-			let dev = &buf[..l];
-			if dev.ends_with(s) {
-				let mut path = Vec::from(*b"pci/");
-				path.extend(&dev[..7]);
-				break file_root.open(&path).unwrap().into_raw();
-			}
-		}
-	};
-	let poll_handle = rt::io::open(dev_handle, b"poll").unwrap();
-	let poll_handle = AsyncObject::from_raw(poll_handle);
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
+	let poll = AsyncObject::from_raw(dev.open(b"poll").unwrap().into_raw());
 
-	let pci_config = rt::io::map_object(dev_handle, None, rt::RWX::R, 0, usize::MAX).unwrap();
+	let pci = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
+	let pci = unsafe { pci::Pci::new(pci.0.cast(), 0, 0, &[]) };
 
-	let pci = unsafe { pci::Pci::new(pci_config.0.cast(), 0, 0, &[]) };
-
-	let dev = pci.get(0, 0, 0).unwrap();
+	let pci = pci.get(0, 0, 0).unwrap();
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
-	let dev = unsafe { core::mem::transmute::<&_, &_>(&dev) };
+	let pci = unsafe { core::mem::transmute::<&_, &_>(&pci) };
 
 	let (dev, addr) = {
-		match dev {
+		match pci {
 			pci::Header::H0(h) => {
 				let map_bar = |bar: u8| {
 					assert!(bar < 6);
 					let mut s = *b"bar0";
 					s[3] += bar;
-					rt::RefObject::from_raw(dev_handle)
-						.open(&s)
+					dev.open(&s)
 						.unwrap()
 						.map_object(None, rt::io::RWX::RW, 0, usize::MAX)
 						.unwrap()
@@ -138,7 +125,7 @@ fn main() {
 	let mut table = Table::new(table_name);
 	let mut table_notify = RefAsyncObject::from(table.table.notifier()).read(());
 
-	let mut poll_job = poll_handle.read(());
+	let mut poll_job = poll.read(());
 
 	struct PendingWrite {
 		handle: rt::Handle,
@@ -463,7 +450,7 @@ fn main() {
 
 		if Pin::new(&mut poll_job).poll(&mut cx).is_ready() {
 			iface.device_mut().process();
-			poll_job = poll_handle.read(());
+			poll_job = poll.read(());
 			continue;
 		}
 		if Pin::new(&mut table_notify).poll(&mut cx).is_ready() {

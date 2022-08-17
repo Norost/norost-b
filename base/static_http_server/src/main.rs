@@ -10,9 +10,9 @@ use async_std::{
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	println,
 };
-use futures::{
+use futures_util::{
 	future::{self, Either},
-	stream::StreamExt,
+	stream::{FuturesUnordered, StreamExt},
 };
 use rt_default as _;
 
@@ -63,7 +63,7 @@ async fn main() -> ! {
 			break; // TODO
 		}
 	};
-	let mut clients = futures::stream::FuturesUnordered::new();
+	let mut clients = FuturesUnordered::new();
 	let mut finish_client = clients.next();
 
 	loop {

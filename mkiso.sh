@@ -31,6 +31,7 @@ cp target/$TARGET_BOOT/$build_dir/noraboot $O/boot/noraboot
 cp boot/$ARCH/grub/grub.cfg $O/boot/grub/grub.cfg
 
 cp init.scf $A/init.scf
+cp pci.scf $A/pci.scf
 cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
 cp -r ssh $A/ssh_conf
@@ -42,28 +43,46 @@ else
 	export RUSTFLAGS="-Z unstable-options -C split-debuginfo=unpacked"
 fi
 
+
+# Separate std and no_std builds because Cargo is retarded
+cargo build $args \
+	--target $TARGET_USER \
+	--workspace \
+	--exclude nora \
+	--exclude noraboot \
+	--exclude image_viewer \
+	--exclude minish \
+	--exclude ssh \
+	--exclude driver_fs_fat \
+
+cargo build $args \
+	--target $TARGET_USER \
+	--package image_viewer \
+	--package minish \
+	--package ssh \
+	--package driver_fs_fat \
+
 install () {
-	(cd $1/$2 && cargo build $args --target $TARGET_USER)
-	cp target/$TARGET_USER/$build_dir/$3 $A/$2
+	cp target/$TARGET_USER/$build_dir/$2 $A/$1
 }
 
-#install drivers fs_fat             driver_fs_fat
-#install drivers intel_hd_graphics  driver_intel_hd_graphics
-install drivers ps2                driver_ps2
-install drivers scancode_to_char   driver_scancode_to_char
-install drivers usb                driver_usb
-install drivers usb_kbd            driver_usb_kbd
-#install drivers virtio_block       driver_virtio_block
-#install drivers virtio_gpu         driver_virtio_gpu
-install drivers virtio_net         driver_virtio_net
-install base    init               init
-#install base    gui_cli            gui_cli
-#install base    image_viewer       image_viewer
-#install base    jail               jail
-install base    minish             minish
-install base    ssh                ssh
-#install base    static_http_server static_http_server
-#install base    window_manager     window_manager
+install fs_fat             driver_fs_fat
+install intel_hd_graphics  driver_intel_hd_graphics
+install pci                driver_pci
+install ps2                driver_ps2
+install scancode_to_char   driver_scancode_to_char
+install usb                driver_usb
+install usb_kbd            driver_usb_kbd
+install virtio_block       driver_virtio_block
+install virtio_gpu         driver_virtio_gpu
+install virtio_net         driver_virtio_net
+install init               init
+install gui_cli            gui_cli
+install image_viewer       image_viewer
+install minish             minish
+install ssh                ssh
+install static_http_server static_http_server
+install window_manager     window_manager
 (
 	exit
 	cd tools

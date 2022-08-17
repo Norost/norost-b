@@ -52,63 +52,39 @@ impl Command {
 	}
 
 	pub async fn spawn(&mut self) -> io::Result<Child> {
-		let mut stdin = None;
-		let mut stdout = None;
-		let mut stderr = None;
-
-		fn io<'a>(
-			n: u32,
-			io: &mut Stdio,
-			og: Option<rt::RefObject<'a>>,
-			sto: &'a mut Option<(rt::Object, rt::Object)>,
-			dir: bool,
-		) -> io::Result<impl Iterator<Item = (u32, rt::RefObject<'a>)>> {
-			let io = mem::replace(&mut io.0, StdioTy::Inherit);
-			Ok(match io {
-				StdioTy::Null => None,
-				StdioTy::Inherit => og,
-				StdioTy::Piped => {
-					let (wr, rd) = rt::Object::new(rt::NewObject::Pipe)?;
-					let (a, b) = if dir { (rd, wr) } else { (wr, rd) };
-					*sto = Some((a, b));
-					sto.as_ref().map(|(_, o)| rt::RefObject::from(o))
-				}
-			}
-			.into_iter()
-			.map(move |o| (n, o)))
-		}
-
 		let (res, p) = file_root().open(mem::take(&mut self.program)).await;
 		self.program = p;
-		use rt::{args::*, io};
 		// FIXME blocking, technically
-		let proc = rt::process::Process::new(
-			rt::io::process_root().unwrap(),
-			&res?,
-			io(ID_STDIN, &mut self.stdin, io::stdin(), &mut stdin, false)?
-				.chain(io(
-					ID_STDOUT,
-					&mut self.stdout,
-					io::stdout(),
-					&mut stdout,
-					true,
-				)?)
-				.chain(io(
-					ID_STDERR,
-					&mut self.stderr,
-					io::stderr(),
-					&mut stderr,
-					true,
-				)?)
-				.chain(rt::process::Process::default_root_handles()),
-			[&self.program].into_iter().chain(self.args.iter()),
-			self.env.iter().map(|(a, b)| (a, b)),
-		)?;
+		let mut b = rt::process::Builder::new()?;
+		b.set_binary_raw(res?.as_raw())?;
+		let mut io = |n: &[u8], io: &mut Stdio, og: Option<rt::RefObject<'static>>| {
+			let io = mem::replace(&mut io.0, StdioTy::Inherit);
+			match io {
+				StdioTy::Null => Ok::<_, rt::Error>(None),
+				StdioTy::Inherit => {
+					if let Some(og) = og {
+						b.add_object(n, &og)?;
+					}
+					Ok(None)
+				}
+				StdioTy::Piped => {
+					let (wr, rd) = rt::Object::new(rt::NewObject::Pipe)?;
+					let (proc, slf) = if n == b"in" { (rd, wr) } else { (wr, rd) };
+					b.add_object(n, &proc)?;
+					Ok(Some(slf))
+				}
+			}
+		};
+		let stdin = io(b"in", &mut self.stdin, rt::io::stdin())?;
+		let stdout = io(b"out", &mut self.stdout, rt::io::stdout())?;
+		let stderr = io(b"err", &mut self.stderr, rt::io::stderr())?;
+		b.add_default_root_objects()?;
+		let proc = b.spawn()?;
 		Ok(Child {
 			process: proc.into_object().into(),
-			stdin: stdin.map(|(o, _)| ChildStdin(o.into())),
-			stdout: stdout.map(|(o, _)| ChildStdout(o.into())),
-			stderr: stderr.map(|(o, _)| ChildStderr(o.into())),
+			stdin: stdin.map(|o| ChildStdin(o.into())),
+			stdout: stdout.map(|o| ChildStdout(o.into())),
+			stderr: stderr.map(|o| ChildStderr(o.into())),
 		})
 	}
 }

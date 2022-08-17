@@ -1,4 +1,21 @@
-use crate::sync::{Mutex, MutexGuard};
+//! ## Arguments format
+//!
+//! Strings are prefixed with a two-byte (`u16`) length.
+//! They are *not* null-terminated.
+//!
+//! The passed arguments contains arrays:
+//!
+//! - Handles, where the key is a string and the value is a 32-bit integer representing a handle
+//!   to an object.
+//! - "Command" arguments, where the values are strings.
+//! - Environment variables, where the keys and values are strings.
+//!
+//! Each array is prefixed with a two-byte (`u16`) length.
+
+use crate::{
+	sync::{Mutex, MutexGuard},
+	RefObject,
+};
 use alloc::{
 	alloc::AllocError,
 	borrow::Cow,
@@ -10,6 +27,10 @@ use core::slice;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 // See note in lib.rs
+#[export_name = "__rt_args_handles"]
+#[linkage = "weak"]
+static HANDLES: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+// See note in lib.rs
 #[export_name = "__rt_args_args_and_env"]
 #[linkage = "weak"]
 static ARGS_AND_ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
@@ -19,20 +40,13 @@ static ARGS_AND_ENV: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 static ENV: Mutex<(bool, BTreeMap<Cow<'static, [u8]>, Cow<'static, [u8]>>)> =
 	Mutex::new((false, BTreeMap::new()));
 
-pub const ID_STDIN: u32 = 0;
-pub const ID_STDOUT: u32 = 1;
-pub const ID_STDERR: u32 = 2;
-pub const ID_FILE_ROOT: u32 = 3;
-pub const ID_NET_ROOT: u32 = 4;
-pub const ID_PROCESS_ROOT: u32 = 5;
-
 pub struct Args {
 	count: u16,
 	ptr: *const u8,
 }
 
 impl Args {
-	pub fn new() -> Self {
+	fn new() -> Self {
 		NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed)).map_or(
 			Self {
 				count: 0,
@@ -144,7 +158,7 @@ impl Env {
 		map
 	}
 
-	pub fn new() -> Self {
+	fn new() -> Self {
 		// "The returned iterator contains a snapshot of the process’s environment variables ..." &
 		// "Modifications to environment variables afterwards will not be reflected ..."
 		// means we need to clone it, or at least use some kind of CoW.
@@ -175,26 +189,29 @@ impl Env {
 /// Must be called exactly once during runtime initialization.
 pub(crate) unsafe fn init(arguments: Option<NonNull<u8>>) {
 	let Some(arguments) = arguments else { return };
+
+	HANDLES.store(arguments.as_ptr(), Ordering::Relaxed);
+
 	// Parse handles
 	unsafe {
-		let mut arguments = arguments.as_ptr().cast::<u32>();
-		let count = *arguments;
-		arguments = arguments.wrapping_add(1);
+		let mut arguments = arguments.as_ptr() as *const u8;
+		let count = arguments.cast::<u16>().read_unaligned();
+		arguments = arguments.add(2);
 		for _ in 0..count {
-			let ty = *arguments;
-			arguments = arguments.wrapping_add(1);
-			let handle = *arguments;
+			let name;
+			(name, arguments) = get_str(arguments);
+			let handle = arguments.cast::<u32>().read_unaligned();
+			arguments = arguments.wrapping_add(4);
 			let globals = crate::globals::GLOBALS.get_ref();
-			match ty {
-				ID_STDIN => globals.stdin_handle.store(handle, Ordering::Relaxed),
-				ID_STDOUT => globals.stdout_handle.store(handle, Ordering::Relaxed),
-				ID_STDERR => globals.stderr_handle.store(handle, Ordering::Relaxed),
-				ID_FILE_ROOT => globals.file_root_handle.store(handle, Ordering::Relaxed),
-				ID_NET_ROOT => globals.net_root_handle.store(handle, Ordering::Relaxed),
-				ID_PROCESS_ROOT => globals.process_root_handle.store(handle, Ordering::Relaxed),
+			match name {
+				b"in" => globals.stdin_handle.store(handle, Ordering::Relaxed),
+				b"out" => globals.stdout_handle.store(handle, Ordering::Relaxed),
+				b"err" => globals.stderr_handle.store(handle, Ordering::Relaxed),
+				b"file" => globals.file_root_handle.store(handle, Ordering::Relaxed),
+				b"net" => globals.net_root_handle.store(handle, Ordering::Relaxed),
+				b"process" => globals.process_root_handle.store(handle, Ordering::Relaxed),
 				_ => {} // Just ignore.
 			}
-			arguments = arguments.wrapping_add(1);
 		}
 
 		// Store pointer for later use
@@ -203,10 +220,52 @@ pub(crate) unsafe fn init(arguments: Option<NonNull<u8>>) {
 }
 
 unsafe fn get_str<'a>(ptr: *const u8) -> (&'a [u8], *const u8) {
-	let len = usize::from(unsafe { ptr.cast::<u16>().read_unaligned() });
-	let ptr = ptr.wrapping_add(2);
-	(
-		unsafe { slice::from_raw_parts(ptr, len) },
-		ptr.wrapping_add(len),
+	unsafe {
+		let len = usize::from(ptr.cast::<u16>().read_unaligned());
+		let ptr = ptr.wrapping_add(2);
+		(slice::from_raw_parts(ptr, len), ptr.add(len))
+	}
+}
+
+/// Iterator over all objects that have been passed to this program.
+pub struct Handles {
+	ptr: NonNull<u8>,
+	count: u16,
+}
+
+impl Iterator for Handles {
+	type Item = (&'static [u8], RefObject<'static>);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.count.checked_sub(1).map(|n| unsafe {
+			self.count = n;
+			let (name, ptr) = get_str(self.ptr.as_ptr());
+			let h = ptr.cast::<u32>().read_unaligned();
+			self.ptr = NonNull::new_unchecked(ptr.add(4) as _);
+			(name, RefObject::from_raw(h))
+		})
+	}
+}
+
+pub fn handles() -> Handles {
+	NonNull::new(HANDLES.load(Ordering::Relaxed)).map_or(
+		Handles {
+			ptr: NonNull::dangling(),
+			count: 0,
+		},
+		|ptr| unsafe {
+			Handles {
+				ptr: NonNull::new_unchecked(ptr.as_ptr().add(2).cast()),
+				count: ptr.as_ptr().cast::<u16>().read_unaligned(),
+			}
+		},
 	)
+}
+
+pub fn args() -> Args {
+	Args::new()
+}
+
+pub fn env() -> Env {
+	Env::new()
 }

@@ -161,14 +161,14 @@ impl<'a> DeviceDriver<'a> {
 		let mut p = rt::process::Builder::new()?;
 		p.set_binary_by_name(path)?;
 		p.add_args([path, &arg])?;
-		p.add_object(rt::args::ID_STDIN, &proc_stdin)?;
-		p.add_object(rt::args::ID_STDOUT, &proc_stdout)?;
-		if let Some(o) = rt::io::stderr() {
-			p.add_object(rt::args::ID_STDERR, &o)?;
-		}
-		if let Some(o) = rt::io::file_root() {
-			p.add_object(rt::args::ID_FILE_ROOT, &o)?;
-		}
+		p.add_object(b"in", &proc_stdin)?;
+		p.add_object(b"out", &proc_stdout)?;
+		rt::io::stderr()
+			.map(|o| p.add_object(b"err", &o))
+			.transpose()?;
+		rt::io::file_root()
+			.map(|o| p.add_object(b"file", &o))
+			.transpose()?;
 
 		let process = p.spawn()?;
 		let read_task = read(queue, &stdout, Vec::with_capacity(MSG_SIZE));

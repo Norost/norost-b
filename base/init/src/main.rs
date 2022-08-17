@@ -11,16 +11,16 @@ use rt_default as _;
 
 #[derive(Default)]
 struct Program<'a> {
-	path: &'a [u8],
-	args: Vec<&'a [u8]>,
-	env: BTreeMap<&'a [u8], &'a [u8]>,
-	after: Vec<&'a [u8]>,
-	file_root: Option<&'a [u8]>,
-	net_root: Option<&'a [u8]>,
-	process_root: Option<&'a [u8]>,
-	stdin: Option<&'a [u8]>,
-	stdout: Option<&'a [u8]>,
-	stderr: Option<&'a [u8]>,
+	path: &'a str,
+	args: Vec<&'a str>,
+	env: BTreeMap<&'a str, &'a str>,
+	after: Vec<&'a str>,
+	file_root: Option<&'a str>,
+	net_root: Option<&'a str>,
+	process_root: Option<&'a str>,
+	stdin: Option<&'a str>,
+	stdout: Option<&'a str>,
+	stderr: Option<&'a str>,
 }
 
 macro_rules! log {
@@ -47,6 +47,10 @@ fn main() -> ! {
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
 
+	for a in rt::args::handles() {
+		rt::dbg!(a);
+	}
+
 	// Read arguments
 	let cfg = drivers.open(b"init.scf").unwrap();
 	let len = usize::try_from(cfg.seek(rt::io::SeekFrom::End(0)).unwrap()).unwrap();
@@ -71,7 +75,6 @@ fn main() -> ! {
 	let mut stdin_path @ mut stdout_path @ mut stderr_path = None;
 	let mut programs = Vec::new();
 	'c: while let Some(tk) = it.next() {
-		rt::dbg!(tk);
 		assert!(tk == Token::Begin);
 		match get_str(&mut it) {
 			"stdin" => stdin_path = Some(get_str(&mut it)),
@@ -80,23 +83,22 @@ fn main() -> ! {
 			"programs" => {
 				while is_begin(&mut it) {
 					let mut p = Program::default();
-					p.path = get_str(&mut it).as_bytes();
+					p.path = get_str(&mut it);
 					let mut disabled = false;
-					rt::println!("program");
 					'p: while is_begin(&mut it) {
 						match get_str(&mut it) {
 							"disabled" => disabled = true,
-							"stdin" => p.stdin = Some(get_str(&mut it).as_bytes()),
-							"stdout" => p.stdout = Some(get_str(&mut it).as_bytes()),
-							"stderr" => p.stderr = Some(get_str(&mut it).as_bytes()),
-							"file_root" => p.file_root = Some(get_str(&mut it).as_bytes()),
-							"net_root" => p.net_root = Some(get_str(&mut it).as_bytes()),
-							"process_root" => p.process_root = Some(get_str(&mut it).as_bytes()),
+							"stdin" => p.stdin = Some(get_str(&mut it)),
+							"stdout" => p.stdout = Some(get_str(&mut it)),
+							"stderr" => p.stderr = Some(get_str(&mut it)),
+							"file_root" => p.file_root = Some(get_str(&mut it)),
+							"net_root" => p.net_root = Some(get_str(&mut it)),
+							"process_root" => p.process_root = Some(get_str(&mut it)),
 							a @ "args" | a @ "after" => loop {
 								match it.next() {
 									Some(Token::Str(s)) => match a {
-										"args" => p.args.push(s.as_bytes()),
-										"after" => p.after.push(s.as_bytes()),
+										"args" => p.args.push(s),
+										"after" => p.after.push(s),
 										_ => unreachable!(),
 									},
 									Some(Token::End) => continue 'p,
@@ -148,15 +150,15 @@ fn main() -> ! {
 		programs.retain(|program| {
 			for f in program.after.iter() {
 				// TODO open is inefficient.
-				if root.open(f).is_err() {
+				if root.open(f.as_bytes()).is_err() {
 					return true;
 				}
 			}
 
-			let open = |base: &Option<&[u8]>| match base {
+			let open = |base: &Option<&str>| match base {
 				None => None,
-				Some(b"") => Some(None),
-				Some(path) => Some(Some(root.open(path).unwrap())),
+				Some("") => Some(None),
+				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
 			};
 			fn select<'a>(
 				base: &'a Option<Option<rt::Object>>,
@@ -182,26 +184,23 @@ fn main() -> ! {
 			let t = open(&program.process_root);
 			let proc_root = select(&t, &process_root);
 
-			let binary = drivers
-				.open(program.path)
-				.unwrap_or_else(|e| panic!("failed to open {:?}: {:?}", &program.path, e));
-			let r = rt::Process::new(
-				&process_root,
-				&binary,
-				[
-					(rt::args::ID_STDIN, stdin),
-					(rt::args::ID_STDOUT, stdout),
-					(rt::args::ID_STDERR, stderr),
-				]
-				.into_iter()
-				.chain(file_root.map(|r| (rt::args::ID_FILE_ROOT, r)))
-				.chain(net_root.map(|r| (rt::args::ID_NET_ROOT, r)))
-				.chain(proc_root.map(|r| (rt::args::ID_PROCESS_ROOT, r))),
-				[program.path]
-					.into_iter()
-					.chain(program.args.iter().copied()),
-				program.env.iter(),
-			);
+			let r = (|| {
+				let bin = drivers.open(program.path.as_bytes())?;
+				let mut b = rt::process::Builder::new_with(&process_root)?;
+				b.set_binary(&bin)?;
+				b.add_object(b"in", &stdin)?;
+				b.add_object(b"out", &stdout)?;
+				b.add_object(b"err", &stderr)?;
+				file_root.map(|r| b.add_object(b"file", &r)).transpose()?;
+				net_root.map(|r| b.add_object(b"net", &r)).transpose()?;
+				proc_root
+					.map(|r| b.add_object(b"process", &r))
+					.transpose()?;
+				b.add_args(&[program.path])?;
+				b.add_args(&program.args)?;
+				// TODO env
+				b.spawn()
+			})();
 			match r {
 				Ok(_) => log!("Launched {:?}", program.path),
 				Err(e) => log!("Failed to launch {:?}: {:?}", program.path, e),

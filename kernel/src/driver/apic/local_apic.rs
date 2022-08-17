@@ -1,6 +1,5 @@
 use super::{RegR, RegRW, RegW};
-use crate::memory::frame::PPN;
-use crate::memory::r#virtual::{phys_to_virt, AddressSpace};
+use crate::memory::r#virtual::phys_to_virt;
 use core::fmt;
 
 const APIC_NMI: u32 = 1 << 4;
@@ -157,10 +156,6 @@ pub fn get_phys() -> u64 {
 }
 
 pub(super) fn init() {
-	// Ensure the LAPIC registers are mapped.
-	let a = PPN::try_from_usize(super::local_apic_address().try_into().unwrap()).unwrap();
-	AddressSpace::identity_map(a, 4096).unwrap();
-
 	// Initialize to a well-known state (https://wiki.osdev.org/APIC_timer#Example_code_in_ASM)
 	let apic = get();
 	apic.destination_format.set(0xffff_ffff);

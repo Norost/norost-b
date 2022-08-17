@@ -28,6 +28,7 @@ git = "https://git.sr.ht/~demindiro/nrofs/"
 default = [
 	"mem-max-16t",
 	"driver-interrupt",
+	"driver-mem",
 	"driver-pci",
 	"driver-hpet",
 	"driver-vga",
@@ -38,6 +39,7 @@ mem-max-256m = []
 driver-interrupt = []
 driver-pci = []
 driver-hpet = []
+driver-mem = []
 driver-pic = []
 driver-rtc = []
 driver-vga = []

@@ -282,34 +282,11 @@ impl Model {
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 
-	// Find suitable device
-	let (path, model) = {
-		let it = root.open(b"pci/info").unwrap();
-		let mut e = [0; 32];
-		loop {
-			let l = it.read(&mut e).unwrap();
-			let e = &e[..l];
-			if e.is_empty() {
-				log!("no suitable Intel HD Graphics device found");
-				return 1;
-			}
-			let s = core::str::from_utf8(&e).unwrap();
-			let (loc, id) = s.split_once(' ').unwrap();
-			let (v, d) = id.split_once(':').unwrap();
-			let f = |s| u16::from_str_radix(s, 16).unwrap();
-			if let Some(model) = Model::try_from_pci_id(f(v), f(d)) {
-				let e = ["pci/", loc]
-					.iter()
-					.flat_map(|c| c.bytes())
-					.collect::<Vec<_>>();
-				break (e, model);
-			}
-		}
-	};
-	log!("{:?}", (&path, model));
-
 	// Open & configure
-	let dev = root.open(&path).unwrap();
+	let dev = rt::args::handles()
+		.find(|(name, _)| name == b"pci")
+		.expect("no 'pci' object")
+		.1;
 	let ioport = root.open(b"portio/map").expect("can't access I/O ports");
 
 	let (pci_config, _) = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
