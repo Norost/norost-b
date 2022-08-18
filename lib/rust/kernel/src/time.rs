@@ -44,9 +44,13 @@ impl Monotonic {
 			.map(Duration::from_nanos)
 	}
 
+	pub fn saturating_duration_since(&self, earlier: Monotonic) -> Duration {
+		self.checked_duration_since(earlier).unwrap_or_default()
+	}
+
 	#[inline]
 	pub fn duration_since(&self, earlier: Monotonic) -> Duration {
-		self.checked_duration_since(earlier).unwrap_or_default()
+		self.saturating_duration_since(earlier)
 	}
 }
 

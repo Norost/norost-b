@@ -1,4 +1,3 @@
-(stdin "uart/0")
 (stdout "system/log")
 (stderr "system/log")
 
