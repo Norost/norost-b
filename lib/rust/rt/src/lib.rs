@@ -26,8 +26,6 @@
 
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
-#[allow(unused_extern_crates)]
-extern crate compiler_builtins;
 
 #[macro_use]
 mod macros;

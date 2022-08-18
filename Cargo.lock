@@ -34,7 +34,6 @@ dependencies = [
 name = "arena"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
@@ -189,9 +188,6 @@ name = "compiler_builtins"
 version = "0.1.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f873ce2bd3550b0b565f878b3d04ea8253f4259dc3d20223af2e1ba86f5ecca"
-dependencies = [
- "rustc-std-workspace-core",
-]
 
 [[package]]
 name = "const-oid"
@@ -835,7 +831,6 @@ checksum = "280db64d556ef447ff253df2bb152b94b6e87ef9c7ca7996a60e520291b512c0"
 name = "nora_io_queue"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -947,7 +942,6 @@ dependencies = [
 name = "norostb_kernel"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "rustc-std-workspace-core",
 ]
 
@@ -956,7 +950,6 @@ name = "norostb_rt"
 version = "0.2.0"
 dependencies = [
  "cfg-if",
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -966,7 +959,6 @@ dependencies = [
 name = "norostb_rt_alloc"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",

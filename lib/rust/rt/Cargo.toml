@@ -10,7 +10,6 @@ cfg-if = "1.0"
 # When built as part of libstd
 alloc = { version = "1.0.0", optional = true, package = "rustc-std-workspace-alloc" }
 core = { version = "1.0.0", optional = true, package = "rustc-std-workspace-core" }
-compiler_builtins = { version = "0.1", features = ["mem"] }
 
 [features]
 rustc-dep-of-std = [
@@ -18,5 +17,4 @@ rustc-dep-of-std = [
 	"core",
 	"cfg-if/rustc-dep-of-std",
 	"norostb_kernel/rustc-dep-of-std",
-	"compiler_builtins/rustc-dep-of-std",
 ]
