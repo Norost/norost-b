@@ -7,7 +7,10 @@ pub struct Thread(Handle);
 
 impl Thread {
 	/// Spawn a new thread.
-	pub unsafe fn new(stack: usize, p: Box<dyn FnOnce()>) -> error::Result<Thread> {
+	// FIXME determine if this should be unsafe
+	// A current issue is the lack of catching panics, but that should be easy to fix once we
+	// support unwinding.
+	pub fn new(stack: usize, p: Box<dyn FnOnce()>) -> error::Result<Thread> {
 		// All things that can fail will be handled before spawning so we don't need to wait
 		// for the thread to confirm things are fine.
 

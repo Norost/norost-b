@@ -68,7 +68,7 @@ impl Handlers {
 		.ok_or(())?;
 		let k = async_std::fs::read(k.clone()).await.0.map_err(|_| ())?;
 		let k = str::from_utf8(&k).map_err(|_| ())?;
-		let k = base85::decode(k.trim()).ok_or(())?;
+		let k = n85::decode_vec(k.trim().as_ref()).expect("todo");
 		(key == k)
 			.then(|| {
 				let k = ed25519_dalek::PublicKey::from_bytes((&*k).try_into().unwrap());
@@ -287,7 +287,7 @@ fn read_key(path: &str) -> Vec<u8> {
 	let key = std::fs::read(&*path).unwrap();
 	let key = std::str::from_utf8(&key).expect("invalid key");
 	let key = key.trim();
-	base85::decode(key).expect("invalid key")
+	n85::decode_vec(key.as_ref()).expect("invalid key")
 }
 
 fn read_key_ecdsa(path: &str) -> ecdsa::SigningKey<p256::NistP256> {

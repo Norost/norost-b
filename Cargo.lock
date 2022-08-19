@@ -72,15 +72,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bdca834647821e0b13d9539a8634eb62d3501b6b6c2cec1722786ee6671b851"
 
 [[package]]
-name = "base85"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e6835f89c0ffc5767d2e61551918e3c421a90c47d20f7c88195a2799fe37099"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
 name = "bit_field"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -736,12 +727,6 @@ name = "jpeg-decoder"
 version = "0.2.6"
 
 [[package]]
-name = "lazy_static"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
 name = "libc"
 version = "0.2.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -798,6 +783,12 @@ version = "0.2.0"
 dependencies = [
  "term",
 ]
+
+[[package]]
+name = "n85"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e953efc6a4d8968e8d41261d6693e00d9573f5a48228121515a24dcc61e3238"
 
 [[package]]
 name = "no-std-net"
@@ -1333,11 +1324,11 @@ name = "ssh"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "base85",
  "clap",
  "ecdsa",
  "ed25519-dalek",
  "futures",
+ "n85",
  "nora_scf",
  "nora_ssh",
  "norost_async_std",

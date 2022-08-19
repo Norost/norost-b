@@ -3,6 +3,7 @@
 TARGET_BOOT=i686-unknown-none-norostbkernel
 TARGET_KERNEL=x86_64-unknown-none-norostbkernel
 TARGET_USER=x86_64-unknown-norostb
+TOOLCHAIN=dev-x86_64-unknown-norostb
 
 set -e
 set -x
