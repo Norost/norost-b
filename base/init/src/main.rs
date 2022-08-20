@@ -44,10 +44,6 @@ fn main() -> ! {
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
 
-	for a in rt::args::handles() {
-		rt::dbg!(a);
-	}
-
 	// Read arguments
 	let cfg = drivers.open(b"init.scf").unwrap();
 	let len = usize::try_from(cfg.seek(rt::io::SeekFrom::End(0)).unwrap()).unwrap();

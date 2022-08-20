@@ -36,6 +36,7 @@ cp pci.scf $A/pci.scf
 cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
 cp -r ssh $A/ssh_conf
+cp ../bin/userdb/user.scf.example $A/userdb.scf
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then
@@ -67,6 +68,11 @@ install () {
 	cp target/$TARGET_USER/$build_dir/$2 $A/$1
 }
 
+install_ext () {
+	(cd $2 && cargo +$TOOLCHAIN b $args --target $TARGET_USER)
+	cp $2/target/$TARGET_USER/$build_dir/$1 $A/$1
+}
+
 install fs_fat             driver_fs_fat
 install intel_hd_graphics  driver_intel_hd_graphics
 install pci                driver_pci
@@ -90,6 +96,7 @@ install window_manager     window_manager
 	make nora_scp
 	cp nora_ssh/target/x86_64-unknown-norostb/release/nora_scp $A/scp
 )
+install_ext userdb ../bin/userdb
 
 ./tools/nrofs.py -rv -C $A $O/boot/norost.nrofs .
 
