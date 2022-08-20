@@ -36,7 +36,9 @@ cp pci.scf $A/pci.scf
 cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
 cp -r ssh $A/ssh_conf
-cp ../bin/userdb/user.scf.example $A/userdb.scf
+cp fs.example/cfg/userdb.scf $A/userdb.scf
+mkdir $A/cfg
+cp fs.example/users/test/cfg/password.scf $A/cfg/password.scf
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then
