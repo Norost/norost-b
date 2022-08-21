@@ -1332,6 +1332,7 @@ dependencies = [
  "nora_scf",
  "nora_ssh",
  "norost_async_std",
+ "norostb_rt",
  "p256",
  "rand",
  "serde",

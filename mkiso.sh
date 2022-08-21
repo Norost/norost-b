@@ -35,10 +35,12 @@ cp init.scf $A/init.scf
 cp pci.scf $A/pci.scf
 cp usb.scf $A/usb.scf
 cp keyboard/azerty.scf $A/keyboard.scf
-cp -r ssh $A/ssh_conf
 cp fs.example/cfg/userdb.scf $A/userdb.scf
+cp fs.example/cfg/ssh.scf $A/sshd.scf
+cp fs.example/cfg/ssh_secret.scf $A/sshd_secret.scf
 mkdir $A/cfg
 cp fs.example/users/test/cfg/password.scf $A/cfg/password.scf
+cp fs.example/users/test/cfg/ssh.scf $A/cfg/ssh.scf
 
 if [ "$1" == --release ] # stuff's broken otherwise
 then

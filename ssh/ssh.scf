@@ -1,5 +1,0 @@
-; Just an example :)
-
-(keys
-	; Key generated from StdRng::seed_from_u64(0)
-	(ecdsa "drivers/ssh_conf/ssh_ecdsa.priv"))

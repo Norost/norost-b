@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 			config.host_keys.ecdsa.expect("no host key"),
 			Handlers {
 				listener,
-				users: config.users,
+				userdb: config.userdb,
 			},
 		);
 
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 struct Handlers {
 	listener: TcpListener,
-	users: BTreeMap<Box<[u8]>, UserConfig>,
+	userdb: rt::Object,
 }
 
 struct User {
@@ -60,17 +60,46 @@ enum UserKey {
 
 impl Handlers {
 	async fn get_user_key(&self, user: &[u8], algorithm: &[u8], key: &[u8]) -> Result<UserKey, ()> {
-		let user = self.users.get(user).ok_or(())?;
-		let k = match algorithm {
-			b"ssh-ed25519" => user.ed25519.as_ref(),
-			_ => None,
+		if algorithm != b"ssh-ed25519" {
+			return Err(());
 		}
-		.ok_or(())?;
-		let k = async_std::fs::read(k.clone()).await.0.map_err(|_| ())?;
-		let k = str::from_utf8(&k).map_err(|_| ())?;
-		let k = n85::decode_vec(k.trim().as_ref()).expect("todo");
-		(key == k)
-			.then(|| {
+
+		let mut path = Vec::from(&b"open/"[..]);
+		path.extend_from_slice(user);
+		path.extend_from_slice(b"/cfg/ssh.scf");
+		let cfg = self
+			.userdb
+			.open(&path)
+			.map_err(|_| ())?
+			.read_file_all()
+			.map_err(|_| ())?;
+		let mut it = scf::parse(&cfg).map(Result::unwrap);
+		let mut kk = None;
+		'l: while let Some(tk) = it.next() {
+			assert_eq!(tk, scf::Token::Begin);
+			assert_eq!(it.next().unwrap(), scf::Token::Str("authorized"));
+			loop {
+				match it.next() {
+					Some(scf::Token::Begin) => {
+						assert_eq!(it.next().unwrap(), scf::Token::Str("ssh-ed25519"));
+						match it.next().unwrap() {
+							scf::Token::Str(s) => {
+								let k = n85::decode_vec(s.as_ref()).unwrap();
+								if &k == key {
+									kk = Some(k)
+								}
+							}
+							_ => todo!(),
+						}
+						assert_eq!(it.next().unwrap(), scf::Token::End);
+					}
+					Some(scf::Token::End) => break,
+					_ => todo!(),
+				}
+			}
+		}
+		kk.and_then(|k| (key == &k).then(|| k))
+			.map(|k| {
 				let k = ed25519_dalek::PublicKey::from_bytes((&*k).try_into().unwrap());
 				UserKey::Ed25519(k.unwrap())
 			})
@@ -216,10 +245,9 @@ struct HostKeys {
 // Just as an example
 //
 // Realistically, the server should load the key only when appropriate
-#[derive(Default)]
 struct Config {
 	host_keys: HostKeys,
-	users: BTreeMap<Box<[u8]>, UserConfig>,
+	userdb: rt::Object,
 }
 
 #[derive(Default)]
@@ -228,10 +256,26 @@ struct UserConfig {
 }
 
 fn parse_config(path: &str) -> Config {
-	let cfg = std::fs::read(path).unwrap();
-	let mut it = scf::parse(&cfg).map(Result::unwrap);
+	let mut cfg @ mut cfg_secret @ mut userdb = None;
+	for (n, o) in rt::args::handles() {
+		match n {
+			b"cfg" => cfg = Some(o),
+			b"cfg_secret" => cfg_secret = Some(o),
+			b"userdb" => userdb = Some(o),
+			_ => {}
+		}
+	}
+	// cfg is currently unused, but do ensure it is defined.
+	cfg.expect("cfg not defined");
+	let cfg_secret = cfg_secret
+		.expect("cfg_secret not defined")
+		.read_file_all()
+		.unwrap();
+	let userdb = userdb.expect("userdb is not defined");
 
-	let mut cfg = Config::default();
+	let mut it = scf::parse(&cfg_secret).map(Result::unwrap);
+
+	let mut token = None;
 
 	use scf::Token;
 	let is_begin = |it: &mut dyn Iterator<Item = Token<'_>>| match it.next() {
@@ -243,6 +287,8 @@ fn parse_config(path: &str) -> Config {
 		it.next().and_then(|o| o.into_str())
 	};
 
+	let mut host_keys = HostKeys::default();
+
 	while let Some(tk) = it.next() {
 		assert!(tk == Token::Begin);
 		match get_str(&mut it).expect("expected section name") {
@@ -251,46 +297,35 @@ fn parse_config(path: &str) -> Config {
 					let algo = get_str(&mut it).expect("expected key algorithm");
 					let path = get_str(&mut it).expect("expected key path");
 					let prev = match algo {
-						"ecdsa" => cfg.host_keys.ecdsa.replace(read_key_ecdsa(path)),
+						"ecdsa" => host_keys.ecdsa.replace(read_key_ecdsa(path)),
 						s => panic!("unknown key algorithm {:?}", s),
 					};
 					assert!(prev.is_none(), "key defined twice");
 					assert!(it.next() == Some(Token::End));
 				}
 			}
-			"users" => {
-				while is_begin(&mut it) {
-					let user = get_str(&mut it).expect("expected user name");
-					let mut c = UserConfig::default();
-					while is_begin(&mut it) {
-						let algo = get_str(&mut it).expect("expected key algorithm");
-						let path = get_str(&mut it).expect("expected key path");
-						let prev = match algo {
-							"ed25519" => c.ed25519.replace(path.as_bytes().into()),
-							s => panic!("unknown key algorithm {:?}", s),
-						};
-						assert!(prev.is_none(), "key defined twice");
-						assert!(it.next() == Some(Token::End));
-					}
-					let prev = cfg.users.insert(user.as_bytes().into(), c);
-					assert!(prev.is_none(), "user defined twice");
-				}
+			"userdb" => {
+				let prev = token.replace(get_str(&mut it).expect("token"));
+				assert!(prev.is_none(), "token defined twice");
+				assert!(it.next() == Some(Token::End));
 			}
 			s => panic!("unknown section {:?}", s),
 		}
 	}
 
-	cfg
+	// Authenticate to userdb
+	let token = token.expect("token for userdb");
+	let path = format!("service/ssh/{}", token);
+	let userdb = userdb
+		.open(path.as_bytes())
+		.expect("failed to authenticate to userdb");
+
+	Config { host_keys, userdb }
 }
 
-fn read_key(path: &str) -> Vec<u8> {
-	let key = std::fs::read(&*path).unwrap();
-	let key = std::str::from_utf8(&key).expect("invalid key");
-	let key = key.trim();
-	n85::decode_vec(key.as_ref()).expect("invalid key")
-}
-
-fn read_key_ecdsa(path: &str) -> ecdsa::SigningKey<p256::NistP256> {
-	let key = read_key(path);
-	ecdsa::SigningKey::from_bytes(&key).expect("invalid key")
+fn read_key_ecdsa(key: &str) -> ecdsa::SigningKey<p256::NistP256> {
+	let mut buf = [0; 32];
+	let l = n85::decode(key.as_ref(), &mut buf).expect("invalid key");
+	assert!(l == buf.len(), "invalid key");
+	ecdsa::SigningKey::from_bytes(&mut buf).expect("invalid key")
 }

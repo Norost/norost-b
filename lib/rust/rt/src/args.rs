@@ -269,3 +269,7 @@ pub fn args() -> Args {
 pub fn env() -> Env {
 	Env::new()
 }
+
+pub fn handle(name: &[u8]) -> Option<RefObject<'static>> {
+	handles().find_map(|(n, o)| (n == name).then(|| o))
+}

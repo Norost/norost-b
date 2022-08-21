@@ -33,6 +33,10 @@ version = "1.0"
 [dependencies.serde_derive]
 version = "1.0"
 
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
 [dependencies.clap]
 version = "3.2"
 default-features = false
