@@ -1,12 +1,5 @@
 (services
 	(ssh
-		(
-			token
-			"9*xBzuES|vSU9O802@[y}NNFw_TUX)9IjAk[,Y:D"
-		)
-		(
-			access
-			cfg/ssh.scf
-		)
-	)
-)
+		(token "9*xBzuES|vSU9O802@[y}NNFw_TUX)9IjAk[,Y:D")
+		(access cfg/ssh.scf)
+		(allow auth)))

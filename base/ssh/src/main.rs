@@ -4,7 +4,7 @@ use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
 	net::{Ipv4Addr, TcpListener, TcpStream},
-	process,
+	process, AsyncObject,
 };
 use clap::Parser;
 use core::str;
@@ -51,7 +51,40 @@ struct Handlers {
 }
 
 struct User {
-	shell: Option<Rc<process::Child>>,
+	shell: Option<Rc<process::Process>>,
+	context: rt::Object,
+}
+
+impl User {
+	async fn spawn_shell(
+		&mut self,
+		bin: &[u8],
+	) -> rt::io::Result<
+		IoSet<AsyncWrapW<AsyncObject>, AsyncWrapR<AsyncObject>, AsyncWrapR<AsyncObject>>,
+	> {
+		let wait =
+			|child: Rc<process::Process>| async move { child.wait().await.unwrap().code as u32 };
+		let (stdin, stdin_shr) = rt::Object::new(rt::NewObject::Pipe)?;
+		let (stdout_shr, stdout) = rt::Object::new(rt::NewObject::Pipe)?;
+		let (stderr_shr, stderr) = rt::Object::new(rt::NewObject::Pipe)?;
+		let mut b = process::Builder::new().await?;
+		b.set_binary_by_name(Vec::from(bin)).await.0?;
+		b.add_object(b"in", stdin_shr.into()).await.0?;
+		b.add_object(b"out", stdout_shr.into()).await.0?;
+		b.add_object(b"err", stderr_shr.into()).await.0?;
+		b.add_object_raw(b"file", self.context.as_raw()).await?;
+		let shell = b.spawn().await?;
+		let mut shell = Rc::new(shell);
+		let sh_mut = Rc::get_mut(&mut shell).unwrap();
+		let io = IoSet {
+			stdin: Some(AsyncWrapW::new(AsyncObject::from(stdin))),
+			stdout: Some(AsyncWrapR::new(AsyncObject::from(stdout))),
+			stderr: Some(AsyncWrapR::new(AsyncObject::from(stderr))),
+			wait: Box::pin(wait(shell.clone())),
+		};
+		self.shell = Some(shell);
+		Ok(io)
+	}
 }
 
 enum UserKey {
@@ -105,6 +138,12 @@ impl Handlers {
 			})
 			.ok_or(())
 	}
+
+	async fn get_user_context(&self, user: &[u8]) -> Result<rt::Object, ()> {
+		let mut path = Vec::from(&b"auth/"[..]);
+		path.extend_from_slice(user);
+		self.userdb.open(&path).map_err(|e| todo!("{:?}", e))
+	}
 }
 
 #[async_trait::async_trait(?Send)]
@@ -114,9 +153,9 @@ impl ServerHandlers for Handlers {
 	type Read = ReadHalf<AsyncWrapRW<TcpStream>>;
 	type Write = WriteHalf<AsyncWrapRW<TcpStream>>;
 	type User = User;
-	type Stdin = AsyncWrapW<process::ChildStdin>;
-	type Stdout = AsyncWrapR<process::ChildStdout>;
-	type Stderr = AsyncWrapR<process::ChildStderr>;
+	type Stdin = AsyncWrapW<AsyncObject>;
+	type Stdout = AsyncWrapR<AsyncObject>;
+	type Stderr = AsyncWrapR<AsyncObject>;
 	type Rng = StdRng;
 
 	async fn accept(&self) -> (Self::Read, Self::Write) {
@@ -161,7 +200,10 @@ impl ServerHandlers for Handlers {
 						.verify(message, &signature.try_into().map_err(|_| ())?)
 						.map_err(|_| ())?,
 				}
-				Ok(User { shell: None })
+				Ok(User {
+					shell: None,
+					context: self.get_user_context(user).await?,
+				})
 			}
 		}
 	}
@@ -172,34 +214,8 @@ impl ServerHandlers for Handlers {
 		ty: SpawnType<'a>,
 		_data: &'a [u8],
 	) -> Result<IoSet<Self::Stdin, Self::Stdout, Self::Stderr>, ()> {
-		let wait = |child: Rc<process::Child>| async move {
-			child.wait().await.unwrap().code().unwrap_or(0) as u32
-		};
 		match ty {
-			SpawnType::Shell => {
-				let shell = "drivers/minish";
-				let shell = process::Command::new(shell)
-					.await
-					.stdin(process::Stdio::piped())
-					.await
-					.stdout(process::Stdio::piped())
-					.await
-					.stderr(process::Stdio::piped())
-					.await
-					.spawn()
-					.await
-					.unwrap();
-				let mut shell = Rc::new(shell);
-				let sh_mut = Rc::get_mut(&mut shell).unwrap();
-				let io = IoSet {
-					stdin: sh_mut.stdin.take().map(AsyncWrapW::new),
-					stdout: sh_mut.stdout.take().map(AsyncWrapR::new),
-					stderr: sh_mut.stderr.take().map(AsyncWrapR::new),
-					wait: Box::pin(wait(shell.clone())),
-				};
-				user.shell = Some(shell);
-				Ok(io)
-			}
+			SpawnType::Shell => user.spawn_shell(b"drivers/minish").await.map_err(|_| ()),
 			SpawnType::Exec { command } => {
 				let mut args = command
 					.split(|c| c.is_ascii_whitespace())
@@ -209,29 +225,7 @@ impl ServerHandlers for Handlers {
 					b"scp" => b"drivers/scp", // TODO do this properly with PATH env or whatever
 					b => b,
 				};
-				let shell = process::Command::new(bin)
-					.await
-					.stdin(process::Stdio::piped())
-					.await
-					.stdout(process::Stdio::piped())
-					.await
-					.stderr(process::Stdio::piped())
-					.await
-					.args(args)
-					.await
-					.spawn()
-					.await
-					.unwrap();
-				let mut shell = Rc::new(shell);
-				let sh_mut = Rc::get_mut(&mut shell).unwrap();
-				let io = IoSet {
-					stdin: sh_mut.stdin.take().map(AsyncWrapW::new),
-					stdout: sh_mut.stdout.take().map(AsyncWrapR::new),
-					stderr: sh_mut.stderr.take().map(AsyncWrapR::new),
-					wait: Box::pin(wait(shell.clone())),
-				};
-				user.shell = Some(shell);
-				Ok(io)
+				user.spawn_shell(bin).await.map_err(|_| ())
 			}
 		}
 	}

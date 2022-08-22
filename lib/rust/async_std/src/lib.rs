@@ -19,7 +19,7 @@ pub mod task;
 #[macro_use]
 mod macros;
 
-use object::AsyncObject;
+pub use object::{AsyncObject, RefAsyncObject};
 
 #[cfg(all(not(feature = "std"), feature = "rt_default"))]
 use rt_default as _;
