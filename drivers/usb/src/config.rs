@@ -2,7 +2,15 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 use nora_scf::Token;
 
 pub struct Config {
-	drivers: BTreeMap<((u8, u8, u8), (u8, u8, u8)), Box<[u8]>>,
+	drivers: BTreeMap<((u8, u8, u8), (u8, u8, u8)), Driver>,
+}
+
+pub struct Driver {
+	pub path: Box<str>,
+	/// The name the driver should get when it shares an interaction object.
+	///
+	/// If no name is specified, the device number is used.
+	pub name: Option<Box<str>>,
 }
 
 /// Format:
@@ -28,61 +36,56 @@ pub fn parse(config: &rt::Object) -> Config {
 	}
 
 	let mut drivers = BTreeMap::default();
-	let mut it = nora_scf::parse(&buf);
+	let mut cf = nora_scf::parse2(&buf);
+	let mut it = cf.iter();
 
-	let s = for<'a, 'b> |it: &'b mut nora_scf::Iter<'a>| -> &'a str {
-		it.next().unwrap().unwrap().into_str().unwrap()
-	};
-
-	let trips = |it: &mut _| {
-		let c = parse_hex_u8(s(it)).unwrap();
-		let sc = parse_hex_u8(s(it)).unwrap();
-		let p = parse_hex_u8(s(it)).unwrap();
+	let trips = |it: &mut nora_scf::GroupsIter<'_, '_>| {
+		let c = it.next_str().and_then(parse_hex_u8).unwrap();
+		let sc = it.next_str().and_then(parse_hex_u8).unwrap();
+		let p = it.next_str().and_then(parse_hex_u8).unwrap();
 		(c, sc, p)
 	};
 
-	while let Some(tk) = it.next().map(Result::unwrap) {
-		match tk {
-			Token::Begin => {
-				assert_eq!(it.next(), Some(Ok(Token::Str("usb-drivers"))));
-				match it.next().unwrap().unwrap() {
-					Token::Begin => {
-						let base = trips(&mut it);
-						loop {
-							match it.next().unwrap().unwrap() {
-								Token::Begin => {
-									let intf = trips(&mut it);
-									let driver = s(&mut it);
-									let prev =
-										drivers.insert((base, intf), Box::from(driver.as_bytes()));
+	for mut it in it.map(|e| e.into_group().unwrap()) {
+		match it.next_str().unwrap() {
+			"usb-drivers" => {
+				for mut it in it.map(|e| e.into_group().unwrap()) {
+					let base = trips(&mut it);
+					for mut it in it.map(|e| e.into_group().unwrap()) {
+						let intf = trips(&mut it);
+						let path = it.next_str().unwrap().into();
+						let mut name = None;
+						for mut it in it.map(|e| e.into_group().unwrap()) {
+							match it.next_str().unwrap() {
+								"name" => {
+									let prev = name.replace(it.next_str().unwrap().into());
 									assert!(
 										prev.is_none(),
-										"already specified for {:?}",
+										"name already set for {:?}",
 										(base, intf)
 									);
-									assert_eq!(it.next(), Some(Ok(Token::End)));
+									assert!(it.next().is_none());
 								}
-								Token::End => break,
-								Token::Str(_) => panic!("unexpected string"),
+								s => todo!("{:?}", s),
 							}
 						}
-						assert_eq!(it.next(), Some(Ok(Token::End)));
+						let prev = drivers.insert((base, intf), Driver { path, name });
+						assert!(prev.is_none(), "already specified for {:?}", (base, intf));
 					}
-					Token::End => {}
-					Token::Str(_) => panic!("unexpected string"),
 				}
 			}
-			Token::End => panic!("unexpected ')'"),
-			Token::Str(_) => panic!("unexpected string"),
+			s => todo!("{:?}", s),
 		}
 	}
+
+	assert!(cf.into_error().is_none());
 
 	Config { drivers }
 }
 
 impl Config {
-	pub fn get_driver(&self, base: (u8, u8, u8), interface: (u8, u8, u8)) -> Option<&[u8]> {
-		self.drivers.get(&(base, interface)).map(|b| &**b)
+	pub fn get_driver(&self, base: (u8, u8, u8), interface: (u8, u8, u8)) -> Option<&Driver> {
+		self.drivers.get(&(base, interface))
 	}
 }
 

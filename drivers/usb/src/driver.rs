@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec};
 use core::{
 	future::Future,
 	num::NonZeroU8,
@@ -12,7 +12,7 @@ const MSG_SIZE: usize = 32;
 pub struct Drivers<'a> {
 	queue: &'a Queue,
 	drivers: BTreeMap<NonZeroU8, DeviceDriver<'a>>,
-	handlers: BTreeMap<Box<[u8]>, rt::Object>,
+	handlers: BTreeMap<Box<str>, rt::Object>,
 }
 
 impl<'a> Drivers<'a> {
@@ -31,8 +31,10 @@ impl<'a> Drivers<'a> {
 			if let Some(share) = driver.share_task.as_mut() {
 				if let Poll::Ready((res, ())) = Pin::new(share).poll(&mut cx) {
 					let obj = rt::Object::from_raw(res.unwrap());
-					self.handlers
-						.insert((*b"usb_keyboard_share_test_yay").into(), obj);
+					self.handlers.insert(
+						gen_name(&driver.name, |s| self.handlers.contains_key(s)),
+						obj,
+					);
 					driver.share_task = None;
 				}
 			} else if let Poll::Ready((res, buf)) = Pin::new(&mut driver.read_task).poll(&mut cx) {
@@ -85,14 +87,14 @@ impl<'a> Drivers<'a> {
 	pub fn load_driver(
 		&mut self,
 		slot: NonZeroU8,
-		path: &[u8],
+		driver: &crate::config::Driver,
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
 	) -> rt::io::Result<()> {
 		self.drivers
 			.entry(slot)
 			.and_modify(|_| panic!("driver already present in slot {}", slot))
-			.or_insert(DeviceDriver::new(path, self.queue, base, interface)?);
+			.or_insert(DeviceDriver::new(driver, self.queue, base, interface)?);
 		Ok(())
 	}
 
@@ -112,11 +114,11 @@ impl<'a> Drivers<'a> {
 		Ok(())
 	}
 
-	pub fn handler<'h>(&'h self, name: &[u8]) -> Option<rt::RefObject<'h>> {
+	pub fn handler<'h>(&'h self, name: &str) -> Option<rt::RefObject<'h>> {
 		self.handlers.get(name).map(Into::into)
 	}
 
-	pub fn handler_at(&self, index: usize) -> Option<(&[u8], &rt::Object)> {
+	pub fn handler_at(&self, index: usize) -> Option<(&str, &rt::Object)> {
 		self.handlers
 			.iter()
 			.skip(index)
@@ -145,11 +147,12 @@ struct DeviceDriver<'a> {
 	read_task: Read<'a, Vec<u8>>,
 	write_tasks: Vec<Write<'a, Vec<u8>>>,
 	share_task: Option<Open<'a, ()>>,
+	name: Box<str>,
 }
 
 impl<'a> DeviceDriver<'a> {
 	fn new(
-		path: &[u8],
+		driver: &crate::config::Driver,
 		queue: &'a Queue,
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
@@ -173,8 +176,8 @@ impl<'a> DeviceDriver<'a> {
 		}
 
 		let mut p = rt::process::Builder::new()?;
-		p.set_binary_by_name(path)?;
-		p.add_args([path, &arg])?;
+		p.set_binary_by_name(driver.path.as_bytes())?;
+		p.add_args([driver.path.as_bytes(), &arg])?;
 		p.add_object(b"in", &proc_stdin)?;
 		p.add_object(b"out", &proc_stdout)?;
 		rt::io::stderr()
@@ -194,6 +197,7 @@ impl<'a> DeviceDriver<'a> {
 			read_task,
 			write_tasks: Default::default(),
 			share_task: Default::default(),
+			name: driver.name.as_deref().unwrap_or("unnamed{n}").into(),
 		})
 	}
 }
@@ -226,4 +230,15 @@ fn write<'a>(queue: &'a Queue, stdin: &rt::Object, data: Vec<u8>) -> Write<'a, V
 	queue
 		.submit_write(stdin.as_raw(), data)
 		.unwrap_or_else(|e| todo!("{:?}", e))
+}
+
+fn gen_name(template: &str, f: impl Fn(&str) -> bool) -> Box<str> {
+	for i in 0usize.. {
+		let s = template.replace("{n}", &i.to_string());
+		assert!(&s != template, "name cannot be unique");
+		if !f(&s) {
+			return s.into();
+		}
+	}
+	unreachable!()
 }

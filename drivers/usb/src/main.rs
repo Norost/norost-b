@@ -20,7 +20,7 @@ mod requests;
 mod xhci;
 
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use core::num::NonZeroU8;
+use core::{num::NonZeroU8, str};
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use io_queue_rt::{Pow2Size, Queue};
 use rt::{Error, Handle};
@@ -248,7 +248,7 @@ fn main() -> ! {
 					}
 					(Handle::MAX, p) if p.starts_with(b"handlers/") => {
 						let p = &p["handlers/".len()..];
-						if let Some(h) = drivers.handler(p) {
+						if let Ok(Some(h)) = str::from_utf8(p).map(|p| drivers.handler(p)) {
 							Response::Object(h)
 						} else {
 							Response::Error(Error::DoesNotExist)
@@ -286,7 +286,7 @@ fn main() -> ! {
 						if let Some((k, _)) = drivers.handler_at(*index) {
 							*index += 1;
 							let buf = tbl.alloc(k.len()).expect("out of buffers");
-							buf.copy_from(0, k);
+							buf.copy_from(0, k.as_ref());
 							Response::Data(buf)
 						} else {
 							*index = usize::MAX;
