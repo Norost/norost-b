@@ -190,7 +190,7 @@ fn main() -> ! {
 								},
 							)
 							.unwrap();
-						ctrl.transfer(slot, endpoint, buf, true);
+						//ctrl.transfer(slot, endpoint, buf, true);
 
 						//unreachable!()
 					}
@@ -211,10 +211,35 @@ fn main() -> ! {
 					endpoint,
 					count,
 				} => {
-					for _ in 0..16 {
+					assert!(endpoint > 0);
+					let ep = endpoint << 1 | 1;
+					assert!(ep < 32);
+					for _ in 0..count {
 						let buf = dma::Dma::new_slice(8).unwrap();
-						ctrl.transfer(slot, 3.try_into().unwrap(), buf, true);
+						ctrl.transfer(slot, ep.try_into().unwrap(), buf, true);
 					}
+				}
+				Event::QueueBulkRead {
+					slot,
+					endpoint,
+					size,
+				} => {
+					assert!(endpoint > 0);
+					let ep = endpoint << 1 | 1;
+					assert!(ep < 32);
+					let buf = dma::Dma::new_slice(size.try_into().unwrap()).unwrap();
+					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true);
+				}
+				Event::BulkWrite {
+					slot,
+					endpoint,
+					data,
+				} => {
+					assert!(endpoint > 0);
+					let ep = endpoint << 1;
+					assert!(ep < 32);
+					ctrl.transfer(slot, ep.try_into().unwrap(), data, false)
+						.unwrap_or_else(|_| todo!());
 				}
 			}
 		}

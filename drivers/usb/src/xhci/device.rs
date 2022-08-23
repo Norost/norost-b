@@ -296,14 +296,16 @@ fn calc_packet_size(speed: u8) -> u16 {
 		LOW_SPEED => 8,
 		HIGH_SPEED => 64,
 		SUPERSPEED_GEN1_X1 | SUPERSPEED_GEN2_X1 | SUPERSPEED_GEN1_X2 | SUPERSPEED_GEN2_X2 => 512,
-		FULL_SPEED => 1337, // TODO todo!("use GET_DESCRIPTOR to get packet size"),
+		FULL_SPEED => todo!("use GET_DESCRIPTOR to get packet size"),
 		n => unimplemented!("unknown speed {}", n),
 	}
 }
 
 fn map_endpoint_type(transfer: EndpointTransfer, dir: Direction) -> EndpointType {
-	match (transfer, dir) {
+	rt::dbg!(match (transfer, dir) {
 		(EndpointTransfer::Interrupt, Direction::In) => EndpointType::InterruptIn,
+		(EndpointTransfer::Bulk, Direction::In) => EndpointType::BulkIn,
+		(EndpointTransfer::Bulk, Direction::Out) => EndpointType::BulkOut,
 		e => todo!("{:?}", e),
-	}
+	})
 }

@@ -3,8 +3,12 @@
 pub const SEND_TY_REQUEST: u8 = 0;
 pub const SEND_TY_INTR_IN_ENQUEUE_NUM: u8 = 1;
 pub const SEND_TY_PUBLIC_OBJECT: u8 = 2;
+pub const SEND_TY_BULK_OUT: u8 = 3;
+pub const SEND_TY_BULK_IN: u8 = 4;
 
 pub const RECV_TY_INTR_IN: u8 = 1;
+pub const RECV_TY_BULK_OUT: u8 = 2;
+pub const RECV_TY_BULK_IN: u8 = 3;
 
 pub fn send_intr_in_enqueue_num<R>(ep: u8, num: u16, f: impl FnOnce(&[u8]) -> R) -> R {
 	assert!((1..16).contains(&ep));
@@ -16,13 +20,28 @@ pub fn send_public_object<R>(f: impl FnOnce(&[u8]) -> R) -> R {
 	f(&[SEND_TY_PUBLIC_OBJECT])
 }
 
+pub fn send_bulk_out<R>(ep: u8, f: impl FnOnce(&[u8]) -> R) -> R {
+	assert!((1..16).contains(&ep));
+	f(&[SEND_TY_BULK_OUT, ep])
+}
+
+pub fn send_bulk_in<R>(ep: u8, amount: u32, f: impl FnOnce(&[u8]) -> R) -> R {
+	assert!((1..16).contains(&ep));
+	let [a, b, c, d] = amount.to_le_bytes();
+	f(&[SEND_TY_BULK_IN, ep, a, b, c, d])
+}
+
 pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
 	let f = |i, j| msg.get(i..j).ok_or("truncated message");
 	let fe = |i| msg.get(i..).ok_or("truncated message");
 	let f1 = |i| f(i, i + 1).map(|l| l[0]);
-	let f2 = |i| f(i, i + 2).map(|l| u16::from_le_bytes(l.try_into().unwrap()));
 	Ok(match f1(0)? {
 		RECV_TY_INTR_IN => Recv::IntrIn {
+			ep: f1(1)?,
+			data: fe(2)?,
+		},
+		RECV_TY_BULK_OUT => Recv::BulkOut { ep: f1(1)? },
+		RECV_TY_BULK_IN => Recv::BulkIn {
 			ep: f1(1)?,
 			data: fe(2)?,
 		},
@@ -32,6 +51,8 @@ pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
 
 pub enum Recv<'a> {
 	IntrIn { ep: u8, data: &'a [u8] },
+	BulkOut { ep: u8 },
+	BulkIn { ep: u8, data: &'a [u8] },
 }
 
 #[repr(C)]

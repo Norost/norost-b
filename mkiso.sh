@@ -84,6 +84,7 @@ install ps2                driver_ps2
 install scancode_to_char   driver_scancode_to_char
 install usb                driver_usb
 install usb_kbd            driver_usb_kbd
+install usb_storage        driver_usb_storage
 install virtio_block       driver_virtio_block
 install virtio_gpu         driver_virtio_gpu
 install virtio_net         driver_virtio_net

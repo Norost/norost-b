@@ -14,6 +14,7 @@ members = [
 	"drivers/virtio_net",
 	"drivers/usb",
 	"drivers/usb_kbd",
+	"drivers/usb_storage",
 	"lib/rust/arena",
 	"lib/rust/async_completion",
 	"lib/rust/async_std",

@@ -109,6 +109,7 @@ fn main() -> ! {
 
 				prev_state.copy_from_slice(data);
 			}
+			_ => todo!(),
 		}
 	}
 }

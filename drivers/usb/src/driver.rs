@@ -37,8 +37,7 @@ impl<'a> Drivers<'a> {
 				}
 			} else if let Poll::Ready((res, buf)) = Pin::new(&mut driver.read_task).poll(&mut cx) {
 				res.unwrap();
-				rt::dbg!(&buf);
-				let evt = match *buf.get(0).unwrap_or_else(|| todo!("invalid msg")) {
+				let evt = match *buf.get(0).unwrap_or_else(|| todo!("no msg")) {
 					ipc_usb::SEND_TY_INTR_IN_ENQUEUE_NUM => Some(Event::QueueInterruptInEntries {
 						slot,
 						endpoint: *buf.get(1).unwrap_or_else(|| todo!("invalid msg")),
@@ -58,7 +57,31 @@ impl<'a> Drivers<'a> {
 						);
 						None
 					}
-					_ => todo!("invalid msg"),
+					ipc_usb::SEND_TY_BULK_IN => {
+						let [_, endpoint, a, b, c, d]: [u8; 6] =
+							(&*buf).try_into().expect("invalid msg");
+						Some(Event::QueueBulkRead {
+							slot,
+							endpoint,
+							size: u32::from_le_bytes([a, b, c, d]),
+						})
+					}
+					ipc_usb::SEND_TY_BULK_OUT => {
+						let [_, endpoint]: [u8; 2] = (&*buf).try_into().expect("invalid msg");
+						let mut buf = [0; 1024 + 32];
+						let l = driver.stdout.read(&mut buf).unwrap();
+						let mut data = crate::dma::Dma::new_slice(l).unwrap();
+						unsafe { data.as_mut().copy_from_slice(&buf[..l]) }
+						Some(Event::BulkWrite {
+							slot,
+							endpoint,
+							data,
+						})
+					}
+					_ => todo!(
+						"invalid msg: {:?}",
+						alloc::string::String::from_utf8_lossy(&buf)
+					),
 				};
 				driver.read_task = read(&self.queue, &driver.stdout, buf);
 				if let Some(evt) = evt {
@@ -92,6 +115,7 @@ impl<'a> Drivers<'a> {
 				v.push(endpoint);
 				v.extend_from_slice(data);
 			}
+			_ => todo!(),
 		}
 		let wr = write(self.queue, &d.stdin, v);
 		d.write_tasks.push(wr);
@@ -190,10 +214,22 @@ pub enum Event {
 		endpoint: u8,
 		count: u16,
 	},
+	QueueBulkRead {
+		slot: NonZeroU8,
+		endpoint: u8,
+		size: u32,
+	},
+	BulkWrite {
+		slot: NonZeroU8,
+		endpoint: u8,
+		data: crate::dma::Dma<[u8]>,
+	},
 }
 
 pub enum Message<'a> {
 	NotifyInterrupt { endpoint: u8, data: &'a [u8] },
+	BulkReadFinished { endpoint: u8, data: &'a [u8] },
+	BulkWriteFinished { endpoint: u8 },
 }
 
 fn read<'a>(queue: &'a Queue, stdout: &rt::Object, mut buf: Vec<u8>) -> Read<'a, Vec<u8>> {

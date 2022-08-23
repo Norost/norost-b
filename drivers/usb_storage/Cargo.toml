@@ -1,0 +1,19 @@
+[package]
+name = "driver_usb_storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.ipc_usb]
+path = "../../lib/rust/ipc/usb"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"
+
+[dependencies.scsi]
+package = "nora_scsi"
+path = "../../../lib/scsi"

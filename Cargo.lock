@@ -359,6 +359,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_usb_storage"
+version = "0.1.0"
+dependencies = [
+ "ipc_usb",
+ "nora_scsi",
+ "norost_rt_default",
+ "norostb_rt",
+]
+
+[[package]]
 name = "driver_utils"
 version = "0.2.0"
 dependencies = [
@@ -838,6 +848,10 @@ dependencies = [
 
 [[package]]
 name = "nora_scf"
+version = "0.1.0"
+
+[[package]]
+name = "nora_scsi"
 version = "0.1.0"
 
 [[package]]
