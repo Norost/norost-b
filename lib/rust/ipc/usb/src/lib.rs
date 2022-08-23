@@ -1,34 +1,43 @@
 #![no_std]
 
-pub const SEND_TY_REQUEST: u8 = 0;
-pub const SEND_TY_INTR_IN_ENQUEUE_NUM: u8 = 1;
-pub const SEND_TY_PUBLIC_OBJECT: u8 = 2;
-pub const SEND_TY_BULK_OUT: u8 = 3;
-pub const SEND_TY_BULK_IN: u8 = 4;
+pub const SEND_TY_REQUEST: u8 = 1;
+pub const SEND_TY_PUBLIC_OBJECT: u8 = 1;
+pub const SEND_TY_DATA_OUT: u8 = 2;
+pub const SEND_TY_DATA_IN: u8 = 3;
 
-pub const RECV_TY_INTR_IN: u8 = 1;
-pub const RECV_TY_BULK_OUT: u8 = 2;
-pub const RECV_TY_BULK_IN: u8 = 3;
+pub const RECV_TY_DATA_IN: u8 = 0;
 
-pub fn send_intr_in_enqueue_num<R>(ep: u8, num: u16, f: impl FnOnce(&[u8]) -> R) -> R {
-	assert!((1..16).contains(&ep));
-	let [a, b] = num.to_le_bytes();
-	f(&[SEND_TY_INTR_IN_ENQUEUE_NUM, ep, a, b])
+#[derive(Clone, Copy, Debug)]
+pub enum Endpoint {
+	N0,
+	N1,
+	N2,
+	N3,
+	N4,
+	N5,
+	N6,
+	N7,
+	N8,
+	N9,
+	N10,
+	N11,
+	N12,
+	N13,
+	N14,
+	N15,
 }
 
 pub fn send_public_object<R>(f: impl FnOnce(&[u8]) -> R) -> R {
 	f(&[SEND_TY_PUBLIC_OBJECT])
 }
 
-pub fn send_bulk_out<R>(ep: u8, f: impl FnOnce(&[u8]) -> R) -> R {
-	assert!((1..16).contains(&ep));
-	f(&[SEND_TY_BULK_OUT, ep])
+pub fn send_data_out<R>(ep: Endpoint, f: impl FnOnce(&[u8]) -> R) -> R {
+	f(&[SEND_TY_DATA_OUT, ep as _])
 }
 
-pub fn send_bulk_in<R>(ep: u8, amount: u32, f: impl FnOnce(&[u8]) -> R) -> R {
-	assert!((1..16).contains(&ep));
+pub fn send_data_in<R>(ep: Endpoint, amount: u32, f: impl FnOnce(&[u8]) -> R) -> R {
 	let [a, b, c, d] = amount.to_le_bytes();
-	f(&[SEND_TY_BULK_IN, ep, a, b, c, d])
+	f(&[SEND_TY_DATA_IN, ep as _, a, b, c, d])
 }
 
 pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
@@ -36,12 +45,7 @@ pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
 	let fe = |i| msg.get(i..).ok_or("truncated message");
 	let f1 = |i| f(i, i + 1).map(|l| l[0]);
 	Ok(match f1(0)? {
-		RECV_TY_INTR_IN => Recv::IntrIn {
-			ep: f1(1)?,
-			data: fe(2)?,
-		},
-		RECV_TY_BULK_OUT => Recv::BulkOut { ep: f1(1)? },
-		RECV_TY_BULK_IN => Recv::BulkIn {
+		RECV_TY_DATA_IN => Recv::DataIn {
 			ep: f1(1)?,
 			data: fe(2)?,
 		},
@@ -50,9 +54,7 @@ pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
 }
 
 pub enum Recv<'a> {
-	IntrIn { ep: u8, data: &'a [u8] },
-	BulkOut { ep: u8 },
-	BulkIn { ep: u8, data: &'a [u8] },
+	DataIn { ep: u8, data: &'a [u8] },
 }
 
 #[repr(C)]

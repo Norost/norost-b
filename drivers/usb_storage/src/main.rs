@@ -19,37 +19,40 @@ fn main() {
 	let stdout = rt::io::stdout().unwrap();
 	let stdin = rt::io::stdin().unwrap();
 
-	let data = bbb::transfer_in(
+	let mut dev = bbb::Device::new(
+		ipc_usb::Endpoint::N2,
+		ipc_usb::Endpoint::N1,
 		&stdout,
 		&stdin,
-		scsi::Inquiry {
-			allocation_length: 0x24,
-			evpd: 0,
-			page_code: 0,
-			control: 0,
-		},
-		0x24,
-	)
-	.unwrap();
+	);
+
+	let data = dev
+		.transfer_in(
+			scsi::Inquiry {
+				allocation_length: 0x24,
+				evpd: 0,
+				page_code: 0,
+				control: 0,
+			},
+			0x24,
+		)
+		.unwrap();
 	rt::dbg!(alloc::string::String::from_utf8_lossy(&data));
 
-	let data = bbb::transfer_in(
-		&stdout,
-		&stdin,
-		scsi::ReadCapacity10 {
-			_reserved: 0,
-			control: 0,
-		},
-		8,
-	)
-	.unwrap();
+	let data = dev
+		.transfer_in(
+			scsi::ReadCapacity10 {
+				_reserved: 0,
+				control: 0,
+			},
+			8,
+		)
+		.unwrap();
 	rt::dbg!(scsi::ReadCapacity10Data::from(
 		<[u8; 8]>::try_from(&*data).unwrap()
 	));
 
-	bbb::transfer_out(
-		&stdout,
-		&stdin,
+	dev.transfer_out(
 		scsi::Write10 {
 			flags: 0,
 			address: 0,
@@ -60,4 +63,8 @@ fn main() {
 		&[b'c'; 512],
 	)
 	.unwrap();
+
+	loop {
+		rt::thread::sleep(core::time::Duration::MAX);
+	}
 }

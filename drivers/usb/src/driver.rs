@@ -38,16 +38,6 @@ impl<'a> Drivers<'a> {
 			} else if let Poll::Ready((res, buf)) = Pin::new(&mut driver.read_task).poll(&mut cx) {
 				res.unwrap();
 				let evt = match *buf.get(0).unwrap_or_else(|| todo!("no msg")) {
-					ipc_usb::SEND_TY_INTR_IN_ENQUEUE_NUM => Some(Event::QueueInterruptInEntries {
-						slot,
-						endpoint: *buf.get(1).unwrap_or_else(|| todo!("invalid msg")),
-						count: u16::from_le_bytes(
-							buf.get(2..4)
-								.unwrap_or_else(|| todo!("invalid msg"))
-								.try_into()
-								.unwrap(),
-						),
-					}),
 					ipc_usb::SEND_TY_PUBLIC_OBJECT => {
 						assert!(driver.share_task.is_none(), "share already in progress");
 						driver.share_task = Some(
@@ -57,22 +47,22 @@ impl<'a> Drivers<'a> {
 						);
 						None
 					}
-					ipc_usb::SEND_TY_BULK_IN => {
+					ipc_usb::SEND_TY_DATA_IN => {
 						let [_, endpoint, a, b, c, d]: [u8; 6] =
 							(&*buf).try_into().expect("invalid msg");
-						Some(Event::QueueBulkRead {
+						Some(Event::DataIn {
 							slot,
 							endpoint,
 							size: u32::from_le_bytes([a, b, c, d]),
 						})
 					}
-					ipc_usb::SEND_TY_BULK_OUT => {
+					ipc_usb::SEND_TY_DATA_OUT => {
 						let [_, endpoint]: [u8; 2] = (&*buf).try_into().expect("invalid msg");
 						let mut buf = [0; 1024 + 32];
 						let l = driver.stdout.read(&mut buf).unwrap();
 						let mut data = crate::dma::Dma::new_slice(l).unwrap();
 						unsafe { data.as_mut().copy_from_slice(&buf[..l]) }
-						Some(Event::BulkWrite {
+						Some(Event::DataOut {
 							slot,
 							endpoint,
 							data,
@@ -110,8 +100,8 @@ impl<'a> Drivers<'a> {
 		let d = self.drivers.get_mut(&slot).expect("no driver at slot");
 		let mut v = Vec::new();
 		match msg {
-			Message::NotifyInterrupt { endpoint, data } => {
-				v.push(ipc_usb::SEND_TY_INTR_IN_ENQUEUE_NUM);
+			Message::DataIn { endpoint, data } => {
+				v.push(ipc_usb::RECV_TY_DATA_IN);
 				v.push(endpoint);
 				v.extend_from_slice(data);
 			}
@@ -209,17 +199,12 @@ impl<'a> DeviceDriver<'a> {
 }
 
 pub enum Event {
-	QueueInterruptInEntries {
-		slot: NonZeroU8,
-		endpoint: u8,
-		count: u16,
-	},
-	QueueBulkRead {
+	DataIn {
 		slot: NonZeroU8,
 		endpoint: u8,
 		size: u32,
 	},
-	BulkWrite {
+	DataOut {
 		slot: NonZeroU8,
 		endpoint: u8,
 		data: crate::dma::Dma<[u8]>,
@@ -227,9 +212,7 @@ pub enum Event {
 }
 
 pub enum Message<'a> {
-	NotifyInterrupt { endpoint: u8, data: &'a [u8] },
-	BulkReadFinished { endpoint: u8, data: &'a [u8] },
-	BulkWriteFinished { endpoint: u8 },
+	DataIn { endpoint: u8, data: &'a [u8] },
 }
 
 fn read<'a>(queue: &'a Queue, stdout: &rt::Object, mut buf: Vec<u8>) -> Read<'a, Vec<u8>> {

@@ -17,90 +17,109 @@
 //
 // I would do it myself if Gitlab wasn't user-hostile *shrug*.
 
-/// Perform a BBB Out transfer
-pub fn transfer_out(
-	wr: &rt::Object,
-	rd: &rt::Object,
-	command: impl scsi::Command,
-	data: &[u8],
-) -> Result<u32, rt::Error> {
-	// CBW
-	let mut cmd = [0; 16];
-	let cmd_len = command.into_raw(&mut cmd).len();
-	let data_len = data.len().try_into().expect("data exceeds 4GB");
-	transfer_command(wr, 0x00, cmd, cmd_len, data_len)?;
-
-	// Data
-	if !data.is_empty() {
-		ipc_usb::send_bulk_out(2, |d| wr.write(d))?;
-		wr.write(data)?;
-	}
-
-	// CSW
-	transfer_status(wr, rd, data_len)
+pub struct Device<'a> {
+	data_out: ipc_usb::Endpoint,
+	data_in: ipc_usb::Endpoint,
+	wr: rt::RefObject<'a>,
+	rd: rt::RefObject<'a>,
 }
 
-/// Perform a BBB Out transfer
-pub fn transfer_in(
-	wr: &rt::Object,
-	rd: &rt::Object,
-	command: impl scsi::Command,
-	length: u32,
-) -> Result<alloc::vec::Vec<u8>, rt::Error> {
-	// CBW
-	let mut cmd = [0; 16];
-	let len = command.into_raw(&mut cmd).len();
-	transfer_command(wr, 0x80, cmd, len, length)?;
-
-	// Data
-	if length != 0 {
-		ipc_usb::send_bulk_in(1, length, |d| wr.write(d))?;
-	}
-	let mut buf = alloc::vec::Vec::with_capacity((32 + length) as _);
-	let l = rd.read_uninit(buf.spare_capacity_mut())?.0.len();
-	// SAFETY: read_uninit guarantees the first l bytes are initialized.
-	unsafe { buf.set_len(l) }
-	buf.drain(..2);
-
-	// CSW
-	let sl = transfer_status(wr, rd, length)?;
-	//assert_eq!(l, sl as usize);
-
-	Ok(buf)
-}
-
-fn transfer_command(
-	out: &rt::Object,
-	flags: u8,
-	cmd: [u8; 16],
-	cmd_len: usize,
-	data_transfer_length: u32,
-) -> Result<(), rt::Error> {
-	let cmd = CommandBlockWrapper {
-		tag: 0,
-		data_transfer_length,
-		flags,
-		lun: 0,
-		cb_length: cmd_len.try_into().unwrap(),
-		data: cmd,
-	};
-	ipc_usb::send_bulk_out(2, |d| out.write(d))?;
-	out.write(&cmd.into_raw())?;
-	Ok(())
-}
-
-fn transfer_status(wr: &rt::Object, rd: &rt::Object, data_len: u32) -> Result<u32, rt::Error> {
-	ipc_usb::send_bulk_in(1, 13, |d| wr.write(d))?;
-	let mut buf = [0; 32];
-	let l = rd.read(&mut buf)?;
-	match ipc_usb::recv_parse(&buf[..l]).unwrap() {
-		// FIXME should be BulkIn
-		ipc_usb::Recv::IntrIn { ep, data } => {
-			let csw = CommandStatusWrapper::from_raw(data.try_into().unwrap());
-			assert!(matches!(csw.status, Status::Success));
-			Ok(data_len - csw.residue)
+impl<'a> Device<'a> {
+	pub fn new(
+		data_out: ipc_usb::Endpoint,
+		data_in: ipc_usb::Endpoint,
+		wr: &'a rt::Object,
+		rd: &'a rt::Object,
+	) -> Self {
+		Self {
+			data_out,
+			data_in,
+			wr: wr.into(),
+			rd: rd.into(),
 		}
-		_ => panic!("unexpected response"),
+	}
+
+	/// Perform a BBB Out transfer
+	pub fn transfer_out(
+		&mut self,
+		command: impl scsi::Command,
+		data: &[u8],
+	) -> Result<u32, rt::Error> {
+		// CBW
+		let mut cmd = [0; 16];
+		let cmd_len = command.into_raw(&mut cmd).len();
+		let data_len = data.len().try_into().expect("data exceeds 4GB");
+		self.transfer_command(0x00, cmd, cmd_len, data_len)?;
+
+		// Data
+		if !data.is_empty() {
+			ipc_usb::send_data_out(ipc_usb::Endpoint::N2, |d| self.wr.write(d))?;
+			self.wr.write(data)?;
+		}
+
+		// CSW
+		self.transfer_status(data_len)
+	}
+
+	/// Perform a BBB Out transfer
+	pub fn transfer_in(
+		&mut self,
+		command: impl scsi::Command,
+		length: u32,
+	) -> Result<alloc::vec::Vec<u8>, rt::Error> {
+		// CBW
+		let mut cmd = [0; 16];
+		let len = command.into_raw(&mut cmd).len();
+		self.transfer_command(0x80, cmd, len, length)?;
+
+		// Data
+		if length != 0 {
+			ipc_usb::send_data_in(self.data_in, length, |d| self.wr.write(d))?;
+		}
+		let mut buf = alloc::vec::Vec::with_capacity((32 + length) as _);
+		let l = self.rd.read_uninit(buf.spare_capacity_mut())?.0.len();
+		// SAFETY: read_uninit guarantees the first l bytes are initialized.
+		unsafe { buf.set_len(l) }
+		buf.drain(..2);
+
+		// CSW
+		let sl = self.transfer_status(length)?;
+		//assert_eq!(l, sl as usize);
+
+		Ok(buf)
+	}
+
+	fn transfer_command(
+		&mut self,
+		flags: u8,
+		cmd: [u8; 16],
+		cmd_len: usize,
+		data_transfer_length: u32,
+	) -> Result<(), rt::Error> {
+		let cmd = CommandBlockWrapper {
+			tag: 0,
+			data_transfer_length,
+			flags,
+			lun: 0,
+			cb_length: cmd_len.try_into().unwrap(),
+			data: cmd,
+		};
+		ipc_usb::send_data_out(self.data_out, |d| self.wr.write(d))?;
+		self.wr.write(&cmd.into_raw())?;
+		Ok(())
+	}
+
+	fn transfer_status(&mut self, data_len: u32) -> Result<u32, rt::Error> {
+		ipc_usb::send_data_in(self.data_in, 13, |d| self.wr.write(d))?;
+		let mut buf = [0; 32];
+		let l = self.rd.read(&mut buf)?;
+		match ipc_usb::recv_parse(&buf[..l]).unwrap() {
+			ipc_usb::Recv::DataIn { ep, data } => {
+				let csw = CommandStatusWrapper::from_raw(data.try_into().unwrap());
+				assert!(matches!(csw.status, Status::Success));
+				Ok(data_len - csw.residue)
+			}
+		}
 	}
 }
 

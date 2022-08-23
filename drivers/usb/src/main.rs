@@ -184,15 +184,12 @@ fn main() -> ! {
 						drivers
 							.send(
 								slot,
-								driver::Message::NotifyInterrupt {
+								driver::Message::DataIn {
 									endpoint: endpoint >> 1,
 									data: unsafe { buf.as_ref() },
 								},
 							)
 							.unwrap();
-						//ctrl.transfer(slot, endpoint, buf, true);
-
-						//unreachable!()
 					}
 				}
 				Event::DeviceConfigured { slot, id, code } => {
@@ -206,20 +203,7 @@ fn main() -> ! {
 		while let Some(evt) = drivers.dequeue() {
 			use driver::Event;
 			match evt {
-				Event::QueueInterruptInEntries {
-					slot,
-					endpoint,
-					count,
-				} => {
-					assert!(endpoint > 0);
-					let ep = endpoint << 1 | 1;
-					assert!(ep < 32);
-					for _ in 0..count {
-						let buf = dma::Dma::new_slice(8).unwrap();
-						ctrl.transfer(slot, ep.try_into().unwrap(), buf, true);
-					}
-				}
-				Event::QueueBulkRead {
+				Event::DataIn {
 					slot,
 					endpoint,
 					size,
@@ -230,7 +214,7 @@ fn main() -> ! {
 					let buf = dma::Dma::new_slice(size.try_into().unwrap()).unwrap();
 					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true);
 				}
-				Event::BulkWrite {
+				Event::DataOut {
 					slot,
 					endpoint,
 					data,
