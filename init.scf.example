@@ -1,55 +1,63 @@
 (stdout "system/log")
 (stderr "system/log")
 
-(program
+(programs
 	(minish
-		(path "minish")
-		(file_root "")
-		(stdin "keyboard/stream")
+		(objects
+			(file "")
+			(in "keyboard/stream"))
 		(after "keyboard"))
 	(fs_fat
 		(disabled)
-		(path "fs_fat")
 		(args "file" "disk/data")
-		(target "file")
 		(after "disk/data")
-		(file_root ""))
+		(objects
+			(file "")))
 	(gui_cli
-		(disabled)
-		(path "gui_cli")
 		(after "window_manager")
-		(file_root ""))
+		(objects
+			(file "")))
 	(image_viewer
-		(disabled)
-		(path "image_viewer")
 		(after "window_manager")
-		(file_root ""))
+		(objects
+			(file "")))
 	(static_http_server
 		(disabled)
-		(path "static_http_server")
 		(after "file" "net")
-		(file_root "file")
-		(net_root "net"))
+		(objects
+			(file file)
+			(net net)))
 	(ps2
-		(path ps2)
-		(file_root ""))
+		(objects
+			(file "")))
+	(pci
+		(args "drivers/pci.scf")
+		(objects
+			(file "")
+			(process "process")))
 	(scancode_to_char
-		(path "scancode_to_char")
 		;(args "keyboard" "ps2/keyboard/stream")
 		;(after "ps2/keyboard/stream")
 		(args "keyboard" "usb/handlers/usb_keyboard_share_test_yay")
-		(after "usb/handlers/usb_keyboard_share_test_yay" ])
-		(file_root ""))
+		(after "usb/handlers/usb_keyboard_share_test_yay")
+		(objects
+			(file "")))
 	(ssh
-		(disabled)
-		(path ssh)
 		(args drivers/ssh_conf/ssh.scf)
-		(after net)
-		(file_root "")
-		(net_root "net")
-		(process_root "process"))
+		(after net userdb)
+		(objects
+			(cfg drivers/sshd.scf)
+			(cfg_secret drivers/sshd_secret.scf)
+			(net net)
+			(file "")
+			(process process)
+			(userdb userdb)))
 	(window_manager
-		(disabled)
-		(path window_manager)
 		(after "gpu/sync")
-		(file_root "")))
+		(objects
+			(file "")))
+	(userdb
+		(objects
+			(share "")
+			(users "")
+			(cfg drivers/userdb.scf))))
