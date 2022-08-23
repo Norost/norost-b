@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 use core::time::Duration;
 use norostb_rt as rt;
 use rt_default as _;
@@ -13,14 +13,9 @@ use rt_default as _;
 struct Program<'a> {
 	path: &'a str,
 	args: Vec<&'a str>,
-	env: BTreeMap<&'a str, &'a str>,
+	env: Vec<(&'a str, &'a str)>,
 	after: Vec<&'a str>,
-	file_root: Option<&'a str>,
-	net_root: Option<&'a str>,
-	process_root: Option<&'a str>,
-	stdin: Option<&'a str>,
-	stdout: Option<&'a str>,
-	stderr: Option<&'a str>,
+	objects: Vec<(&'a str, &'a str)>,
 }
 
 macro_rules! log {
@@ -35,6 +30,8 @@ fn start(_: isize, _: *const *const u8) -> isize {
 }
 
 fn main() -> ! {
+	let start_time = rt::time::Monotonic::now();
+
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
 	let root = rt::Object::from_raw(0 << 24 | 0);
@@ -46,10 +43,6 @@ fn main() -> ! {
 	rt::io::set_stderr(stderr);
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
-
-	for a in rt::args::handles() {
-		rt::dbg!(a);
-	}
 
 	// Read arguments
 	let cfg = drivers.open(b"init.scf").unwrap();
@@ -72,12 +65,11 @@ fn main() -> ! {
 		_ => panic!("expected '(' or ')'"),
 	};
 
-	let mut stdin_path @ mut stdout_path @ mut stderr_path = None;
+	let mut stdout_path @ mut stderr_path = None;
 	let mut programs = Vec::new();
 	'c: while let Some(tk) = it.next() {
 		assert!(tk == Token::Begin);
 		match get_str(&mut it) {
-			"stdin" => stdin_path = Some(get_str(&mut it)),
 			"stdout" => stdout_path = Some(get_str(&mut it)),
 			"stderr" => stderr_path = Some(get_str(&mut it)),
 			"programs" => {
@@ -85,15 +77,28 @@ fn main() -> ! {
 					let mut p = Program::default();
 					p.path = get_str(&mut it);
 					let mut disabled = false;
-					'p: while is_begin(&mut it) {
+					while is_begin(&mut it) {
 						match get_str(&mut it) {
-							"disabled" => disabled = true,
-							"stdin" => p.stdin = Some(get_str(&mut it)),
-							"stdout" => p.stdout = Some(get_str(&mut it)),
-							"stderr" => p.stderr = Some(get_str(&mut it)),
-							"file_root" => p.file_root = Some(get_str(&mut it)),
-							"net_root" => p.net_root = Some(get_str(&mut it)),
-							"process_root" => p.process_root = Some(get_str(&mut it)),
+							"disabled" => {
+								disabled = true;
+								assert!(it.next() == Some(Token::End));
+							}
+							"env" => {
+								while is_begin(&mut it) {
+									let key = get_str(&mut it);
+									let val = get_str(&mut it);
+									assert!(it.next() == Some(Token::End));
+									p.env.push((key, val));
+								}
+							}
+							"objects" => {
+								while is_begin(&mut it) {
+									let name = get_str(&mut it);
+									let path = get_str(&mut it);
+									assert!(it.next() == Some(Token::End));
+									p.objects.push((name, path));
+								}
+							}
 							a @ "args" | a @ "after" => loop {
 								match it.next() {
 									Some(Token::Str(s)) => match a {
@@ -101,13 +106,12 @@ fn main() -> ! {
 										"after" => p.after.push(s),
 										_ => unreachable!(),
 									},
-									Some(Token::End) => continue 'p,
+									Some(Token::End) => break,
 									_ => panic!("expected ')' or string"),
 								}
 							},
 							s => panic!("unknown property {:?}", s),
 						}
-						assert!(it.next() == Some(Token::End));
 					}
 					if !disabled {
 						programs.push(p);
@@ -119,30 +123,22 @@ fn main() -> ! {
 		}
 		assert!(it.next() == Some(Token::End));
 	}
-	let stdin_path = stdin_path.unwrap().as_bytes();
-	let stdout_path = stdout_path.unwrap().as_bytes();
-	let stderr_path = stderr_path.unwrap().as_bytes();
+	let stdout_path = stdout_path.unwrap();
+	let stderr_path = stderr_path.unwrap();
 
-	// Open stdin, stdout, stderr
-	// Try to share stdin/out/err handles as it reduces the real amount of handles used by the
-	// kernel and the servers.
 	let open = |p: &[u8]| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p).unwrap());
-	let stdin = open(&stdin_path);
-	let stdout = if stdout_path == stdin_path {
-		stdin
-	} else {
-		open(&stdout_path)
-	};
-	let stderr = if stderr_path == stdin_path {
-		stdin
-	} else if stderr_path == stdout_path {
-		stdout
-	} else {
-		open(&stderr_path)
-	};
+	let stdout = open(stdout_path.as_bytes());
+	let stderr = open(stderr_path.as_bytes());
 	rt::io::set_stdin(Some(stdout));
 	rt::io::set_stdout(Some(stdout));
 	rt::io::set_stderr(Some(stderr));
+
+	// Add stderr by default, as it is used for panic & other output
+	for p in programs.iter_mut() {
+		if !p.objects.iter().find(|(n, _)| *n == "err").is_some() {
+			p.objects.push(("err", stderr_path));
+		}
+	}
 
 	// Launch programs
 	log!("Launching {} programs", programs.len());
@@ -155,47 +151,19 @@ fn main() -> ! {
 				}
 			}
 
-			let open = |base: &Option<&str>| match base {
-				None => None,
-				Some("") => Some(None),
-				Some(path) => Some(Some(root.open(path.as_bytes()).unwrap())),
-			};
-			fn select<'a>(
-				base: &'a Option<Option<rt::Object>>,
-				default: &'a rt::Object,
-			) -> Option<rt::RefObject<'a>> {
-				match base {
-					None => None,
-					Some(None) => Some(default.into()),
-					Some(Some(base)) => Some(base.into()),
-				}
-			}
-
-			let t = open(&program.stdin);
-			let stdin = select(&t, &stdin).unwrap_or(stdin);
-			let t = open(&program.stdout);
-			let stdout = select(&t, &stdout).unwrap_or(stdout);
-			let t = open(&program.stderr);
-			let stderr = select(&t, &stderr).unwrap_or(stderr);
-			let t = open(&program.file_root);
-			let file_root = select(&t, &root);
-			let t = open(&program.net_root);
-			let net_root = select(&t, &root);
-			let t = open(&program.process_root);
-			let proc_root = select(&t, &process_root);
-
 			let r = (|| {
 				let bin = drivers.open(program.path.as_bytes())?;
 				let mut b = rt::process::Builder::new_with(&process_root)?;
 				b.set_binary(&bin)?;
-				b.add_object(b"in", &stdin)?;
-				b.add_object(b"out", &stdout)?;
-				b.add_object(b"err", &stderr)?;
-				file_root.map(|r| b.add_object(b"file", &r)).transpose()?;
-				net_root.map(|r| b.add_object(b"net", &r)).transpose()?;
-				proc_root
-					.map(|r| b.add_object(b"process", &r))
-					.transpose()?;
+				for (name, path) in &program.objects {
+					// FIXME bug in Root, probably
+					if *path == "" {
+						b.add_object(name.as_ref(), &root)?;
+					} else {
+						let obj = root.open(path.as_ref()).unwrap();
+						b.add_object(name.as_ref(), &obj)?;
+					}
+				}
 				b.add_args(&[program.path])?;
 				b.add_args(&program.args)?;
 				// TODO env
@@ -212,7 +180,8 @@ fn main() -> ! {
 		rt::thread::sleep(Duration::from_millis(1));
 	}
 
-	log!("Finished init");
+	let t = rt::time::Monotonic::now().saturating_duration_since(start_time);
+	log!("Finished init in {:?}", t);
 
 	rt::exit(0);
 }

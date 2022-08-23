@@ -16,6 +16,9 @@ path = "../../lib/rust/async_std"
 default-features = false
 features = ["std"]
 
+[dependencies.n85]
+version = "0.1"
+
 [dependencies.nora_ssh]
 git = "https://git.sr.ht/~demindiro/nora_ssh"
 features = ["no_send"]
@@ -30,13 +33,14 @@ version = "1.0"
 [dependencies.serde_derive]
 version = "1.0"
 
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
 [dependencies.clap]
 version = "3.2"
 default-features = false
 features = ["std", "derive"]
-
-[dependencies.base85]
-version = "1.1"
 
 [dependencies.ed25519-dalek]
 version = "1.0"

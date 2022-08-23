@@ -39,6 +39,14 @@ impl AsyncObject {
 			queue::submit2(|q, b, bm| q.submit_get_meta(self.0, b, bm), property, value).await;
 		(res, b, bm)
 	}
+
+	pub async fn share(&self, object: AsyncObject) -> (io::Result<u64>, AsyncObject) {
+		(self.share_raw(object.0).await, object)
+	}
+
+	pub async fn share_raw(&self, handle: rt::Handle) -> io::Result<u64> {
+		queue::submit(|q, ()| q.submit_share(self.0, handle), ()).await
+	}
 }
 
 impl From<rt::Object> for AsyncObject {
@@ -109,6 +117,19 @@ impl Drop for AsyncObject {
 pub struct RefAsyncObject<'a> {
 	handle: rt::Handle,
 	_marker: PhantomData<&'a AsyncObject>,
+}
+
+impl<'a> RefAsyncObject<'a> {
+	pub fn as_raw(&self) -> rt::Handle {
+		self.0
+	}
+
+	pub fn from_raw(handle: rt::Handle) -> Self {
+		Self {
+			handle,
+			_marker: PhantomData,
+		}
+	}
 }
 
 impl<'a> From<&'a rt::Object> for RefAsyncObject<'a> {

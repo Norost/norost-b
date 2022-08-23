@@ -1,4 +1,5 @@
 use crate::io::{self, TinySlice, RWX};
+use alloc::vec::Vec;
 use core::{
 	fmt,
 	marker::PhantomData,
@@ -56,6 +57,24 @@ impl Object {
 			l += io::read(self.0, &mut buf[l..])?;
 		}
 		Ok(())
+	}
+
+	/// Read the full contents of a file.
+	///
+	/// This uses [`Object::seek`] to determine the length of the file,
+	/// then rewinds to the start of the file.
+	pub fn read_file_all(&self) -> io::Result<Vec<u8>> {
+		let len = self
+			.seek(io::SeekFrom::End(0))?
+			.try_into()
+			.map_err(|_| io::Error::CantCreateObject)?;
+		self.seek(io::SeekFrom::Start(0))?;
+		let mut buf = Vec::with_capacity(len);
+		while buf.len() < len {
+			let l = self.read_uninit(buf.spare_capacity_mut())?.0.len();
+			unsafe { buf.set_len(buf.len() + l) };
+		}
+		Ok(buf)
 	}
 
 	#[inline]

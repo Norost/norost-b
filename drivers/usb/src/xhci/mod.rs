@@ -117,13 +117,13 @@ impl Xhci {
 			// Initialize each active interrupter by:
 
 			// Defining the Event Ring:
-			event_ring.install(regs.interrupt_register_set.interrupter_mut(0));
+			event_ring.install(regs.interrupter_register_set.interrupter_mut(0));
 
 			regs.operational.usbcmd.update_volatile(|c| {
 				c.set_interrupter_enable();
 			});
 
-			regs.interrupt_register_set
+			regs.interrupter_register_set
 				.interrupter_mut(0)
 				.iman
 				.update_volatile(|c| {
@@ -228,7 +228,7 @@ impl Xhci {
 		loop {
 			let evt = if let Some(evt) = self.event_ring.dequeue() {
 				self.event_ring
-					.inform(self.registers.interrupt_register_set.interrupter_mut(0));
+					.inform(self.registers.interrupter_register_set.interrupter_mut(0));
 				evt
 			} else {
 				return None;

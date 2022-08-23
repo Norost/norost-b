@@ -34,7 +34,6 @@ dependencies = [
 name = "arena"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
 ]
@@ -71,15 +70,6 @@ name = "base64ct"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bdca834647821e0b13d9539a8634eb62d3501b6b6c2cec1722786ee6671b851"
-
-[[package]]
-name = "base85"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e6835f89c0ffc5767d2e61551918e3c421a90c47d20f7c88195a2799fe37099"
-dependencies = [
- "lazy_static",
-]
 
 [[package]]
 name = "bit_field"
@@ -189,9 +179,6 @@ name = "compiler_builtins"
 version = "0.1.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f873ce2bd3550b0b565f878b3d04ea8253f4259dc3d20223af2e1ba86f5ecca"
-dependencies = [
- "rustc-std-workspace-core",
-]
 
 [[package]]
 name = "const-oid"
@@ -740,12 +727,6 @@ name = "jpeg-decoder"
 version = "0.2.6"
 
 [[package]]
-name = "lazy_static"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
 name = "libc"
 version = "0.2.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -804,6 +785,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "n85"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e953efc6a4d8968e8d41261d6693e00d9573f5a48228121515a24dcc61e3238"
+
+[[package]]
 name = "no-std-net"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,7 +822,6 @@ checksum = "280db64d556ef447ff253df2bb152b94b6e87ef9c7ca7996a60e520291b512c0"
 name = "nora_io_queue"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -947,7 +933,6 @@ dependencies = [
 name = "norostb_kernel"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "rustc-std-workspace-core",
 ]
 
@@ -956,7 +941,6 @@ name = "norostb_rt"
 version = "0.2.0"
 dependencies = [
  "cfg-if",
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -966,7 +950,6 @@ dependencies = [
 name = "norostb_rt_alloc"
 version = "0.2.0"
 dependencies = [
- "compiler_builtins",
  "norostb_kernel",
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -1341,14 +1324,15 @@ name = "ssh"
 version = "0.2.0"
 dependencies = [
  "async-trait",
- "base85",
  "clap",
  "ecdsa",
  "ed25519-dalek",
  "futures",
+ "n85",
  "nora_scf",
  "nora_ssh",
  "norost_async_std",
+ "norostb_rt",
  "p256",
  "rand",
  "serde",
@@ -1567,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "xhci"
-version = "0.8.6"
+version = "0.9.0"
 dependencies = [
  "accessor",
  "bit_field",

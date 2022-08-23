@@ -141,7 +141,7 @@ impl FsIo {
 
 impl Object for Fs {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
-		Ticket::new_complete(if path == b"" {
+		Ticket::new_complete(if matches!(path, b"" | b"/") {
 			let mut io_entry = self.io();
 			let mut buf = [0; 255];
 			let it = self
