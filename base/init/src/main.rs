@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::time::Duration;
+use core::{mem, time::Duration};
 use norostb_rt as rt;
 use rt_default as _;
 
@@ -15,7 +15,7 @@ struct Program<'a> {
 	args: Vec<&'a str>,
 	env: Vec<(&'a str, &'a str)>,
 	after: Vec<&'a str>,
-	objects: Vec<(&'a str, &'a str)>,
+	objects: Vec<(&'a str, Vec<&'a str>)>,
 }
 
 macro_rules! log {
@@ -50,66 +50,53 @@ fn main() -> ! {
 	let (ptr, len2) = cfg.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
 	assert!(len2 >= len);
 	let cfg = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
-	let mut it = scf::parse(cfg).map(Result::unwrap);
-
-	use scf::Token;
-	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> &'a str {
-		match it.next() {
-			Some(Token::Str(s)) => s,
-			_ => panic!("expected string"),
-		}
-	}
-	let is_begin = |it: &mut dyn Iterator<Item = Token>| match it.next() {
-		Some(Token::End) => false,
-		Some(Token::Begin) => true,
-		_ => panic!("expected '(' or ')'"),
-	};
+	let mut cf = scf::parse2(cfg);
+	let mut it = cf.iter();
 
 	let mut stdout_path @ mut stderr_path = None;
 	let mut programs = Vec::new();
-	'c: while let Some(tk) = it.next() {
-		assert!(tk == Token::Begin);
-		match get_str(&mut it) {
-			"stdout" => stdout_path = Some(get_str(&mut it)),
-			"stderr" => stderr_path = Some(get_str(&mut it)),
+	for item in it {
+		let mut it = item.into_group().unwrap();
+		match it.next_str().unwrap() {
+			"stdout" => stdout_path = Some(it.next_str().unwrap()),
+			"stderr" => stderr_path = Some(it.next_str().unwrap()),
 			"programs" => {
-				while is_begin(&mut it) {
+				for item in it {
+					let mut it = item.into_group().unwrap();
 					let mut p = Program::default();
-					p.path = get_str(&mut it);
+					p.path = it.next_str().unwrap();
 					let mut disabled = false;
-					while is_begin(&mut it) {
-						match get_str(&mut it) {
+					for item in it {
+						let mut it = item.into_group().unwrap();
+						match it.next_str().unwrap() {
 							"disabled" => {
 								disabled = true;
-								assert!(it.next() == Some(Token::End));
+								assert!(it.next().is_none());
 							}
 							"env" => {
-								while is_begin(&mut it) {
-									let key = get_str(&mut it);
-									let val = get_str(&mut it);
-									assert!(it.next() == Some(Token::End));
+								for item in it {
+									let mut it = item.into_group().unwrap();
+									let key = it.next_str().unwrap();
+									let val = it.next_str().unwrap();
+									assert!(it.next().is_none());
 									p.env.push((key, val));
 								}
 							}
 							"objects" => {
-								while is_begin(&mut it) {
-									let name = get_str(&mut it);
-									let path = get_str(&mut it);
-									assert!(it.next() == Some(Token::End));
+								for item in it {
+									let mut it = item.into_group().unwrap();
+									let name = it.next_str().unwrap();
+									let path = it.map(|e| e.into_str().unwrap()).collect();
 									p.objects.push((name, path));
 								}
 							}
-							a @ "args" | a @ "after" => loop {
-								match it.next() {
-									Some(Token::Str(s)) => match a {
-										"args" => p.args.push(s),
-										"after" => p.after.push(s),
-										_ => unreachable!(),
-									},
-									Some(Token::End) => break,
-									_ => panic!("expected ')' or string"),
-								}
-							},
+							a @ "args" | a @ "after" => {
+								*match a {
+									"args" => &mut p.args,
+									"after" => &mut p.after,
+									_ => unreachable!(),
+								} = it.map(|e| e.into_str().unwrap()).collect();
+							}
 							s => panic!("unknown property {:?}", s),
 						}
 					}
@@ -117,11 +104,9 @@ fn main() -> ! {
 						programs.push(p);
 					}
 				}
-				continue 'c;
 			}
 			_ => panic!("unknown section"),
 		}
-		assert!(it.next() == Some(Token::End));
 	}
 	let stdout_path = stdout_path.unwrap();
 	let stderr_path = stderr_path.unwrap();
@@ -136,7 +121,7 @@ fn main() -> ! {
 	// Add stderr by default, as it is used for panic & other output
 	for p in programs.iter_mut() {
 		if !p.objects.iter().find(|(n, _)| *n == "err").is_some() {
-			p.objects.push(("err", stderr_path));
+			p.objects.push(("err", Vec::from([stderr_path])));
 		}
 	}
 
@@ -157,10 +142,14 @@ fn main() -> ! {
 				b.set_binary(&bin)?;
 				for (name, path) in &program.objects {
 					// FIXME bug in Root, probably
-					if *path == "" {
+					if &*path == &[""] {
 						b.add_object(name.as_ref(), &root)?;
 					} else {
-						let obj = root.open(path.as_ref()).unwrap();
+						let mut it = path.iter().map(|p| p.as_bytes());
+						let mut obj = root.open(it.next().unwrap())?;
+						for p in it {
+							obj = obj.open(p)?;
+						}
 						b.add_object(name.as_ref(), &obj)?;
 					}
 				}

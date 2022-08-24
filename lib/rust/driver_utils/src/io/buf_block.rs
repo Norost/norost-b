@@ -14,7 +14,7 @@ pub struct BufBlock<T: Read + Write + Seek> {
 	/// Whether we did a write to the internal data.
 	inner_dirty: bool,
 	/// Buffered data.
-	buffer: [MaybeUninit<u8>; 4096],
+	buffer: [MaybeUninit<u8>; 512],
 	/// The corresponding position of the buffered data relative to the device's data.
 	buffer_position: u64,
 	/// How many bytes of data are valid in the buffer.

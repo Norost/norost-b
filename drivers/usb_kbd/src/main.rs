@@ -33,7 +33,11 @@ fn main() -> ! {
 
 	let (public_in, public_out) = rt::Object::new(rt::NewObject::MessagePipe).unwrap();
 
-	ipc_usb::send_intr_in_enqueue_num(1, 16, |d| stdout.write(d)).unwrap();
+	let enqueue_read =
+		|| ipc_usb::send_data_in(ipc_usb::Endpoint::N1, 8, |d| stdout.write(d)).unwrap();
+	for _ in 0..16 {
+		enqueue_read();
+	}
 	ipc_usb::send_public_object(|d| stdout.write(d)).unwrap();
 	stdout.share(&public_out).unwrap();
 
@@ -46,7 +50,7 @@ fn main() -> ! {
 		let mut buf = [0; 32];
 		let len = stdin.read(&mut buf).unwrap();
 		match ipc_usb::recv_parse(&buf[..len]).unwrap() {
-			Recv::IntrIn { ep, data } => {
+			Recv::DataIn { ep, data } => {
 				assert!(data.len() == 8, "unexpected data size");
 
 				let send = |k| public_in.write(&u32::from(k).to_le_bytes()).unwrap();
@@ -110,6 +114,7 @@ fn main() -> ! {
 				prev_state.copy_from_slice(data);
 			}
 		}
+		enqueue_read();
 	}
 }
 

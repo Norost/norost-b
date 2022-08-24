@@ -189,7 +189,7 @@ impl Xhci {
 			.get_mut(&slot)
 			.expect("no device at slot")
 			.transfer(endpoint, notify.then(|| 0), &data)?;
-		self.ring(slot.get(), 0, 3);
+		self.ring(slot.get(), 0, endpoint);
 		self.transfers.insert(id, data);
 		Ok(id)
 	}
@@ -212,7 +212,7 @@ impl Xhci {
 	}
 
 	pub fn poll(&mut self) -> Option<Event> {
-		for i in 0..self.wait_device_reset.len() {
+		for i in (0..self.wait_device_reset.len()).rev() {
 			if let Some((cmd, e)) = self.wait_device_reset[i].poll(&mut self.registers) {
 				self.wait_device_reset.swap_remove(i);
 				let id = self.enqueue_command(cmd).unwrap_or_else(|_| todo!());

@@ -14,11 +14,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let table_name = args.next().ok_or("expected table name")?;
 	let disk = args.next().ok_or("expected disk path")?;
 
-	let disk = fs::OpenOptions::new()
-		.read(true)
-		.write(true)
-		.open(&disk)
-		.expect("disk not found");
+	let disk = rt::args::handle(b"data").expect("data object undefined");
+	let share = rt::args::handle(b"share").expect("share object undefined");
+
+	use std::os::norostb::io::FromHandle;
+	let disk = unsafe { fs::File::from_handle(disk.as_raw()) };
 
 	let disk = driver_utils::io::BufBlock::new(disk);
 	let fs =
@@ -29,8 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 16 }).unwrap();
 		StreamTable::new(&buf, Pow2Size(9), (1 << 12) - 1)
 	};
-	rt::io::file_root()
-		.unwrap()
+	share
 		.create(table_name.as_bytes())
 		.unwrap()
 		.share(tbl.public())
