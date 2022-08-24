@@ -11,13 +11,9 @@ boot:
 run:
 	./run.sh
 
-disk0:
+disk0 usb0:
 	fallocate -l $$((128 * 512)) $@
 	/sbin/mkfs.fat -F 12 $@
-
-usb0:
-	fallocate -l $$((8 * 512)) $@
-	python3 -c 'open("$@", "r+b").write(b"Hello, world!")'
 
 clean:
 	cargo clean

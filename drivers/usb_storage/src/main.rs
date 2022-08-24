@@ -5,6 +5,7 @@
 
 extern crate alloc;
 
+use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use rt_default as _;
 
 mod bbb;
@@ -37,7 +38,7 @@ fn main() {
 			0x24,
 		)
 		.unwrap();
-	rt::dbg!(alloc::string::String::from_utf8_lossy(&data));
+	rt::dbg!(scsi::InquiryData::try_from(&*data).unwrap());
 
 	let data = dev
 		.transfer_in(
@@ -48,23 +49,99 @@ fn main() {
 			8,
 		)
 		.unwrap();
-	rt::dbg!(scsi::ReadCapacity10Data::from(
-		<[u8; 8]>::try_from(&*data).unwrap()
-	));
+	let attr = scsi::ReadCapacity10Data::from(<[u8; 8]>::try_from(&*data).unwrap());
+	assert!(attr.block_length.is_power_of_two());
+	let block_length_p2 = attr.block_length.trailing_zeros();
+	let block_length_mask = attr.block_length - 1;
 
-	dev.transfer_out(
-		scsi::Write10 {
-			flags: 0,
-			address: 0,
-			length: 1,
-			group_number: 0,
-			control: 0,
-		},
-		&[b'c'; 512],
-	)
-	.unwrap();
+	let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 16 }).unwrap();
+	let tbl = StreamTable::new(&buf, 512.try_into().unwrap(), 512.try_into().unwrap());
+
+	ipc_usb::send_public_object(|d| stdout.write(d)).unwrap();
+	stdout.share(tbl.public()).unwrap();
+
+	let mut obj = driver_utils::Arena::new();
 
 	loop {
-		rt::thread::sleep(core::time::Duration::MAX);
+		tbl.wait();
+		let mut flush = false;
+		while let Some((handle, job_id, req)) = tbl.dequeue() {
+			let resp = match req {
+				Request::Open { path } if handle == rt::Handle::MAX => {
+					let mut p = alloc::vec![0; path.len()];
+					path.copy_to(0, &mut p);
+					rt::dbg!(core::str::from_utf8(&p));
+					if &p == b"data" {
+						Response::Handle(obj.insert(0))
+					} else {
+						Response::Error(rt::Error::DoesNotExist)
+					}
+				}
+				Request::Read { amount } if handle != rt::Handle::MAX => {
+					if amount != attr.block_length {
+						Response::Error(rt::Error::InvalidData)
+					} else {
+						let data = dev
+							.transfer_in(
+								scsi::Read10 {
+									flags: 0,
+									address: obj[handle],
+									length: 1,
+									group_number: 0,
+									control: 0,
+								},
+								amount,
+							)
+							.unwrap();
+						let b = tbl.alloc(amount as _).expect("out of buffers");
+						b.copy_from(0, &data);
+						obj[handle] += 1;
+						Response::Data(b)
+					}
+				}
+				Request::Write { data } if handle != rt::Handle::MAX => {
+					if data.len() != attr.block_length as _ {
+						Response::Error(rt::Error::InvalidData)
+					} else {
+						let mut b = alloc::vec![0; data.len()];
+						data.copy_to(0, &mut b);
+						dev.transfer_out(
+							scsi::Write10 {
+								flags: 0,
+								address: obj[handle],
+								length: 1,
+								group_number: 0,
+								control: 0,
+							},
+							&b,
+						)
+						.unwrap();
+						obj[handle] += 1;
+						Response::Amount(data.len() as _)
+					}
+				}
+				Request::Seek { from } => match from {
+					rt::io::SeekFrom::Start(n)
+						if n & u64::from(block_length_mask) == 0
+							&& n >> block_length_p2
+								<= u64::from(attr.returned_logical_block_address) =>
+					{
+						obj[handle] = (n >> block_length_p2) as _;
+						Response::Position(n)
+					}
+					_ => Response::Error(rt::Error::InvalidData),
+				},
+				Request::Close => {
+					if handle != rt::Handle::MAX {
+						obj.remove(handle).unwrap();
+					}
+					continue;
+				}
+				_ => Response::Error(rt::Error::InvalidOperation),
+			};
+			tbl.enqueue(job_id, resp);
+			flush = true;
+		}
+		flush.then(|| tbl.flush());
 	}
 }

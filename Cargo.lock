@@ -362,6 +362,7 @@ dependencies = [
 name = "driver_usb_storage"
 version = "0.1.0"
 dependencies = [
+ "driver_utils",
  "ipc_usb",
  "nora_scsi",
  "norost_rt_default",

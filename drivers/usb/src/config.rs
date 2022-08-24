@@ -54,7 +54,7 @@ pub fn parse(config: &rt::Object) -> Config {
 					for mut it in it.map(|e| e.into_group().unwrap()) {
 						let intf = trips(&mut it);
 						let path = it.next_str().unwrap().into();
-						let mut name = None;
+						let mut name = None::<Box<str>>;
 						for mut it in it.map(|e| e.into_group().unwrap()) {
 							match it.next_str().unwrap() {
 								"name" => {
@@ -64,6 +64,7 @@ pub fn parse(config: &rt::Object) -> Config {
 										"name already set for {:?}",
 										(base, intf)
 									);
+									assert!(!name.as_ref().unwrap().contains('/'));
 									assert!(it.next().is_none());
 								}
 								s => todo!("{:?}", s),
