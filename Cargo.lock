@@ -288,6 +288,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_gpt"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "norost_rt_default",
+ "norostb_rt",
+]
+
+[[package]]
 name = "driver_intel_hd_graphics"
 version = "0.2.0"
 dependencies = [

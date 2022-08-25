@@ -78,6 +78,7 @@ install_ext () {
 }
 
 install fs_fat             driver_fs_fat
+install gpt                driver_gpt
 install intel_hd_graphics  driver_intel_hd_graphics
 install pci                driver_pci
 install ps2                driver_ps2

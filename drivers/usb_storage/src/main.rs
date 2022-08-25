@@ -137,6 +137,9 @@ fn main() {
 					}
 					continue;
 				}
+				Request::GetMeta { property } => match property.get(&mut [0; 255]) {
+					_ => Response::Error(rt::Error::InvalidData),
+				},
 				_ => Response::Error(rt::Error::InvalidOperation),
 			};
 			tbl.enqueue(job_id, resp);

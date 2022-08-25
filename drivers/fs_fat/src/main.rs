@@ -12,7 +12,6 @@ use std::{
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut args = std::env::args().skip(1);
 	let table_name = args.next().ok_or("expected table name")?;
-	let disk = args.next().ok_or("expected disk path")?;
 
 	let disk = rt::args::handle(b"data").expect("data object undefined");
 	let share = rt::args::handle(b"share").expect("share object undefined");
