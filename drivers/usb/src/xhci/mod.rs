@@ -158,7 +158,7 @@ impl Xhci {
 	}
 
 	fn enqueue_command(&mut self, cmd: command::Allowed) -> Result<ring::EntryId, ring::Full> {
-		let e = self.command_ring.enqueue(cmd)?;
+		let e = self.command_ring.enqueue(cmd);
 		self.registers.doorbell.update_volatile_at(0, |c| {
 			c.set_doorbell_stream_id(0).set_doorbell_target(0);
 		});
@@ -283,12 +283,13 @@ impl Xhci {
 			.map(|(k, _)| *k)
 	}
 
-	fn ring(&mut self, slot: u8, stream: u16, target: u8) {
+	fn ring(&mut self, slot: u8, stream: u16, endpoint: u8) {
 		// SAFETY: 0 is a valid value for a doorbell and Register is repr(transparent) of u32.
 		// Annoyingly, the xhci crate doesn't provide a Default impl or anything for it, so
 		// TODO make a PR
 		let mut v = unsafe { mem::transmute::<_, xhci::registers::doorbell::Register>(0u32) };
-		v.set_doorbell_stream_id(stream).set_doorbell_target(target);
+		v.set_doorbell_stream_id(stream)
+			.set_doorbell_target(endpoint);
 		self.registers.doorbell.write_volatile_at(slot.into(), v);
 	}
 }
