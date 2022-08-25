@@ -1,0 +1,8 @@
+label: gpt
+label-id: 0xdeadbeef
+device: usb0
+unit: sectors
+sector-size: 512
+
+start= 34, size= 6
+start= 40, size= 128

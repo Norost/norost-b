@@ -62,8 +62,7 @@ impl Device {
 				.set_value(req.value)
 				.set_index(req.index)
 				.set_length(len),
-		))
-		.unwrap_or_else(|_| todo!("undo enqueue"));
+		));
 		// Data
 		if len > 0 {
 			ring.enqueue(transfer::Allowed::Isoch(
@@ -73,17 +72,14 @@ impl Device {
 					// FIXME qemu crashes if this is less than length in SetupStage
 					.set_trb_transfer_length(len.into())
 					.set_chain_bit(),
-			))
-			.unwrap_or_else(|_| todo!("undo enqueue"));
+			));
 		}
 		// Status
-		let id = ring
-			.enqueue(transfer::Allowed::StatusStage(
-				*transfer::StatusStage::new()
-					.set_interrupter_target(interrupter)
-					.set_interrupt_on_completion(),
-			))
-			.unwrap_or_else(|_| todo!("undo enqueue"));
+		let id = ring.enqueue(transfer::Allowed::StatusStage(
+			*transfer::StatusStage::new()
+				.set_interrupter_target(interrupter)
+				.set_interrupt_on_completion(),
+		));
 		Ok(id)
 	}
 
@@ -101,11 +97,13 @@ impl Device {
 			xfer.set_interrupter_target(intr)
 				.set_interrupt_on_completion();
 		}
-		self.endpoints
+		let id = self
+			.endpoints
 			.get_mut(usize::from(endpoint) - 2)
 			.and_then(|o| o.as_mut())
 			.expect("invalid/unitinialized endpoint")
-			.enqueue(xfer)
+			.enqueue(xfer);
+		Ok(id)
 	}
 
 	pub fn configure(

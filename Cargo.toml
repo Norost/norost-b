@@ -5,6 +5,7 @@ members = [
 	"kernel",
 	"boot/amd64",
 	"drivers/fs_fat",
+	"drivers/gpt",
 	"drivers/intel_hd_graphics",
 	"drivers/pci",
 	"drivers/ps2",

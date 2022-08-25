@@ -1,8 +1,9 @@
 use crate::dma::Dma;
 use core::{
 	marker::PhantomData,
-	num::{NonZeroUsize, Wrapping},
+	num::NonZeroUsize,
 	ptr::NonNull,
+	sync::atomic::{self, Ordering},
 };
 use xhci::ring::trb;
 
@@ -11,8 +12,7 @@ where
 	T: TrbEntry,
 {
 	buf: Dma<[[u32; 4]]>,
-	dequeue_index: Wrapping<usize>,
-	enqueue_index: Wrapping<usize>,
+	enqueue_index: usize,
 	_marker: PhantomData<T>,
 }
 
@@ -21,56 +21,56 @@ where
 	T: TrbEntry,
 {
 	pub fn new() -> Result<Self, rt::Error> {
+		let mut buf = Dma::new_slice(32).unwrap();
+		// Set Link TRB at end to estabilish loop
+		let link = trb::Link::new()
+			.set_ring_segment_pointer(buf.as_phys())
+			.set_cycle_bit()
+			.into_raw();
+		let len = buf.len();
+		unsafe { buf.as_mut()[len - 1] = link }
 		Ok(Self {
-			buf: Dma::new_slice(256).unwrap(),
-			dequeue_index: Wrapping(0),
-			enqueue_index: Wrapping(0),
+			buf,
+			enqueue_index: 0,
 			_marker: PhantomData,
 		})
 	}
 
-	pub fn enqueue(&mut self, item: T) -> Result<EntryId, Full> {
+	#[cfg_attr(debug_assertions, track_caller)]
+	pub fn enqueue(&mut self, item: T) -> EntryId {
 		// Reduce monomorphization overhead.
 		self.enqueue_inner(item.into_raw())
 	}
 
-	fn enqueue_inner(&mut self, item: [u32; 4]) -> Result<EntryId, Full> {
-		if self.enqueue_index.0 >= self.buf.len() - 1 {
-			let item = trb::Link::new()
-				.set_ring_segment_pointer(self.buf.as_phys())
-				.into_raw();
-			self.enqueue_raw(item)?;
-			self.enqueue_index.0 = 0;
-		}
-		self.enqueue_raw(item)
-	}
-
-	fn enqueue_raw(&mut self, mut item: [u32; 4]) -> Result<EntryId, Full> {
-		if self.enqueue_index == self.dequeue_index + Wrapping(self.buf.len()) {
-			return Err(Full);
-		}
-		item[3] |= 1; // Set cycle bit
-		let i = self.enqueue_index.0;
-		// TODO ensure we don't set the cycle bit before the entry has been fully written.
-		// We should try to do this in an efficient way, e.g. a single XMM store is atomic.
-		unsafe { self.buf.as_mut()[i] = item }
+	#[cfg_attr(debug_assertions, track_caller)]
+	fn enqueue_inner(&mut self, mut item: [u32; 4]) -> EntryId {
+		let i = self.enqueue_index;
 		self.enqueue_index += 1;
-		Ok(self.buf.as_phys() + i as u64 * 16)
-	}
-
-	pub fn mark_dequeued(&mut self) {
-		unsafe {
-			// Clear cycle bit
-			self.buf.as_mut()[self.dequeue_index.0][3] = 0;
-			self.dequeue_index.0 += 1;
-			if self.dequeue_index.0 >= self.buf.len() {
-				self.dequeue_index.0 = 0;
-			}
+		if self.enqueue_index >= self.capacity() {
+			self.enqueue_index = 0;
 		}
+
+		let b = unsafe { self.buf.as_mut() };
+
+		// Clear cycle bit of the next entry as not to create a loop
+		b[self.enqueue_index][3] = 0;
+		atomic::fence(Ordering::Release);
+
+		// TODO ensure we don't set the cycle bit before the entry has been fully written.
+		// We should try to do this in an efficient way, e.g. a single XMM store is atomic
+		// (at least, on all archs with AVX).
+		item[3] |= 1; // Set cycle bit
+		b[i] = item;
+		self.buf.as_phys() + i as u64 * 16
 	}
 
 	pub fn as_phys(&self) -> u64 {
 		self.buf.as_phys()
+	}
+
+	fn capacity(&self) -> usize {
+		// -1 to account for link
+		self.buf.len() - 1
 	}
 }
 

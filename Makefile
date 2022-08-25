@@ -1,3 +1,7 @@
+MKFS.FAT = /sbin/mkfs.fat
+SFDISK = /sbin/sfdisk
+DD = dd
+
 # There's a bug in cargo that causes panics when using `forced-target`
 # Use Makefiles as workaround for now
 build: kernel boot
@@ -11,9 +15,18 @@ boot:
 run:
 	./run.sh
 
-disk0 usb0:
+disk0:
 	fallocate -l $$((128 * 512)) $@
-	/sbin/mkfs.fat -F 12 $@
+	$(MKFS.FAT) -F 12 $@
+
+usb0:
+	fallocate -l $$((256 * 512)) $@
+	$(SFDISK) $@ < $@.sfdisk
+	$(eval TMP := $(shell mktemp))
+	fallocate -l $$((128 * 512)) $(TMP)
+	$(MKFS.FAT) -F 12 $(TMP)
+	$(DD) if=$(TMP) of=$@ bs=512 seek=40 conv=notrunc
+	rm -f $(TMP)
 
 clean:
 	cargo clean

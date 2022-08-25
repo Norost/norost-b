@@ -1,6 +1,6 @@
 use crate::Slice;
 use core::{
-	intrinsics, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, sync::atomic::AtomicU32,
+	intrinsics, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, slice, sync::atomic::AtomicU32,
 };
 
 #[derive(Clone, Copy)]
@@ -31,8 +31,16 @@ impl Buffer<'_> {
 	}
 
 	#[inline(always)]
-	pub fn as_mut_ptr(&self) -> *const u8 {
+	pub fn as_mut_ptr(&self) -> *mut u8 {
 		self.base.as_ptr()
+	}
+
+	pub unsafe fn as_ref(&self) -> &[u8] {
+		slice::from_raw_parts(self.as_ptr(), self.len())
+	}
+
+	pub unsafe fn as_mut(&mut self) -> &mut [u8] {
+		slice::from_raw_parts_mut(self.as_mut_ptr(), self.len())
 	}
 
 	#[inline]
