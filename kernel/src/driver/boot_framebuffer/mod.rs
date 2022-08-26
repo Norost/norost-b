@@ -77,8 +77,7 @@ unsafe impl MemoryObject for Framebuffer {
 	}
 
 	fn page_flags(&self) -> (PageFlags, RWX) {
-		//(*PageFlags::default().set_write_combining(), RWX::RW)
-		(PageFlags::default(), RWX::RW)
+		(*PageFlags::default().set_write_combining(), RWX::RW)
 	}
 }
 
