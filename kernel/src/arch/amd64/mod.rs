@@ -477,3 +477,17 @@ pub fn disable_interrupts() {
 pub fn _cpu_stack() -> *mut () {
 	syscall::cpu_stack()
 }
+
+#[derive(Clone, Copy, Default)]
+pub struct PageFlags(u8);
+
+impl PageFlags {
+	fn write_combining(&self) -> bool {
+		self.0 & 1 << 0 != 0
+	}
+
+	pub fn set_write_combining(&mut self) -> &mut Self {
+		self.0 |= 1 << 0;
+		self
+	}
+}

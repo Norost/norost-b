@@ -15,7 +15,7 @@ mod streaming;
 mod subrange;
 mod ticket;
 
-pub use crate::scheduler::MemoryObject;
+pub use crate::scheduler::{MemoryObject, PageFlags};
 
 pub use norostb_kernel::{
 	error::Error,

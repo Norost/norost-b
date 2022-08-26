@@ -1,4 +1,4 @@
-use super::{MemoryObject, Object};
+use super::{MemoryObject, Object, PageFlags};
 use crate::memory::{frame::PPN, r#virtual::RWX, Page};
 use alloc::sync::Arc;
 use core::ops::RangeInclusive;
@@ -64,8 +64,8 @@ unsafe impl MemoryObject for SubRange {
 		self.total_size
 	}
 
-	fn page_permissions(&self) -> RWX {
-		self.object.page_permissions()
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		self.object.page_flags()
 	}
 }
 

@@ -1,3 +1,4 @@
+use super::super::PageFlags;
 use crate::memory::{frame, Page};
 use core::{
 	arch::asm,
@@ -118,6 +119,7 @@ impl Entry {
 		frame: u64,
 		user: bool,
 		writeable: bool,
+		flags: PageFlags,
 	) -> Result<(), SetPageError> {
 		if self.is_table() {
 			Err(SetPageError::IsTable)
@@ -128,6 +130,7 @@ impl Entry {
 			self.0 |= Self::USER * u64::from(user);
 			self.0 |= Self::GLOBAL * u64::from(!user);
 			self.0 |= Self::READ_WRITE * u64::from(writeable);
+			self.0 |= Self::WRITE_THROUGH * u64::from(flags.write_combining());
 			Ok(())
 		}
 	}

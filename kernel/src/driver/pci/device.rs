@@ -3,8 +3,7 @@ use crate::memory::{
 	frame::{PageFrameIter, PPN},
 	r#virtual::RWX,
 };
-use crate::object_table::Object;
-use crate::object_table::{Ticket, TicketWaker};
+use crate::object_table::{Object, PageFlags, Ticket, TicketWaker};
 use crate::scheduler::MemoryObject;
 use crate::sync::SpinLock;
 use crate::Error;
@@ -46,8 +45,8 @@ unsafe impl MemoryObject for PciDevice {
 		1
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::R
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::R)
 	}
 }
 
@@ -145,8 +144,8 @@ unsafe impl MemoryObject for BarRegion {
 		self.frames.len()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RW)
 	}
 }
 

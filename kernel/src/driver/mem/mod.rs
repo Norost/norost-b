@@ -5,7 +5,7 @@ use crate::{
 		r#virtual::RWX,
 		Page,
 	},
-	object_table::{MemoryObject, Object, Root},
+	object_table::{MemoryObject, Object, PageFlags, Root},
 };
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -33,8 +33,8 @@ unsafe impl MemoryObject for Mem {
 		TOP.load(Ordering::Relaxed).try_into().unwrap()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RW)
 	}
 }
 

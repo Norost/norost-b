@@ -32,15 +32,7 @@ fn main() -> ! {
 	assert_eq!((bpp, r_mask, g_mask, b_mask), (32, 8, 8, 8));
 
 	let map_len = (stride as usize + 1) * (height as usize + 1);
-	let (base, len) = fb
-		.map_object(
-			None,
-			rt::RWX::RW,
-			0,
-			map_len,
-			rt::io::MAP_OBJECT_HINT_NON_TEMPORAL,
-		)
-		.unwrap();
+	let (base, len) = fb.map_object(None, rt::RWX::RW, 0, map_len).unwrap();
 	assert!(len >= map_len);
 
 	enum Fb {
@@ -120,7 +112,7 @@ fn main() -> ! {
 					}
 				}
 				Request::Share { share } => {
-					match share.map_object(None, rt::io::RWX::R, 0, 1 << 30, 0) {
+					match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
 						Err(e) => Response::Error(e as _),
 						Ok((buf, size)) => {
 							command_buf = (buf.cast(), size);

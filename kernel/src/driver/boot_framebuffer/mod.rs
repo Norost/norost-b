@@ -5,7 +5,7 @@ use crate::{
 		r#virtual::RWX,
 		Page,
 	},
-	object_table::{Error, MemoryObject, Object, Root, Ticket, TinySlice},
+	object_table::{Error, MemoryObject, Object, PageFlags, Root, Ticket, TinySlice},
 };
 use alloc::{boxed::Box, sync::Arc};
 
@@ -76,8 +76,9 @@ unsafe impl MemoryObject for Framebuffer {
 		}
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		//(*PageFlags::default().set_write_combining(), RWX::RW)
+		(PageFlags::default(), RWX::RW)
 	}
 }
 
