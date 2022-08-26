@@ -7,7 +7,7 @@ use alloc::string::ToString;
 use core::ptr::NonNull;
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use framebuffer::{Bgrx8888, FrameBuffer, Rgbx8888};
-use rt::{Error, Handle};
+use rt::Error;
 use rt_default as _;
 
 #[start]
@@ -56,7 +56,7 @@ fn main() -> ! {
 	loop {
 		tbl.wait();
 		let mut flush = false;
-		while let Some((handle, job_id, req)) = tbl.dequeue() {
+		while let Some((_, job_id, req)) = tbl.dequeue() {
 			let resp = match req {
 				Request::GetMeta { property } => match &*property.get(&mut [0; 64]) {
 					b"resolution" => {

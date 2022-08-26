@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use rt::{io::Pow2Size, Handle};
 use rt_default as _;

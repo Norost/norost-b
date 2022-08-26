@@ -27,18 +27,17 @@ fn main() {
 		&stdin,
 	);
 
-	let data = dev
-		.transfer_in(
-			scsi::Inquiry {
-				allocation_length: 0x24,
-				evpd: 0,
-				page_code: 0,
-				control: 0,
-			},
-			0x24,
-		)
-		.unwrap();
-	rt::dbg!(scsi::InquiryData::try_from(&*data).unwrap());
+	// Send inquiry since it seems to be required for MSD devices to work properly
+	dev.transfer_in(
+		scsi::Inquiry {
+			allocation_length: 0x24,
+			evpd: 0,
+			page_code: 0,
+			control: 0,
+		},
+		0x24,
+	)
+	.unwrap();
 
 	let data = dev
 		.transfer_in(
@@ -70,7 +69,6 @@ fn main() {
 				Request::Open { path } if handle == rt::Handle::MAX => {
 					let mut p = alloc::vec![0; path.len()];
 					path.copy_to(0, &mut p);
-					rt::dbg!(core::str::from_utf8(&p));
 					if &p == b"data" {
 						Response::Handle(obj.insert(0))
 					} else {

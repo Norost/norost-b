@@ -85,7 +85,7 @@ fn main() {
 				Request::Read { amount } if handle != rt::Handle::MAX => {
 					if handle & 1 << 31 != 0 {
 						let i = &mut ls[handle ^ 1 << 31];
-						let mut s = partitions
+						let s = partitions
 							.iter()
 							.enumerate()
 							.skip(*i)
@@ -164,17 +164,26 @@ fn main() {
 
 #[derive(Debug)]
 struct PartitionTableHeader {
+	#[allow(dead_code)]
 	gpt_revision: u32,
+	#[allow(dead_code)]
 	header_size: u32,
+	#[allow(dead_code)]
 	crc32: u32,
+	#[allow(dead_code)]
 	header_lba: u64,
+	#[allow(dead_code)]
 	alt_header_lba: u64,
+	#[allow(dead_code)]
 	first_usable_block: u64,
+	#[allow(dead_code)]
 	last_usable_block: u64,
+	#[allow(dead_code)]
 	guid: u128,
 	partition_entry_array_lba: u64,
 	partition_entry_count: u32,
 	partition_entry_size: u32,
+	#[allow(dead_code)]
 	partition_entry_array_crc32: u32,
 }
 

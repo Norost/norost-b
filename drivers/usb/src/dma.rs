@@ -22,6 +22,7 @@ where
 		self.ptr.as_mut()
 	}
 
+	#[allow(dead_code)]
 	pub fn as_ptr(&self) -> NonNull<T> {
 		self.ptr
 	}

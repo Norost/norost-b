@@ -1,29 +1,15 @@
-use super::{event::Event, ring, DeviceConfig, Xhci};
+use super::{ring, DeviceConfig, Xhci};
 use crate::{
 	dma::Dma,
-	requests::{
-		Direction, EndpointAttributes, EndpointTransfer, EndpointUsage, RawRequest, Request,
-	},
+	requests::{Direction, EndpointTransfer, RawRequest},
 };
 use alloc::vec::Vec;
-use core::{marker::PhantomData, mem, num::NonZeroU8, ptr::NonNull};
-use driver_utils::dma;
+use core::num::NonZeroU8;
 use xhci::{
 	accessor::Mapper,
-	context::{
-		Device32Byte, DeviceHandler, EndpointHandler, EndpointState, EndpointType, Input32Byte,
-		InputHandler,
-	},
-	ring::trb::{command, event, transfer},
-	Registers,
+	context::{Device32Byte, EndpointType, Input32Byte, InputHandler},
+	ring::trb::{command, transfer},
 };
-
-// https://wiki.osdev.org/USB#GET_DESCRIPTOR
-const GET_DESCRIPTOR: u8 = 6;
-const DESCRIPTOR_DEVICE: u16 = 1 << 8;
-const DESCRIPTOR_CONFIGURATION: u16 = 2 << 8;
-const DESCRIPTOR_STRING: u16 = 3 << 8;
-const DESCRIPTOR_DEVICE_QUALIFIER: u16 = 6 << 8;
 
 const FULL_SPEED: u8 = 1;
 const LOW_SPEED: u8 = 2;
@@ -34,9 +20,8 @@ const SUPERSPEED_GEN1_X2: u8 = 6;
 const SUPERSPEED_GEN2_X2: u8 = 7;
 
 pub(super) struct Device {
-	port: NonZeroU8,
 	slot: NonZeroU8,
-	output_dev_context: Dma<Device32Byte>,
+	_output_dev_context: Dma<Device32Byte>,
 	transfer_ring: ring::Ring<transfer::Allowed>,
 	endpoints: Vec<Option<ring::Ring<transfer::Normal>>>,
 }
@@ -106,11 +91,7 @@ impl Device {
 		Ok(id)
 	}
 
-	pub fn configure(
-		&mut self,
-		interrupter: u16,
-		config: DeviceConfig,
-	) -> (command::Allowed, Dma<Input32Byte>) {
+	pub fn configure(&mut self, config: DeviceConfig) -> (command::Allowed, Dma<Input32Byte>) {
 		let mut input_context = Dma::<Input32Byte>::new().unwrap_or_else(|_| todo!());
 		let inp = unsafe { input_context.as_mut() };
 
@@ -158,8 +139,6 @@ impl Device {
 		(command::Allowed::ConfigureEndpoint(cmd), input_context)
 	}
 
-	pub fn transfer_in(&mut self, interrupter: u16) {}
-
 	pub fn slot(&self) -> NonZeroU8 {
 		self.slot
 	}
@@ -176,12 +155,12 @@ pub(super) fn init(port: NonZeroU8, ctrl: &mut Xhci) -> Result<WaitReset, &'stat
 	Ok(WaitReset { port })
 }
 
-#[must_use]
 pub(super) struct WaitReset {
 	port: NonZeroU8,
 }
 
 impl WaitReset {
+	#[must_use]
 	pub fn poll(
 		&mut self,
 		regs: &mut xhci::Registers<impl Mapper + Clone>,
@@ -200,12 +179,12 @@ impl WaitReset {
 	}
 }
 
-#[must_use]
 pub(super) struct AllocSlot {
 	port: NonZeroU8,
 }
 
 impl AllocSlot {
+	#[must_use]
 	pub fn init(
 		&mut self,
 		ctrl: &mut Xhci,
@@ -265,9 +244,8 @@ impl AllocSlot {
 			))?,
 			SetAddress {
 				dev: Device {
-					port: self.port,
 					slot,
-					output_dev_context,
+					_output_dev_context: output_dev_context,
 					transfer_ring,
 					endpoints: Default::default(),
 				},
@@ -276,7 +254,6 @@ impl AllocSlot {
 	}
 }
 
-#[must_use]
 pub(super) struct SetAddress {
 	dev: Device,
 }
@@ -300,10 +277,10 @@ fn calc_packet_size(speed: u8) -> u16 {
 }
 
 fn map_endpoint_type(transfer: EndpointTransfer, dir: Direction) -> EndpointType {
-	rt::dbg!(match (transfer, dir) {
+	match (transfer, dir) {
 		(EndpointTransfer::Interrupt, Direction::In) => EndpointType::InterruptIn,
 		(EndpointTransfer::Bulk, Direction::In) => EndpointType::BulkIn,
 		(EndpointTransfer::Bulk, Direction::Out) => EndpointType::BulkOut,
 		e => todo!("{:?}", e),
-	})
+	}
 }

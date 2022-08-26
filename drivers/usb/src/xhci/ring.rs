@@ -1,8 +1,6 @@
 use crate::dma::Dma;
 use core::{
 	marker::PhantomData,
-	num::NonZeroUsize,
-	ptr::NonNull,
 	sync::atomic::{self, Ordering},
 };
 use xhci::ring::trb;
@@ -75,7 +73,6 @@ where
 }
 
 pub struct Full;
-pub struct Empty;
 
 pub trait TrbEntry: private::Sealed {
 	fn into_raw(self) -> [u32; 4];

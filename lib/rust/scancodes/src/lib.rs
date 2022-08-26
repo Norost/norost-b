@@ -190,7 +190,7 @@ impl TryFrom<u32> for KeyCode {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Event {
 	Release(KeyCode),
 	Press(KeyCode),

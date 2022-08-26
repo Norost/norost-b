@@ -5,7 +5,7 @@ use core::{
 	pin::Pin,
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
-use io_queue_rt::{Open, Pow2Size, Queue, Read, Share, Write};
+use io_queue_rt::{Open, Queue, Read, Write};
 
 const MSG_SIZE: usize = 32;
 
@@ -107,7 +107,6 @@ impl<'a> Drivers<'a> {
 				v.push(endpoint);
 				v.extend_from_slice(data);
 			}
-			_ => todo!(),
 		}
 		let wr = write(self.queue, &d.stdin, v);
 		d.write_tasks.push(wr);
@@ -141,6 +140,7 @@ impl<'a> Drivers<'a> {
 }
 
 struct DeviceDriver<'a> {
+	#[allow(dead_code)]
 	process: rt::Process,
 	stdin: rt::Object,
 	stdout: rt::Object,

@@ -18,6 +18,24 @@ mod paging;
 mod uart;
 mod vga;
 
+macro_rules! log {
+	($fmt:literal) => {{
+		let _ = $crate::Stdout.write_str(concat!($fmt, "\n"));
+	}};
+	($fmt:literal, $($arg:tt)+) => {{
+		let _ = writeln!($crate::Stdout, $fmt, $($arg)+);
+	}};
+}
+
+macro_rules! err {
+	($fmt:literal) => {{
+		let _ = $crate::Stderr.write_str(concat!($fmt, "\n"));
+	}};
+	($fmt:literal, $($arg:tt)+) => {{
+		let _ = writeln!($crate::Stderr, $fmt, $($arg)+);
+	}};
+}
+
 use alloc::alloc;
 use core::alloc::Layout;
 use core::arch::asm;
@@ -74,7 +92,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 			&boot_top as *const _ as u64,
 		)
 	};
-	let _ = writeln!(Stdout, "Boot: {:#x} - {:#x}", boot_start, boot_end);
+	log!("Boot: {:#x} - {:#x}", boot_start, boot_end);
 
 	let info = unsafe { &mut *alloc(Layout::new::<info::Info>()).cast::<info::Info>() };
 
@@ -88,7 +106,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	for e in boot_info() {
 		match e {
 			bi::Info::Unknown(ty) => {
-				let _ = writeln!(Stderr, "multiboot2: unknown type {}", ty);
+				err!("multiboot2: unknown type {}", ty)
 			}
 			bi::Info::Module(m) => match m.string {
 				b"initfs" => {
@@ -102,18 +120,14 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				m => panic!("unknown module type: {:?}", core::str::from_utf8(m)),
 			},
 			bi::Info::MemoryMap(m) => {
-				let _ = writeln!(Stdout, "multiboot2: memory map");
+				log!("multiboot2: memory map");
 				assert!(
 					memory_top.is_none(),
 					"memory map has already been specified"
 				);
 				let mut max = 0;
 				for e in m.entries {
-					let _ = writeln!(
-						Stdout,
-						"  {:#10x} {:#10x} {:05}",
-						e.base_address, e.length, e.typ
-					);
+					let _ = log!("  {:#10x} {:#10x} {:05}", e.base_address, e.length, e.typ);
 					max = max.max(e.base_address + e.length);
 				}
 				memory_top = Some(max - 1);
@@ -131,7 +145,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				};
 				match fb.color_info {
 					bi::FramebufferColorInfo::IndexedColor(_) => {
-						let _ = writeln!(Stderr, "todo: indexed color");
+						err!("todo: indexed color")
 					}
 					bi::FramebufferColorInfo::DirectRgbColor(ci) => {
 						info.framebuffer = info::Framebuffer {
@@ -145,10 +159,10 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 						};
 					}
 					bi::FramebufferColorInfo::EgaText => {
-						let _ = writeln!(Stderr, "todo: EGA text");
+						err!("todo: EGA text")
 					}
 					bi::FramebufferColorInfo::Unknown(ty) => {
-						let _ = writeln!(Stderr, "unknown framebuffer type {}", ty);
+						err!("unknown framebuffer type {}", ty);
 					}
 				}
 			}
@@ -158,8 +172,8 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	let kernel = kernel.expect("No kernel");
 	let initfs = initfs.expect("No initfs");
 	let memory_top = memory_top.expect("no memory map");
-	let _ = writeln!(Stdout, "kernel: {:#x} - {:#x}", kernel.start, kernel.end);
-	let _ = writeln!(Stdout, "initfs: {:#x} - {:#x}", initfs.start, initfs.end);
+	log!("kernel: {:#x} - {:#x}", kernel.start, kernel.end);
+	log!("initfs: {:#x} - {:#x}", initfs.start, initfs.end);
 	info.rsdp.write(*rsdp.expect("no RSDP found"));
 
 	// Determine free memory regions
@@ -255,8 +269,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	info.initfs_len = initfs.end - initfs.start;
 	let mut i = 0;
 	iter_regions(&mut |region| {
-		let _ = writeln!(
-			Stdout,
+		log!(
 			"Memory region: {:#x} - {:#x}",
 			region.base,
 			region.base + region.size
@@ -308,14 +321,12 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 	// Set IA32_PAT so we can use all caching types in a sensible way
 	unsafe {
-		writeln!(Stdout, "{:016x}", msr::rdmsr(msr::IA32_PAT));
 		// 0: WB
 		// 1: WC
 		// Repeat for 4-7 because FIXME why oh why do you use both bit 12 and 7 Intel.
 		// Especially 7 is already used to indicate whether a page is a 2M page, which
 		// I incidentally am using for 4K pages. Bloody shit
 		msr::wrmsr(msr::IA32_PAT, 0x0000_0106_0000_0106);
-		writeln!(Stdout, "{:016x}", msr::rdmsr(msr::IA32_PAT));
 	}
 
 	Return {
@@ -327,7 +338,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-	let _ = write!(Stderr, "{}", info);
+	err!("{}", info);
 	halt();
 }
 

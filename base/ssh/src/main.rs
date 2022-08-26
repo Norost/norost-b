@@ -1,12 +1,11 @@
 extern crate alloc;
 
-use alloc::{boxed::Box, collections::BTreeMap, rc::Rc};
+use alloc::{boxed::Box, rc::Rc};
 use async_std::{
 	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
 	net::{Ipv4Addr, TcpListener, TcpStream},
 	process, AsyncObject,
 };
-use clap::Parser;
 use core::str;
 use futures::io::{AsyncReadExt, ReadHalf, WriteHalf};
 use nora_ssh::{
@@ -16,18 +15,9 @@ use nora_ssh::{
 	Identifier,
 };
 use rand::rngs::StdRng;
-use serde_derive::Deserialize;
-
-#[derive(Parser, Debug)]
-struct Args {
-	#[clap(value_parser)]
-	config: String,
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let args = Args::parse();
-
-	let config = parse_config(&args.config);
+	let config = parse_config();
 
 	async_std::task::block_on(async {
 		let addr = (Ipv4Addr::UNSPECIFIED, 22);
@@ -74,8 +64,7 @@ impl User {
 		b.add_object(b"err", stderr_shr.into()).await.0?;
 		b.add_object_raw(b"file", self.context.as_raw()).await?;
 		let shell = b.spawn().await?;
-		let mut shell = Rc::new(shell);
-		let sh_mut = Rc::get_mut(&mut shell).unwrap();
+		let shell = Rc::new(shell);
 		let io = IoSet {
 			stdin: Some(AsyncWrapW::new(AsyncObject::from(stdin))),
 			stdout: Some(AsyncWrapR::new(AsyncObject::from(stdout))),
@@ -106,29 +95,20 @@ impl Handlers {
 			.map_err(|_| ())?
 			.read_file_all()
 			.map_err(|_| ())?;
-		let mut it = scf::parse(&cfg).map(Result::unwrap);
+		let mut cf = scf::parse2(&cfg);
 		let mut kk = None;
-		'l: while let Some(tk) = it.next() {
-			assert_eq!(tk, scf::Token::Begin);
-			assert_eq!(it.next().unwrap(), scf::Token::Str("authorized"));
-			loop {
-				match it.next() {
-					Some(scf::Token::Begin) => {
-						assert_eq!(it.next().unwrap(), scf::Token::Str("ssh-ed25519"));
-						match it.next().unwrap() {
-							scf::Token::Str(s) => {
-								let k = n85::decode_vec(s.as_ref()).unwrap();
-								if &k == key {
-									kk = Some(k)
-								}
-							}
-							_ => todo!(),
-						}
-						assert_eq!(it.next().unwrap(), scf::Token::End);
-					}
-					Some(scf::Token::End) => break,
-					_ => todo!(),
+		for item in cf.iter() {
+			let mut it = item.into_group().unwrap();
+			assert!(it.next_str() == Some("authorized"));
+			for item in it {
+				let mut it = item.into_group().unwrap();
+				assert!(it.next_str() == Some("ssh-ed25519"));
+				let s = it.next_str().unwrap();
+				let k = n85::decode_vec(s.as_ref()).unwrap();
+				if &k == key {
+					kk = Some(k)
 				}
+				assert!(it.next().is_none());
 			}
 		}
 		kk.and_then(|k| (key == &k).then(|| k))
@@ -245,11 +225,9 @@ struct Config {
 }
 
 #[derive(Default)]
-struct UserConfig {
-	ed25519: Option<Box<[u8]>>,
-}
+struct UserConfig {}
 
-fn parse_config(path: &str) -> Config {
+fn parse_config() -> Config {
 	let mut cfg @ mut cfg_secret @ mut userdb = None;
 	for (n, o) in rt::args::handles() {
 		match n {
@@ -267,41 +245,30 @@ fn parse_config(path: &str) -> Config {
 		.unwrap();
 	let userdb = userdb.expect("userdb is not defined");
 
-	let mut it = scf::parse(&cfg_secret).map(Result::unwrap);
-
 	let mut token = None;
-
-	use scf::Token;
-	let is_begin = |it: &mut dyn Iterator<Item = Token<'_>>| match it.next() {
-		Some(Token::Begin) => true,
-		Some(Token::End) => false,
-		_ => panic!("expected '(' or ')'"),
-	};
-	fn get_str<'a>(it: &mut dyn Iterator<Item = Token<'a>>) -> Option<&'a str> {
-		it.next().and_then(|o| o.into_str())
-	};
-
 	let mut host_keys = HostKeys::default();
 
-	while let Some(tk) = it.next() {
-		assert!(tk == Token::Begin);
-		match get_str(&mut it).expect("expected section name") {
+	let mut cf = scf::parse2(&cfg_secret);
+	for item in cf.iter() {
+		let mut it = item.into_group().unwrap();
+		match it.next_str().expect("expected section name") {
 			"keys" => {
-				while is_begin(&mut it) {
-					let algo = get_str(&mut it).expect("expected key algorithm");
-					let path = get_str(&mut it).expect("expected key path");
+				for item in it {
+					let mut it = item.into_group().unwrap();
+					let algo = it.next_str().expect("expected key algorithm");
+					let path = it.next_str().expect("expected key path");
 					let prev = match algo {
 						"ecdsa" => host_keys.ecdsa.replace(read_key_ecdsa(path)),
 						s => panic!("unknown key algorithm {:?}", s),
 					};
 					assert!(prev.is_none(), "key defined twice");
-					assert!(it.next() == Some(Token::End));
+					assert!(it.next().is_none());
 				}
 			}
 			"userdb" => {
-				let prev = token.replace(get_str(&mut it).expect("token"));
+				let prev = token.replace(it.next_str().expect("expected token"));
 				assert!(prev.is_none(), "token defined twice");
-				assert!(it.next() == Some(Token::End));
+				assert!(it.next().is_none());
 			}
 			s => panic!("unknown section {:?}", s),
 		}

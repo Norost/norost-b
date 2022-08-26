@@ -83,8 +83,7 @@ impl<'a> Device<'a> {
 		buf.drain(..2);
 
 		// CSW
-		let sl = self.transfer_status(length)?;
-		//assert_eq!(l, sl as usize);
+		self.transfer_status(length)?;
 
 		Ok(buf)
 	}
@@ -114,7 +113,7 @@ impl<'a> Device<'a> {
 		let mut buf = [0; 32];
 		let l = self.rd.read(&mut buf)?;
 		match ipc_usb::recv_parse(&buf[..l]).unwrap() {
-			ipc_usb::Recv::DataIn { ep, data } => {
+			ipc_usb::Recv::DataIn { ep: _, data } => {
 				let csw = CommandStatusWrapper::from_raw(data.try_into().unwrap());
 				assert!(matches!(csw.status, Status::Success));
 				Ok(data_len - csw.residue)

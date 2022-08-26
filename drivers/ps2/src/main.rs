@@ -17,7 +17,6 @@ mod keyboard;
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::boxed::Box;
 use async_std::{
-	fs,
 	io::{Read, Write},
 	object::RefAsyncObject,
 	task,

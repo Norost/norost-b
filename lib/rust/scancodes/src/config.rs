@@ -96,67 +96,47 @@ impl Config {
 }
 
 pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
-	use scf::Token;
-
-	let mut it = scf::parse(cfg);
-
+	let mut cf = scf::parse2(cfg);
 	let mut cfg = Config::default();
 
-	let assert_tk = |tk, eq| (tk == eq).then(|| ()).ok_or(Error::UnexpectedToken);
-	fn get_str(tk: Token<'_>) -> Result<&str, Error<'_>> {
-		tk.into_str().ok_or(Error::UnexpectedToken)
-	}
-	let mut next = || it.next().transpose().map_err(Error::Syntax);
-
-	while let Some(tk) = next()? {
-		let mut next = || next()?.ok_or(Error::ExpectedToken);
-		assert_tk(tk, Token::Begin)?;
-		match get_str(next()?)? {
-			"raw" => loop {
-				match next()? {
-					Token::Begin => {}
-					Token::End => break,
-					Token::Str(_) => Err(Error::UnexpectedToken)?,
-				}
-				let keycode = parse_keycode(get_str(next()?)?)?;
-				let mut buf = [0; 16];
-				let mut i = 0;
-				loop {
-					match next()? {
-						Token::Begin => Err(Error::UnexpectedToken)?,
-						Token::End => break,
-						Token::Str(s) => {
-							*buf.get_mut(i).ok_or(Error::ScancodeTooLong)? = parse_hex_u8(s)?;
-							i += 1;
-						}
+	for item in cf.iter() {
+		let mut it = item.into_group().ok_or(Error::ExpectedGroup)?;
+		match it.next_str().ok_or(Error::ExpectedString)? {
+			"raw" => {
+				for item in it {
+					let mut it = item.into_group().ok_or(Error::ExpectedGroup)?;
+					let keycode = parse_keycode(it.next_str().ok_or(Error::ExpectedString)?)?;
+					let mut buf = [0; 16];
+					let mut i = 0;
+					for item in it {
+						let s = item.into_str().ok_or(Error::ExpectedString)?;
+						*buf.get_mut(i).ok_or(Error::ScancodeTooLong)? = parse_hex_u8(s)?;
+						i += 1;
 					}
+					let prev = match &buf[..i] {
+						&[a] => cfg.raw.map_single[usize::from(a)].replace(keycode),
+						&[a, b] => cfg.raw.map_double.insert([a, b], keycode),
+						s => cfg.raw.map_long.insert(s.into(), keycode),
+					};
+					// TODO somehow log or return *warning* if a duplicate key is found
+					let _ = prev;
 				}
-				let prev = match &buf[..i] {
-					&[a] => cfg.raw.map_single[usize::from(a)].replace(keycode),
-					&[a, b] => cfg.raw.map_double.insert([a, b], keycode),
-					s => cfg.raw.map_long.insert(s.into(), keycode),
-				};
-				// TODO somehow log or return *warning* if a duplicate key is found
-				let _ = prev;
-			},
-			s @ "caps" | s @ "altgr" | s @ "altgr+caps" => loop {
-				match next()? {
-					Token::Begin => {}
-					Token::End => break,
-					Token::Str(_) => Err(Error::UnexpectedToken)?,
+			}
+			s @ "caps" | s @ "altgr" | s @ "altgr+caps" => {
+				for item in it {
+					let mut it = item.into_group().ok_or(Error::ExpectedGroup)?;
+					let target = parse_keycode(it.next_str().ok_or(Error::ExpectedString)?)?;
+					let source = parse_keycode(it.next_str().ok_or(Error::ExpectedString)?)?;
+					let prev = match s {
+						"caps" => cfg.translate_caps.insert(source, target),
+						"altgr" => cfg.translate_altgr.insert(source, target),
+						"altgr+caps" => cfg.translate_altgr_caps.insert(source, target),
+						_ => unreachable!(),
+					};
+					// TODO ditto
+					let _ = prev;
 				}
-				let target = parse_keycode(get_str(next()?)?)?;
-				let source = parse_keycode(get_str(next()?)?)?;
-				assert_tk(next()?, Token::End)?;
-				let prev = match s {
-					"caps" => cfg.translate_caps.insert(source, target),
-					"altgr" => cfg.translate_altgr.insert(source, target),
-					"altgr+caps" => cfg.translate_altgr_caps.insert(source, target),
-					_ => unreachable!(),
-				};
-				// TODO ditto
-				let _ = prev;
-			},
+			}
 			s => Err(Error::UnknownSection(s))?,
 		}
 	}
@@ -166,8 +146,8 @@ pub fn parse(cfg: &[u8]) -> Result<Config, Error<'_>> {
 
 #[derive(Debug)]
 pub enum Error<'a> {
-	ExpectedToken,
-	UnexpectedToken,
+	ExpectedGroup,
+	ExpectedString,
 	UnknownSection(&'a str),
 	UnknownKeyCode(&'a str),
 	Syntax(scf::Error),

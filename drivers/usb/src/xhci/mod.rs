@@ -11,12 +11,7 @@ use errata::Errata;
 
 use crate::{dma::Dma, requests};
 use alloc::{collections::BTreeMap, vec::Vec};
-use core::{
-	mem,
-	num::{NonZeroU8, NonZeroUsize},
-	ptr::NonNull,
-	time::Duration,
-};
+use core::{mem, num::NonZeroU8, time::Duration};
 use xhci::{
 	registers::operational::DeviceContextBaseAddressArrayPointerRegister, ring::trb::command,
 	Registers,
@@ -31,6 +26,7 @@ pub struct Xhci {
 	pending_commands: BTreeMap<ring::EntryId, PendingCommand>,
 	transfers: BTreeMap<ring::EntryId, Dma<[u8]>>,
 	wait_device_reset: Vec<device::WaitReset>,
+	poll: rt::Object,
 }
 
 impl Xhci {
@@ -38,8 +34,7 @@ impl Xhci {
 		let errata = Errata::get(0x1b36, 0x000d);
 
 		let poll = dev.open(b"poll").unwrap();
-		let pci_config = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap().0;
-		let (mmio_ptr, mmio_len) = dev
+		let (mmio_ptr, _) = dev
 			.open(b"bar0")
 			.unwrap()
 			.map_object(None, rt::RWX::RW, 0, usize::MAX)
@@ -154,6 +149,7 @@ impl Xhci {
 			pending_commands: Default::default(),
 			transfers: Default::default(),
 			wait_device_reset: Default::default(),
+			poll,
 		})
 	}
 
@@ -203,7 +199,7 @@ impl Xhci {
 			.devices
 			.get_mut(&slot)
 			.expect("no device")
-			.configure(0, config);
+			.configure(config);
 		core::mem::forget(buf); // FIXME
 		self.enqueue_command(cmd).inspect(|&id| {
 			self.pending_commands

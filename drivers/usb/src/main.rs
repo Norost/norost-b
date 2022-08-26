@@ -19,7 +19,7 @@ mod loader;
 mod requests;
 mod xhci;
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::{num::NonZeroU8, str};
 use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
 use io_queue_rt::{Pow2Size, Queue};
@@ -50,10 +50,8 @@ fn main() -> ! {
 	let mut conf_driver = BTreeMap::default();
 	let mut wait_finish_config = BTreeMap::default();
 
-	let (tbl_buf, tbl_buf_phys) =
-		driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
+	let (tbl_buf, _) = driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
 	let tbl = StreamTable::new(&tbl_buf, 512.try_into().unwrap(), (1 << 12) - 1);
-	let tbl_get_phys = |data: ()| todo!();
 	file_root
 		.create(b"usb")
 		.unwrap()
@@ -84,6 +82,7 @@ fn main() -> ! {
 					buffer,
 					code,
 				} => {
+					code.unwrap();
 					if let Some(j) = jobs.remove(&id) {
 						if let Some((job_id, resp)) =
 							j.progress(&mut jobs, &mut ctrl, slot, buffer.unwrap(), &tbl)
@@ -136,7 +135,7 @@ fn main() -> ! {
 												endpoints.push(e)
 											}
 										}
-										requests::DescriptorResult::Unknown { ty, .. } => continue,
+										requests::DescriptorResult::Unknown { .. } => continue,
 										requests::DescriptorResult::Invalid => {
 											todo!("invalid descr")
 										}
@@ -176,8 +175,8 @@ fn main() -> ! {
 							}
 							_ => unreachable!(),
 						}
-					} else if let Some(slot) = conf_driver.remove(&id) {
-						rt::dbg!("done configuring");
+					} else if let Some(_slot) = conf_driver.remove(&id) {
+						// Nothing to do
 					} else {
 						let buf = buffer.unwrap();
 						assert!(endpoint & 1 == 1);
@@ -192,8 +191,9 @@ fn main() -> ! {
 							.unwrap();
 					}
 				}
-				Event::DeviceConfigured { slot, id, code } => {
-					let driver = wait_finish_config.remove(&id).unwrap();
+				Event::DeviceConfigured { slot: _, id, code } => {
+					code.unwrap();
+					wait_finish_config.remove(&id).unwrap();
 				}
 			}
 		}
@@ -212,7 +212,8 @@ fn main() -> ! {
 					let ep = endpoint << 1 | 1;
 					assert!(ep < 32);
 					let buf = dma::Dma::new_slice(size.try_into().unwrap()).unwrap();
-					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true);
+					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true)
+						.unwrap_or_else(|_| todo!());
 				}
 				Event::DataOut {
 					slot,
@@ -254,7 +255,6 @@ fn main() -> ! {
 							Response::Error(Error::DoesNotExist)
 						}
 					}
-					(_, p) => todo!("{:?}", core::str::from_utf8(p)),
 					_ => Response::Error(Error::DoesNotExist),
 				},
 				Request::Read { amount } => match &mut objects[handle] {
@@ -268,8 +268,8 @@ fn main() -> ! {
 							}
 						};
 						*i += 1;
-						let b = tbl.alloc(s.len()).expect("out of buffers");
-						b.copy_from(0, s);
+						let b = tbl.alloc(s.len().min(amount as _)).expect("out of buffers");
+						b.copy_from(0, &s[..b.len()]);
 						Response::Data(b)
 					}
 					Object::ListDevices { slot } => {
@@ -315,7 +315,7 @@ struct Job {
 
 enum JobState {
 	WaitDeviceInfo,
-	WaitDeviceName { info: requests::Device },
+	WaitDeviceName,
 }
 
 impl Job {
@@ -366,11 +366,11 @@ impl Job {
 						},
 					)
 					.unwrap_or_else(|_| todo!());
-				self.state = JobState::WaitDeviceName { info };
+				self.state = JobState::WaitDeviceName;
 				jobs.insert(id, self);
 				None
 			}
-			JobState::WaitDeviceName { info: _ } => {
+			JobState::WaitDeviceName => {
 				let s = res.into_string().unwrap();
 				let name = tbl.alloc(s.len()).expect("out of buffers");
 				for (i, mut c) in s.enumerate() {

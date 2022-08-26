@@ -50,9 +50,10 @@ fn main() -> ! {
 		let mut buf = [0; 32];
 		let len = stdin.read(&mut buf).unwrap();
 		match ipc_usb::recv_parse(&buf[..len]).unwrap() {
-			Recv::DataIn { ep, data } => {
+			Recv::DataIn { ep: _, data } => {
 				assert!(data.len() == 8, "unexpected data size");
 
+				let mut toggle_capslock = false;
 				let send = |k| public_in.write(&u32::from(k).to_le_bytes()).unwrap();
 
 				// Convert modifiers to keypresses
@@ -84,10 +85,11 @@ fn main() -> ! {
 					altgr: altgr_level != 0,
 					num: false,
 				};
-				let send = |d, press| {
+				let mut send = |d, press| {
 					if let Some(k) = cfg.raw(&[d]) {
 						let k = cfg.modified(k, m).unwrap_or(k);
 						send(if press {
+							toggle_capslock |= k == KeyCode::Special(SpecialKeyCode::CapsLock);
 							Event::Press(k)
 						} else {
 							Event::Release(k)
@@ -112,6 +114,7 @@ fn main() -> ! {
 				}
 
 				prev_state.copy_from_slice(data);
+				capslock ^= toggle_capslock;
 			}
 		}
 		enqueue_read();

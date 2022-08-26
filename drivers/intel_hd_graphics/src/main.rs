@@ -240,7 +240,6 @@ mod transcoder;
 mod vga;
 mod watermark;
 
-use alloc::vec::Vec;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64;
 use core::ptr::NonNull;

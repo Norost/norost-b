@@ -67,6 +67,3 @@ dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
 getrandom = { git = "https://git.sr.ht/~demindiro/getrandom" }
 #xhci = { git = "https://github.com/Demindiro/xhci/", branch = "fix-try_from-type-range" }
 xhci = { path = "../thirdparty/xhci" }
-
-[patch.crates-io.os_str_bytes]
-git = "https://git.sr.ht/~demindiro/os_str_bytes"

@@ -43,7 +43,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let pending_read = Cell::new(None);
 
 	let do_read = || async {
-		use scancodes::{Event, KeyCode, SpecialKeyCode};
+		use scancodes::{Event, KeyCode};
 		// FIXME https://github.com/rust-lang/rust/issues/99385
 		// It *was* fine up until recently. Imma keep using it for now...
 		let (res, mut buf) = input.read(Vec::with_capacity(4)).await;
