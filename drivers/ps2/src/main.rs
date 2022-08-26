@@ -335,6 +335,8 @@ impl Ps2 {
 			io: PortIo::new().unwrap(),
 		};
 		let mut devices: [Option<Box<dyn Device>>; 2] = [None, None];
+		// Because shit's just broken on my laptop. Hoo fucking ha
+		let mut two_channels = rt::args::args().find(|a| a == b"disable-port2").is_none();
 
 		{
 			// Disable devices
@@ -372,7 +374,7 @@ impl Ps2 {
 			slf.write_command(Command::EnablePort2).unwrap();
 			slf.write_command(Command::ReadControllerConfiguration)
 				.unwrap();
-			let two_channels = slf.read_data().unwrap() & CTRL_CFG_PORT_2_CLOCK_DISABLED == 0;
+			two_channels &= slf.read_data().unwrap() & CTRL_CFG_PORT_2_CLOCK_DISABLED == 0;
 			slf.write_command(Command::DisablePort2).unwrap();
 
 			// Test ports
@@ -404,25 +406,30 @@ impl Ps2 {
 			}
 
 			// Initialize drivers for any detected PS/2 devices
-			for (i, (port, enable_cmd)) in [(Port::P1, Command::EnablePort1)]
-				.into_iter()
-				.chain(two_channels.then(|| (Port::P2, Command::EnablePort2)))
-				.enumerate()
+			for (i, (port, enable_cmd, disable_cmd)) in
+				[(Port::P1, Command::EnablePort1, Command::DisablePort2)]
+					.into_iter()
+					.chain(
+						two_channels
+							.then(|| (Port::P2, Command::EnablePort2, Command::DisablePort2)),
+					)
+					.enumerate()
 			{
 				slf.write_command(enable_cmd).unwrap();
 
 				// Reset to clear buffer
 				slf.write_port_command(port, PortCommand::Reset).unwrap();
 				slf.read_port_data_with_acknowledge().unwrap();
-				assert!(
-					slf.read_port_data().unwrap() == PORT_SELF_TEST_PASSED,
-					"reset & self test failed"
-				);
+				if slf
+					.read_port_data()
+					.map_or(true, |c| c != PORT_SELF_TEST_PASSED)
+				{
+					slf.write_command(disable_cmd).unwrap();
+					log!("{:?}: reset & self test failed", port);
+					continue;
+				}
 
-				// FIXME resetting the device does not seem to actually clear the buffer, or
-				// at least, there is a single lingering byte.
-				// Reading now works well enough as long as the user doesn't mash the keyboard
-				// really fast.
+				// QEMU sends mouse_type because reasons.
 				let _ = slf.read_port_data();
 
 				slf.write_port_command(port, PortCommand::DisableScanning)
@@ -454,12 +461,14 @@ impl Ps2 {
 						| &[DEVICE_MF2_KEYBOARD, 0x83]
 						=> {
 							log!("{:?}: found keyboard", port);
-							devices[i] = Some(Box::new(keyboard::Keyboard::init(&mut slf, port)))
+							devices[i] = Some(Box::new(keyboard::Keyboard::init(&mut slf, port)));
+							continue;
 						}
 						&[a] => log!("{:?}: unsupported device {:#02x}", port, a),
 						&[a, b] => log!("{:?}: unsupported device {:#02x}{:02x}", port, a, b),
 						_ => unreachable!(),
 				}
+				slf.write_command(disable_cmd).unwrap();
 			}
 
 			(slf, devices)
