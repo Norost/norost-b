@@ -12,6 +12,12 @@ pub struct Entry(u64);
 
 pub const IDENTITY_MAP_ADDRESS: *mut u8 = 0xffff_c000_0000_0000 as *mut _;
 
+/// ## IA32_PAT setup
+///
+/// ```
+///  7  6  5  4  3  2  1  0
+/// UC UC WC WB UC UC WC WB
+/// ```
 impl Entry {
 	const PRESENT: u64 = 1 << 0;
 	const READ_WRITE: u64 = 1 << 1;
@@ -26,6 +32,11 @@ impl Entry {
 	const GLOBAL: u64 = 1 << 8;
 	#[allow(dead_code)]
 	const AVAILABLE: u64 = 7 << 9;
+
+	#[allow(dead_code)]
+	const PAT_4K: u64 = 1 << 7;
+	#[allow(dead_code)]
+	const PAT_2M: u64 = 1 << 12;
 
 	pub fn is_present(&self) -> bool {
 		self.0 & Self::PRESENT > 0

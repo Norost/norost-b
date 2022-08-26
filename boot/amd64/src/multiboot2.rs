@@ -16,8 +16,17 @@ struct Tag {
 }
 
 #[repr(C)]
+struct FramebufferTag {
+	tag: Tag,
+	width: u32,
+	height: u32,
+	depth: u32,
+}
+
+#[repr(C)]
 struct MultiBoot {
 	header: Header,
+	framebuffer: FramebufferTag,
 	end_tag: Tag,
 }
 
@@ -37,6 +46,16 @@ static MULTIBOOT: MultiBoot = {
 			flags,
 			header_length,
 			checksum,
+		},
+		framebuffer: FramebufferTag {
+			tag: Tag {
+				typ: 5,
+				flags: 0,
+				size: core::mem::size_of::<FramebufferTag>() as _,
+			},
+			width: 0,
+			height: 0,
+			depth: 32, // RGBX8888 or similar, hopefully
 		},
 		end_tag: Tag {
 			typ: 0,
@@ -90,9 +109,46 @@ pub mod bootinfo {
 		}
 	}
 
+	#[derive(Debug)]
+	pub struct FramebufferInfo<'a> {
+		pub addr: u64,
+		pub pitch: u32,
+		pub width: u32,
+		pub height: u32,
+		pub bpp: u8,
+		pub color_info: FramebufferColorInfo<'a>,
+	}
+
+	#[derive(Debug)]
+	pub enum FramebufferColorInfo<'a> {
+		IndexedColor(&'a [FramebufferPaletteEntry]),
+		DirectRgbColor(FramebufferDirectRgbColor),
+		EgaText,
+		Unknown(u8),
+	}
+
+	#[derive(Debug)]
+	#[repr(C)]
+	pub struct FramebufferPaletteEntry {
+		pub r: u8,
+		pub g: u8,
+		pub b: u8,
+	}
+
+	#[derive(Debug)]
+	pub struct FramebufferDirectRgbColor {
+		pub r_pos: u8,
+		pub r_mask: u8,
+		pub g_pos: u8,
+		pub g_mask: u8,
+		pub b_pos: u8,
+		pub b_mask: u8,
+	}
+
 	pub enum Info<'a> {
 		Module(Module<'a>),
 		MemoryMap(MemoryMap<'a>),
+		FramebufferInfo(FramebufferInfo<'a>),
 		AcpiRsdp(&'a rsdp::Rsdp),
 		Unknown(u32),
 	}
@@ -106,6 +162,7 @@ pub mod bootinfo {
 	impl<'a> BootInfo<'a> {
 		const MODULE: u32 = 3;
 		const MEMORY_MAP: u32 = 6;
+		const FRAMEBUFFER_INFO: u32 = 8;
 		const ACPI_OLD_RSDP: u32 = 14;
 		const ACPI_NEW_RSDP: u32 = 15;
 
@@ -167,6 +224,40 @@ pub mod bootinfo {
 									(size - mem::size_of::<u32>() * 2)
 										/ mem::size_of::<MemoryMapEntry>(),
 								),
+							})
+						}
+					}
+					Self::FRAMEBUFFER_INFO => {
+						const SIZE: usize = 8 + 4 * 3 + 3;
+						debug_assert!(size >= SIZE);
+						unsafe {
+							Info::FramebufferInfo(FramebufferInfo {
+								addr: ptr.cast::<u64>().read(),
+								pitch: ptr.add(8).cast::<u32>().read(),
+								width: ptr.add(12).cast::<u32>().read(),
+								height: ptr.add(16).cast::<u32>().read(),
+								bpp: ptr.add(20).read(),
+								color_info: match ptr.add(21).read() {
+									0 => FramebufferColorInfo::IndexedColor({
+										let len = ptr.add(24).cast::<u32>().read();
+										slice::from_raw_parts(
+											ptr.add(28).cast::<FramebufferPaletteEntry>(),
+											len.try_into().unwrap(),
+										)
+									}),
+									1 => FramebufferColorInfo::DirectRgbColor(
+										FramebufferDirectRgbColor {
+											r_pos: ptr.add(24).read(),
+											r_mask: ptr.add(25).read(),
+											g_pos: ptr.add(26).read(),
+											g_mask: ptr.add(27).read(),
+											b_pos: ptr.add(28).read(),
+											b_mask: ptr.add(29).read(),
+										},
+									),
+									2 => FramebufferColorInfo::EgaText,
+									ty => FramebufferColorInfo::Unknown(ty),
+								},
 							})
 						}
 					}

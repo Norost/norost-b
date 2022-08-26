@@ -29,14 +29,14 @@ pub const KERNEL_GS_BASE: u32 = 0xc0000102;
 pub unsafe fn wrmsr(reg: u32, value: u64) {
 	let (high, low) = ((value >> 32) as u32, value as u32);
 	unsafe {
-		asm!("wrmsr", in("ecx") reg, in("edx") high, in("eax") low);
+		asm!("wrmsr", in("ecx") reg, in("edx") high, in("eax") low, options(nostack, nomem));
 	}
 }
 
 pub unsafe fn rdmsr(reg: u32) -> u64 {
 	let (high, low): (u32, u32);
 	unsafe {
-		asm!("rdmsr", in("ecx") reg, out("edx") high, out("eax") low);
+		asm!("rdmsr", in("ecx") reg, out("edx") high, out("eax") low, options(nostack, nomem));
 	}
 	u64::from(high) << 32 | u64::from(low)
 }

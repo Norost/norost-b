@@ -1,7 +1,4 @@
-use crate::{
-	memory::Page,
-	util::{ByteStr, DebugIter},
-};
+use crate::memory::Page;
 use core::fmt;
 
 #[repr(C)]
@@ -12,6 +9,7 @@ pub struct Info {
 	pub memory_top: u64,
 	pub initfs_ptr: u32,
 	pub initfs_len: u32,
+	pub framebuffer: Framebuffer,
 	#[cfg(target_arch = "x86_64")]
 	pub rsdp: rsdp::Rsdp,
 }
@@ -35,21 +33,6 @@ impl Info {
 			let b = (self as *const _ as *const u8).add(self.memory_regions_offset.into());
 			core::slice::from_raw_parts(b.cast(), usize::from(self.memory_regions_len))
 		}
-	}
-
-	/// Get a byte string from the buffer.
-	///
-	/// A byte string is prefixed with a single byte that indicates its length.
-	fn get_str(&self, offset: u16) -> &[u8] {
-		let offset = usize::from(offset);
-		let len = self.buffer()[offset];
-		&self.buffer()[1 + offset..1 + offset + usize::from(len)]
-	}
-
-	/// Cast to an array.
-	fn buffer(&self) -> &[u8; 1 << 16] {
-		// SAFETY: The boot loader should have given us a sufficiently large buffer.
-		unsafe { &*(self as *const Self).cast() }
 	}
 }
 
@@ -122,41 +105,17 @@ impl fmt::Debug for MemoryRegion {
 	}
 }
 
-#[repr(C)]
-struct RawInitProgram {
-	driver: u16,
-	args_offset: u16,
-	args_len: u16,
-}
-
-/// A program to run at boot.
-pub struct InitProgram<'a> {
-	info: &'a Info,
-	inner: &'a RawInitProgram,
-}
-
-impl<'a> InitProgram<'a> {
-	/// The index of the corresponding driver
-	pub fn driver(&self) -> u16 {
-		self.inner.driver
-	}
-
-	/// The arguments that should be passed to this program.
-	pub fn args(&self) -> impl Iterator<Item = &'a [u8]> + '_ {
-		let mut offset = self.inner.args_offset;
-		(0..self.inner.args_len).map(move |_| {
-			let s = self.info.get_str(offset);
-			offset += 1 + u16::try_from(s.len()).unwrap();
-			s
-		})
-	}
-}
-
-impl fmt::Debug for InitProgram<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct(stringify!(InitProgram))
-			.field("driver", &self.driver())
-			.field("args", &DebugIter::new(self.args().map(ByteStr::new)))
-			.finish()
-	}
+#[repr(C, align(8))]
+pub struct Framebuffer {
+	pub base: u64,
+	pub pitch: u16,
+	pub width: u16,
+	pub height: u16,
+	pub bpp: u8,
+	pub r_pos: u8,
+	pub r_mask: u8,
+	pub g_pos: u8,
+	pub g_mask: u8,
+	pub b_pos: u8,
+	pub b_mask: u8,
 }

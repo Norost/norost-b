@@ -52,7 +52,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
-	let sync = root.open(b"gpu/sync").unwrap();
+	let sync = rt::args::handle(b"gpu").expect("gpu undefined");
 	let res = {
 		let mut b = [0; 8];
 		sync.get_meta(b"bin/resolution".into(), (&mut b).into())

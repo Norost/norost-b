@@ -22,9 +22,8 @@ impl Object for Mem {
 
 unsafe impl MemoryObject for Mem {
 	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
-		let top = TOP.load(Ordering::Relaxed);
-		for i in 0..top {
-			if f(&[PPN(i)]) {
+		for i in 0..TOP.load(Ordering::Relaxed) {
+			if !f(&[PPN(i)]) {
 				break;
 			}
 		}
