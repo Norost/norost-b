@@ -1,0 +1,24 @@
+[package]
+name = "driver_framebuffer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.driver_utils]
+package = "driver_utils"
+path = "../../lib/rust/driver_utils"
+default-features = false
+
+[dependencies.framebuffer]
+package = "framebuffer"
+git = "https://git.sr.ht/~demindiro/framebuffer"
+
+[dependencies.ipc_gpu]
+path = "../../lib/rust/ipc/gpu"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"

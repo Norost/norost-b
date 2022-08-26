@@ -1,5 +1,9 @@
 use super::{AllocateError, AllocateHints, Page, PPN};
-use crate::{memory::r#virtual::RWX, object_table::Object, scheduler::MemoryObject};
+use crate::{
+	memory::r#virtual::RWX,
+	object_table::{Object, PageFlags},
+	scheduler::MemoryObject,
+};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::num::NonZeroUsize;
 
@@ -58,8 +62,8 @@ unsafe impl MemoryObject for OwnedPageFrames {
 		self.frames.len()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RWX
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RWX)
 	}
 }
 

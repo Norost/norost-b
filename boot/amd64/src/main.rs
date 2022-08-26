@@ -119,6 +119,39 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				memory_top = Some(max - 1);
 			}
 			bi::Info::AcpiRsdp(r) => rsdp = Some(r),
+			bi::Info::FramebufferInfo(fb) => {
+				let f = |n: u32| n.checked_sub(1).and_then(|n| n.try_into().ok());
+				info.framebuffer = info::Framebuffer {
+					base: fb.addr,
+					pitch: f(fb.pitch).expect("pitch out of range"),
+					width: f(fb.width).expect("width out of range"),
+					height: f(fb.height).expect("height out of range"),
+					bpp: fb.bpp,
+					..info.framebuffer
+				};
+				match fb.color_info {
+					bi::FramebufferColorInfo::IndexedColor(_) => {
+						let _ = writeln!(Stderr, "todo: indexed color");
+					}
+					bi::FramebufferColorInfo::DirectRgbColor(ci) => {
+						info.framebuffer = info::Framebuffer {
+							r_pos: ci.r_pos,
+							g_pos: ci.g_pos,
+							b_pos: ci.b_pos,
+							r_mask: ci.r_mask,
+							g_mask: ci.g_mask,
+							b_mask: ci.b_mask,
+							..info.framebuffer
+						};
+					}
+					bi::FramebufferColorInfo::EgaText => {
+						let _ = writeln!(Stderr, "todo: EGA text");
+					}
+					bi::FramebufferColorInfo::Unknown(ty) => {
+						let _ = writeln!(Stderr, "unknown framebuffer type {}", ty);
+					}
+				}
+			}
 		}
 	}
 
@@ -273,6 +306,18 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		GDT_PTR.activate();
 	}
 
+	// Set IA32_PAT so we can use all caching types in a sensible way
+	unsafe {
+		writeln!(Stdout, "{:016x}", msr::rdmsr(msr::IA32_PAT));
+		// 0: WB
+		// 1: WC
+		// Repeat for 4-7 because FIXME why oh why do you use both bit 12 and 7 Intel.
+		// Especially 7 is already used to indicate whether a page is a 2M page, which
+		// I incidentally am using for 4K pages. Bloody shit
+		msr::wrmsr(msr::IA32_PAT, 0x0000_0106_0000_0106);
+		writeln!(Stdout, "{:016x}", msr::rdmsr(msr::IA32_PAT));
+	}
+
 	Return {
 		entry,
 		pml4,
@@ -311,9 +356,8 @@ impl Write for Stdout {
 }
 
 fn halt() -> ! {
-	loop {
-		unsafe {
-			asm!("hlt", options(nostack, nomem));
-		}
+	unsafe {
+		// Interrupts are not enabled.
+		asm!("hlt", options(nostack, nomem, noreturn));
 	}
 }

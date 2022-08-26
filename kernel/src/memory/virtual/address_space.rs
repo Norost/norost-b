@@ -53,7 +53,8 @@ impl AddressSpace {
 		if offset % Page::SIZE != 0 {
 			return Err(MapError::UnalignedOffset);
 		}
-		if !rwx.is_subset_of(object.page_permissions()) {
+		let (flags, perms) = object.page_flags();
+		if !rwx.is_subset_of(perms) {
 			return Err(MapError::Permission);
 		}
 
@@ -66,9 +67,12 @@ impl AddressSpace {
 		)?;
 
 		unsafe {
-			let mut f =
-				self.mmu_address_space
-					.map(range.start().as_ptr() as *const _, rwx, hint_color);
+			let mut f = self.mmu_address_space.map(
+				range.start().as_ptr() as *const _,
+				rwx,
+				hint_color,
+				flags,
+			);
 			object.physical_pages(&mut |p| {
 				for &p in p.iter() {
 					if let Some(o) = offset.checked_sub(Page::SIZE) {
@@ -96,6 +100,11 @@ impl AddressSpace {
 		object: Arc<dyn MemoryObject>,
 		rwx: RWX,
 	) -> Result<(NonNull<Page>, usize), MapError> {
+		let (flags, perms) = object.page_flags();
+		if !rwx.is_subset_of(perms) {
+			return Err(MapError::Permission);
+		}
+
 		// FIXME this will deadlock because there is now a circular dependency
 		// on the heap allocator
 		let mut objects = KERNEL_MAPPED_OBJECTS.auto_lock();
@@ -113,7 +122,7 @@ impl AddressSpace {
 
 		unsafe {
 			let mut f =
-				r#virtual::AddressSpace::kernel_map(range.start().as_ptr() as *const _, rwx);
+				r#virtual::AddressSpace::kernel_map(range.start().as_ptr() as *const _, rwx, flags);
 			object.physical_pages(&mut |p| {
 				for &p in p.iter() {
 					f(p).unwrap_or_else(|e| todo!("{:?}", MapError::Arch(e)))

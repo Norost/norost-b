@@ -5,7 +5,7 @@ use crate::{
 		r#virtual::RWX,
 		Page,
 	},
-	object_table::{MemoryObject, Object, Root},
+	object_table::{MemoryObject, Object, PageFlags, Root},
 };
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -22,9 +22,8 @@ impl Object for Mem {
 
 unsafe impl MemoryObject for Mem {
 	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
-		let top = TOP.load(Ordering::Relaxed);
-		for i in 0..top {
-			if f(&[PPN(i)]) {
+		for i in 0..TOP.load(Ordering::Relaxed) {
+			if !f(&[PPN(i)]) {
 				break;
 			}
 		}
@@ -34,8 +33,8 @@ unsafe impl MemoryObject for Mem {
 		TOP.load(Ordering::Relaxed).try_into().unwrap()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RW)
 	}
 }
 

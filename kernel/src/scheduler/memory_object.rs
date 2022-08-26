@@ -1,6 +1,8 @@
 use crate::memory::{frame::PPN, r#virtual::RWX};
 use core::any::Any;
 
+pub use crate::arch::PageFlags;
+
 /// Objects which can be mapped into an address space.
 ///
 /// # Safety
@@ -18,6 +20,6 @@ where
 	/// The total amount of physical pages.
 	fn physical_pages_len(&self) -> usize;
 
-	/// The RWX permissions that may be used for these pages.
-	fn page_permissions(&self) -> RWX;
+	/// The RWX permissions and other architecture-specific flags that may be used for these pages.
+	fn page_flags(&self) -> (PageFlags, RWX);
 }

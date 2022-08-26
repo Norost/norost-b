@@ -1,5 +1,7 @@
 mod acpi;
 pub mod apic;
+#[cfg(feature = "driver-boot-framebuffer")]
+pub mod boot_framebuffer;
 #[cfg(feature = "driver-hpet")]
 pub mod hpet;
 #[cfg(feature = "driver-interrupt")]
@@ -53,6 +55,9 @@ pub unsafe fn init(boot: &boot::Info) {
 
 		#[cfg(feature = "driver-mem")]
 		mem::init(boot);
+
+		#[cfg(feature = "driver-boot-framebuffer")]
+		boot_framebuffer::init(boot);
 	}
 }
 
@@ -70,4 +75,7 @@ pub fn post_init(root: &Root) {
 
 	#[cfg(feature = "driver-mem")]
 	mem::post_init(root);
+
+	#[cfg(feature = "driver-boot-framebuffer")]
+	boot_framebuffer::post_init(root);
 }

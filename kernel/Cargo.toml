@@ -27,6 +27,7 @@ git = "https://git.sr.ht/~demindiro/nrofs/"
 # TODO only enable driver-portio for x86 platforms
 default = [
 	"mem-max-16t",
+	"driver-boot-framebuffer",
 	"driver-interrupt",
 	"driver-mem",
 	"driver-pci",
@@ -36,6 +37,7 @@ default = [
 ]
 mem-max-16t = []
 mem-max-256m = []
+driver-boot-framebuffer = []
 driver-interrupt = []
 driver-pci = []
 driver-hpet = []

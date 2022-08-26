@@ -1,4 +1,4 @@
-use super::common;
+use super::{super::PageFlags, common};
 use crate::memory::frame::{self, PPN};
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
@@ -48,15 +48,17 @@ impl AddressSpace {
 		address: *const Page,
 		rwx: RWX,
 		hint_color: u8,
+		flags: PageFlags,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
-		unsafe { Self::map_common(self.table_mut(), address, rwx, hint_color, true) }
+		unsafe { Self::map_common(self.table_mut(), address, rwx, hint_color, true, flags) }
 	}
 
 	pub unsafe fn kernel_map(
 		address: *const Page,
 		rwx: RWX,
+		flags: PageFlags,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + 'static {
-		unsafe { Self::map_common(Self::current(), address, rwx, 0, false) }
+		unsafe { Self::map_common(Self::current(), address, rwx, 0, false, flags) }
 	}
 
 	unsafe fn map_common(
@@ -65,12 +67,14 @@ impl AddressSpace {
 		rwx: RWX,
 		hint_color: u8,
 		user: bool,
+		flags: PageFlags,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
 		move |ppn| loop {
 			match common::get_entry_mut(tbl, address as u64, 0, 3) {
 				Ok(e) => {
 					debug_assert!(!e.is_present(), "page already set");
-					e.set_page(ppn.as_phys() as u64, user, rwx.w()).unwrap();
+					e.set_page(ppn.as_phys() as u64, user, rwx.w(), flags)
+						.unwrap();
 					address = address.wrapping_add(1);
 					break Ok(());
 				}

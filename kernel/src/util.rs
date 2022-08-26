@@ -1,4 +1,5 @@
 //! # Various useful utilities that probably exist in a crate somewhere but meh.
+#![allow(dead_code)]
 
 use core::{
 	cell::Cell,

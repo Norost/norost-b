@@ -4,7 +4,7 @@ use crate::{
 		r#virtual::{phys_to_virt, RWX},
 		Page,
 	},
-	object_table::{Error, MemoryObject, Object, QueryIter, SeekFrom, Ticket},
+	object_table::{Error, MemoryObject, Object, PageFlags, QueryIter, SeekFrom, Ticket},
 };
 use alloc::{boxed::Box, sync::Arc};
 use core::{
@@ -33,8 +33,8 @@ unsafe impl MemoryObject for File {
 		Page::min_pages_for_bytes(self.data.len())
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RX
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RX)
 	}
 }
 

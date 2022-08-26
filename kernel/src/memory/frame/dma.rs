@@ -2,7 +2,7 @@ use super::{fixed_bitmap::FixedBitmap, PPNBox, Page, PageFrameIter, PPN};
 use crate::{
 	boot,
 	memory::r#virtual::RWX,
-	object_table::{Error, Object, Root, Ticket},
+	object_table::{Error, Object, PageFlags, Root, Ticket},
 	scheduler::MemoryObject,
 	sync::SpinLock,
 };
@@ -60,8 +60,8 @@ unsafe impl MemoryObject for DmaFrame {
 		self.count.try_into().unwrap()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RWX)
 	}
 }
 

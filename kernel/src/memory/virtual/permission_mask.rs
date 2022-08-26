@@ -1,7 +1,7 @@
 //! A `PermissionMask` object restricts the permissions that can be used when mapping an object.
 
 use super::{PPN, RWX};
-use crate::object_table::{MemoryObject, Object};
+use crate::object_table::{MemoryObject, Object, PageFlags};
 use alloc::sync::Arc;
 
 macro_rules! pm {
@@ -17,8 +17,9 @@ macro_rules! pm {
 				self.0.physical_pages_len()
 			}
 
-			fn page_permissions(&self) -> RWX {
-				RWX::$perm
+			fn page_flags(&self) -> (PageFlags, RWX) {
+				let (flags, _) = self.0.page_flags();
+				(flags, RWX::$perm)
 			}
 		}
 
@@ -41,7 +42,7 @@ pub fn mask_permissions_object(obj: Arc<dyn Object>, rwx: RWX) -> Option<Arc<dyn
 		return Some(obj);
 	}
 	let o = obj.clone().memory_object()?;
-	let perm = o.page_permissions();
+	let (_, perm) = o.page_flags();
 	if perm.is_subset_of(rwx) {
 		return Some(obj);
 	}

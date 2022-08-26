@@ -4,6 +4,7 @@ cargo-features = ["strip"]
 members = [
 	"kernel",
 	"boot/amd64",
+	"drivers/framebuffer",
 	"drivers/fs_fat",
 	"drivers/gpt",
 	"drivers/intel_hd_graphics",

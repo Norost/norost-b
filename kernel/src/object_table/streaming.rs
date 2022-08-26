@@ -210,8 +210,8 @@ unsafe impl MemoryObject for StreamingTable {
 		self.queue_mem.physical_pages_len()
 	}
 
-	fn page_permissions(&self) -> RWX {
-		RWX::RW
+	fn page_flags(&self) -> (PageFlags, RWX) {
+		(Default::default(), RWX::RW)
 	}
 }
 

@@ -279,6 +279,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_framebuffer"
+version = "0.1.0"
+dependencies = [
+ "driver_utils",
+ "framebuffer",
+ "ipc_gpu",
+ "norost_rt_default",
+ "norostb_rt",
+]
+
+[[package]]
 name = "driver_fs_fat"
 version = "0.2.0"
 dependencies = [
@@ -513,6 +524,11 @@ dependencies = [
  "hashbrown 0.11.2",
  "ttf-parser",
 ]
+
+[[package]]
+name = "framebuffer"
+version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/framebuffer#94b82e117d06b24e8f27dd31574a33528ebb1be9"
 
 [[package]]
 name = "futures"

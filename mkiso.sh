@@ -77,6 +77,7 @@ install_ext () {
 	cp $2/target/$TARGET_USER/$build_dir/$1 $A/$1
 }
 
+install framebuffer        driver_framebuffer
 install fs_fat             driver_fs_fat
 install gpt                driver_gpt
 install intel_hd_graphics  driver_intel_hd_graphics
