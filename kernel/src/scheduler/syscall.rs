@@ -18,7 +18,6 @@ use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
-use core::time::Duration;
 use norostb_kernel::{error::Error, io::Request, object::NewObject};
 
 #[derive(Clone, Copy)]

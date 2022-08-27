@@ -7,7 +7,6 @@ pub struct Monotonic {
 }
 
 impl Monotonic {
-	pub const ZERO: Self = Self { ns: 0 };
 	pub const MAX: Self = Self { ns: u64::MAX };
 
 	pub fn from_nanos(ns: u64) -> Self {

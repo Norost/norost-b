@@ -12,7 +12,6 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
 	ptr::{self, NonNull},
 	task::Poll,
-	time::Duration,
 };
 use norostb_kernel::io::{self as k_io, Request, Response, SeekFrom};
 
