@@ -28,6 +28,16 @@ impl<'a> Drivers<'a> {
 		let wk = self.make_waker();
 		let mut cx = Context::from_waker(&wk);
 		for (&slot, driver) in self.drivers.iter_mut() {
+			// Remove done tasks
+			for i in (0..driver.write_tasks.len()).rev() {
+				if Pin::new(&mut driver.write_tasks[i])
+					.poll(&mut cx)
+					.is_ready()
+				{
+					driver.write_tasks.swap_remove(i);
+				}
+			}
+
 			if let Some(share) = driver.share_task.as_mut() {
 				if let Poll::Ready((res, ())) = Pin::new(share).poll(&mut cx) {
 					let obj = rt::Object::from_raw(res.unwrap());
