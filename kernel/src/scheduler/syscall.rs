@@ -18,7 +18,6 @@ use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
-use core::time::Duration;
 use norostb_kernel::{error::Error, io::Request, object::NewObject};
 
 #[derive(Clone, Copy)]
@@ -402,10 +401,10 @@ extern "C" fn sleep(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!(syscall "sleep");
-	let time = merge_u64(time_l, time_h);
-	let time = Duration::from_nanos(time.into());
-	Thread::current().unwrap().sleep(time);
+	let t = merge_u64(time_l, time_h);
+	debug!(syscall "sleep {:?}", Duration::from_nanos(t));
+	let t = Monotonic::now().saturating_add_nanos(t);
+	Thread::current().unwrap().sleep_until(t);
 	get_mono_time()
 }
 
@@ -527,7 +526,6 @@ extern "C" fn wait_io_queue(
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
 	let timeout = merge_u64(timeout_l, timeout_h);
-	let timeout = Duration::from_nanos(timeout.into());
 	Process::current()
 		.unwrap()
 		.wait_io_queue(base, timeout)

@@ -15,8 +15,12 @@ use core::arch::asm;
 use core::cell::Cell;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
+#[cfg(not(target_has_atomic = "64"))]
+use core::sync::atomic::AtomicU32;
+#[cfg(target_has_atomic = "64")]
+use core::sync::atomic::AtomicU64;
+use core::sync::atomic::Ordering;
 use core::task::Waker;
-use core::time::Duration;
 use norostb_kernel::Handle;
 
 const KERNEL_STACK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
@@ -33,7 +37,50 @@ pub struct Thread {
 	// Especially, we don't need to store the processes anywhere as as long a thread
 	// is alive, the process itself will be alive too.
 	process: Option<Arc<Process>>,
-	sleep: SpinLock<Sleep>,
+	/// How long this thread will sleep at minimum.
+	///
+	/// This also serves as the base for `wait`.
+	///
+	/// This field is only updated by the core running/holding this thread, so while
+	/// synchronization is still necessary between threads (on the same core), there
+	/// will never be concurrent writes to this location.
+	///
+	/// Hence, while a read may appear torn on some (32-bit) platforms, this will not be an
+	/// issue in practice.
+	/// Consider the following (extreme) scenario, where the value HL will be written to `sleep`:
+	///
+	/// * Thread writes 0 to 31:0 of `sleep`.
+	/// * Thread is pre-empted.
+	/// * Core checks `sleep`, finds that `sleep` is <= current time.
+	///   * `sleep[63:32]` <= `time[63:32]`, since otherwise the thread wouldn't be running.
+	///   * `sleep[31:0]` <= `time[31:0]`, as `sleep[31:0]` is 0.
+	/// * Thread writes H to `sleep[63:32]`.
+	/// * Thread is pre-empted.
+	/// * Core checks `sleep`, finds that `sleep` is <= current time
+	///   * If `sleep[63:32]` > `time[63:32]`, the thread will sleep and wake up sometime before
+	///     HL, as `sleep[63:32]` is H and `sleep[31:0]` is 0.
+	///   * If `sleep[63:32]` <= `time[63:32]`, the thread continues running.
+	/// * Thread writes L to `sleep[31:0]`.
+	/// * Thread yields.
+	///
+	/// So while a thread may wake too early, this is never visible to user-space applications.
+	/// It will also never wake too late due to a torn write.
+	/// Ergo, the current implementation will behave correctly.
+	#[cfg(target_has_atomic = "64")]
+	sleep: AtomicU64,
+	#[cfg(not(target_has_atomic = "64"))]
+	sleep: (AtomicU32, AtomicU32),
+	/// How long this thread will wait for an event at most, in nanoseconds.
+	/// This value is added to `sleep` to get the real wait time.
+	///
+	/// On platforms with 32-bit atomics this value is limited to 4 seconds.
+	/// On platforms with 64-bit atomics it is limited to a few hundred years.
+	///
+	/// External events may set this to zero.
+	#[cfg(target_has_atomic = "64")]
+	wait: AtomicU64,
+	#[cfg(not(target_has_atomic = "64"))]
+	wait: AtomicU32,
 	/// Architecture-specific data.
 	pub arch_specific: arch::ThreadData,
 	/// Tasks to notify when this thread finishes.
@@ -83,6 +130,7 @@ impl Thread {
 				kernel_stack_base,
 				process: Some(process),
 				sleep: Default::default(),
+				wait: Default::default(),
 				arch_specific: arch::ThreadData::new_user(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
@@ -173,6 +221,7 @@ impl Thread {
 				kernel_stack_base,
 				process: None,
 				sleep: Default::default(),
+				wait: Default::default(),
 				arch_specific: arch::ThreadData::new_kernel(),
 				waiters: Default::default(),
 				destroyed: Cell::new(false),
@@ -274,21 +323,42 @@ impl Thread {
 		}
 	}
 
-	pub fn sleep_until(&self) -> Monotonic {
-		self.sleep.auto_lock().until
+	/// When this thread should be woken up next.
+	pub fn wake_time(&self) -> Monotonic {
+		#[cfg(target_has_atomic = "64")]
+		let t = self.sleep.load(Ordering::Relaxed);
+		#[cfg(not(target_has_atomic = "64"))]
+		let t = u64::from(self.sleep.0.load(Ordering::Relaxed))
+			| u64::from(self.sleep.1.load(Ordering::Relaxed)) << 32;
+		let t = Monotonic::from_nanos(t);
+		t.saturating_add_nanos(self.wait.load(Ordering::Relaxed).into())
 	}
 
-	/// Sleep until the given duration.
-	///
-	/// The thread may wake earlier if [`wake`] is called or if an asynchronous deadline is set.
-	pub fn sleep(&self, duration: Duration) {
+	/// Sleep until the given time.
+	pub fn sleep_until(&self, time: Monotonic) {
+		if cfg!(debug_assertions) && time == Monotonic::MAX {
+			warn!("thread will sleep forever");
+		}
+		self.wait_until(time, 0);
+	}
+
+	/// Wait for a given duration, using the given time as base.
+	pub fn wait_until(&self, time: Monotonic, duration_ns: u64) {
+		// Set wait first before setting sleep so the thread doesn't potentially sleep for too long.
+		#[cfg(not(target_has_atomic = "64"))]
+		let duration_ns = u32::try_from(duration_ns).unwrap_or(u32::MAX);
+		self.wait.store(duration_ns, Ordering::Release);
+
+		#[cfg(target_has_atomic = "64")]
+		self.sleep.store(time.as_nanos(), Ordering::Relaxed);
+		#[cfg(not(target_has_atomic = "64"))]
 		{
-			let mut s = self.sleep.lock();
-			if core::mem::take(&mut s.waked) {
-				// A task woke us. Poll it before yielding.
-				return;
-			}
-			s.until = Monotonic::now().saturating_add(duration);
+			// See documentation of sleep member for explanation
+			sleep.0.store(0, Ordering::Release);
+			sleep
+				.1
+				.store((time.as_nanos() >> 32 as u32), Ordering::Release);
+			sleep.0.store((time.as_nanos() as u32), Ordering::Relaxed);
 		}
 		Self::yield_current();
 	}
@@ -326,7 +396,7 @@ impl Thread {
 			waiters.push(waker);
 			drop(waiters);
 			while !self.destroyed() {
-				wake_thr.sleep(Duration::MAX);
+				wake_thr.sleep_until(Monotonic::MAX);
 			}
 		}
 		Ok(())
@@ -336,11 +406,9 @@ impl Thread {
 		crate::arch::yield_current_thread();
 	}
 
-	/// Cancel sleep
+	/// Clear the wait value, waking this thread if the sleep duration has passed.
 	pub fn wake(&self) {
-		let mut s = self.sleep.auto_lock();
-		s.until = Monotonic::ZERO;
-		s.waked = true;
+		self.wait.store(0, Ordering::Relaxed);
 	}
 
 	pub fn current() -> Option<Arc<Self>> {
@@ -381,12 +449,3 @@ impl Drop for Thread {
 
 #[derive(Debug)]
 pub struct Destroyed;
-
-#[derive(Default)]
-struct Sleep {
-	/// How long to wait.
-	until: Monotonic,
-	/// Whether a task has sent a wake-up event to this thread. If set, [`Thread::sleep`] will
-	/// clear this flag and return immediately.
-	waked: bool,
-}
