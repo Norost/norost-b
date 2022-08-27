@@ -120,6 +120,12 @@ impl Xhci {
 
 			regs.interrupter_register_set
 				.interrupter_mut(0)
+				.imod
+				.update_volatile(|c| {
+					c.set_interrupt_moderation_interval(4000); // 1ms
+				});
+			regs.interrupter_register_set
+				.interrupter_mut(0)
 				.iman
 				.update_volatile(|c| {
 					c.set_interrupt_enable();
@@ -277,6 +283,10 @@ impl Xhci {
 			.checked_add(1)
 			.and_then(|n| self.devices.range(NonZeroU8::new(n).unwrap()..).next())
 			.map(|(k, _)| *k)
+	}
+
+	pub fn notifier(&self) -> rt::RefObject<'_> {
+		(&self.poll).into()
 	}
 
 	fn ring(&mut self, slot: u8, stream: u16, endpoint: u8) {

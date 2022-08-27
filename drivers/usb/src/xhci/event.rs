@@ -128,8 +128,9 @@ impl Table {
 		reg.erstsz
 			.update_volatile(|c| c.set(self.segments.len().try_into().unwrap()));
 		// Program the Interrupter Event Ring Dequeue Pointer
+		rt::dbg!(reg.erdp.read_volatile().event_handler_busy());
 		reg.erdp.update_volatile(|c| {
-			c.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base })
+			c.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base });
 		});
 		// Program the Interrupter Event Ring Segment Table Base Address
 		reg.erstba.update_volatile(|c| c.set(self.buf.as_phys()));
@@ -138,8 +139,10 @@ impl Table {
 	pub fn inform(&self, mut reg: Interrupter<'_, impl Mapper + Clone, ReadWrite>) {
 		let phys = unsafe { self.buf.as_ref()[usize::from(self.dequeue_segment)].base };
 		let phys = phys + u64::from(self.dequeue_index) * 16;
-		reg.erdp
-			.update_volatile(|c| c.set_event_ring_dequeue_pointer(phys));
+		reg.erdp.update_volatile(|c| {
+			c.set_event_ring_dequeue_pointer(phys);
+			c.clear_event_handler_busy();
+		});
 	}
 }
 
