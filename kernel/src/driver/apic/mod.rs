@@ -3,8 +3,8 @@ pub mod local_apic;
 mod reg;
 
 use crate::arch::amd64::{self, msr};
+use crate::driver::hpet;
 use crate::memory::Page;
-use crate::time::Monotonic;
 use acpi::{AcpiHandler, AcpiTables};
 use core::time::Duration;
 use reg::*;
@@ -86,11 +86,11 @@ pub fn set_timer_oneshot(t: Duration) {
 /// Loop for the given duration and count the amount of passed ACPI timer cycles to
 /// calibrate the timer.
 fn calibrate_timer(t: Duration) {
-	let end = Monotonic::now().saturating_add(t);
+	let end = hpet::now().saturating_add(t);
 	let lapic = local_apic::get();
 	lapic.divide_configuration.set(0b1011); // Set divisor to 1
 	lapic.initial_count.set(u32::MAX);
-	while Monotonic::now() < end { /* pass */ }
+	while hpet::now() < end { /* pass */ }
 	let ticks = u32::MAX - lapic.current_count.get();
 	lapic.initial_count.set(0);
 	unsafe {

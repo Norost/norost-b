@@ -120,6 +120,7 @@ impl Entry {
 		user: bool,
 		writeable: bool,
 		flags: PageFlags,
+		global: bool,
 	) -> Result<(), SetPageError> {
 		if self.is_table() {
 			Err(SetPageError::IsTable)
@@ -128,7 +129,7 @@ impl Entry {
 		} else {
 			self.0 = frame | Self::PAGE_SIZE | Self::PRESENT;
 			self.0 |= Self::USER * u64::from(user);
-			self.0 |= Self::GLOBAL * u64::from(!user);
+			self.0 |= Self::GLOBAL * u64::from(global);
 			self.0 |= Self::READ_WRITE * u64::from(writeable);
 			self.0 |= Self::WRITE_THROUGH * u64::from(flags.write_combining());
 			Ok(())

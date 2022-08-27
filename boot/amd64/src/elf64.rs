@@ -1,6 +1,8 @@
-use crate::paging::{AddError, Page, PML4};
-use core::fmt;
-use core::mem;
+use crate::{
+	info::{Info, VSYSCALL_VIRT_ADDR},
+	paging::{AddError, Page, PML4},
+};
+use core::{fmt, mem};
 
 #[repr(C)]
 struct FileHeader {
@@ -96,6 +98,7 @@ pub fn load_elf<F>(
 	data: &[u8],
 	mut page_alloc: F,
 	page_tables: &mut PML4,
+	info: &mut Info,
 ) -> Result<u64, ParseError>
 where
 	F: FnMut() -> *mut Page,
@@ -196,6 +199,11 @@ where
 			page_tables
 				.add(virt, phys, r, w, x, &mut page_alloc)
 				.map_err(ParseError::PageAddError)?;
+
+			match virt {
+				VSYSCALL_VIRT_ADDR => info.vsyscall_phys_addr = phys as _,
+				_ => {}
+			}
 		}
 		let alloc = (header.memory_size + offset + PAGE_MASK) / PAGE_SIZE;
 		for i in count..alloc {

@@ -45,7 +45,7 @@ struct PendingTicket {
 impl Process {
 	fn new() -> Result<Self, frame::AllocateError> {
 		Ok(Self {
-			address_space: SpinLock::new(AddressSpace::new()?),
+			address_space: SpinLock::new(AddressSpace::new(0)?),
 			hint_color: 0,
 			threads: Default::default(),
 			objects: Default::default(),

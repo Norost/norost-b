@@ -5,7 +5,7 @@ use core::fmt;
 pub struct Info {
 	pub memory_regions_offset: u16,
 	pub memory_regions_len: u16,
-	_padding: u32,
+	pub vsyscall_phys_addr: u32,
 	pub memory_top: u64,
 	pub initfs_ptr: u32,
 	pub initfs_len: u32,

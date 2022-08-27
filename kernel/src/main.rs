@@ -23,6 +23,7 @@
 #![feature(result_flattening)]
 #![feature(slice_index_methods)]
 #![feature(stmt_expr_attributes)]
+#![feature(sync_unsafe_cell)]
 #![feature(waker_getters)]
 #![feature(bench_black_box)]
 #![deny(incomplete_features)]
@@ -57,9 +58,10 @@ pub extern "C" fn main(boot_info: &'static mut boot::Info) -> ! {
 
 	unsafe {
 		memory::init(boot_info.memory_regions_mut());
-		arch::init();
+		arch::init(boot_info);
 		driver::init(boot_info);
 		scheduler::init();
+		arch::init_extra(boot_info);
 	}
 
 	scheduler::new_kernel_thread_1(post_init, boot_info as *mut _ as _, true)
