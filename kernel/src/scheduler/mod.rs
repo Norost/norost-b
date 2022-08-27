@@ -37,13 +37,13 @@ unsafe fn try_next_thread() -> Result<!, Monotonic> {
 	let now = Monotonic::now();
 	let mut t = Monotonic::MAX;
 	loop {
-		let sleep_until = thr.sleep_until();
-		if sleep_until <= now {
+		let wake_time = thr.wake_time();
+		if wake_time <= now {
 			// Be very careful _not_ to clone here, as otherwise we'll start leaking references.
 			apic::set_timer_oneshot(TIME_SLICE);
 			let _ = thr.resume();
 		}
-		t = t.min(sleep_until);
+		t = t.min(wake_time);
 		thr = next();
 		if Arc::as_ptr(&thr) == first {
 			return Err(t);
@@ -84,7 +84,9 @@ fn block_on<T>(mut task: impl Future<Output = T> + Unpin) -> T {
 	loop {
 		match Pin::new(&mut task).poll(&mut cx) {
 			Poll::Ready(t) => return t,
-			Poll::Pending => Thread::current().unwrap().sleep(Duration::MAX),
+			Poll::Pending => Thread::current()
+				.unwrap()
+				.wait_until(Monotonic::now(), u64::MAX),
 		}
 	}
 }

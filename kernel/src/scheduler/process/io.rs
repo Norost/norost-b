@@ -4,7 +4,10 @@ use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTick
 use crate::memory::frame::OwnedPageFrames;
 use crate::memory::r#virtual::{MapError, UnmapError, RWX};
 use crate::memory::Page;
-use crate::object_table::{AnyTicketValue, Error, Handle, Object, TinySlice};
+use crate::{
+	object_table::{AnyTicketValue, Error, Handle, Object, TinySlice},
+	time::Monotonic,
+};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
 	ptr::{self, NonNull},
@@ -266,11 +269,7 @@ impl super::Process {
 		Ok(())
 	}
 
-	pub fn wait_io_queue(
-		&self,
-		base: NonNull<Page>,
-		timeout: Duration,
-	) -> Result<(), WaitQueueError> {
+	pub fn wait_io_queue(&self, base: NonNull<Page>, timeout: u64) -> Result<(), WaitQueueError> {
 		for i in 0..2 {
 			let mut io_queues = self.io_queues.lock();
 			let queue = io_queues
@@ -294,7 +293,9 @@ impl super::Process {
 			drop(io_queues);
 
 			if i == 0 {
-				super::super::Thread::current().unwrap().sleep(timeout);
+				super::super::Thread::current()
+					.unwrap()
+					.wait_until(Monotonic::now(), timeout);
 			}
 		}
 		Ok(())

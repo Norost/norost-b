@@ -1,5 +1,4 @@
-use core::fmt;
-use core::time::Duration;
+use core::{fmt, time::Duration};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -35,8 +34,16 @@ impl Monotonic {
 			.map(|ns| Self { ns })
 	}
 
+	pub fn checked_add_nanos(self, dt: u64) -> Option<Self> {
+		self.ns.checked_add(dt).map(|ns| Self { ns })
+	}
+
 	pub fn saturating_add(self, dt: Duration) -> Self {
 		self.checked_add(dt).unwrap_or(Self::MAX)
+	}
+
+	pub fn saturating_add_nanos(self, dt: u64) -> Self {
+		self.checked_add_nanos(dt).unwrap_or(Self::MAX)
 	}
 
 	/// Returns the `Duration` until the given `Monotonic`. This is `None` if the
