@@ -271,12 +271,15 @@ impl Queue {
 		self.ready_responses.set(self.ready_responses.get() + n);
 	}
 
-	pub fn poll(&self) -> Monotonic {
+	pub fn poll(&self) {
 		self.inner.borrow_mut().poll()
 	}
 
-	pub fn wait(&self, timeout: Duration) -> Option<Monotonic> {
-		(self.ready_responses.get() == 0).then(|| self.inner.borrow_mut().wait(timeout))
+	pub fn wait(&self, timeout: Duration) {
+		// Don't wait if there are still responses available to avoid "lost wakeup"-eque problems
+		if self.ready_responses.get() == 0 {
+			self.inner.borrow_mut().wait(timeout)
+		}
 	}
 }
 

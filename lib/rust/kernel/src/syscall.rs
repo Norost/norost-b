@@ -263,11 +263,13 @@ pub fn map_object(
 }
 
 #[inline]
-pub fn sleep(duration: Duration) -> Monotonic {
-	sys_to_mono(match duration_to_sys(duration) {
+pub fn sleep(duration: Duration) {
+	// Assume sleep does not fail to reduce binary bloat a bit.
+	// (It can't realistically fail without other stuff being broken too anyways)
+	let _ = match duration_to_sys(duration) {
 		(l, None) => syscall!(ID_SLEEP(l)),
 		(l, Some(h)) => syscall!(ID_SLEEP(l, h)),
-	})
+	};
 }
 
 #[inline]
@@ -301,21 +303,21 @@ pub unsafe fn destroy_io_queue(base: NonNull<Page>) -> error::Result<()> {
 }
 
 #[inline]
-pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<Monotonic> {
+pub fn process_io_queue(base: Option<NonNull<Page>>) -> error::Result<()> {
 	ret(syscall!(ID_POLL_IO_QUEUE(
 		base.map_or(ptr::null_mut(), NonNull::as_ptr)
 	)))
-	.map(sys_to_mono)
+	.map(|_| ())
 }
 
 #[inline]
-pub fn wait_io_queue(base: Option<NonNull<Page>>, timeout: Duration) -> error::Result<Monotonic> {
+pub fn wait_io_queue(base: Option<NonNull<Page>>, timeout: Duration) -> error::Result<()> {
 	let base = base.map_or(ptr::null_mut(), NonNull::as_ptr);
 	ret(match duration_to_sys(timeout) {
 		(l, None) => syscall!(ID_WAIT_IO_QUEUE(base, l)),
 		(l, Some(h)) => syscall!(ID_WAIT_IO_QUEUE(base, l, h)),
 	})
-	.map(sys_to_mono)
+	.map(|_| ())
 }
 
 #[inline]

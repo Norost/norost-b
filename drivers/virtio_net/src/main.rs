@@ -455,11 +455,13 @@ fn main() {
 		if Pin::new(&mut table_notify).poll(&mut cx).is_ready() {
 			table_notify = RefAsyncObject::from(table.table.notifier()).read(());
 		}
-		t = async_std::queue::poll();
+		async_std::queue::poll();
+		t = rt::time::Monotonic::now();
 		if let Some(delay) = iface.poll_delay(time::Instant::from_micros(t.as_micros() as i64)) {
 			let delay = delay.into();
 			if delay != Duration::ZERO {
-				t = async_std::queue::wait(delay);
+				async_std::queue::wait(delay);
+				t = rt::time::Monotonic::now();
 			}
 		}
 

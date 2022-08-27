@@ -1,4 +1,3 @@
-use crate::time::Monotonic;
 use alloc::boxed::Box;
 use core::{mem, ptr, time::Duration};
 use norostb_kernel::{error, syscall, Handle};
@@ -123,10 +122,10 @@ impl Thread {
 	}
 }
 
-pub fn sleep(duration: Duration) -> Monotonic {
+pub fn sleep(duration: Duration) {
 	syscall::sleep(duration)
 }
 
-pub fn yield_now() -> Monotonic {
+pub fn yield_now() {
 	sleep(Duration::ZERO)
 }

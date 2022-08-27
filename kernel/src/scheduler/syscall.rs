@@ -28,6 +28,10 @@ pub struct Return {
 }
 
 impl Return {
+	const OK: Self = Self {
+		status: 0,
+		value: 0,
+	};
 	const INVALID_OBJECT: Self = Self::error(Error::InvalidObject);
 	const INVALID_OPERATION: Self = Self::error(Error::InvalidObject);
 	const INVALID_DATA: Self = Self::error(Error::InvalidData);
@@ -405,7 +409,7 @@ extern "C" fn sleep(
 	debug!(syscall "sleep {:?}", Duration::from_nanos(t));
 	let t = Monotonic::now().saturating_add_nanos(t);
 	Thread::current().unwrap().sleep_until(t);
-	get_mono_time()
+	Return::OK
 }
 
 extern "C" fn spawn_thread(
@@ -509,7 +513,7 @@ extern "C" fn poll_io_queue(
 			status: Error::Unknown as usize,
 			value: 0,
 		},
-		|_| get_mono_time(),
+		|_| Return::OK,
 	)
 }
 
@@ -534,7 +538,7 @@ extern "C" fn wait_io_queue(
 				status: Error::Unknown as usize,
 				value: 0,
 			},
-			|_| get_mono_time(),
+			|_| Return::OK,
 		)
 }
 
