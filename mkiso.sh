@@ -113,7 +113,7 @@ grub-mkrescue -o norost.iso $O \
 	--locales= \
 	--fonts= \
 	--install-modules="multiboot2 normal" \
-	--modules= \
+	--modules=all_video \
 	--compress=xz
 
 ./tools/nrofs.py -lv $O/boot/norost.nrofs
