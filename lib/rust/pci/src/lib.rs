@@ -588,25 +588,80 @@ pub mod capability {
 
 	impl Msi {
 		get_volatile!(message_control -> MsiMessageControl);
+		set_volatile!(set_message_control: message_control <- MsiMessageControl);
 
-		#[inline]
 		pub fn message_address(&self) -> u64 {
 			let f = |n: &VolatileCell<u32le>| u64::from(u32::from(n.get()));
 			f(&self.message_address_low) | f(&self.message_address_high) << 32
 		}
 
+		pub fn set_message_address(&self, address: u64) {
+			self.message_address_low.set((address as u32).into());
+			self.message_address_high
+				.set(((address >> 32) as u32).into());
+		}
+
 		get_volatile!(message_data -> u16);
+		set_volatile!(set_message_data: message_data <- u16);
 		get_volatile!(mask -> u32);
+		set_volatile!(set_mask: mask <- u32);
 		get_volatile!(pending -> u32);
 	}
 
 	impl MsiMessageControl {
-		#[inline]
 		pub fn enable(&self) -> bool {
-			u16::from(self.0) & 1 > 0
+			self.0 & 1 != 0
 		}
 
-		// TODO other stuff
+		pub fn set_enable(&mut self, enable: bool) {
+			self.0 &= !1;
+			self.0 |= u16::from(enable);
+		}
+
+		pub fn multiple_message_capable(&self) -> Option<MsiInterrupts> {
+			MsiInterrupts::from_raw(u16::from(self.0) >> 1 & 0x111)
+		}
+
+		pub fn multiple_message_enable(&self) -> Option<MsiInterrupts> {
+			MsiInterrupts::from_raw(u16::from(self.0) >> 4 & 0x111)
+		}
+
+		pub fn set_multiple_message_enable(&mut self, count: MsiInterrupts) {
+			self.0 &= !(7 << 4);
+			self.0 |= (count as u16) << 4;
+		}
+
+		pub fn address_64(&self) -> bool {
+			self.0 & 1 << 7 != 0
+		}
+
+		pub fn per_vector_masking(&self) -> bool {
+			self.0 & 1 << 8 != 0
+		}
+	}
+
+	#[derive(Copy, Clone, Debug)]
+	pub enum MsiInterrupts {
+		N1,
+		N2,
+		N4,
+		N8,
+		N16,
+		N32,
+	}
+
+	impl MsiInterrupts {
+		fn from_raw(n: u16) -> Option<Self> {
+			Some(match n {
+				0 => Self::N1,
+				1 => Self::N2,
+				2 => Self::N4,
+				3 => Self::N8,
+				4 => Self::N16,
+				5 => Self::N32,
+				_ => return None,
+			})
+		}
 	}
 
 	impl fmt::Debug for Msi {
@@ -632,7 +687,11 @@ pub mod capability {
 		fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 			f.debug_struct(stringify!(MsiMessageControl))
 				.field("enable", &self.enable())
-				.finish_non_exhaustive()
+				.field("multiple_message_capable", &self.multiple_message_capable())
+				.field("multiple_message_enable", &self.multiple_message_enable())
+				.field("address_64", &self.address_64())
+				.field("per_vector_masking", &self.per_vector_masking())
+				.finish()
 		}
 	}
 

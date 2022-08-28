@@ -17,7 +17,10 @@ use crate::{
 use acpi::{sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::sync::Arc;
 use core::ptr::NonNull;
-use pci::Pci;
+use pci::{
+	capability::{Capability, Msi, MsiX},
+	Pci,
+};
 
 mod device;
 mod table;
@@ -78,46 +81,87 @@ unsafe fn allocate_irqs(pci: &mut Pci) {
 		let h = dev.header();
 		let cmd = h.common().command();
 		h.set_command(cmd | pci::HeaderCommon::COMMAND_BUS_MASTER_MASK);
+		enum Int<'a> {
+			None,
+			Msi(&'a Msi),
+			MsiX(&'a MsiX),
+		}
+		let mut int = Int::None;
 		for cap in h.capabilities() {
-			use pci::capability::Capability;
 			match cap.downcast() {
+				Some(Capability::Msi(msi)) => int = Int::Msi(msi),
 				Some(Capability::MsiX(msix)) => {
-					let mut ctrl = msix.message_control();
-					let table_size = usize::from(ctrl.table_size()) + 1;
-
-					let (table_offset, table) = msix.table();
-					let table = h.full_base_address(table.into()).expect("bar");
-					let table = table.try_as_mmio().expect("mmio bar") + u64::from(table_offset);
-
-					let table = unsafe { phys_to_virt(table) };
-					let table = unsafe {
-						core::slice::from_raw_parts_mut(
-							table.cast::<pci::msix::TableEntry>(),
-							table_size,
-						)
-					};
-
-					for e in table.iter_mut() {
-						let irq;
-						#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-						irq = {
-							use crate::arch::amd64;
-							let irq = amd64::allocate_irq().expect("irq");
-							unsafe {
-								amd64::set_interrupt_handler(irq.into(), irq_handler);
-							}
-							irq
-						};
-
-						e.set_message_data(irq.into());
-						e.set_message_address(local_apic::get_phys());
-						e.set_vector_control_mask(false);
-					}
-
-					ctrl.set_enable(true);
-					msix.set_message_control(ctrl);
+					int = Int::MsiX(msix);
+					break;
 				}
 				_ => {}
+			}
+		}
+
+		let alloc_irq;
+		#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+		alloc_irq = || {
+			use crate::arch::amd64;
+			let irq = amd64::allocate_irq().expect("irq");
+			unsafe {
+				amd64::set_interrupt_handler(irq.into(), irq_handler);
+			}
+			irq
+		};
+
+		let (bus, dev, func) = (dev.bus(), dev.device(), 0);
+		match int {
+			Int::None => info!("No MSI or MSI-X for {:02x}:{:02x}.{:x}", bus, dev, func),
+			Int::Msi(msi) => {
+				let mut ctrl = msi.message_control();
+				let mmc = ctrl.multiple_message_capable().expect("invalid MMC");
+				// Limit to 1 for now, as the IRQ allocator is quite primitive.
+				// (It may be worth leaving it like this, modern hardware uses MSI-X anyways).
+				info!(
+					"{} (max: 1) MSI vectors for {:02x}:{:02x}.{:x}",
+					(1 << mmc as u8),
+					bus,
+					dev,
+					func
+				);
+
+				ctrl.set_multiple_message_enable(pci::capability::MsiInterrupts::N1);
+				let irq = alloc_irq();
+				msi.set_message_data(irq.into());
+				msi.set_message_address(local_apic::get_phys());
+
+				ctrl.set_enable(true);
+				msi.set_message_control(ctrl);
+			}
+			Int::MsiX(msix) => {
+				let mut ctrl = msix.message_control();
+				let table_size = usize::from(ctrl.table_size()) + 1;
+				info!(
+					"{} MSI-X vectors for {:02x}:{:02x}.{:x}",
+					table_size, bus, dev, func
+				);
+
+				let (table_offset, table) = msix.table();
+				let table = h.full_base_address(table.into()).expect("bar");
+				let table = table.try_as_mmio().expect("mmio bar") + u64::from(table_offset);
+
+				let table = unsafe { phys_to_virt(table) };
+				let table = unsafe {
+					core::slice::from_raw_parts_mut(
+						table.cast::<pci::msix::TableEntry>(),
+						table_size,
+					)
+				};
+
+				for e in table.iter_mut() {
+					let irq = alloc_irq();
+					e.set_message_data(irq.into());
+					e.set_message_address(local_apic::get_phys());
+					e.set_vector_control_mask(false);
+				}
+
+				ctrl.set_enable(true);
+				msix.set_message_control(ctrl);
 			}
 		}
 	}
