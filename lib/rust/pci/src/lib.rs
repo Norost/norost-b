@@ -829,7 +829,7 @@ pub struct Pci {
 	/// The physical address of the area.
 	physical_address: usize,
 	/// The size of the area in bytes
-	_size: usize,
+	size: usize,
 	/// MMIO ranges for use with base addresses
 	mem: [Option<PhysicalMemory>; 8],
 	/// Ugly hacky but working counter for MMIO bump allocator.
@@ -860,7 +860,7 @@ impl Pci {
 		Self {
 			start,
 			physical_address,
-			_size: size,
+			size,
 			mem,
 			alloc_counter,
 		}
@@ -879,7 +879,7 @@ impl Pci {
 	///
 	/// If the bus + device + function are out of the MMIO range.
 	pub fn get(&self, bus: u8, device: u8, function: u8) -> Option<Header> {
-		let h = self.get_unchecked(bus, device, function);
+		let h = self.get_unchecked(bus, device, function)?;
 		if h.common().vendor_id.get() == 0xffff {
 			None
 		} else {
@@ -920,15 +920,15 @@ impl Pci {
 		(usize::from(bus) << 20) | (usize::from(device) << 15) | (usize::from(function) << 12)
 	}
 
-	/// Return a reference to the configuration header for a function. This won't
-	/// return `None`, but the header values may be all `1`s.
+	/// Return a reference to the configuration header for a function.
+	/// This won't return `None` if the bus exists, but the header values may be all `1`s.
 	///
 	/// ## Panics
 	///
 	/// If either the device or function are out of bounds.
-	fn get_unchecked<'a>(&'a self, bus: u8, device: u8, function: u8) -> Header<'a> {
+	fn get_unchecked<'a>(&'a self, bus: u8, device: u8, function: u8) -> Option<Header<'a>> {
 		let offt = Self::offset(bus, device, function);
-		unsafe {
+		(offt < self.size).then(|| unsafe {
 			let h = self.start.as_ptr().cast::<u8>().add(offt);
 			let hc = &*h.cast::<HeaderCommon>();
 			match hc.header_type.get() & 0x7f {
@@ -936,7 +936,7 @@ impl Pci {
 				1 => Header::H1(&*h.cast()),
 				_ => Header::Unknown(hc),
 			}
-		}
+		})
 	}
 
 	/// Return a region of MMIO.
@@ -1045,7 +1045,7 @@ impl<'a> Device<'a> {
 
 	#[inline]
 	pub fn header(&self) -> Header {
-		self.pci.get_unchecked(self.bus, self.device, 0)
+		self.pci.get_unchecked(self.bus, self.device, 0).unwrap()
 	}
 
 	#[inline]
@@ -1114,7 +1114,7 @@ impl<'a> Iterator for IterPci<'a> {
 		if self.bus == 0xff {
 			return None;
 		} else if self.bus == 0 {
-			let h = self.pci.get_unchecked(0, 0, 0);
+			let h = self.pci.get_unchecked(0, 0, 0)?;
 			if h.common().header_type.get() & 0x80 == 0 {
 				self.bus = 0xff;
 				return Some(Bus {
@@ -1125,7 +1125,7 @@ impl<'a> Iterator for IterPci<'a> {
 		}
 
 		self.bus += 1;
-		let h = self.pci.get_unchecked(0, 0, self.bus);
+		let h = self.pci.get_unchecked(0, 0, self.bus)?;
 		if h.common().vendor_id.get() != 0xffff {
 			self.bus = 0xff;
 			None
@@ -1169,7 +1169,9 @@ impl<'a> Iterator for IterDevice<'a> {
 		if self.function == 0xff {
 			None
 		} else {
-			let h = self.pci.get_unchecked(self.bus, self.device, self.function);
+			let h = self
+				.pci
+				.get_unchecked(self.bus, self.device, self.function)?;
 			if h.common().vendor_id.get() == 0xffff {
 				self.function = 0xff;
 				None

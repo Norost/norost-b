@@ -56,7 +56,7 @@ fn main() -> ! {
 				rt::eprintln!("launched driver {:?} for {}", d.path, loc);
 			}
 		} else {
-			rt::eprintln!("no driver for {:04x}:{:04x}", v, d);
+			rt::eprintln!("no driver for {:04x}:{:04x} at {}", v, d, loc);
 		}
 	}
 	todo!();

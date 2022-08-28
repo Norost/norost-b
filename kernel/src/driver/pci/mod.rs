@@ -6,13 +6,15 @@
 //!
 //! [osdev pci]: https://wiki.osdev.org/PCI
 
+mod mcfg;
+
 use crate::{
 	driver::apic::local_apic,
 	memory::r#virtual::phys_to_virt,
 	object_table::{self, Root},
 	sync::SpinLock,
 };
-use acpi::{AcpiHandler, AcpiTables, PciConfigRegions};
+use acpi::{sdt::Signature, AcpiHandler, AcpiTables};
 use alloc::sync::Arc;
 use core::ptr::NonNull;
 use pci::Pci;
@@ -31,26 +33,28 @@ pub(super) unsafe fn init_acpi<H>(acpi: &AcpiTables<H>)
 where
 	H: AcpiHandler,
 {
-	let pci = match PciConfigRegions::new(acpi) {
-		Ok(p) => p,
-		Err(e) => {
-			warn!("failed to load PCI configuration regions: {:?}", e);
-			return;
+	let mcfg = unsafe {
+		match acpi.get_sdt::<mcfg::Mcfg>(Signature::MCFG) {
+			Ok(Some(p)) => p,
+			Ok(None) => return warn!("MCFG not found"),
+			Err(e) => return warn!("Failed to parse MCFG: {:?}", e),
 		}
 	};
-	let mut avail = [0u128; 2];
-	// TODO this is ridiculous. Fork the crate or implement MCFG ourselves.
-	for bus in 0..=255 {
-		// IDK what a segment group is
-		if pci.physical_address(0, bus, 0, 0).is_some() {
-			avail[usize::from(bus >> 7)] |= 1 << (bus & 0x7f);
-		}
-	}
-	assert_eq!(avail, [u128::MAX; 2], "todo: handle PCI bus stupidity");
 
-	let phys = pci.physical_address(0, 0, 0, 0).unwrap();
-	let size = 256 * 32 * 8 * 4096;
-	let virt = unsafe { NonNull::new(phys_to_virt(phys.try_into().unwrap())).unwrap() };
+	let e = match mcfg.entries() {
+		[] => return warn!("No MCFG entries"),
+		[e] => e,
+		[e, ..] => {
+			warn!("Ignoring extra MCFG entries");
+			e
+		}
+	};
+
+	assert_eq!(e.bus_number_start, 0, "todo: very funny PCI thing");
+
+	let phys = e.base_address();
+	let size = (usize::from(e.bus_number_end) + 1) * 32 * 8 * 4096;
+	let virt = unsafe { NonNull::new(phys_to_virt(phys)).unwrap() };
 
 	let mut pci = unsafe { Pci::new(virt.cast(), phys.try_into().unwrap(), size, &[]) };
 
