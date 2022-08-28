@@ -187,7 +187,6 @@ impl Thread {
 			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
 					.unwrap();
-			dbg!(kernel_stack_base);
 			// The stack must be aligned to 16 bytes *before* a call according to SysV ABI.
 			// We will write 5 + 15 registers, which comes out at 160 bytes, ergo it is
 			// already properly aligned.
