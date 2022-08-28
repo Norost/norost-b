@@ -7,7 +7,6 @@
 #![feature(maybe_uninit_uninit_array, maybe_uninit_slice)]
 
 mod alloc;
-mod cpuid;
 mod elf64;
 mod gdt;
 mod info;
@@ -76,7 +75,14 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		VGA = Some(vga::Text::new());
 	}
 
-	let cpuid = cpuid::Features::new().expect("No CPUID support");
+	let cpuid = cpuid::Cpuid::new();
+
+	// Ensure either invariant TSC or pvclock is supported, as we can't do proper timekeeping
+	// otherwise.
+	assert!(
+		cpuid.invariant_tsc() || cpuid.kvm_feature_clocksource2(),
+		"no invariant TSC or pvclock"
+	);
 
 	assert_eq!(magic, 0x36d76289, "Bad multiboot2 magic");
 

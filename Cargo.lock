@@ -160,6 +160,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpuid"
+version = "0.1.0"
+source = "git+https://git.sr.ht/~demindiro/cpuid#93a7b200e3cc2520ce3b3deaa26c1f16527107dd"
+
+[[package]]
 name = "crypto-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -782,6 +787,7 @@ dependencies = [
  "arena",
  "cfg-if",
  "compiler_builtins",
+ "cpuid",
  "nora_endian",
  "nora_stream_table",
  "norostb_kernel",
@@ -868,6 +874,7 @@ name = "noraboot"
 version = "0.2.0"
 dependencies = [
  "compiler_builtins",
+ "cpuid",
  "rsdp",
 ]
 

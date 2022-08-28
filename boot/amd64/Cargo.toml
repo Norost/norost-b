@@ -10,5 +10,8 @@ forced-target = "i686-unknown-none-norostbkernel"
 version = "0.1"
 features = ["mem"]
 
+[dependencies.cpuid]
+git = "https://git.sr.ht/~demindiro/cpuid"
+
 [dependencies.rsdp]
 version = "*"

@@ -1,4 +1,5 @@
 use core::arch::asm;
+pub use cpuid::Cpuid as Features;
 
 mod cr0 {
 	use super::*;
@@ -26,90 +27,6 @@ mod cr4 {
 	pub const OSXMMEXCPT: u32 = 1 << 10;
 	pub const FSGSBASE: u32 = 1 << 16;
 	pub const OSXSAVE: u32 = 1 << 18;
-}
-
-pub struct Features {
-	max_basic_eax: u32,
-	max_hypervisor_eax: u32,
-	#[allow(dead_code)]
-	max_extended_eax: u32,
-}
-
-macro_rules! flag {
-	(basic $flag:ident = $id:literal | $reg:ident[$bit:literal]) => {
-		pub fn $flag(&self) -> bool {
-			let id: u32 = $id;
-			// SAFETY: id is in range
-			id <= self.max_basic_eax && unsafe { (Cpuid::new(id).$reg & 1 << $bit) != 0 }
-		}
-	};
-	(hypervisor $flag:ident = $id:literal | $reg:ident[$bit:literal]) => {
-		pub fn $flag(&self) -> bool {
-			let id: u32 = $id | 1 << 30;
-			// SAFETY: id is in range
-			id <= self.max_hypervisor_eax && unsafe { (Cpuid::new(id).$reg & 1 << $bit) != 0 }
-		}
-	};
-	(extended $flag:ident = $id:literal | $reg:ident[$bit:literal]) => {
-		pub fn $flag(&self) -> bool {
-			let id: u32 = $id | 2 << 30;
-			// SAFETY: id is in range
-			id <= self.max_extended_eax && unsafe { (Cpuid::new(id).$reg & 1 << $bit) != 0 }
-		}
-	};
-}
-
-impl Features {
-	pub fn new() -> Self {
-		// Get maximum EAX value for basic and extended features
-		// SAFETY: cpuid is guaranteed to exist in long mode & using cpuid with eax = 0 and
-		// 0x8000_0000 is always safe.
-		unsafe {
-			Self {
-				max_basic_eax: Cpuid::new(0 << 31).eax,
-				max_hypervisor_eax: Cpuid::new(1 << 30).eax,
-				max_extended_eax: Cpuid::new(2 << 30).eax,
-			}
-		}
-	}
-
-	// List stolen from https://sandpile.org/x86/cpuid.htm
-	flag!(basic osxsave = 0x1 | ecx[26]);
-	flag!(basic fsgsbase = 0x7 | ebx[0]);
-	flag!(basic avx2 = 0x7 | ebx[5]);
-
-	// https://docs.kernel.org/virt/kvm/x86/cpuid.html
-	flag!(hypervisor kvm_feature_clocksource2 = 0x1 | eax[3]);
-}
-
-struct Cpuid {
-	eax: u32,
-	ebx: u32,
-	ecx: u32,
-	#[allow(dead_code)]
-	edx: u32,
-}
-
-impl Cpuid {
-	// SAFETY: id has to be below basic_max or extended_max
-	unsafe fn new(id: u32) -> Self {
-		let (eax, ebx, ecx, edx): (u32, u32, u32, u32);
-		unsafe {
-			asm!(
-				// Thanks LLVM for forbidding me from using ebx
-				"mov r11, rbx",
-				"cpuid",
-				"xchg rbx, r11",
-				inout("eax") id => eax,
-				// TODO sublevels
-				inout("ecx") 0 => ecx,
-				out("r11d") ebx,
-				out("edx") edx,
-				options(nostack, nomem, preserves_flags, pure)
-			);
-		}
-		Self { eax, ebx, ecx, edx }
-	}
 }
 
 pub fn try_enable_features(features: &Features) {
