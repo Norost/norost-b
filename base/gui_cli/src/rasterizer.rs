@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::String};
 use core::{ptr::NonNull, slice};
 use fontdue::{
 	layout::{CoordinateSystem, GlyphRasterConfig, Layout, LayoutSettings, TextStyle, WrapStyle},
@@ -28,34 +28,39 @@ impl Letters {
 
 pub struct Rasterizer {
 	letters: Letters,
-	lines: Vec<String>,
+	lines: VecDeque<String>,
 	min_y: u32,
+	scale: f32,
 }
 
 impl Rasterizer {
-	pub fn new(font: Font) -> Self {
+	pub fn new(font: Font, scale: f32) -> Self {
 		Self {
 			letters: Letters::new(font),
 			lines: Default::default(),
 			min_y: 0,
+			scale,
 		}
 	}
 
 	pub fn new_line(&mut self) {
-		self.lines.push(Default::default());
+		if self.lines.len() >= 256 {
+			self.lines.pop_front();
+		}
+		self.lines.push_back(Default::default());
 	}
 
 	pub fn push_char(&mut self, c: char) {
 		self.lines.is_empty().then(|| self.new_line());
-		self.lines.last_mut().unwrap().push(c);
+		self.lines.back_mut().unwrap().push(c);
 	}
 
 	pub fn pop_char(&mut self) {
-		self.lines.last_mut().and_then(|l| l.pop());
+		self.lines.back_mut().and_then(|l| l.pop());
 	}
 
 	pub fn clear_line(&mut self) {
-		self.lines.last_mut().map(|l| l.clear());
+		self.lines.back_mut().map(|l| l.clear());
 	}
 
 	pub fn render_all(&mut self, framebuffer: &mut FrameBuffer) {
@@ -67,9 +72,9 @@ impl Rasterizer {
 		});
 		let fonts = slice::from_ref(&self.letters.font);
 		for (i, l) in self.lines.iter().enumerate() {
-			layout.append(fonts, &TextStyle::new(l, 20.0, 0));
+			layout.append(fonts, &TextStyle::new(l, self.scale, 0));
 			if i != self.lines.len() - 1 {
-				layout.append(fonts, &TextStyle::new("\n", 20.0, 0));
+				layout.append(fonts, &TextStyle::new("\n", self.scale, 0));
 			}
 		}
 		// layout height is *inclusive*
