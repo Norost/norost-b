@@ -1,5 +1,5 @@
 ENTRY(_start)
- 
+
 SECTIONS
 {
 	. = 0xffff800000000000;
@@ -29,6 +29,13 @@ SECTIONS
 	{
 		*(COMMON)
 		*(.bss .bss.*)
+	}
+
+	. = 0xffff800000000000 | (1 << 21) - (4096 * 1);
+
+	.vsyscall.data :
+	{
+		*(.vsyscall.data.timeinfo)
 	}
 
 	/DISCARD/ :

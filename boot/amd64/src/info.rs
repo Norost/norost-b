@@ -1,11 +1,14 @@
 use core::mem::MaybeUninit;
 
+pub const KERNEL_BASE_ADDR: u64 = 0xffff800000000000;
+pub const VSYSCALL_VIRT_ADDR: u64 = KERNEL_BASE_ADDR | (1 << 21) - 4096;
+
 #[repr(C)]
 #[repr(align(8))]
 pub struct Info {
 	pub memory_regions_offset: u16,
 	pub memory_regions_len: u16,
-	pub _padding: u32,
+	pub vsyscall_phys_addr: u32,
 	pub memory_top: u64,
 	pub initfs_ptr: u32,
 	pub initfs_len: u32,

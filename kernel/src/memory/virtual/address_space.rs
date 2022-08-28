@@ -14,6 +14,7 @@ pub enum MapError {
 	ZeroSize,
 	UnalignedOffset,
 	Permission,
+	Reserved,
 	Arch(crate::arch::r#virtual::MapError),
 }
 
@@ -25,6 +26,9 @@ static KERNEL_MAPPED_OBJECTS: SpinLock<
 	Vec<(RangeInclusive<NonNull<Page>>, Arc<dyn MemoryObject>)>,
 > = SpinLock::new(Vec::new());
 
+/// The minimum address for any mappings. Everything below is reserved for the kernel.
+const MIN_ADDR: NonNull<Page> = unsafe { NonNull::new_unchecked(0x1_0000 as _) };
+
 pub struct AddressSpace {
 	/// The address space mapping used by the MMU
 	mmu_address_space: r#virtual::AddressSpace,
@@ -33,9 +37,9 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
-	pub fn new() -> Result<Self, crate::memory::frame::AllocateError> {
+	pub fn new(hint_color: u8) -> Result<Self, crate::memory::frame::AllocateError> {
 		Ok(Self {
-			mmu_address_space: r#virtual::AddressSpace::new()?,
+			mmu_address_space: r#virtual::AddressSpace::new(hint_color)?,
 			objects: Default::default(),
 		})
 	}
@@ -151,6 +155,12 @@ impl AddressSpace {
 			Some(base) => (base, objects.partition_point(|e| e.0.start() < &base)),
 			None => Self::find_free_range(objects, count, default)?,
 		};
+
+		// first 64 KiB is reserved for the kernel
+		if base < MIN_ADDR {
+			return Err(MapError::Reserved);
+		}
+
 		// FIXME we need to ensure the range doesn't overlap with any other range.
 		let end = base
 			.as_ptr()

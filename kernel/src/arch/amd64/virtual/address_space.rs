@@ -1,4 +1,7 @@
-use super::{super::PageFlags, common};
+use super::{
+	super::{vsyscall, PageFlags},
+	common,
+};
 use crate::memory::frame::{self, PPN};
 use crate::memory::r#virtual::{phys_to_virt, RWX};
 use crate::memory::Page;
@@ -15,9 +18,9 @@ pub struct AddressSpace {
 static mut DEFAULT_ADDRESS_SPACE: MaybeUninit<AddressSpace> = MaybeUninit::uninit();
 
 impl AddressSpace {
-	pub fn new() -> Result<Self, frame::AllocateError> {
+	pub fn new(hint_color: u8) -> Result<Self, frame::AllocateError> {
 		let mut ppn = None;
-		frame::allocate(1, |f| ppn = Some(f), 0 as _, 0)?;
+		frame::allocate(1, |f| ppn = Some(f), 0 as _, hint_color)?;
 		let ppn = ppn.unwrap();
 		unsafe {
 			ppn.as_ptr().cast::<Page>().write_bytes(0, 1);
@@ -31,6 +34,21 @@ impl AddressSpace {
 			.zip(cur[256..].iter())
 		{
 			*w = r.clone();
+		}
+
+		// Map the vsyscall page
+		unsafe {
+			let vs = vsyscall::mapping();
+			let mut f = Self::map_common(
+				slf.table_mut(),
+				vs.data_virt_addr as _,
+				RWX::R,
+				hint_color,
+				true,
+				PageFlags::default(),
+				true,
+			);
+			f(vs.data_phys_addr).unwrap_or_else(|e| todo!("{:?}", e));
 		}
 
 		Ok(slf)
@@ -50,7 +68,17 @@ impl AddressSpace {
 		hint_color: u8,
 		flags: PageFlags,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
-		unsafe { Self::map_common(self.table_mut(), address, rwx, hint_color, true, flags) }
+		unsafe {
+			Self::map_common(
+				self.table_mut(),
+				address,
+				rwx,
+				hint_color,
+				true,
+				flags,
+				false,
+			)
+		}
 	}
 
 	pub unsafe fn kernel_map(
@@ -58,7 +86,7 @@ impl AddressSpace {
 		rwx: RWX,
 		flags: PageFlags,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + 'static {
-		unsafe { Self::map_common(Self::current(), address, rwx, 0, false, flags) }
+		unsafe { Self::map_common(Self::current(), address, rwx, 0, false, flags, true) }
 	}
 
 	unsafe fn map_common(
@@ -68,12 +96,13 @@ impl AddressSpace {
 		hint_color: u8,
 		user: bool,
 		flags: PageFlags,
+		global: bool,
 	) -> impl FnMut(PPN) -> Result<(), MapError> + '_ {
 		move |ppn| loop {
 			match common::get_entry_mut(tbl, address as u64, 0, 3) {
 				Ok(e) => {
 					debug_assert!(!e.is_present(), "page already set");
-					e.set_page(ppn.as_phys() as u64, user, rwx.w(), flags)
+					e.set_page(ppn.as_phys() as u64, user, rwx.w(), flags, global)
 						.unwrap();
 					address = address.wrapping_add(1);
 					break Ok(());

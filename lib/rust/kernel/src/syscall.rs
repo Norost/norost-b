@@ -212,7 +212,7 @@ pub unsafe fn dealloc(base: NonNull<Page>, size: usize) -> error::Result<()> {
 
 #[inline]
 pub fn monotonic_time() -> Monotonic {
-	sys_to_mono(syscall!(ID_MONOTONIC_TIME()))
+	Monotonic::from_nanos(crate::vsyscall::vsyscall_data().time_info.now_nanos())
 }
 
 #[inline]
@@ -352,11 +352,4 @@ fn duration_to_sys(t: Duration) -> (usize, Option<usize>) {
 	return (ns as usize, Some((ns >> 32) as usize));
 	#[cfg(target_pointer_width = "64")]
 	return (ns as usize, None);
-}
-
-fn sys_to_mono((_hi, lo): (usize, usize)) -> Monotonic {
-	#[cfg(target_pointer_width = "32")]
-	return Monotonic::from_nanos(((_hi as u64) << 32) | (lo as u64));
-	#[cfg(target_pointer_width = "64")]
-	return Monotonic::from_nanos(lo as u64);
 }

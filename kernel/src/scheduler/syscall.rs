@@ -71,7 +71,7 @@ static SYSCALLS: SyscallTable = SyscallTable([
 	do_io,
 	poll_io_queue,
 	wait_io_queue,
-	monotonic_time,
+	undefined,
 	sleep,
 	exit,
 	spawn_thread,
@@ -164,10 +164,6 @@ extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _:
 				value: base.as_ptr() as usize,
 			},
 		)
-}
-
-extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	get_mono_time()
 }
 
 // Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
@@ -385,7 +381,8 @@ extern "C" fn map_object(
 					MapError::Overflow
 					| MapError::ZeroSize
 					| MapError::Permission
-					| MapError::UnalignedOffset => Error::InvalidData,
+					| MapError::UnalignedOffset
+					| MapError::Reserved => Error::InvalidData,
 					MapError::Arch(e) => todo!("{:?}", e),
 				}) as _,
 				value: 0,
@@ -633,16 +630,6 @@ fn merge_u64(l: usize, h: usize) -> u64 {
 	}
 }
 
-fn get_mono_time() -> Return {
-	let now = Monotonic::now().as_nanos();
-	#[cfg(target_pointer_width = "32")]
-	return Return {
-		status: (now >> 32) as usize,
-		value: now as usize,
-	};
-	#[cfg(target_pointer_width = "64")]
-	return Return {
-		status: 0,
-		value: now as usize,
-	};
+extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	Return::INVALID_OPERATION
 }

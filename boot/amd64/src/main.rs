@@ -313,7 +313,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		)
 	};
 
-	let entry = elf64::load_elf(kernel, page_alloc, pml4).expect("Failed to load ELF: {}");
+	let entry = elf64::load_elf(kernel, page_alloc, pml4, info).expect("Failed to load ELF: {}");
 
 	unsafe {
 		GDT_PTR.activate();
