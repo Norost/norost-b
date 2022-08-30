@@ -9,14 +9,17 @@ cpu="-cpu max"
 
 gdb --args qemu-system-x86_64 \
 	$cpu \
-	-drive format=raw,file=norost.iso \
+	-m 256M \
 	-machine q35 \
+	-drive format=raw,file=norost.iso \
 	-drive file=disk0,format=raw,if=none,id=disk0 \
+	-device qemu-xhci \
+	-device usb-kbd \
+	-serial stdio \
+	-vga virtio \
+	"$@"
+	#-device usb-storage,drive=usb0 \
 	-drive file=usb0,format=raw,if=none,id=usb0 \
 	-device virtio-blk-pci,drive=disk0 \
 	-netdev user,id=net0,hostfwd=tcp::5555-:80,hostfwd=tcp::2222-:22 \
 	-device virtio-net-pci,netdev=net0 \
-	-device qemu-xhci \
-	-device usb-storage,drive=usb0 \
-	"$@"
-	#-device usb-kbd \

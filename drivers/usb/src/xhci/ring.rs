@@ -11,6 +11,7 @@ where
 {
 	buf: Dma<[[u32; 4]]>,
 	enqueue_index: usize,
+	cycle_bit: bool,
 	_marker: PhantomData<T>,
 }
 
@@ -18,11 +19,16 @@ impl<T> Ring<T>
 where
 	T: TrbEntry,
 {
+	/// # Note
+	///
+	/// Ring Cycle State must be cleared.
 	pub fn new() -> Result<Self, rt::Error> {
 		let mut buf = Dma::new_slice(32).unwrap();
 		// Set Link TRB at end to estabilish loop
 		let link = trb::Link::new()
 			.set_ring_segment_pointer(buf.as_phys())
+			// Toggle cycle bit every time we wrap around.
+			.set_toggle_cycle()
 			.set_cycle_bit()
 			.into_raw();
 		let len = buf.len();
@@ -30,6 +36,7 @@ where
 		Ok(Self {
 			buf,
 			enqueue_index: 0,
+			cycle_bit: true,
 			_marker: PhantomData,
 		})
 	}
@@ -42,28 +49,32 @@ where
 
 	#[cfg_attr(debug_assertions, track_caller)]
 	fn enqueue_inner(&mut self, mut item: [u32; 4]) -> EntryId {
-		let i = self.enqueue_index;
+		let (i, c) = (self.enqueue_index, self.cycle_bit);
 		self.enqueue_index += 1;
 		if self.enqueue_index >= self.capacity() {
 			self.enqueue_index = 0;
+			self.cycle_bit = !self.cycle_bit;
 		}
 
 		let b = unsafe { self.buf.as_mut() };
 
-		// Clear cycle bit of the next entry as not to create a loop
-		b[self.enqueue_index][3] = 0;
 		atomic::fence(Ordering::Release);
 
 		// TODO ensure we don't set the cycle bit before the entry has been fully written.
 		// We should try to do this in an efficient way, e.g. a single XMM store is atomic
 		// (at least, on all archs with AVX).
-		item[3] |= 1; // Set cycle bit
+		item[3] &= !1;
+		item[3] |= u32::from(c);
 		b[i] = item;
 		self.buf.as_phys() + i as u64 * 16
 	}
 
 	pub fn as_phys(&self) -> u64 {
 		self.buf.as_phys()
+	}
+
+	pub fn set_cycle_bit(&mut self, on: bool) {
+		self.cycle_bit = on;
 	}
 
 	fn capacity(&self) -> usize {

@@ -3,6 +3,10 @@ name = "driver_usb"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["trace"]
+trace = []
+
 [dependencies.pci]
 path = "../../lib/rust/pci"
 

@@ -14,7 +14,7 @@ pub enum Event {
 	},
 	CommandCompletion {
 		id: u64,
-		slot: NonZeroU8,
+		slot: Option<NonZeroU8>,
 		code: Result<CompletionCode, u8>,
 	},
 	Transfer {
@@ -76,7 +76,7 @@ impl Table {
 				.read()
 		};
 
-		if (evt[3] & 1 == 0) == self.cycle_state_bit_on {
+		if evt[3] & 1 != u32::from(self.cycle_state_bit_on) {
 			return None;
 		}
 
@@ -109,7 +109,7 @@ impl Table {
 			Allowed::BandwidthRequest(_) => todo!(),
 			Allowed::CommandCompletion(c) => Event::CommandCompletion {
 				id: c.command_trb_pointer(),
-				slot: c.slot_id().try_into().unwrap(),
+				slot: c.slot_id().try_into().ok(),
 				code: c.completion_code(),
 			},
 			Allowed::DeviceNotification(_) => todo!(),
@@ -130,6 +130,8 @@ impl Table {
 		// Program the Interrupter Event Ring Dequeue Pointer
 		reg.erdp.update_volatile(|c| {
 			c.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base });
+			c.set_dequeue_erst_segment_index(0);
+			c.clear_event_handler_busy();
 		});
 		// Program the Interrupter Event Ring Segment Table Base Address
 		reg.erstba.update_volatile(|c| c.set(self.buf.as_phys()));

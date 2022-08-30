@@ -41,6 +41,7 @@ pub enum GetDescriptor {
 	String { index: u8 },
 }
 
+#[derive(Debug)]
 pub enum DescriptorResult<'a> {
 	Device(Device),
 	Configuration(Configuration),
@@ -301,6 +302,7 @@ pub enum EndpointTransfer {
 	Interrupt,
 }
 
+#[derive(Debug)]
 pub struct DescriptorStringIter<'a>(ArrayChunks<'a, u8, 2>);
 
 pub enum Request {
