@@ -1,3 +1,5 @@
+//mod init;
+
 use super::{ring, DeviceConfig, Xhci};
 use crate::{
 	dma::Dma,
@@ -174,9 +176,23 @@ impl Xhci {
 		let i = (port.get() - 1).into();
 		let mut c = self.registers.port_register_set.read_volatile_at(i);
 
+		trace!("acknowledge status change");
+		self.registers.port_register_set.write_volatile_at(i, c);
+
+		rt::dbg!(self
+			.registers
+			.port_register_set
+			.read_volatile_at(i)
+			.portsc
+			.connect_status_change());
+
+		if !c.portsc.connect_status_change() {
+			trace!("not port status change, ignore");
+			return;
+		}
+
 		if !c.portsc.current_connect_status() {
 			trace!("port is not connected");
-			// Disconnected
 			return;
 		}
 
@@ -184,9 +200,9 @@ impl Xhci {
 		// TODO check if USB2
 		if !c.portsc.port_reset_change() {
 			trace!("reset port");
-			let mut cc = c;
-			cc.portsc.set_port_reset();
-			self.registers.port_register_set.write_volatile_at(i, cc);
+			c.portsc.set_port_reset();
+			self.registers.port_register_set.write_volatile_at(i, c);
+			return;
 			while !c.portsc.port_reset_change() {
 				rt::thread::sleep(core::time::Duration::from_millis(1));
 				c = self.registers.port_register_set.read_volatile_at(i);
@@ -205,30 +221,6 @@ impl Xhci {
 		let e = AllocSlot { port };
 		self.pending_commands
 			.insert(id, super::PendingCommand::AllocSlot(e));
-	}
-}
-
-pub(super) struct WaitReset {
-	port: NonZeroU8,
-}
-
-impl WaitReset {
-	#[must_use]
-	pub fn poll(
-		&mut self,
-		regs: &mut xhci::Registers<impl Mapper + Clone>,
-	) -> Option<(command::Allowed, AllocSlot)> {
-		regs.port_register_set
-			.read_volatile_at((self.port.get() - 1).into())
-			.portsc
-			.port_reset_change()
-			.then(|| {
-				// system software shall obtain a Device Slot
-				(
-					command::Allowed::EnableSlot(*command::EnableSlot::new().set_slot_type(0)),
-					AllocSlot { port: self.port },
-				)
-			})
 	}
 }
 

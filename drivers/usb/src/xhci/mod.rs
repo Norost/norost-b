@@ -22,6 +22,7 @@ pub struct Xhci {
 	registers: Registers,
 	dcbaap: DeviceContextBaseAddressArray,
 	devices: BTreeMap<NonZeroU8, device::Device>,
+	setup_devices: BTreeMap<NonZeroU8, PendingCommand>,
 	pending_commands: BTreeMap<ring::EntryId, PendingCommand>,
 	transfers: BTreeMap<ring::EntryId, Dma<[u8]>>,
 	poll: rt::Object,
@@ -156,9 +157,7 @@ impl Xhci {
 		rt::thread::sleep(core::time::Duration::from_millis(100));
 
 		// QEMU is buggy and doesn't generate PSCEs at reset unless we reset the ports, so do that.
-		//
-		// FIXME we're totally doing something wrong, it doesn't work on hardware either.
-		if true || errata.no_psce_on_reset() {
+		if errata.no_psce_on_reset() {
 			trace!("apply PSCE errate fix");
 			for i in 0..regs.capability.hcsparams1.read_volatile().number_of_ports() {
 				regs.port_register_set.update_volatile_at(i.into(), |c| {
@@ -173,6 +172,7 @@ impl Xhci {
 			registers: regs,
 			dcbaap,
 			devices: Default::default(),
+			setup_devices: Default::default(),
 			pending_commands: Default::default(),
 			transfers: Default::default(),
 			poll,

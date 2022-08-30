@@ -101,6 +101,7 @@ impl<'a> Drivers<'a> {
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
 	) -> rt::io::Result<()> {
+		trace!("load driver for {}", slot);
 		self.drivers
 			.entry(slot)
 			.and_modify(|_| panic!("driver already present in slot {}", slot))
