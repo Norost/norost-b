@@ -58,15 +58,16 @@ where
 
 		let b = unsafe { self.buf.as_mut() };
 
-		atomic::fence(Ordering::Release);
-
 		// TODO ensure we don't set the cycle bit before the entry has been fully written.
 		// We should try to do this in an efficient way, e.g. a single XMM store is atomic
 		// (at least, on all archs with AVX).
 		item[3] &= !1;
 		item[3] |= u32::from(c);
+		atomic::fence(Ordering::Release);
 		b[i] = item;
-		self.buf.as_phys() + i as u64 * 16
+		let p = self.buf.as_phys() + i as u64 * 16;
+		trace!("ring enqueue {:x} cb {}", p, c);
+		p
 	}
 
 	pub fn as_phys(&self) -> u64 {
@@ -82,8 +83,6 @@ where
 		self.buf.len() - 1
 	}
 }
-
-pub struct Full;
 
 pub trait TrbEntry: private::Sealed {
 	fn into_raw(self) -> [u32; 4];

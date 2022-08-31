@@ -102,8 +102,6 @@ fn main() -> ! {
 					Event::NewDevice { slot } => {
 						trace!("new device, slot {}", slot);
 						let mut buffer = dma::Dma::new_slice(1024).unwrap_or_else(|_| todo!());
-						//let mut buffer = dma::Dma::new_slice(8).unwrap_or_else(|_| todo!());
-						unsafe { buffer.as_mut().fill(0xcc) };
 						let e = ctrl
 							.send_request(
 								slot,
@@ -147,9 +145,8 @@ fn main() -> ! {
 						} else if let Some(mut j) = load_driver.remove(&id) {
 							trace!("load driver");
 							let buffer = buffer.unwrap();
-							rt::eprintln!("{:02x?}", unsafe { buffer.as_ref() });
 							let mut it = requests::decode(unsafe { buffer.as_ref() });
-							match rt::dbg!(it.next().unwrap()) {
+							match it.next().unwrap() {
 								requests::DescriptorResult::Device(info) => {
 									j.base = Some((info.class, info.subclass, info.protocol));
 									let e = ctrl
@@ -173,7 +170,6 @@ fn main() -> ! {
 									while n > 0 {
 										match it.next().unwrap() {
 											requests::DescriptorResult::Interface(i) => {
-												rt::dbg!(&i);
 												let intf = (i.class, i.subclass, i.protocol);
 												if driver.is_none() {
 													n += usize::from(i.num_endpoints);
@@ -217,16 +213,14 @@ fn main() -> ! {
 										.unwrap_or_else(|_| todo!());
 									conf_driver.insert(id, slot);
 
-									let id = ctrl
-										.configure_device(
-											slot,
-											xhci::DeviceConfig {
-												config,
-												interface,
-												endpoints,
-											},
-										)
-										.unwrap_or_else(|_| todo!());
+									let id = ctrl.configure_device(
+										slot,
+										xhci::DeviceConfig {
+											config,
+											interface,
+											endpoints,
+										},
+									);
 									wait_finish_config.insert(id, ());
 								}
 								requests::DescriptorResult::String(_) => todo!(),
@@ -346,6 +340,7 @@ fn main() -> ! {
 							if let Some(s) = ctrl.next_slot(NonZeroU8::new(*slot)) {
 								*slot = s.get();
 								Job::get_info(&mut jobs, &mut ctrl, s, job_id);
+								//Job::get_string(&mut jobs, &mut ctrl, s, job_id);
 								continue 'req;
 							} else {
 								*slot = 255;
@@ -392,6 +387,33 @@ enum JobState {
 }
 
 impl Job {
+	// FIXME this is a quick hack to confirm that it is only the second request
+	// that gets stuck.
+	fn get_string(
+		jobs: &mut BTreeMap<u64, Self>,
+		ctrl: &mut xhci::Xhci,
+		slot: NonZeroU8,
+		job_id: JobId,
+	) {
+		let mut buffer = dma::Dma::new_slice(64).unwrap();
+		let id = ctrl
+			.send_request(
+				slot,
+				requests::Request::GetDescriptor {
+					buffer,
+					ty: requests::GetDescriptor::String { index: 2 },
+				},
+			)
+			.unwrap_or_else(|_| todo!());
+		jobs.insert(
+			id,
+			Self {
+				state: JobState::WaitDeviceName,
+				job_id,
+			},
+		);
+	}
+
 	fn get_info(
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
@@ -399,7 +421,6 @@ impl Job {
 		job_id: JobId,
 	) {
 		let mut buffer = dma::Dma::new_slice(64).unwrap();
-		unsafe { buffer.as_mut().fill(0xdd) }
 		let id = ctrl
 			.send_request(
 				slot,
@@ -426,28 +447,33 @@ impl Job {
 		mut buf: dma::Dma<[u8]>,
 		tbl: &'a StreamTable,
 	) -> Option<(JobId, Response<'a, 'static>)> {
-		rt::eprintln!("{:02x?}", unsafe { buf.as_ref() });
 		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
 		match &self.state {
 			JobState::WaitDeviceInfo => {
 				let info = res.into_device().unwrap();
-				unsafe { buf.as_mut().fill(0xee) }
 				rt::dbg!(&info);
-				let id = ctrl
-					.send_request(
-						slot,
-						requests::Request::GetDescriptor {
-							buffer: buf,
-							ty: requests::GetDescriptor::String {
-								//index: info.index_product,
-								index: info.index_manufacturer,
+				//if info.index_product != 0 {
+				if info.index_manufacturer != 0 {
+					let id = ctrl
+						.send_request(
+							slot,
+							requests::Request::GetDescriptor {
+								buffer: buf,
+								ty: requests::GetDescriptor::String {
+									//index: info.index_product,
+									index: info.index_manufacturer,
+								},
 							},
-						},
-					)
-					.unwrap_or_else(|_| todo!());
-				self.state = JobState::WaitDeviceName;
-				jobs.insert(id, self);
-				None
+						)
+						.unwrap_or_else(|_| todo!());
+					self.state = JobState::WaitDeviceName;
+					jobs.insert(id, self);
+					None
+				} else {
+					let name = tbl.alloc(3).expect("out of buffers");
+					name.copy_from(0, b"N/A");
+					Some((self.job_id, Response::Data(name)))
+				}
 			}
 			JobState::WaitDeviceName => {
 				let s = res.into_string().unwrap();

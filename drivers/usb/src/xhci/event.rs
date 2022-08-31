@@ -7,24 +7,6 @@ use xhci::{
 	ring::trb::event::{Allowed, CompletionCode},
 };
 
-#[derive(Debug)]
-pub enum Event {
-	PortStatusChange {
-		port: NonZeroU8,
-	},
-	CommandCompletion {
-		id: u64,
-		slot: Option<NonZeroU8>,
-		code: Result<CompletionCode, u8>,
-	},
-	Transfer {
-		id: u64,
-		slot: NonZeroU8,
-		endpoint: u8,
-		code: Result<CompletionCode, u8>,
-	},
-}
-
 pub struct Table {
 	buf: Dma<[SegmentEntry]>,
 	dequeue_segment: u8,
@@ -65,7 +47,7 @@ impl Table {
 		Ok(())
 	}
 
-	pub fn dequeue(&mut self) -> Option<Event> {
+	pub fn dequeue(&mut self) -> Option<Allowed> {
 		atomic::fence(atomic::Ordering::Acquire);
 		// Do a raw read as we can't guarantee the controller won't write to
 		// the other entries while we hold a reference.
@@ -93,27 +75,7 @@ impl Table {
 			};
 		}
 
-		Some(match Allowed::try_from(evt).expect("invalid event") {
-			Allowed::PortStatusChange(p) => Event::PortStatusChange {
-				port: p.port_id().try_into().unwrap(),
-			},
-			Allowed::Doorbell(_) => todo!(),
-			Allowed::MfindexWrap(_) => todo!(),
-			Allowed::TransferEvent(c) => Event::Transfer {
-				id: c.trb_pointer(),
-				endpoint: c.endpoint_id(),
-				slot: c.slot_id().try_into().unwrap(),
-				code: c.completion_code(),
-			},
-			Allowed::HostController(e) => todo!("{:?}", e),
-			Allowed::BandwidthRequest(_) => todo!(),
-			Allowed::CommandCompletion(c) => Event::CommandCompletion {
-				id: c.command_trb_pointer(),
-				slot: c.slot_id().try_into().ok(),
-				code: c.completion_code(),
-			},
-			Allowed::DeviceNotification(_) => todo!(),
-		})
+		Some(Allowed::try_from(evt).expect("invalid event"))
 	}
 
 	/// # Panics
