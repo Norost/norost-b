@@ -155,10 +155,10 @@ pub struct EndpointAddress(u8);
 
 impl EndpointAddress {
 	pub fn direction(&self) -> Direction {
-		if self.0 & 1 << 7 != 0 {
-			Direction::In
-		} else {
+		if self.0 & 1 << 7 == 0 {
 			Direction::Out
+		} else {
+			Direction::In
 		}
 	}
 
@@ -335,7 +335,7 @@ impl Request {
 		match self {
 			Self::GetDescriptor { ty, buffer } => RawRequest {
 				request_type: 0b1000_0000,
-				direction: Direction::Out,
+				direction: Direction::In,
 				request: GET_DESCRIPTOR,
 				value: match ty {
 					GetDescriptor::Device => u16::from(DESCRIPTOR_DEVICE) << 8,
@@ -351,7 +351,7 @@ impl Request {
 			},
 			Self::SetConfiguration { value } => RawRequest {
 				request_type: 0b0000_0000,
-				direction: Direction::In,
+				direction: Direction::Out,
 				request: SET_CONFIGURATION,
 				value: value.into(),
 				index: 0,

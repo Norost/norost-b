@@ -118,6 +118,9 @@ impl<'a> Device<'a> {
 				assert!(matches!(csw.status, Status::Success));
 				Ok(data_len - csw.residue)
 			}
+			ipc_usb::Recv::Error { id, code, message } => {
+				panic!("{} (message {}, code {})", message, id, code)
+			}
 		}
 	}
 }

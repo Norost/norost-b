@@ -48,7 +48,6 @@ impl Xhci {
 			}
 			Pending::SetAddress(mut e) => {
 				let slot = NonZeroU8::new(slot).expect("SetAddress for slot 0");
-				//rt::dbg!(self.registers.port_register_set.read_volatile_at(1));
 				assert_eq!(code, Ok(CompletionCode::Success));
 				if e.should_adjust_packet_size() {
 					trace!("adjust packet size: get descriptor");

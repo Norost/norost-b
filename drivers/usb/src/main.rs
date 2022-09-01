@@ -10,14 +10,25 @@
 #![feature(result_option_inspect)]
 #![feature(closure_lifetime_binder)]
 #![feature(iterator_try_collect)]
+#![feature(optimize_attribute)]
 
 extern crate alloc;
 
 #[cfg(feature = "trace")]
 #[doc(hidden)]
 #[inline(never)]
+#[optimize(size)]
+#[cold]
 fn _trace_time(f: &str) {
 	rt::eprint!("[{:?}] [{}] ", rt::time::Monotonic::now(), f);
+}
+
+#[doc(hidden)]
+#[inline(never)]
+#[optimize(size)]
+#[cold]
+fn _warn_nl(args: core::fmt::Arguments<'_>) {
+	rt::eprintln!("[{:?}] [WARN] {}", rt::time::Monotonic::now(), args);
 }
 
 #[cfg(feature = "trace")]
@@ -34,6 +45,12 @@ macro_rules! trace {
 #[cfg(not(feature = "trace"))]
 macro_rules! trace {
 	($($arg:tt)*) => {{}};
+}
+
+macro_rules! warn {
+	($fmt:literal, $($arg:tt)*) => {{
+		$crate::_warn_nl(format_args!($fmt, $($arg)*));
+	}};
 }
 
 mod config;
@@ -129,10 +146,10 @@ fn main() -> ! {
 							code
 						);
 						use ::xhci::ring::trb::event::CompletionCode;
-						assert!(matches!(
-							code.unwrap(),
-							CompletionCode::Success | CompletionCode::ShortPacket
-						));
+						match code {
+							Ok(CompletionCode::Success) | Ok(CompletionCode::ShortPacket) => {}
+							e => todo!("{:?}", e),
+						}
 						if let Some(j) = jobs.remove(&id) {
 							trace!("progress job");
 							if let Some((job_id, resp)) =
@@ -155,7 +172,7 @@ fn main() -> ! {
 											requests::Request::GetDescriptor {
 												buffer,
 												ty: requests::GetDescriptor::Configuration {
-													index: (info.num_configurations - 1).min(1),
+													index: 0,
 												},
 											},
 										)
@@ -201,8 +218,6 @@ fn main() -> ! {
 										continue;
 									};
 
-									drivers.load_driver(slot, driver, base, intf).unwrap();
-
 									let id = ctrl
 										.send_request(
 											slot,
@@ -211,17 +226,10 @@ fn main() -> ! {
 											},
 										)
 										.unwrap_or_else(|_| todo!());
-									conf_driver.insert(id, slot);
-
-									let id = ctrl.configure_device(
-										slot,
-										xhci::DeviceConfig {
-											config,
-											interface,
-											endpoints,
-										},
+									conf_driver.insert(
+										id,
+										(config, driver, interface, intf, endpoints, base),
 									);
-									wait_finish_config.insert(id, ());
 								}
 								requests::DescriptorResult::String(_) => todo!(),
 								requests::DescriptorResult::Endpoint(_) => todo!(),
@@ -230,8 +238,20 @@ fn main() -> ! {
 								requests::DescriptorResult::Truncated { .. } => todo!(),
 								requests::DescriptorResult::Invalid => todo!(),
 							}
-						} else if let Some(_slot) = conf_driver.remove(&id) {
-							trace!("configured driver");
+						} else if let Some((config, driver, interface, intf, endpoints, base)) =
+							conf_driver.remove(&id)
+						{
+							trace!("SetConfigured");
+							let id = ctrl.configure_device(
+								slot,
+								xhci::DeviceConfig {
+									config: &config,
+									interface: &interface,
+									endpoints: &endpoints,
+								},
+							);
+							wait_finish_config
+								.insert(id, (driver, interface, intf, endpoints, base));
 						} else {
 							trace!("driver transfer");
 							let buf = buffer.unwrap();
@@ -247,45 +267,57 @@ fn main() -> ! {
 								.unwrap();
 						}
 					}
-					Event::DeviceConfigured {
-						slot: _slot,
-						id,
-						code,
-					} => {
-						trace!("configured device, slot {}, {:?}", _slot, code);
+					Event::DeviceConfigured { slot, id, code } => {
+						assert_eq!(code, Ok(::xhci::ring::trb::event::CompletionCode::Success));
+						trace!("configured device slot {}, {:?}", slot, code);
+						let (driver, interface, intf, endpoints, base) =
+							wait_finish_config.remove(&id).unwrap();
+						drivers
+							.load_driver(slot, driver, base, intf, &endpoints)
+							.unwrap();
 						code.unwrap();
-						wait_finish_config.remove(&id).unwrap();
 					}
 				}
 			}
 		}
 
-		while let Some(evt) = drivers.dequeue() {
+		while let Some((slot, msg_id, evt)) = drivers.dequeue() {
 			use driver::Event;
-			match evt {
-				Event::DataIn {
-					slot,
-					endpoint,
-					size,
-				} => {
+			let res = match evt {
+				Event::DataIn { endpoint, size } => {
 					assert!(endpoint > 0);
 					let ep = endpoint << 1 | 1;
 					assert!(ep < 32);
 					let buf = dma::Dma::new_slice(size.try_into().unwrap()).unwrap();
 					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true)
-						.unwrap_or_else(|_| todo!());
 				}
-				Event::DataOut {
-					slot,
-					endpoint,
-					data,
-				} => {
+				Event::DataOut { endpoint, data } => {
 					assert!(endpoint > 0);
 					let ep = endpoint << 1;
 					assert!(ep < 32);
 					ctrl.transfer(slot, ep.try_into().unwrap(), data, false)
-						.unwrap_or_else(|_| todo!());
 				}
+			};
+			match res {
+				Ok(_id) => {}
+				Err(e) => drivers
+					.send(
+						slot,
+						match e {
+							xhci::TransferError::InvalidEndpoint { endpoint } => {
+								warn!(
+									"driver tried to access invalid endpoint {} (slot {})",
+									endpoint, slot
+								);
+								driver::Message::Error {
+									id: msg_id,
+									code: 1,
+									message: "invalid endpoint",
+								}
+							}
+						},
+					)
+					.unwrap_or_else(|e| todo!("{:?}", e)),
 			}
 		}
 
@@ -451,7 +483,6 @@ impl Job {
 		match &self.state {
 			JobState::WaitDeviceInfo => {
 				let info = res.into_device().unwrap();
-				rt::dbg!(&info);
 				//if info.index_product != 0 {
 				if info.index_manufacturer != 0 {
 					let id = ctrl

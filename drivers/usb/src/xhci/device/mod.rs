@@ -5,11 +5,11 @@ use crate::{
 	dma::Dma,
 	requests::{Direction, EndpointTransfer, RawRequest},
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroU8;
 use xhci::{
 	accessor::Mapper,
-	context::{Device32Byte, EndpointType, Input32Byte, InputHandler},
+	context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
 	ring::trb::{command, transfer},
 };
 
@@ -23,9 +23,11 @@ const SUPERSPEED_GEN2_X2: u8 = 7;
 
 pub(super) struct Device {
 	slot: NonZeroU8,
+	port: NonZeroU8,
+	port_speed: u8,
 	output_dev_context: Dma<Device32Byte>,
 	transfer_ring: ring::Ring<transfer::Allowed>,
-	endpoints: Vec<Option<ring::Ring<transfer::Normal>>>,
+	endpoints: Box<[Option<ring::Ring<transfer::Normal>>]>,
 }
 
 impl Device {
@@ -51,9 +53,8 @@ impl Device {
 		let ring = &mut self.transfer_ring;
 
 		let (dir, trf) = match req.direction {
-			// FIXME it's swapped...
-			Direction::Out => (transfer::Direction::In, transfer::TransferType::In),
-			Direction::In => (transfer::Direction::Out, transfer::TransferType::Out),
+			Direction::In => (transfer::Direction::In, transfer::TransferType::In),
+			Direction::Out => (transfer::Direction::Out, transfer::TransferType::Out),
 		};
 
 		// Page 85 of manual for example
@@ -90,7 +91,7 @@ impl Device {
 		endpoint: u8,
 		interrupter: Option<u16>,
 		data: &Dma<[u8]>,
-	) -> Result<ring::EntryId, ()> {
+	) -> Result<ring::EntryId, TransferError> {
 		trace!(
 			"transfer ep {} intr {:?} phys {:#x} len {}",
 			endpoint,
@@ -108,20 +109,29 @@ impl Device {
 		}
 		let id = self
 			.endpoints
-			.get_mut(usize::from(endpoint) - 2)
+			.get_mut(usize::from(endpoint).wrapping_sub(2))
 			.and_then(|o| o.as_mut())
-			.expect("invalid/unitinialized endpoint")
+			.ok_or(TransferError::InvalidEndpoint { endpoint })?
 			.enqueue(xfer);
 		Ok(id)
 	}
 
-	pub fn configure(&mut self, config: DeviceConfig) -> (command::Allowed, Dma<Input32Byte>) {
+	pub fn configure(&mut self, config: DeviceConfig<'_>) -> (command::Allowed, Dma<Input32Byte>) {
+		trace!("configure device slot {}", self.slot);
 		let mut input_context = Dma::<Input32Byte>::new().unwrap_or_else(|_| todo!());
 		let inp = unsafe { input_context.as_mut() };
 
-		inp.control_mut().set_add_context_flag(0); // evaluate slot context
+		let mut c = inp.control_mut();
+		c.set_configuration_value(config.config.configuration_value);
+		assert_eq!(config.interface.number, 0, "todo");
+		c.set_interface_number(config.interface.number);
+		assert_eq!(config.interface.alternate_setting, 0, "todo");
+		c.set_alternate_setting(config.interface.alternate_setting);
 
+		let mut max_dci = 0;
+		let mut endpoints = Vec::new();
 		for ep_descr in config.endpoints {
+			trace!("enable {:?}", ep_descr);
 			let index = usize::from(ep_descr.address.number()) * 2
 				+ match ep_descr.address.direction() {
 					Direction::Out => 0,
@@ -129,9 +139,9 @@ impl Device {
 				};
 
 			let l = self.endpoints.len().max(index - 1);
-			self.endpoints.resize_with(l, || None);
+			endpoints.resize_with(l, || None);
 			assert!(
-				self.endpoints[index - 2].is_none(),
+				endpoints[index - 2].is_none(),
 				"endpoint already initialized"
 			);
 
@@ -139,6 +149,7 @@ impl Device {
 
 			// 4.8.2.4
 			let ep = inp.device_mut().endpoint_mut(index);
+			ep.set_endpoint_state(EndpointState::Running);
 			ep.set_endpoint_type(map_endpoint_type(
 				ep_descr.attributes.transfer(),
 				ep_descr.address.direction(),
@@ -147,16 +158,24 @@ impl Device {
 			ep.set_max_burst_size(0);
 			ep.set_tr_dequeue_pointer(ring.as_phys());
 			ep.set_dequeue_cycle_state();
-			ep.set_interval(0);
+			ep.set_interval(ep_descr.interval);
 			ep.set_max_primary_streams(0);
 			ep.set_mult(0);
 			ep.set_error_count(3);
-			ep.set_interval(8); // 128µs * 8 = 1ms (TODO set this properly)
 
-			self.endpoints[index - 2] = Some(ring);
+			endpoints[index - 2] = Some(ring);
 
-			inp.control_mut().set_add_context_flag(index); // evaluate endpoint context
+			inp.control_mut().set_add_context_flag(index);
+			max_dci = max_dci.max(index as _);
 		}
+
+		let mut sl = inp.device_mut().slot_mut();
+		sl.set_root_hub_port_number(self.port.get());
+		sl.set_speed(self.port_speed);
+		sl.set_context_entries(max_dci);
+		inp.control_mut().set_add_context_flag(0);
+
+		self.endpoints = endpoints.into();
 		let cmd = *command::ConfigureEndpoint::new()
 			.set_input_context_pointer(input_context.as_phys())
 			.set_slot_id(self.slot.get());
@@ -166,6 +185,10 @@ impl Device {
 	pub fn slot(&self) -> NonZeroU8 {
 		self.slot
 	}
+}
+
+pub enum TransferError {
+	InvalidEndpoint { endpoint: u8 },
 }
 
 impl Xhci {
@@ -225,6 +248,8 @@ impl Xhci {
 			Pending::SetAddress(SetAddress {
 				dev: Device {
 					slot,
+					port,
+					port_speed,
 					output_dev_context,
 					transfer_ring,
 					endpoints: Default::default(),

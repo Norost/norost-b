@@ -20,8 +20,8 @@ exec qemu-system-x86_64 \
 	-device virtio-net-pci,netdev=net0 \
 	-device qemu-xhci,p2=6,p3=0 \
 	-device usb-storage,drive=usb0,id=usbmsd \
-	-device usb-kbd \
 	-vga virtio \
 	-s \
 	"$@"
 	#-device usb-mouse \
+	-device usb-kbd \

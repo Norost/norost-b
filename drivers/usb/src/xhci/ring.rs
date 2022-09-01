@@ -50,13 +50,17 @@ where
 	#[cfg_attr(debug_assertions, track_caller)]
 	fn enqueue_inner(&mut self, mut item: [u32; 4]) -> EntryId {
 		let (i, c) = (self.enqueue_index, self.cycle_bit);
+		let cap = self.capacity();
+		let b = unsafe { self.buf.as_mut() };
+
 		self.enqueue_index += 1;
-		if self.enqueue_index >= self.capacity() {
+		if self.enqueue_index >= cap {
+			trace!("ring wrap");
+			b[self.enqueue_index][3] &= !1;
+			b[self.enqueue_index][3] |= u32::from(c);
 			self.enqueue_index = 0;
 			self.cycle_bit = !self.cycle_bit;
 		}
-
-		let b = unsafe { self.buf.as_mut() };
 
 		// TODO ensure we don't set the cycle bit before the entry has been fully written.
 		// We should try to do this in an efficient way, e.g. a single XMM store is atomic

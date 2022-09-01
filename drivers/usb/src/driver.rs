@@ -1,3 +1,4 @@
+use crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer};
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec};
 use core::{
 	future::Future,
@@ -24,7 +25,7 @@ impl<'a> Drivers<'a> {
 		}
 	}
 
-	pub fn dequeue(&mut self) -> Option<Event> {
+	pub fn dequeue(&mut self) -> Option<(NonZeroU8, u32, Event)> {
 		let wk = self.make_waker();
 		let mut cx = Context::from_waker(&wk);
 		for (&slot, driver) in self.drivers.iter_mut() {
@@ -63,7 +64,6 @@ impl<'a> Drivers<'a> {
 						let [_, endpoint, a, b, c, d]: [u8; 6] =
 							(&*buf).try_into().expect("invalid msg");
 						Some(Event::DataIn {
-							slot,
 							endpoint,
 							size: u32::from_le_bytes([a, b, c, d]),
 						})
@@ -74,11 +74,7 @@ impl<'a> Drivers<'a> {
 						let l = driver.stdout.read(&mut buf).unwrap();
 						let mut data = crate::dma::Dma::new_slice(l).unwrap();
 						unsafe { data.as_mut().copy_from_slice(&buf[..l]) }
-						Some(Event::DataOut {
-							slot,
-							endpoint,
-							data,
-						})
+						Some(Event::DataOut { endpoint, data })
 					}
 					_ => todo!(
 						"invalid msg: {:?}",
@@ -87,7 +83,9 @@ impl<'a> Drivers<'a> {
 				};
 				driver.read_task = read(&self.queue, &driver.stdout, buf);
 				if let Some(evt) = evt {
-					return Some(evt);
+					let id = driver.msg_in_counter;
+					driver.msg_in_counter += 1;
+					return Some((slot, id, evt));
 				}
 			}
 		}
@@ -100,12 +98,15 @@ impl<'a> Drivers<'a> {
 		driver: &crate::config::Driver,
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
+		endpoints: &[Endpoint],
 	) -> rt::io::Result<()> {
 		trace!("load driver for {}", slot);
 		self.drivers
 			.entry(slot)
 			.and_modify(|_| panic!("driver already present in slot {}", slot))
-			.or_insert(DeviceDriver::new(driver, self.queue, base, interface)?);
+			.or_insert(DeviceDriver::new(
+				driver, self.queue, base, interface, endpoints,
+			)?);
 		Ok(())
 	}
 
@@ -117,6 +118,12 @@ impl<'a> Drivers<'a> {
 				v.push(ipc_usb::RECV_TY_DATA_IN);
 				v.push(endpoint);
 				v.extend_from_slice(data);
+			}
+			Message::Error { id, code, message } => {
+				v.push(ipc_usb::RECV_TY_ERROR);
+				v.extend_from_slice(&id.to_le_bytes());
+				v.push(code);
+				v.extend_from_slice(message.as_ref());
 			}
 		}
 		let wr = write(self.queue, &d.stdin, v);
@@ -159,6 +166,8 @@ struct DeviceDriver<'a> {
 	write_tasks: Vec<Write<'a, Vec<u8>>>,
 	share_task: Option<Open<'a, ()>>,
 	name: Box<str>,
+	msg_in_counter: u32,
+	msg_out_counter: u32,
 }
 
 impl<'a> DeviceDriver<'a> {
@@ -167,6 +176,7 @@ impl<'a> DeviceDriver<'a> {
 		queue: &'a Queue,
 		base: (u8, u8, u8),
 		interface: (u8, u8, u8),
+		endpoints: &[Endpoint],
 	) -> rt::io::Result<Self> {
 		let (stdin, proc_stdin) = rt::Object::new(rt::NewObject::MessagePipe)?;
 		let (proc_stdout, stdout) = rt::Object::new(rt::NewObject::MessagePipe)?;
@@ -188,7 +198,38 @@ impl<'a> DeviceDriver<'a> {
 
 		let mut p = rt::process::Builder::new()?;
 		p.set_binary_by_name(driver.path.as_bytes())?;
-		p.add_args([driver.path.as_bytes(), &arg])?;
+		p.add_args([driver.path.as_bytes(), b"--class", &arg])?;
+
+		for ep in endpoints {
+			let num = match ep.address.number() {
+				EndpointNumber::N1 => "1",
+				EndpointNumber::N2 => "2",
+				EndpointNumber::N3 => "3",
+				EndpointNumber::N4 => "4",
+				EndpointNumber::N5 => "5",
+				EndpointNumber::N6 => "6",
+				EndpointNumber::N7 => "7",
+				EndpointNumber::N8 => "8",
+				EndpointNumber::N9 => "9",
+				EndpointNumber::N10 => "10",
+				EndpointNumber::N11 => "11",
+				EndpointNumber::N12 => "12",
+				EndpointNumber::N13 => "13",
+				EndpointNumber::N14 => "14",
+				EndpointNumber::N15 => "15",
+			};
+			let arg = match (ep.attributes.transfer(), ep.address.direction()) {
+				(EndpointTransfer::Bulk, Direction::Out) => "--bulk-out",
+				(EndpointTransfer::Bulk, Direction::In) => "--bulk-in",
+				(EndpointTransfer::Interrupt, Direction::Out) => "--itnr-out",
+				(EndpointTransfer::Interrupt, Direction::In) => "--intr-in",
+				(EndpointTransfer::Isoch, Direction::Out) => "--isoch-out",
+				(EndpointTransfer::Isoch, Direction::In) => "--isoch-in",
+				(EndpointTransfer::Control, _) => unreachable!(),
+			};
+			p.add_args([arg, num]);
+		}
+
 		p.add_object(b"in", &proc_stdin)?;
 		p.add_object(b"out", &proc_stdout)?;
 		rt::io::stderr()
@@ -209,18 +250,18 @@ impl<'a> DeviceDriver<'a> {
 			write_tasks: Default::default(),
 			share_task: Default::default(),
 			name: driver.name.as_deref().unwrap_or("unnamed{n}").into(),
+			msg_in_counter: 0,
+			msg_out_counter: 0,
 		})
 	}
 }
 
 pub enum Event {
 	DataIn {
-		slot: NonZeroU8,
 		endpoint: u8,
 		size: u32,
 	},
 	DataOut {
-		slot: NonZeroU8,
 		endpoint: u8,
 		data: crate::dma::Dma<[u8]>,
 	},
@@ -228,6 +269,7 @@ pub enum Event {
 
 pub enum Message<'a> {
 	DataIn { endpoint: u8, data: &'a [u8] },
+	Error { id: u32, code: u8, message: &'a str },
 }
 
 fn read<'a>(queue: &'a Queue, stdout: &rt::Object, mut buf: Vec<u8>) -> Read<'a, Vec<u8>> {

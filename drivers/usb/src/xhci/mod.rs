@@ -17,6 +17,8 @@ use command::Pending;
 use core::{mem, num::NonZeroU8, time::Duration};
 use xhci::ring::trb::command as cmd;
 
+pub use device::TransferError;
+
 type Registers = xhci::Registers<driver_utils::accessor::Identity>;
 
 pub struct Xhci {
@@ -56,7 +58,6 @@ impl Xhci {
 		let mut regs = unsafe {
 			xhci::Registers::new(mmio_ptr.as_ptr() as _, driver_utils::accessor::Identity)
 		};
-		trace!("quack");
 
 		assert!(
 			!regs.capability.hccparams1.read_volatile().context_size(),
@@ -105,7 +106,6 @@ impl Xhci {
 
 		// Wait for controller to be ready
 		while oper.usbsts.read_volatile().controller_not_ready() {
-			rt::dbg!("zzz");
 			rt::thread::sleep(Duration::from_millis(1));
 		}
 
@@ -129,6 +129,10 @@ impl Xhci {
 			trace!("wait 1ms to avoid hang after reset");
 			rt::thread::sleep(Duration::from_millis(1));
 		}
+
+		// FIXME We are probably doing something wrong, this delay shouldn't be necessary
+		// Either that or we found an errata (hooray!)
+		rt::thread::sleep(Duration::from_millis(500));
 
 		while oper.usbcmd.read_volatile().host_controller_reset() {
 			rt::thread::sleep(Duration::from_millis(1));
@@ -199,8 +203,6 @@ impl Xhci {
 			}
 		}
 
-		rt::dbg!(&regs.operational);
-
 		Ok(Self {
 			event_ring,
 			command_ring,
@@ -234,7 +236,7 @@ impl Xhci {
 		endpoint: u8,
 		data: Dma<[u8]>,
 		notify: bool,
-	) -> Result<ring::EntryId, ()> {
+	) -> Result<ring::EntryId, TransferError> {
 		trace!(
 			"transfer, slot {} ep {}, data len {}",
 			slot,
@@ -251,7 +253,7 @@ impl Xhci {
 		Ok(id)
 	}
 
-	pub fn configure_device(&mut self, slot: NonZeroU8, config: DeviceConfig) -> ring::EntryId {
+	pub fn configure_device(&mut self, slot: NonZeroU8, config: DeviceConfig<'_>) -> ring::EntryId {
 		trace!("configure device, slot {}", slot);
 		let (cmd, buf) = self
 			.devices
@@ -411,9 +413,8 @@ pub enum Event {
 	},
 }
 
-pub struct DeviceConfig {
-	pub config: requests::Configuration,
-	pub interface: requests::Interface,
-	// TODO avoid allocation
-	pub endpoints: Vec<requests::Endpoint>,
+pub struct DeviceConfig<'a> {
+	pub config: &'a requests::Configuration,
+	pub interface: &'a requests::Interface,
+	pub endpoints: &'a [requests::Endpoint],
 }
