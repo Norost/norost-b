@@ -1,5 +1,4 @@
 const INTEL: u16 = 0x8086;
-const PANTHERPOINT_XHCI: u16 = 0x1e31;
 
 /// # Safety
 ///
@@ -11,9 +10,7 @@ pub unsafe fn apply(vendor: u16, device: u16, pci: *mut u8) {
 		return;
 	}
 
-	if device == PANTHERPOINT_XHCI {
-		enable_xhci_ports(vendor, device, pci);
-	}
+	enable_xhci_ports(vendor, device, pci);
 }
 
 /// Switch ports over from EHC to xHC.
