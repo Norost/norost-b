@@ -46,7 +46,7 @@ unsafe impl MemoryObject for PciDevice {
 	}
 
 	fn page_flags(&self) -> (PageFlags, RWX) {
-		(Default::default(), RWX::R)
+		(Default::default(), RWX::RW)
 	}
 }
 

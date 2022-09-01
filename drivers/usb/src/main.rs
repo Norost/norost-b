@@ -14,32 +14,18 @@
 
 extern crate alloc;
 
-#[cfg(feature = "trace")]
 #[doc(hidden)]
 #[inline(never)]
 #[optimize(size)]
 #[cold]
-fn _trace_time(f: &str) {
-	rt::eprint!("[{:?}] [{}] ", rt::time::Monotonic::now(), f);
-}
-
-#[doc(hidden)]
-#[inline(never)]
-#[optimize(size)]
-#[cold]
-fn _warn_nl(args: core::fmt::Arguments<'_>) {
-	rt::eprintln!("[{:?}] [WARN] {}", rt::time::Monotonic::now(), args);
+fn _message(pre: &str, args: core::fmt::Arguments<'_>) {
+	rt::eprintln!("[{}] [{}] {}", rt::time::Monotonic::now(), pre, args);
 }
 
 #[cfg(feature = "trace")]
 macro_rules! trace {
-	($fmt:literal) => {{
-		$crate::_trace_time(file!());
-		rt::eprintln!($fmt);
-	}};
-	($fmt:literal, $($arg:tt)*) => {{
-		$crate::_trace_time(file!());
-		rt::eprintln!($fmt, $($arg)*);
+	($($arg:tt)*) => {{
+		$crate::_message(file!(), format_args!($($arg)*));
 	}};
 }
 #[cfg(not(feature = "trace"))]
@@ -47,9 +33,14 @@ macro_rules! trace {
 	($($arg:tt)*) => {{}};
 }
 
+macro_rules! info {
+	($($arg:tt)*) => {{
+		$crate::_message("INFO", format_args!($($arg)*));
+	}};
+}
 macro_rules! warn {
-	($fmt:literal, $($arg:tt)*) => {{
-		$crate::_warn_nl(format_args!($fmt, $($arg)*));
+	($($arg:tt)*) => {{
+		$crate::_message("WARN", format_args!($($arg)*));
 	}};
 }
 

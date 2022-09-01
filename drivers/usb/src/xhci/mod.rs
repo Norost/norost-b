@@ -8,6 +8,7 @@ mod errata;
 mod event;
 mod port;
 mod ring;
+mod vendor;
 
 use errata::Errata;
 
@@ -37,14 +38,14 @@ pub struct Xhci {
 impl Xhci {
 	pub fn new(dev: &rt::Object) -> Result<Self, &'static str> {
 		trace!("get errata");
-		let mut errata = unsafe {
-			let (pci, s) = dev.map_object(None, rt::RWX::R, 0, 4096).unwrap();
+		let (pci, vendor, device) = unsafe {
+			let (pci, s) = dev.map_object(None, rt::RWX::RW, 0, 4096).unwrap();
 			assert_eq!(s, 4096);
-			let vendor = pci.cast::<u16>().as_ptr().add(0).read_volatile();
-			let device = pci.cast::<u16>().as_ptr().add(1).read_volatile();
-			let _ = rt::mem::dealloc(pci, 4096);
-			Errata::get(vendor, device)
+			let vendor = pci.cast::<u16>().as_ptr().add(0).read_volatile().to_le();
+			let device = pci.cast::<u16>().as_ptr().add(1).read_volatile().to_le();
+			(pci, vendor, device)
 		};
+		let mut errata = Errata::get(vendor, device);
 
 		let poll = dev.open(b"poll").unwrap();
 		trace!("map MMIO");
@@ -100,6 +101,13 @@ impl Xhci {
 					trace!("unknown ext cap {}", i)
 				}
 			}
+		}
+
+		// Apply vendor-specific fixes now.
+		unsafe {
+			vendor::apply(vendor, device, pci.as_ptr());
+			// We no longer need to access the PCI space.
+			let _ = rt::mem::dealloc(pci, 4096);
 		}
 
 		let oper = &mut regs.operational;

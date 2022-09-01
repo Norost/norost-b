@@ -34,15 +34,15 @@ fn main() -> ! {
 		assert!(it.next().is_none());
 
 		let process_root = rt::io::process_root().unwrap();
-		if let Some(d) = cfg
+		if let Some(drv) = cfg
 			.drivers_by_id
 			.get(&(v, d))
 			.or_else(|| cfg.drivers_by_class.get(&class))
 		{
 			if let Err(e) = (|| {
 				let mut b = rt::process::Builder::new()?;
-				b.set_binary_by_name(d.path.as_bytes())?;
-				b.add_args([loc, d.name.as_deref().unwrap_or(loc)])?;
+				b.set_binary_by_name(drv.path.as_bytes())?;
+				b.add_args([loc, drv.name.as_deref().unwrap_or(loc)])?;
 				if let Some(o) = rt::io::stderr() {
 					b.add_object(b"err", &o)?;
 				}
@@ -51,9 +51,15 @@ fn main() -> ! {
 				b.add_object(b"pci", &pci.open(loc.as_ref())?)?;
 				b.spawn()
 			})() {
-				rt::eprintln!("failed to launch driver {:?}: {:?}", d.path, e);
+				rt::eprintln!("failed to launch driver {:?}: {:?}", drv.path, e);
 			} else {
-				rt::eprintln!("launched driver {:?} for {}", d.path, loc);
+				rt::eprintln!(
+					"launched driver {:?} for {:04x}:{:04x} at {}",
+					drv.path,
+					v,
+					d,
+					loc
+				);
 			}
 		} else {
 			rt::eprintln!("no driver for {:04x}:{:04x} at {}", v, d, loc);
