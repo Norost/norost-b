@@ -1,4 +1,3 @@
-(stdout "system/log")
 (stderr "system/log")
 
 (programs

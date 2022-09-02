@@ -35,11 +35,10 @@ fn main() -> ! {
 	// Open default objects
 	// TODO we shouldn't hardcode the handle.
 	let root = rt::Object::from_raw(0 << 24 | 0);
-	let stdout @ stderr = root
+	let stderr = root
 		.open(b"system/log")
 		.map(|o| rt::RefObject::from_raw(o.into_raw()))
 		.ok();
-	rt::io::set_stdout(stdout);
 	rt::io::set_stderr(stderr);
 	let drivers = root.open(b"drivers").unwrap();
 	let process_root = root.open(b"process").unwrap();
@@ -52,12 +51,11 @@ fn main() -> ! {
 	let cfg = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
 	let mut cf = scf::parse2(cfg);
 
-	let mut stdout_path @ mut stderr_path = None;
+	let mut stderr_path = None;
 	let mut programs = Vec::new();
 	for item in cf.iter() {
 		let mut it = item.into_group().unwrap();
 		match it.next_str().unwrap() {
-			"stdout" => stdout_path = Some(it.next_str().unwrap()),
 			"stderr" => stderr_path = Some(it.next_str().unwrap()),
 			"programs" => {
 				for item in it {
@@ -107,14 +105,10 @@ fn main() -> ! {
 			_ => panic!("unknown section"),
 		}
 	}
-	let stdout_path = stdout_path.unwrap();
 	let stderr_path = stderr_path.unwrap();
 
 	let open = |p: &[u8]| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p).unwrap());
-	let stdout = open(stdout_path.as_bytes());
 	let stderr = open(stderr_path.as_bytes());
-	rt::io::set_stdin(Some(stdout));
-	rt::io::set_stdout(Some(stdout));
 	rt::io::set_stderr(Some(stderr));
 
 	// Add stderr by default, as it is used for panic & other output
