@@ -15,7 +15,7 @@ fn start(_: isize, _: *const *const u8) -> isize {
 fn main() -> ! {
 	let file_root = rt::io::file_root().unwrap();
 	let cfg = load_config();
-	let pci = file_root.open(b"pci").unwrap();
+	let pci = rt::args::handle(b"pci").expect("pci object undefined");
 	let list = pci.open(b"xinfo").unwrap();
 	loop {
 		let mut b = [0; 32];
@@ -80,9 +80,7 @@ struct Driver {
 }
 
 fn load_config() -> Config {
-	let file_root = rt::io::file_root().unwrap();
-	let cfg = rt::args::args().skip(1).next().expect("pci object");
-	let cfg = file_root.open(cfg).unwrap();
+	let cfg = rt::args::handle(b"cfg").expect("cfg object undefined");
 	let len = cfg
 		.seek(rt::io::SeekFrom::End(0))
 		.unwrap()
