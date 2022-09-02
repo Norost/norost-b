@@ -447,16 +447,22 @@ fn main() {
 			}
 		}
 
+		t = rt::time::Monotonic::now();
+
 		if Pin::new(&mut poll_job).poll(&mut cx).is_ready() {
 			iface.device_mut().process();
+			iface
+				.poll(time::Instant::from_micros(t.as_micros() as i64))
+				.unwrap();
 			poll_job = poll.read(());
 			continue;
 		}
 		if Pin::new(&mut table_notify).poll(&mut cx).is_ready() {
 			table_notify = RefAsyncObject::from(table.table.notifier()).read(());
+			continue;
 		}
+
 		async_std::queue::poll();
-		t = rt::time::Monotonic::now();
 		if let Some(delay) = iface.poll_delay(time::Instant::from_micros(t.as_micros() as i64)) {
 			let delay = delay.into();
 			if delay != Duration::ZERO {
