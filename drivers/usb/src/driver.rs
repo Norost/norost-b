@@ -2,7 +2,7 @@ use crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer};
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec};
 use core::{
 	future::Future,
-	num::NonZeroU8,
+	num::{NonZeroU8, Wrapping},
 	pin::Pin,
 	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
@@ -85,7 +85,7 @@ impl<'a> Drivers<'a> {
 				if let Some(evt) = evt {
 					let id = driver.msg_in_counter;
 					driver.msg_in_counter += 1;
-					return Some((slot, id, evt));
+					return Some((slot, id.0, evt));
 				}
 			}
 		}
@@ -128,6 +128,7 @@ impl<'a> Drivers<'a> {
 		}
 		let wr = write(self.queue, &d.stdin, v);
 		d.write_tasks.push(wr);
+		d.msg_out_counter += 1;
 		Ok(())
 	}
 
@@ -166,8 +167,8 @@ struct DeviceDriver<'a> {
 	write_tasks: Vec<Write<'a, Vec<u8>>>,
 	share_task: Option<Open<'a, ()>>,
 	name: Box<str>,
-	msg_in_counter: u32,
-	msg_out_counter: u32,
+	msg_in_counter: Wrapping<u32>,
+	msg_out_counter: Wrapping<u32>,
 }
 
 impl<'a> DeviceDriver<'a> {
@@ -227,7 +228,7 @@ impl<'a> DeviceDriver<'a> {
 				(EndpointTransfer::Isoch, Direction::In) => "--isoch-in",
 				(EndpointTransfer::Control, _) => unreachable!(),
 			};
-			p.add_args([arg, num]);
+			p.add_args([arg, num])?;
 		}
 
 		p.add_object(b"in", &proc_stdin)?;
@@ -250,8 +251,8 @@ impl<'a> DeviceDriver<'a> {
 			write_tasks: Default::default(),
 			share_task: Default::default(),
 			name: driver.name.as_deref().unwrap_or("unnamed{n}").into(),
-			msg_in_counter: 0,
-			msg_out_counter: 0,
+			msg_in_counter: Wrapping(0),
+			msg_out_counter: Wrapping(0),
 		})
 	}
 }

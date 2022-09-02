@@ -41,13 +41,11 @@ where
 		})
 	}
 
-	#[cfg_attr(debug_assertions, track_caller)]
 	pub fn enqueue(&mut self, item: T) -> EntryId {
 		// Reduce monomorphization overhead.
 		self.enqueue_inner(item.into_raw())
 	}
 
-	#[cfg_attr(debug_assertions, track_caller)]
 	fn enqueue_inner(&mut self, mut item: [u32; 4]) -> EntryId {
 		let (i, c) = (self.enqueue_index, self.cycle_bit);
 		let cap = self.capacity();
@@ -76,10 +74,6 @@ where
 
 	pub fn as_phys(&self) -> u64 {
 		self.buf.as_phys()
-	}
-
-	pub fn set_cycle_bit(&mut self, on: bool) {
-		self.cycle_bit = on;
 	}
 
 	fn capacity(&self) -> usize {

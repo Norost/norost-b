@@ -13,7 +13,7 @@ mod vendor;
 use errata::Errata;
 
 use crate::{dma::Dma, requests};
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap};
 use command::Pending;
 use core::{mem, num::NonZeroU8, time::Duration};
 use xhci::ring::trb::command as cmd;
@@ -86,7 +86,7 @@ impl Xhci {
 						rt::thread::sleep(core::time::Duration::from_millis(1));
 					}
 				}
-				Ok(ExtendedCapability::XhciSupportedProtocol(mut c)) => {
+				Ok(ExtendedCapability::XhciSupportedProtocol(c)) => {
 					// TODO use this to determine USB types
 					rt::dbg!(&c);
 				}
@@ -274,7 +274,7 @@ impl Xhci {
 
 	pub fn poll(&mut self) -> Option<Event> {
 		trace!("poll");
-		use xhci::ring::trb::event::{Allowed, CompletionCode};
+		use xhci::ring::trb::event::Allowed;
 		loop {
 			let evt = if let Some(evt) = self.event_ring.dequeue() {
 				self.event_ring
@@ -363,8 +363,8 @@ impl Xhci {
 
 struct DeviceContextBaseAddressArray {
 	storage: Dma<[u64; 256]>,
-	scratchpad_array: Dma<[u64]>,
-	scratchpad_pages: Box<[Dma<[u8; 4096]>]>,
+	_scratchpad_array: Dma<[u64]>,
+	_scratchpad_pages: Box<[Dma<[u8; 4096]>]>,
 }
 
 impl DeviceContextBaseAddressArray {
@@ -393,8 +393,8 @@ impl DeviceContextBaseAddressArray {
 		});
 		Ok(Self {
 			storage,
-			scratchpad_array,
-			scratchpad_pages,
+			_scratchpad_array: scratchpad_array,
+			_scratchpad_pages: scratchpad_pages,
 		})
 	}
 

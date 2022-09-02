@@ -27,6 +27,9 @@ impl Xhci {
 
 		if !portsc.current_connect_status() {
 			trace!("port is not connected");
+			if let Some(slot) = self.port_slot_map[usize::from(port.get() - 1)].take() {
+				self.disable_slot(slot);
+			}
 			return;
 		}
 
@@ -41,16 +44,15 @@ impl Xhci {
 
 		let port_speed = portsc.port_speed();
 
+		info!("enable slot for port {}", port);
 		self.enqueue_command(
 			Allowed::EnableSlot(*EnableSlot::new().set_slot_type(0)),
 			Pending::AllocSlot { port, port_speed },
 		);
 	}
 
-	fn disable_slot_by_port(&mut self, port: NonZeroU8) {
-		let slot = self.port_slot_map[usize::from(port.get() - 1)]
-			.take()
-			.expect("slot not allocated");
+	fn disable_slot(&mut self, slot: NonZeroU8) {
+		info!("disable slot {}", slot);
 		self.enqueue_command(
 			Allowed::DisableSlot(*DisableSlot::new().set_slot_id(slot.get())),
 			Pending::DeallocSlot { slot },
@@ -61,6 +63,8 @@ impl Xhci {
 	///
 	/// The slot must not be in use by the controller.
 	pub unsafe fn dealloc_slot(&mut self, slot: NonZeroU8) {
-		//self.dcbaa.
+		trace!("dealloc slot {}", slot);
+		self.dcbaa.set(slot, 0);
+		self.devices.remove(&slot).expect("no device at slot");
 	}
 }

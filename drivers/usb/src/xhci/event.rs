@@ -1,11 +1,8 @@
 use crate::dma::Dma;
 use alloc::vec::Vec;
-use core::{marker::PhantomData, num::NonZeroU8, ptr::NonNull, sync::atomic};
+use core::{marker::PhantomData, ptr::NonNull, sync::atomic};
 use xhci::accessor::{marker::ReadWrite, Mapper};
-use xhci::{
-	registers::runtime::Interrupter,
-	ring::trb::event::{Allowed, CompletionCode},
-};
+use xhci::{registers::runtime::Interrupter, ring::trb::event::Allowed};
 
 pub struct Table {
 	buf: Dma<[SegmentEntry]>,

@@ -30,7 +30,9 @@ macro_rules! trace {
 }
 #[cfg(not(feature = "trace"))]
 macro_rules! trace {
-	($($arg:tt)*) => {{}};
+	($($arg:tt)*) => {{
+		let _ = || ($($arg)*);
+	}};
 }
 
 macro_rules! info {
@@ -109,7 +111,7 @@ fn main() -> ! {
 				match e {
 					Event::NewDevice { slot } => {
 						trace!("new device, slot {}", slot);
-						let mut buffer = dma::Dma::new_slice(1024).unwrap_or_else(|_| todo!());
+						let buffer = dma::Dma::new_slice(1024).unwrap_or_else(|_| todo!());
 						let e = ctrl
 							.send_request(
 								slot,
@@ -241,8 +243,7 @@ fn main() -> ! {
 									endpoints: &endpoints,
 								},
 							);
-							wait_finish_config
-								.insert(id, (driver, interface, intf, endpoints, base));
+							wait_finish_config.insert(id, (driver, intf, endpoints, base));
 						} else {
 							trace!("driver transfer");
 							let buf = buffer.unwrap();
@@ -261,7 +262,7 @@ fn main() -> ! {
 					Event::DeviceConfigured { slot, id, code } => {
 						assert_eq!(code, Ok(::xhci::ring::trb::event::CompletionCode::Success));
 						trace!("configured device slot {}, {:?}", slot, code);
-						let (driver, interface, intf, endpoints, base) =
+						let (driver, intf, endpoints, base) =
 							wait_finish_config.remove(&id).unwrap();
 						drivers
 							.load_driver(slot, driver, base, intf, &endpoints)
@@ -410,40 +411,13 @@ enum JobState {
 }
 
 impl Job {
-	// FIXME this is a quick hack to confirm that it is only the second request
-	// that gets stuck.
-	fn get_string(
-		jobs: &mut BTreeMap<u64, Self>,
-		ctrl: &mut xhci::Xhci,
-		slot: NonZeroU8,
-		job_id: JobId,
-	) {
-		let mut buffer = dma::Dma::new_slice(64).unwrap();
-		let id = ctrl
-			.send_request(
-				slot,
-				requests::Request::GetDescriptor {
-					buffer,
-					ty: requests::GetDescriptor::String { index: 2 },
-				},
-			)
-			.unwrap_or_else(|_| todo!());
-		jobs.insert(
-			id,
-			Self {
-				state: JobState::WaitDeviceName,
-				job_id,
-			},
-		);
-	}
-
 	fn get_info(
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
 		slot: NonZeroU8,
 		job_id: JobId,
 	) {
-		let mut buffer = dma::Dma::new_slice(64).unwrap();
+		let buffer = dma::Dma::new_slice(64).unwrap();
 		let id = ctrl
 			.send_request(
 				slot,
@@ -467,7 +441,7 @@ impl Job {
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
 		slot: NonZeroU8,
-		mut buf: dma::Dma<[u8]>,
+		buf: dma::Dma<[u8]>,
 		tbl: &'a StreamTable,
 	) -> Option<(JobId, Response<'a, 'static>)> {
 		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });

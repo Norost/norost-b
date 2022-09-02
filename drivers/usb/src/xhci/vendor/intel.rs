@@ -5,12 +5,12 @@ const INTEL: u16 = 0x8086;
 /// `vendor` and `device` must be correct.
 ///
 /// `pci` must point to the start of the PCI function of the xHC.
-pub unsafe fn apply(vendor: u16, device: u16, pci: *mut u8) {
+pub unsafe fn apply(vendor: u16, _device: u16, pci: *mut u8) {
 	if vendor != INTEL {
 		return;
 	}
 
-	enable_xhci_ports(vendor, device, pci);
+	enable_xhci_ports(pci);
 }
 
 /// Switch ports over from EHC to xHC.
@@ -24,15 +24,13 @@ pub unsafe fn apply(vendor: u16, device: u16, pci: *mut u8) {
 ///
 /// # Safety
 ///
-/// `vendor` and `device` must be correct.
-///
 /// `pci` must point to the start of the PCI function of the xHC.
 ///
 /// # References
 ///
 /// Commit `69e848c2090aebba5698a1620604c7dccb448684` ("Intel xhci: Support EHCI/xHCI port
 /// switching.") in the Linux source tree.
-unsafe fn enable_xhci_ports(vendor: u16, device: u16, pci: *mut u8) {
+unsafe fn enable_xhci_ports(pci: *mut u8) {
 	info!("Switch EHC ports to xHC");
 
 	const USB3_PSSEN: usize = 0xd0;

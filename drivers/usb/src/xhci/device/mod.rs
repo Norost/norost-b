@@ -8,7 +8,6 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroU8;
 use xhci::{
-	accessor::Mapper,
 	context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
 	ring::trb::{command, transfer},
 };
@@ -25,7 +24,7 @@ pub(super) struct Device {
 	slot: NonZeroU8,
 	port: NonZeroU8,
 	port_speed: u8,
-	output_dev_context: Dma<Device32Byte>,
+	_output_dev_context: Dma<Device32Byte>,
 	transfer_ring: ring::Ring<transfer::Allowed>,
 	endpoints: Box<[Option<ring::Ring<transfer::Normal>>]>,
 }
@@ -121,7 +120,7 @@ impl Device {
 		let mut input_context = Dma::<Input32Byte>::new().unwrap_or_else(|_| todo!());
 		let inp = unsafe { input_context.as_mut() };
 
-		let mut c = inp.control_mut();
+		let c = inp.control_mut();
 		c.set_configuration_value(config.config.configuration_value);
 		assert_eq!(config.interface.number, 0, "todo");
 		c.set_interface_number(config.interface.number);
@@ -169,7 +168,7 @@ impl Device {
 			max_dci = max_dci.max(index as _);
 		}
 
-		let mut sl = inp.device_mut().slot_mut();
+		let sl = inp.device_mut().slot_mut();
 		sl.set_root_hub_port_number(self.port.get());
 		sl.set_speed(self.port_speed);
 		sl.set_context_entries(max_dci);
@@ -209,7 +208,7 @@ impl Xhci {
 
 		// Initialize the Input Slot Context
 		// FIXME how? what's the topology?
-		let mut sl = input.device_mut().slot_mut();
+		let sl = input.device_mut().slot_mut();
 		sl.set_root_hub_port_number(port.get());
 		sl.set_context_entries(1);
 		sl.set_speed(port_speed);
@@ -233,10 +232,10 @@ impl Xhci {
 		ep.set_error_count(3);
 
 		// Allocate the Output Device Context data structure and set to '0'
-		let output_dev_context = Dma::<Device32Byte>::new().unwrap_or_else(|_| todo!());
+		let _output_dev_context = Dma::<Device32Byte>::new().unwrap_or_else(|_| todo!());
 
 		// Load the appropriate (Device Slot ID) entry in the Device Context Base Address Array
-		self.dcbaa.set(slot, output_dev_context.as_phys());
+		self.dcbaa.set(slot, _output_dev_context.as_phys());
 
 		// Issue an Address Device Command for the Device Slot
 		self.enqueue_command(
@@ -250,7 +249,7 @@ impl Xhci {
 					slot,
 					port,
 					port_speed,
-					output_dev_context,
+					_output_dev_context,
 					transfer_ring,
 					endpoints: Default::default(),
 				},
@@ -276,8 +275,6 @@ impl SetAddress {
 		trace!("adjust packet size");
 		assert!(self.adjust_packet_size);
 		self.adjust_packet_size = false;
-
-		let dev = unsafe { self.dev.output_dev_context.as_mut() };
 
 		let inp = unsafe { self.input_context.as_mut() };
 

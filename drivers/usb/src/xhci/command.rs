@@ -12,7 +12,6 @@ pub(super) enum Pending {
 	AllocSlot { port: NonZeroU8, port_speed: u8 },
 	DeallocSlot { slot: NonZeroU8 },
 	SetAddress(device::SetAddress),
-	SetPacketSize(),
 	ConfigureDev,
 }
 
@@ -47,7 +46,6 @@ impl Xhci {
 				None
 			}
 			Pending::SetAddress(mut e) => {
-				let slot = NonZeroU8::new(slot).expect("SetAddress for slot 0");
 				assert_eq!(code, Ok(CompletionCode::Success));
 				if e.should_adjust_packet_size() {
 					trace!("adjust packet size: get descriptor");
@@ -71,7 +69,6 @@ impl Xhci {
 					.or_insert(d);
 				Some(Event::NewDevice { slot: d.slot() })
 			}
-			Pending::SetPacketSize() => todo!(),
 			Pending::ConfigureDev => {
 				let slot = NonZeroU8::new(slot).expect("ConfigureDev for slot 0");
 				Some(Event::DeviceConfigured { id, slot, code })
