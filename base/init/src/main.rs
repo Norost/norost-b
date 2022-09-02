@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(btree_drain_filter)]
 #![feature(start)]
+#![feature(result_option_inspect)]
 
 extern crate alloc;
 
@@ -128,16 +129,20 @@ fn main() -> ! {
 				b.set_binary(&bin)?;
 				for (name, path) in &program.objects {
 					// FIXME bug in Root, probably
-					if &*path == &[""] {
-						b.add_object(name.as_ref(), &root)?;
-					} else {
-						let mut it = path.iter().map(|p| p.as_bytes());
-						let mut obj = root.open(it.next().unwrap())?;
-						for p in it {
-							obj = obj.open(p)?;
+					(|| {
+						if &*path == &[""] {
+							b.add_object(name.as_ref(), &root)?;
+						} else {
+							let mut it = path.iter().map(|p| p.as_bytes());
+							let mut obj = root.open(it.next().unwrap())?;
+							for p in it {
+								obj = obj.open(p)?;
+							}
+							b.add_object(name.as_ref(), &obj)?;
 						}
-						b.add_object(name.as_ref(), &obj)?;
-					}
+						Ok(())
+					})()
+					.inspect_err(|e: &rt::Error| log!("Failed to open {:?}: {:?}", path, e))?;
 				}
 				b.add_args(&[program.path])?;
 				b.add_args(&program.args)?;
