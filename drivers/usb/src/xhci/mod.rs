@@ -16,8 +16,14 @@ use {
 	crate::{dma::Dma, requests},
 	alloc::{boxed::Box, collections::BTreeMap},
 	command::Pending,
-	core::{mem, num::NonZeroU8, time::Duration},
-	xhci::ring::trb::command as cmd,
+	core::{num::NonZeroU8, time::Duration},
+	xhci::{
+		registers::{
+			operational::DeviceContextBaseAddressArrayPointerRegister,
+			runtime::InterrupterModerationRegister,
+		},
+		ring::trb::command as cmd,
+	},
 };
 
 pub use device::TransferError;
@@ -186,9 +192,10 @@ impl Xhci {
 		});
 
 		let mut intr = regs.interrupter_register_set.interrupter_mut(0);
-		intr.imod.update_volatile(|c| {
-			c.set_interrupt_moderation_interval(4000); // 1ms
-		});
+		// Set to 1ms, as recommended by the specification.
+		intr.imod.write_volatile(
+			*InterrupterModerationRegister::default().set_interrupt_moderation_interval(4000),
+		);
 		intr.iman.update_volatile(|c| {
 			c.set_interrupt_enable();
 		});
@@ -347,11 +354,8 @@ impl Xhci {
 			stream,
 			endpoint
 		);
-		// SAFETY: 0 is a valid value for a doorbell and Register is repr(transparent) of u32.
-		// Annoyingly, the xhci crate doesn't provide a Default impl or anything for it, so
-		// TODO make a PR
-		let mut v = unsafe { mem::transmute::<_, xhci::registers::doorbell::Register>(0u32) };
-		v.set_doorbell_stream_id(stream)
+		let v = *xhci::registers::doorbell::Register::default()
+			.set_doorbell_stream_id(stream)
 			.set_doorbell_target(endpoint);
 		self.registers.doorbell.write_volatile_at(slot.into(), v);
 	}
@@ -384,9 +388,9 @@ impl DeviceContextBaseAddressArray {
 		}
 		trace!("done alloc");
 		unsafe { storage.as_mut()[0] = scratchpad_array.as_phys() }
-		regs.operational.dcbaap.update_volatile(|c| {
-			c.set(storage.as_phys());
-		});
+		let mut v = DeviceContextBaseAddressArrayPointerRegister::default();
+		v.set(storage.as_phys());
+		regs.operational.dcbaap.write_volatile(v);
 		Ok(Self {
 			storage,
 			_scratchpad_array: scratchpad_array,

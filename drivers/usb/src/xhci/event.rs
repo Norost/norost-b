@@ -4,7 +4,7 @@ use {
 	core::{marker::PhantomData, ptr::NonNull, sync::atomic},
 	xhci::{
 		accessor::{marker::ReadWrite, Mapper},
-		registers::runtime::Interrupter,
+		registers::runtime::{EventRingDequeuePointerRegister, Interrupter},
 		ring::trb::event::Allowed,
 	},
 };
@@ -89,11 +89,9 @@ impl Table {
 		reg.erstsz
 			.update_volatile(|c| c.set(self.segments.len().try_into().unwrap()));
 		// Program the Interrupter Event Ring Dequeue Pointer
-		reg.erdp.update_volatile(|c| {
-			c.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base });
-			c.set_dequeue_erst_segment_index(0);
-			c.clear_event_handler_busy();
-		});
+		let mut v = EventRingDequeuePointerRegister::default();
+		v.set_event_ring_dequeue_pointer(unsafe { self.buf.as_ref()[0].base });
+		reg.erdp.write_volatile(v);
 		// Program the Interrupter Event Ring Segment Table Base Address
 		reg.erstba.update_volatile(|c| c.set(self.buf.as_phys()));
 	}
