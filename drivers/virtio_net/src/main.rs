@@ -56,7 +56,7 @@ fn main() {
 	let poll = AsyncObject::from_raw(dev.open(b"poll").unwrap().into_raw());
 
 	let pci = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
-	let pci = unsafe { pci::Pci::new(pci.0.cast(), 0, 0, &[]) };
+	let pci = unsafe { pci::Pci::new(pci.0.cast(), 0, 4096, &[]) };
 
 	let pci = pci.get(0, 0, 0).unwrap();
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement

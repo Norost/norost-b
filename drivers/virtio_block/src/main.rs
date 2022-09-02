@@ -29,7 +29,7 @@ fn main() -> ! {
 	let poll = dev.open(b"poll").unwrap();
 	let pci_config = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap().0;
 
-	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 0, &[]) };
+	let pci = unsafe { pci::Pci::new(pci_config.cast(), 0, 4096, &[]) };
 
 	let mut dev = {
 		let h = pci.get(0, 0, 0).unwrap();

@@ -116,6 +116,9 @@ fn main() -> ! {
 				prev_state.copy_from_slice(data);
 				capslock ^= toggle_capslock;
 			}
+			Recv::Error { id, code, message } => {
+				panic!("{} (message {}, code {})", message, id, code)
+			}
 		}
 		enqueue_read();
 	}

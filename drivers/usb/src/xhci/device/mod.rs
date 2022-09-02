@@ -1,13 +1,14 @@
-use super::{ring, DeviceConfig, Xhci};
+//mod init;
+
+use super::{ring, DeviceConfig, Pending, Xhci};
 use crate::{
 	dma::Dma,
 	requests::{Direction, EndpointTransfer, RawRequest},
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::num::NonZeroU8;
 use xhci::{
-	accessor::Mapper,
-	context::{Device32Byte, EndpointType, Input32Byte, InputHandler},
+	context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
 	ring::trb::{command, transfer},
 };
 
@@ -21,9 +22,11 @@ const SUPERSPEED_GEN2_X2: u8 = 7;
 
 pub(super) struct Device {
 	slot: NonZeroU8,
+	port: NonZeroU8,
+	port_speed: u8,
 	_output_dev_context: Dma<Device32Byte>,
 	transfer_ring: ring::Ring<transfer::Allowed>,
-	endpoints: Vec<Option<ring::Ring<transfer::Normal>>>,
+	endpoints: Box<[Option<ring::Ring<transfer::Normal>>]>,
 }
 
 impl Device {
@@ -31,18 +34,33 @@ impl Device {
 		&mut self,
 		interrupter: u16,
 		req: &RawRequest,
-	) -> Result<ring::EntryId, ring::Full> {
+	) -> Result<ring::EntryId, ()> {
 		// Setup
 		let (phys, len) = req
 			.buffer
 			.as_ref()
 			.map_or((0, 0), |b| (b.as_phys(), b.len()));
 		let len = u16::try_from(len).unwrap_or(u16::MAX);
+		trace!(
+			"send request ty {:#x} val {:#x} index {:#x} phys {:#x} len {}",
+			req.request_type,
+			req.value,
+			req.index,
+			phys,
+			len
+		);
 		let ring = &mut self.transfer_ring;
+
+		let (dir, trf) = match req.direction {
+			Direction::In => (transfer::Direction::In, transfer::TransferType::In),
+			Direction::Out => (transfer::Direction::Out, transfer::TransferType::Out),
+		};
+
+		// Page 85 of manual for example
 		ring.enqueue(transfer::Allowed::SetupStage(
 			*transfer::SetupStage::new()
 				.set_request_type(req.request_type)
-				.set_transfer_type(transfer::TransferType::Out)
+				.set_transfer_type(trf)
 				.set_request(req.request)
 				.set_value(req.value)
 				.set_index(req.index)
@@ -50,13 +68,12 @@ impl Device {
 		));
 		// Data
 		if len > 0 {
-			ring.enqueue(transfer::Allowed::Isoch(
-				// FIXME Isoch doesn't make sense, does it?
-				*transfer::Isoch::new()
+			ring.enqueue(transfer::Allowed::DataStage(
+				*transfer::DataStage::new()
+					.set_direction(dir)
 					.set_data_buffer_pointer(phys)
 					// FIXME qemu crashes if this is less than length in SetupStage
-					.set_trb_transfer_length(len.into())
-					.set_chain_bit(),
+					.set_trb_transfer_length(len.into()),
 			));
 		}
 		// Status
@@ -73,7 +90,14 @@ impl Device {
 		endpoint: u8,
 		interrupter: Option<u16>,
 		data: &Dma<[u8]>,
-	) -> Result<ring::EntryId, ring::Full> {
+	) -> Result<ring::EntryId, TransferError> {
+		trace!(
+			"transfer ep {} intr {:?} phys {:#x} len {}",
+			endpoint,
+			interrupter,
+			data.as_phys(),
+			data.len()
+		);
 		let mut xfer = transfer::Normal::new();
 		xfer.set_data_buffer_pointer(data.as_phys())
 			.set_trb_transfer_length(data.len().try_into().expect("data too large"))
@@ -84,20 +108,29 @@ impl Device {
 		}
 		let id = self
 			.endpoints
-			.get_mut(usize::from(endpoint) - 2)
+			.get_mut(usize::from(endpoint).wrapping_sub(2))
 			.and_then(|o| o.as_mut())
-			.expect("invalid/unitinialized endpoint")
+			.ok_or(TransferError::InvalidEndpoint { endpoint })?
 			.enqueue(xfer);
 		Ok(id)
 	}
 
-	pub fn configure(&mut self, config: DeviceConfig) -> (command::Allowed, Dma<Input32Byte>) {
+	pub fn configure(&mut self, config: DeviceConfig<'_>) -> (command::Allowed, Dma<Input32Byte>) {
+		trace!("configure device slot {}", self.slot);
 		let mut input_context = Dma::<Input32Byte>::new().unwrap_or_else(|_| todo!());
 		let inp = unsafe { input_context.as_mut() };
 
-		inp.control_mut().set_add_context_flag(0); // evaluate slot context
+		let c = inp.control_mut();
+		c.set_configuration_value(config.config.configuration_value);
+		assert_eq!(config.interface.number, 0, "todo");
+		c.set_interface_number(config.interface.number);
+		assert_eq!(config.interface.alternate_setting, 0, "todo");
+		c.set_alternate_setting(config.interface.alternate_setting);
 
+		let mut max_dci = 0;
+		let mut endpoints = Vec::new();
 		for ep_descr in config.endpoints {
+			trace!("enable {:?}", ep_descr);
 			let index = usize::from(ep_descr.address.number()) * 2
 				+ match ep_descr.address.direction() {
 					Direction::Out => 0,
@@ -105,9 +138,9 @@ impl Device {
 				};
 
 			let l = self.endpoints.len().max(index - 1);
-			self.endpoints.resize_with(l, || None);
+			endpoints.resize_with(l, || None);
 			assert!(
-				self.endpoints[index - 2].is_none(),
+				endpoints[index - 2].is_none(),
 				"endpoint already initialized"
 			);
 
@@ -115,6 +148,7 @@ impl Device {
 
 			// 4.8.2.4
 			let ep = inp.device_mut().endpoint_mut(index);
+			ep.set_endpoint_state(EndpointState::Running);
 			ep.set_endpoint_type(map_endpoint_type(
 				ep_descr.attributes.transfer(),
 				ep_descr.address.direction(),
@@ -123,16 +157,24 @@ impl Device {
 			ep.set_max_burst_size(0);
 			ep.set_tr_dequeue_pointer(ring.as_phys());
 			ep.set_dequeue_cycle_state();
-			ep.set_interval(0);
+			ep.set_interval(ep_descr.interval);
 			ep.set_max_primary_streams(0);
 			ep.set_mult(0);
 			ep.set_error_count(3);
-			ep.set_interval(8); // 128µs * 8 = 1ms (TODO set this properly)
 
-			self.endpoints[index - 2] = Some(ring);
+			endpoints[index - 2] = Some(ring);
 
-			inp.control_mut().set_add_context_flag(index); // evaluate endpoint context
+			inp.control_mut().set_add_context_flag(index);
+			max_dci = max_dci.max(index as _);
 		}
+
+		let sl = inp.device_mut().slot_mut();
+		sl.set_root_hub_port_number(self.port.get());
+		sl.set_speed(self.port_speed);
+		sl.set_context_entries(max_dci);
+		inp.control_mut().set_add_context_flag(0);
+
+		self.endpoints = endpoints.into();
 		let cmd = *command::ConfigureEndpoint::new()
 			.set_input_context_pointer(input_context.as_phys())
 			.set_slot_id(self.slot.get());
@@ -144,53 +186,18 @@ impl Device {
 	}
 }
 
-pub(super) fn init(port: NonZeroU8, ctrl: &mut Xhci) -> Result<WaitReset, &'static str> {
-	// Reset if USB2
-	// TODO check if USB2
-	ctrl.registers
-		.port_register_set
-		.update_volatile_at((port.get() - 1).into(), |c| {
-			c.portsc.set_port_reset();
-		});
-	Ok(WaitReset { port })
+pub enum TransferError {
+	InvalidEndpoint { endpoint: u8 },
 }
 
-pub(super) struct WaitReset {
-	port: NonZeroU8,
-}
-
-impl WaitReset {
-	#[must_use]
-	pub fn poll(
-		&mut self,
-		regs: &mut xhci::Registers<impl Mapper + Clone>,
-	) -> Option<(command::Allowed, AllocSlot)> {
-		regs.port_register_set
-			.read_volatile_at((self.port.get() - 1).into())
-			.portsc
-			.port_reset_change()
-			.then(|| {
-				// system software shall obtain a Device Slot
-				(
-					command::Allowed::EnableSlot(*command::EnableSlot::new().set_slot_type(0)),
-					AllocSlot { port: self.port },
-				)
-			})
-	}
-}
-
-pub(super) struct AllocSlot {
-	port: NonZeroU8,
-}
-
-impl AllocSlot {
-	#[must_use]
-	pub fn init(
-		&mut self,
-		ctrl: &mut Xhci,
-		//regs: &mut xhci::Registers<impl Mapper + Clone>,
-		slot: NonZeroU8,
-	) -> Result<(ring::EntryId, SetAddress), ring::Full> {
+impl Xhci {
+	pub(super) fn set_address(&mut self, port: NonZeroU8, slot: NonZeroU8, port_speed: u8) {
+		trace!(
+			"set address port {} slot {} speed {}",
+			port,
+			slot,
+			port_speed
+		);
 		// Allocate an Input Context
 		let mut input_context = Dma::<Input32Byte>::new().unwrap_or_else(|_| todo!());
 		let input = unsafe { input_context.as_mut() };
@@ -201,77 +208,115 @@ impl AllocSlot {
 
 		// Initialize the Input Slot Context
 		// FIXME how? what's the topology?
-		input
-			.device_mut()
-			.slot_mut()
-			.set_root_hub_port_number(slot.get());
-		//input.device_mut().slot_mut().set_route_string(todo!());
-		input.device_mut().slot_mut().set_context_entries(1);
+		let sl = input.device_mut().slot_mut();
+		sl.set_root_hub_port_number(port.get());
+		sl.set_context_entries(1);
+		sl.set_speed(port_speed);
 
 		// Allocate and initialize the Transfer Ring for the Default Control Endpoint
 		let transfer_ring = ring::Ring::new().unwrap_or_else(|_| todo!());
 
+		let (pkt_size, adjust_packet_size) = calc_packet_size(port_speed);
+		trace!(
+			"packet size {}, needs adjust: {}",
+			pkt_size,
+			adjust_packet_size
+		);
+
 		// Initialize the Input default control Endpoint 0 Context
 		let ep = input.device_mut().endpoint_mut(1);
 		ep.set_endpoint_type(EndpointType::Control);
-		ep.set_max_packet_size(calc_packet_size(
-			ctrl.registers
-				.port_register_set
-				.read_volatile_at((self.port.get() - 1).into())
-				.portsc
-				.port_speed(),
-		));
-		ep.set_max_burst_size(0);
+		ep.set_max_packet_size(pkt_size);
 		ep.set_tr_dequeue_pointer(transfer_ring.as_phys());
 		ep.set_dequeue_cycle_state();
-		ep.set_interval(0);
-		ep.set_max_primary_streams(0);
-		ep.set_mult(0);
-		ep.set_error_count(0);
+		ep.set_error_count(3);
 
 		// Allocate the Output Device Context data structure and set to '0'
-		let output_dev_context = Dma::<Device32Byte>::new().unwrap_or_else(|_| todo!());
+		let _output_dev_context = Dma::<Device32Byte>::new().unwrap_or_else(|_| todo!());
 
 		// Load the appropriate (Device Slot ID) entry in the Device Context Base Address Array
-		ctrl.dcbaap.set(slot.into(), output_dev_context.as_phys());
+		self.dcbaa.set(slot, _output_dev_context.as_phys());
 
 		// Issue an Address Device Command for the Device Slot
-		Ok((
-			ctrl.enqueue_command(command::Allowed::AddressDevice(
+		self.enqueue_command(
+			command::Allowed::AddressDevice(
 				*command::AddressDevice::new()
 					.set_slot_id(slot.get())
 					.set_input_context_pointer(input_context.as_phys()),
-			))?,
-			SetAddress {
+			),
+			Pending::SetAddress(SetAddress {
 				dev: Device {
 					slot,
-					_output_dev_context: output_dev_context,
+					port,
+					port_speed,
+					_output_dev_context,
 					transfer_ring,
 					endpoints: Default::default(),
 				},
-			},
-		))
+				input_context,
+				adjust_packet_size,
+			}),
+		);
 	}
 }
 
 pub(super) struct SetAddress {
-	dev: Device,
+	pub(super) dev: Device,
+	adjust_packet_size: bool,
+	input_context: Dma<Input32Byte>,
 }
 
 impl SetAddress {
+	pub fn should_adjust_packet_size(&self) -> bool {
+		self.adjust_packet_size
+	}
+
+	pub fn adjust_packet_size(&mut self, pkt_size: u8) -> command::Allowed {
+		trace!("adjust packet size");
+		assert!(self.adjust_packet_size);
+		self.adjust_packet_size = false;
+
+		let inp = unsafe { self.input_context.as_mut() };
+
+		inp.control_mut().set_add_context_flag(1);
+
+		let ep = inp.device_mut().endpoint_mut(1);
+		ep.set_endpoint_type(EndpointType::Control);
+		ep.set_max_packet_size(pkt_size.into());
+		ep.set_max_burst_size(0);
+		ep.set_tr_dequeue_pointer(self.dev.transfer_ring.as_phys());
+		ep.set_dequeue_cycle_state();
+		ep.set_error_count(3);
+		inp.control_mut().set_add_context_flag(1); // evaluate ep 1 context
+
+		let cmd = *command::EvaluateContext::new()
+			.set_input_context_pointer(self.input_context.as_phys())
+			.set_slot_id(self.dev.slot.get());
+		command::Allowed::EvaluateContext(cmd)
+	}
+
 	#[must_use]
 	pub fn finish(self) -> Device {
+		trace!("finish set address");
+		assert!(!self.adjust_packet_size);
 		self.dev
 	}
 }
 
-fn calc_packet_size(speed: u8) -> u16 {
+/// The boolean field indicates whether GET_DESCRIPTOR should be used to get the real packet size.
+///
+/// # Note
+///
+/// The speed must come from the **link** register.
+fn calc_packet_size(speed: u8) -> (u16, bool) {
 	match speed {
 		0 => panic!("uninitialized"),
-		LOW_SPEED => 8,
-		HIGH_SPEED => 64,
-		SUPERSPEED_GEN1_X1 | SUPERSPEED_GEN2_X1 | SUPERSPEED_GEN1_X2 | SUPERSPEED_GEN2_X2 => 512,
-		FULL_SPEED => todo!("use GET_DESCRIPTOR to get packet size"),
+		LOW_SPEED => (8, false),
+		HIGH_SPEED => (64, false),
+		SUPERSPEED_GEN1_X1 | SUPERSPEED_GEN2_X1 | SUPERSPEED_GEN1_X2 | SUPERSPEED_GEN2_X2 => {
+			(512, false)
+		}
+		FULL_SPEED => (8, true),
 		n => unimplemented!("unknown speed {}", n),
 	}
 }
