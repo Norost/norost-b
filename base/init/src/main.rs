@@ -51,12 +51,10 @@ fn main() -> ! {
 	let cfg = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
 	let mut cf = scf::parse2(cfg);
 
-	let mut stderr_path = None;
 	let mut programs = Vec::new();
 	for item in cf.iter() {
 		let mut it = item.into_group().unwrap();
 		match it.next_str().unwrap() {
-			"stderr" => stderr_path = Some(it.next_str().unwrap()),
 			"programs" => {
 				for item in it {
 					let mut it = item.into_group().unwrap();
@@ -105,16 +103,11 @@ fn main() -> ! {
 			_ => panic!("unknown section"),
 		}
 	}
-	let stderr_path = stderr_path.unwrap();
-
-	let open = |p: &[u8]| rt::RefObject::from_raw(rt::io::open(root.as_raw(), p).unwrap());
-	let stderr = open(stderr_path.as_bytes());
-	rt::io::set_stderr(Some(stderr));
 
 	// Add stderr by default, as it is used for panic & other output
 	for p in programs.iter_mut() {
 		if !p.objects.iter().find(|(n, _)| *n == "err").is_some() {
-			p.objects.push(("err", Vec::from([stderr_path])));
+			p.objects.push(("err", Vec::from(["system/log"])));
 		}
 	}
 
