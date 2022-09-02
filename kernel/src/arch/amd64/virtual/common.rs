@@ -1,9 +1,11 @@
-use super::super::PageFlags;
-use crate::memory::{frame, Page};
-use core::{
-	arch::asm,
-	fmt,
-	ptr::{self, NonNull},
+use {
+	super::super::PageFlags,
+	crate::memory::{frame, Page},
+	core::{
+		arch::asm,
+		fmt,
+		ptr::{self, NonNull},
+	},
 };
 
 // Don't implement copy to avoid accidentally updating stack values instead of

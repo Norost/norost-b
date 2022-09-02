@@ -1,12 +1,14 @@
-use super::{Error, Object, Ticket};
-use crate::{object_table::QueryIter, sync::Mutex};
-use alloc::{
-	boxed::Box,
-	collections::BTreeMap,
-	sync::{Arc, Weak},
-	vec::Vec,
+use {
+	super::{Error, Object, Ticket},
+	crate::{object_table::QueryIter, sync::Mutex},
+	alloc::{
+		boxed::Box,
+		collections::BTreeMap,
+		sync::{Arc, Weak},
+		vec::Vec,
+	},
+	core::mem,
 };
-use core::mem;
 
 /// A root object. This object has multiple child objects which can be accessed by a name, e.g.
 ///
@@ -29,9 +31,7 @@ pub struct Root {
 impl Root {
 	/// Create a new root
 	pub fn new() -> Self {
-		Self {
-			objects: Default::default(),
-		}
+		Self { objects: Default::default() }
 	}
 
 	/// Add a new object to the root.

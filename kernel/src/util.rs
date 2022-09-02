@@ -1,12 +1,14 @@
 //! # Various useful utilities that probably exist in a crate somewhere but meh.
 #![allow(dead_code)]
 
-use core::{
-	cell::Cell,
-	fmt::{self, Write},
-	str,
+use {
+	core::{
+		cell::Cell,
+		fmt::{self, Write},
+		str,
+	},
+	norostb_kernel::Handle,
 };
-use norostb_kernel::Handle;
 
 /// Pretty print an iterator.
 ///

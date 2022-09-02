@@ -15,18 +15,22 @@ pub mod r#virtual;
 mod vm;
 mod vsyscall;
 
-use crate::{boot, driver::apic};
-use core::{
-	arch::asm,
-	mem::MaybeUninit,
-	sync::atomic::{AtomicU8, Ordering},
+use {
+	crate::{boot, driver::apic},
+	core::{
+		arch::asm,
+		mem::MaybeUninit,
+		sync::atomic::{AtomicU8, Ordering},
+	},
 };
-pub use gdt::GDT;
-pub use idt::{Handler, IDTEntry};
-pub use scheduler::yield_current_thread;
-pub use syscall::{
-	clear_current_thread, current_process, current_thread, current_thread_ptr, current_thread_weak,
-	set_current_thread, CpuData, ThreadData,
+pub use {
+	gdt::GDT,
+	idt::{Handler, IDTEntry},
+	scheduler::yield_current_thread,
+	syscall::{
+		clear_current_thread, current_process, current_thread, current_thread_ptr,
+		current_thread_weak, set_current_thread, CpuData, ThreadData,
+	},
 };
 
 /// The IRQ used by the timer.

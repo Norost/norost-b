@@ -1,13 +1,15 @@
-use crate::{
-	boot,
-	memory::{
-		frame::{PPNBox, PageFrameIter, PPN},
-		r#virtual::RWX,
-		Page,
+use {
+	crate::{
+		boot,
+		memory::{
+			frame::{PPNBox, PageFrameIter, PPN},
+			r#virtual::RWX,
+			Page,
+		},
+		object_table::{Error, MemoryObject, Object, PageFlags, Root, Ticket, TinySlice},
 	},
-	object_table::{Error, MemoryObject, Object, PageFlags, Root, Ticket, TinySlice},
+	alloc::{boxed::Box, sync::Arc},
 };
-use alloc::{boxed::Box, sync::Arc};
 
 static mut BASE: PPNBox = 0;
 static mut INFO: FramebufferInfo = FramebufferInfo {
@@ -59,10 +61,7 @@ impl Object for Framebuffer {
 unsafe impl MemoryObject for Framebuffer {
 	fn physical_pages(&self, f: &mut dyn FnMut(&[PPN]) -> bool) {
 		// SAFETY: BASE is not modified after init.
-		for p in (PageFrameIter {
-			base: unsafe { PPN(BASE) },
-			count: self.physical_pages_len(),
-		}) {
+		for p in (PageFrameIter { base: unsafe { PPN(BASE) }, count: self.physical_pages_len() }) {
 			if !f(&[p]) {
 				break;
 			}

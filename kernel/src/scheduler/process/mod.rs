@@ -2,26 +2,28 @@ mod elf;
 mod io;
 mod table;
 
-use super::{MemoryObject, Thread};
-use crate::{
-	arch,
-	memory::{
-		frame::{self, AllocateHints},
-		r#virtual::{AddressSpace, MapError, UnmapError, RWX},
-		Page,
+use {
+	super::{MemoryObject, Thread},
+	crate::{
+		arch,
+		memory::{
+			frame::{self, AllocateHints},
+			r#virtual::{AddressSpace, MapError, UnmapError, RWX},
+			Page,
+		},
+		object_table::{AnyTicket, Error, Object, Ticket, TicketWaker, TinySlice},
+		sync::{Mutex, SpinLock},
+		util::{erase_handle, unerase_handle},
 	},
-	object_table::{AnyTicket, Error, Object, Ticket, TicketWaker, TinySlice},
-	sync::{Mutex, SpinLock},
-	util::{erase_handle, unerase_handle},
+	alloc::{boxed::Box, sync::Arc, vec::Vec},
+	arena::Arena,
+	core::{
+		num::NonZeroUsize,
+		ptr::NonNull,
+		sync::atomic::{AtomicU8, Ordering},
+	},
+	norostb_kernel::Handle,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use arena::Arena;
-use core::{
-	num::NonZeroUsize,
-	ptr::NonNull,
-	sync::atomic::{AtomicU8, Ordering},
-};
-use norostb_kernel::Handle;
 
 pub use table::post_init;
 
@@ -168,10 +170,7 @@ impl Process {
 
 	/// Create an [`AllocateHints`] structure for the given virtual address.
 	pub fn allocate_hints(&self, address: *const u8) -> AllocateHints {
-		AllocateHints {
-			address,
-			color: self.hint_color,
-		}
+		AllocateHints { address, color: self.hint_color }
 	}
 
 	/// Begin preparations to destroy this process.

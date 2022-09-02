@@ -1,5 +1,7 @@
-use crate::{Handle, RWX};
-use core::ops::RangeInclusive;
+use {
+	crate::{Handle, RWX},
+	core::ops::RangeInclusive,
+};
 
 macro_rules! impl_ {
 	{ $($v:ident $i:literal)* } => {
@@ -134,8 +136,7 @@ pub enum NewObjectArgs {
 impl NewObject {
 	#[inline]
 	pub fn into_args(self) -> (usize, NewObjectArgs) {
-		use NewObjectArgs::*;
-		use NewObjectType::*;
+		use {NewObjectArgs::*, NewObjectType::*};
 		let (t, a) = match self {
 			Self::SubRange { handle, range } => {
 				(SubRange, N3(handle as _, *range.start(), *range.end()))
@@ -169,10 +170,7 @@ impl NewObject {
 	pub fn try_from_args(ty: usize, a: usize, b: usize, c: usize) -> Option<Self> {
 		use NewObjectType::*;
 		Some(match NewObjectType::from_raw(ty)? {
-			SubRange => Self::SubRange {
-				handle: a as _,
-				range: b..=c,
-			},
+			SubRange => Self::SubRange { handle: a as _, range: b..=c },
 			Root => Self::Root,
 			Duplicate => Self::Duplicate { handle: a as _ },
 			SharedMemory => Self::SharedMemory { size: a },
@@ -182,10 +180,9 @@ impl NewObject {
 				allow_sharing: b & (1 << 8) != 0,
 				max_request_mem: c as _,
 			},
-			PermissionMask => Self::PermissionMask {
-				handle: a as _,
-				rwx: RWX::try_from_raw((b & 7) as u8)?,
-			},
+			PermissionMask => {
+				Self::PermissionMask { handle: a as _, rwx: RWX::try_from_raw((b & 7) as u8)? }
+			}
 			Pipe => Self::Pipe,
 			MessagePipe => Self::MessagePipe,
 		})

@@ -1,6 +1,8 @@
-use super::{Object, Ticket};
-use crate::sync::Mutex;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use {
+	super::{Object, Ticket},
+	crate::sync::Mutex,
+	alloc::{boxed::Box, sync::Arc, vec::Vec},
+};
 
 /// A query that returns no results.
 pub struct NoneQuery;

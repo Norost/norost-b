@@ -1,7 +1,9 @@
-use crate::arch::sync;
-use core::{
-	cell::UnsafeCell,
-	ops::{Deref, DerefMut},
+use {
+	crate::arch::sync,
+	core::{
+		cell::UnsafeCell,
+		ops::{Deref, DerefMut},
+	},
 };
 
 /// A spinlock intended for use with interrupt service routines.
@@ -25,10 +27,7 @@ pub struct IsrGuard<'a, T> {
 
 impl<T> SpinLock<T> {
 	pub const fn new(value: T) -> Self {
-		Self {
-			lock: Default::default(),
-			value: UnsafeCell::new(value),
-		}
+		Self { lock: Default::default(), value: UnsafeCell::new(value) }
 	}
 
 	/// Lock from *outside* an ISR routine. This will disable interrupts.

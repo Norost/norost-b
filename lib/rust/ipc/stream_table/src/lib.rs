@@ -11,8 +11,7 @@ mod buffer;
 
 pub mod stack;
 
-pub use buffer::*;
-pub use raw::Id as JobId;
+pub use {buffer::*, raw::Id as JobId};
 
 type Handle = u32;
 
@@ -81,11 +80,7 @@ impl ServerQueue {
 	/// `base` must point to a valid memory region.
 	#[inline(always)]
 	pub unsafe fn new(base: NonNull<u8>) -> Self {
-		Self {
-			base: Queue { base },
-			response_tail: Wrapping(0),
-			request_head: Wrapping(0),
-		}
+		Self { base: Queue { base }, response_tail: Wrapping(0), request_head: Wrapping(0) }
 	}
 
 	#[inline(always)]
@@ -144,40 +139,18 @@ impl ServerQueue {
 				handle,
 				job_id,
 				match r.ty().unwrap() {
-					T::Read => R::Read {
-						amount: args.amount(),
-					},
-					T::Write => R::Write {
-						data: Slice::from_raw(args.slice()),
-					},
-					T::Open => R::Open {
-						path: Slice::from_raw(args.slice()),
-					},
-					T::GetMeta => R::GetMeta {
-						property: Slice::from_raw(args.slice()),
-					},
-					T::SetMeta => R::SetMeta {
-						property_value: Slice::from_raw(args.slice()),
-					},
+					T::Read => R::Read { amount: args.amount() },
+					T::Write => R::Write { data: Slice::from_raw(args.slice()) },
+					T::Open => R::Open { path: Slice::from_raw(args.slice()) },
+					T::GetMeta => R::GetMeta { property: Slice::from_raw(args.slice()) },
+					T::SetMeta => R::SetMeta { property_value: Slice::from_raw(args.slice()) },
 					T::Close => R::Close,
-					T::Create => R::Create {
-						path: Slice::from_raw(args.slice()),
-					},
-					T::Destroy => R::Destroy {
-						path: Slice::from_raw(args.slice()),
-					},
-					T::SeekStart => R::Seek {
-						from: S::Start(args.offset_u()),
-					},
-					T::SeekCurrent => R::Seek {
-						from: S::Current(args.offset_s()),
-					},
-					T::SeekEnd => R::Seek {
-						from: S::End(args.offset_s() as _),
-					},
-					T::Share => R::Share {
-						share: args.share(),
-					},
+					T::Create => R::Create { path: Slice::from_raw(args.slice()) },
+					T::Destroy => R::Destroy { path: Slice::from_raw(args.slice()) },
+					T::SeekStart => R::Seek { from: S::Start(args.offset_u()) },
+					T::SeekCurrent => R::Seek { from: S::Current(args.offset_s()) },
+					T::SeekEnd => R::Seek { from: S::End(args.offset_s() as _) },
+					T::Share => R::Share { share: args.share() },
 				},
 			)
 		})
@@ -195,11 +168,7 @@ impl ClientQueue {
 	/// `base` must point to a valid memory region.
 	#[inline(always)]
 	pub unsafe fn new(base: NonNull<u8>) -> Self {
-		Self {
-			base: Queue { base },
-			response_head: Wrapping(0),
-			request_tail: Wrapping(0),
-		}
+		Self { base: Queue { base }, response_head: Wrapping(0), request_tail: Wrapping(0) }
 	}
 
 	#[inline(always)]
@@ -333,10 +302,7 @@ pub struct Slice {
 
 impl Slice {
 	fn from_raw(raw: raw::Slice) -> Self {
-		Self {
-			offset: raw.offset(),
-			length: raw.length(),
-		}
+		Self { offset: raw.offset(), length: raw.length() }
 	}
 
 	fn into_raw(self) -> raw::Slice {

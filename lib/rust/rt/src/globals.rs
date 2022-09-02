@@ -1,5 +1,7 @@
-use crate::{AtomicHandle, Handle};
-use core::{mem, sync::atomic::AtomicPtr};
+use {
+	crate::{AtomicHandle, Handle},
+	core::{mem, sync::atomic::AtomicPtr},
+};
 
 #[linkage = "weak"]
 #[export_name = "__rt_globals"]

@@ -8,11 +8,12 @@ mod rect;
 mod set_scanout;
 mod transfer_to_host_2d;
 
-pub use display_info::*;
-pub use edid::*;
-pub use rect::Rect;
-pub use set_scanout::SetScanout;
-pub use transfer_to_host_2d::TransferToHost2D;
+pub use {
+	display_info::*, edid::*, rect::Rect, set_scanout::SetScanout,
+	transfer_to_host_2d::TransferToHost2D,
+};
 
-use crate::ControlHeader;
-use endian::{u32le, u64le};
+use {
+	crate::ControlHeader,
+	endian::{u32le, u64le},
+};

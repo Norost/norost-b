@@ -1,5 +1,7 @@
-use crate::{io, AsyncObject};
-use alloc::format;
+use {
+	crate::{io, AsyncObject},
+	alloc::format,
+};
 
 pub use no_std_net::*;
 

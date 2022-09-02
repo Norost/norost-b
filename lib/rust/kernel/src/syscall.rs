@@ -18,19 +18,21 @@ pub const ID_EXIT_THREAD: usize = 12;
 pub const ID_CREATE_IO_QUEUE: usize = 13;
 pub const ID_DESTROY_IO_QUEUE: usize = 14;
 
-use crate::{
-	error, io,
-	object::{NewObject, NewObjectArgs},
-	time::Monotonic,
-	Page,
-};
-use core::{
-	arch::asm,
-	fmt,
-	num::NonZeroUsize,
-	ptr::{self, NonNull},
-	str,
-	time::Duration,
+use {
+	crate::{
+		error, io,
+		object::{NewObject, NewObjectArgs},
+		time::Monotonic,
+		Page,
+	},
+	core::{
+		arch::asm,
+		fmt,
+		num::NonZeroUsize,
+		ptr::{self, NonNull},
+		str,
+		time::Duration,
+	},
 };
 
 struct DebugLossy<'a>(&'a [u8]);

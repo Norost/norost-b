@@ -1,6 +1,4 @@
-use super::ControlHeader;
-use endian::u32le;
-use virtio::PhysAddr;
+use {super::ControlHeader, endian::u32le, virtio::PhysAddr};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -30,10 +28,6 @@ pub struct MemoryEntry {
 
 impl MemoryEntry {
 	pub fn new(address: PhysAddr, length: u32) -> Self {
-		Self {
-			address,
-			length: length.into(),
-			_padding: 0.into(),
-		}
+		Self { address, length: length.into(), _padding: 0.into() }
 	}
 }

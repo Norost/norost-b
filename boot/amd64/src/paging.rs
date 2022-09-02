@@ -1,6 +1,7 @@
-use crate::mtrr;
-use core::fmt;
-use core::mem::MaybeUninit;
+use {
+	crate::mtrr,
+	core::{fmt, mem::MaybeUninit},
+};
 
 #[repr(C)]
 #[repr(align(4096))]

@@ -3,12 +3,14 @@
 
 extern crate alloc;
 
-use alloc::string::ToString;
-use core::ptr::NonNull;
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use framebuffer::{Bgrx8888, FrameBuffer, Rgbx8888};
-use rt::Error;
-use rt_default as _;
+use {
+	alloc::string::ToString,
+	core::ptr::NonNull,
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	framebuffer::{Bgrx8888, FrameBuffer, Rgbx8888},
+	rt::Error,
+	rt_default as _,
+};
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
@@ -68,11 +70,7 @@ fn main() -> ! {
 						Response::Data(data)
 					}
 					b"bin/resolution" => {
-						let r = ipc_gpu::Resolution {
-							x: width as _,
-							y: height as _,
-						}
-						.encode();
+						let r = ipc_gpu::Resolution { x: width as _, y: height as _ }.encode();
 						let data = tbl.alloc(r.len()).unwrap();
 						data.copy_from(0, &r);
 						Response::Data(data)

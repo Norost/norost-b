@@ -1,7 +1,9 @@
 // Copied from acpi crate because I can't be bothered maintaining yet another fork.
 
-use acpi::{sdt::SdtHeader, AcpiTable};
-use core::{mem, slice};
+use {
+	acpi::{sdt::SdtHeader, AcpiTable},
+	core::{mem, slice},
+};
 
 // Use u8 only as QEMU puts this structure at address 0x0ffe2269 for a presumably cursed reason
 #[repr(C)]

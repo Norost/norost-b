@@ -1,5 +1,4 @@
-use super::common;
-use core::fmt;
+use {super::common, core::fmt};
 
 pub struct DumpCurrent;
 

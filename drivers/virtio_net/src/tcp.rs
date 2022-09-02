@@ -1,9 +1,11 @@
-use alloc::vec::Vec;
-use smoltcp::{
-	iface::{Interface, SocketHandle},
-	phy::Device,
-	socket::{TcpSocket, TcpSocketBuffer, TcpState},
-	wire::IpEndpoint,
+use {
+	alloc::vec::Vec,
+	smoltcp::{
+		iface::{Interface, SocketHandle},
+		phy::Device,
+		socket::{TcpSocket, TcpSocketBuffer, TcpState},
+		wire::IpEndpoint,
+	},
 };
 
 pub struct TcpListener<const PENDING_MAX: usize>

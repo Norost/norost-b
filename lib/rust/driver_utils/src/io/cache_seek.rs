@@ -1,5 +1,7 @@
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::num::NonZeroU64;
+use std::{
+	io::{self, Read, Seek, SeekFrom, Write},
+	num::NonZeroU64,
+};
 
 /// A wrapper that prevents redundant seek calls from being performed. It also defers seeks until
 /// a read or write is performed.
@@ -21,12 +23,7 @@ impl<T: Seek> CacheSeek<T> {
 	///
 	/// The seek position of the inner device **must** be set to 0!
 	pub fn new(inner: T) -> Self {
-		Self {
-			inner,
-			inner_position: 0,
-			inner_size: None,
-			position: 0,
-		}
+		Self { inner, inner_position: 0, inner_size: None, position: 0 }
 	}
 
 	/// Seek to the current position. This only performs an actual seek call if the given position

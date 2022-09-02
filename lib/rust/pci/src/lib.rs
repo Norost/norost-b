@@ -9,14 +9,11 @@
 #![no_std]
 #![feature(ptr_metadata)]
 
-use core::cell::Cell;
-use core::convert::TryInto;
-use core::fmt;
-use core::marker::PhantomData;
-use core::num::NonZeroU32;
-use core::ptr::NonNull;
-use endian::{u16le, u32le};
-use volatile::VolatileCell;
+use {
+	core::{cell::Cell, convert::TryInto, fmt, marker::PhantomData, num::NonZeroU32, ptr::NonNull},
+	endian::{u16le, u32le},
+	volatile::VolatileCell,
+};
 
 pub const BAR_IO_SPACE: u32 = 1;
 pub const BAR_TYPE_MASK: u32 = 0x6;
@@ -88,9 +85,7 @@ impl BaseAddress {
 	pub fn full_base_address(bars: &[Self], index: usize) -> Option<ParsedBaseAddress> {
 		let low = bars.get(index)?.0.get().into();
 		if BaseAddress::is_io(low) {
-			Some(ParsedBaseAddress::IO32 {
-				address: low & !0x3,
-			})
+			Some(ParsedBaseAddress::IO32 { address: low & !0x3 })
 		} else if BaseAddress::is_32bit(low) {
 			Some(ParsedBaseAddress::MMIO32 {
 				address: low & !0xf,
@@ -468,10 +463,7 @@ impl<'a> Header<'a> {
 		match self {
 			Self::H0(h) => h.capabilities(),
 			Self::H1(h) => h.capabilities(),
-			Self::Unknown(_) => CapabilityIter {
-				marker: PhantomData,
-				next: None,
-			},
+			Self::Unknown(_) => CapabilityIter { marker: PhantomData, next: None },
 		}
 	}
 
@@ -916,13 +908,7 @@ impl Pci {
 		}
 		let mem = mm;
 		let alloc_counter = Cell::new(0);
-		Self {
-			start,
-			physical_address,
-			size,
-			mem,
-			alloc_counter,
-		}
+		Self { start, physical_address, size, mem, alloc_counter }
 	}
 
 	/// Returns an iterator over all the valid devices.
@@ -1060,11 +1046,7 @@ pub struct Bus<'a> {
 
 impl<'a> Bus<'a> {
 	pub fn iter(&self) -> IterBus<'a> {
-		IterBus {
-			pci: self.pci,
-			bus: self.bus,
-			device: 0,
-		}
+		IterBus { pci: self.pci, bus: self.bus, device: 0 }
 	}
 }
 
@@ -1176,10 +1158,7 @@ impl<'a> Iterator for IterPci<'a> {
 			let h = self.pci.get_unchecked(0, 0, 0)?;
 			if h.common().header_type.get() & 0x80 == 0 {
 				self.bus = 0xff;
-				return Some(Bus {
-					pci: self.pci,
-					bus: 0,
-				});
+				return Some(Bus { pci: self.pci, bus: 0 });
 			}
 		}
 
@@ -1189,10 +1168,7 @@ impl<'a> Iterator for IterPci<'a> {
 			self.bus = 0xff;
 			None
 		} else {
-			Some(Bus {
-				pci: self.pci,
-				bus: self.bus,
-			})
+			Some(Bus { pci: self.pci, bus: self.bus })
 		}
 	}
 }
@@ -1205,11 +1181,7 @@ impl<'a> Iterator for IterBus<'a> {
 			let dev = self.device;
 			self.device += 1;
 			if self.pci.get(self.bus, dev, 0).is_some() {
-				return Some(Device {
-					pci: self.pci,
-					bus: self.bus,
-					device: dev,
-				});
+				return Some(Device { pci: self.pci, bus: self.bus, device: dev });
 			}
 		}
 		None
@@ -1240,10 +1212,7 @@ impl<'a> Iterator for IterDevice<'a> {
 					if let Header::H1(h) = h {
 						if h.common.class_code.get() == 0x6 && h.common.subclass.get() == 0x4 {
 							let sb = h.secondary_bus_number.get();
-							Some(FunctionItem::Bus(Bus {
-								pci: self.pci,
-								bus: sb,
-							}))
+							Some(FunctionItem::Bus(Bus { pci: self.pci, bus: sb }))
 						} else {
 							Some(FunctionItem::Header(Header::H1(h)))
 						}

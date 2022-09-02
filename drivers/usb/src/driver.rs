@@ -1,12 +1,14 @@
-use crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer};
-use alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec};
-use core::{
-	future::Future,
-	num::{NonZeroU8, Wrapping},
-	pin::Pin,
-	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+use {
+	crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer},
+	alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec},
+	core::{
+		future::Future,
+		num::{NonZeroU8, Wrapping},
+		pin::Pin,
+		task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+	},
+	io_queue_rt::{Open, Queue, Read, Write},
 };
-use io_queue_rt::{Open, Queue, Read, Write};
 
 const MSG_SIZE: usize = 32;
 
@@ -18,11 +20,7 @@ pub struct Drivers<'a> {
 
 impl<'a> Drivers<'a> {
 	pub fn new(queue: &'a Queue) -> Self {
-		Self {
-			queue,
-			drivers: Default::default(),
-			handlers: Default::default(),
-		}
+		Self { queue, drivers: Default::default(), handlers: Default::default() }
 	}
 
 	pub fn dequeue(&mut self) -> Option<(NonZeroU8, u32, Event)> {
@@ -63,10 +61,7 @@ impl<'a> Drivers<'a> {
 					ipc_usb::SEND_TY_DATA_IN => {
 						let [_, endpoint, a, b, c, d]: [u8; 6] =
 							(&*buf).try_into().expect("invalid msg");
-						Some(Event::DataIn {
-							endpoint,
-							size: u32::from_le_bytes([a, b, c, d]),
-						})
+						Some(Event::DataIn { endpoint, size: u32::from_le_bytes([a, b, c, d]) })
 					}
 					ipc_usb::SEND_TY_DATA_OUT => {
 						let [_, endpoint]: [u8; 2] = (&*buf).try_into().expect("invalid msg");
@@ -258,14 +253,8 @@ impl<'a> DeviceDriver<'a> {
 }
 
 pub enum Event {
-	DataIn {
-		endpoint: u8,
-		size: u32,
-	},
-	DataOut {
-		endpoint: u8,
-		data: crate::dma::Dma<[u8]>,
-	},
+	DataIn { endpoint: u8, size: u32 },
+	DataOut { endpoint: u8, data: crate::dma::Dma<[u8]> },
 }
 
 pub enum Message<'a> {

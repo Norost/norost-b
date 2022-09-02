@@ -8,21 +8,23 @@ extern crate alloc;
 
 pub use nora_io_queue::{error, Handle, Monotonic, Pow2Size, SeekFrom};
 
-use alloc::boxed::Box;
-use arena::Arena;
-use async_completion::{Buf, BufMut};
-use core::{
-	any::Any,
-	cell::{Cell, RefCell},
-	fmt,
-	future::Future,
-	mem::{self, MaybeUninit},
-	pin::Pin,
-	slice,
-	task::{Context, Poll, Waker},
-	time::Duration,
+use {
+	alloc::boxed::Box,
+	arena::Arena,
+	async_completion::{Buf, BufMut},
+	core::{
+		any::Any,
+		cell::{Cell, RefCell},
+		fmt,
+		future::Future,
+		mem::{self, MaybeUninit},
+		pin::Pin,
+		slice,
+		task::{Context, Poll, Waker},
+		time::Duration,
+	},
+	nora_io_queue::{self as q, Request, TinySlice},
 };
-use nora_io_queue::{self as q, Request, TinySlice};
 
 pub struct Queue {
 	inner: RefCell<q::Queue>,
@@ -84,11 +86,7 @@ impl Queue {
 			.borrow_mut()
 			.submit(i.into_raw().0 as u64, handle, wrap(buf));
 		match res {
-			Ok(_) => Ok(BufferFuture {
-				queue: self,
-				inflight_index: i,
-				buffer: Some(buffer),
-			}),
+			Ok(_) => Ok(BufferFuture { queue: self, inflight_index: i, buffer: Some(buffer) }),
 			Err(_) => {
 				inflight.remove(i);
 				Err(Full(buffer))
@@ -116,11 +114,7 @@ impl Queue {
 			.borrow_mut()
 			.submit(i.into_raw().0 as u64, handle, wrap(buf));
 		match res {
-			Ok(_) => Ok(BufferFuture {
-				queue: self,
-				inflight_index: i,
-				buffer: Some(buffer),
-			}),
+			Ok(_) => Ok(BufferFuture { queue: self, inflight_index: i, buffer: Some(buffer) }),
 			Err(_) => {
 				inflight.remove(i);
 				Err(Full(buffer))

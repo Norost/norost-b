@@ -1,9 +1,11 @@
-use crate::{
-	io::{self, Write},
-	object::file_root,
-	AsyncObject, RefAsyncObject,
+use {
+	crate::{
+		io::{self, Write},
+		object::file_root,
+		AsyncObject, RefAsyncObject,
+	},
+	alloc::vec::Vec,
 };
-use alloc::vec::Vec;
 
 pub use rt::process::ExitStatus;
 

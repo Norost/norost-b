@@ -1,19 +1,23 @@
-use super::PCI;
-use crate::memory::{
-	frame::{PageFrameIter, PPN},
-	r#virtual::RWX,
+use {
+	super::PCI,
+	crate::{
+		memory::{
+			frame::{PageFrameIter, PPN},
+			r#virtual::RWX,
+		},
+		object_table::{Object, PageFlags, Ticket, TicketWaker},
+		scheduler::MemoryObject,
+		sync::SpinLock,
+		Error,
+	},
+	alloc::{
+		boxed::Box,
+		sync::{Arc, Weak},
+		vec::Vec,
+	},
+	core::mem,
+	pci::BaseAddress,
 };
-use crate::object_table::{Object, PageFlags, Ticket, TicketWaker};
-use crate::scheduler::MemoryObject;
-use crate::sync::SpinLock;
-use crate::Error;
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
-	vec::Vec,
-};
-use core::mem;
-use pci::BaseAddress;
 
 /// A single PCI device.
 pub struct PciDevice {
@@ -54,10 +58,7 @@ impl Object for PciDevice {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(match path {
 			b"poll" => {
-				let o = IrqPollInner {
-					irq_occurred: false.into(),
-					waiting: Vec::new(),
-				};
+				let o = IrqPollInner { irq_occurred: false.into(), waiting: Vec::new() };
 				let o = Arc::new(IrqPoll(SpinLock::new(o)));
 				IRQ_LISTENERS.lock().push(Arc::downgrade(&o));
 				Ok(o)
@@ -81,9 +82,7 @@ impl Object for PciDevice {
 					};
 					// FIXME there needs to be a better way to limit the amount of pages.
 					frames.count = frames.count.min(1 << 20);
-					let r = Arc::new(BarRegion {
-						frames: frames.collect(),
-					});
+					let r = Arc::new(BarRegion { frames: frames.collect() });
 					Ok(r)
 				} else {
 					Err(Error::CantCreateObject)

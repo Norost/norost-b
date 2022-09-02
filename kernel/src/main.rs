@@ -32,9 +32,11 @@
 
 extern crate alloc;
 
-use crate::object_table::{Error, Object};
-use alloc::sync::{Arc, Weak};
-use core::panic::PanicInfo;
+use {
+	crate::object_table::{Error, Object},
+	alloc::sync::{Arc, Weak},
+	core::panic::PanicInfo,
+};
 
 #[macro_use]
 mod log;

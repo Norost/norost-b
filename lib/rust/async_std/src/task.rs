@@ -1,9 +1,11 @@
-use crate::queue;
-use core::{
-	future::Future,
-	pin::Pin,
-	task::{Context, Poll},
-	time::Duration,
+use {
+	crate::queue,
+	core::{
+		future::Future,
+		pin::Pin,
+		task::{Context, Poll},
+		time::Duration,
+	},
 };
 
 pub fn block_on<R>(fut: impl Future<Output = R>) -> R {

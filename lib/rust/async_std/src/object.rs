@@ -1,8 +1,14 @@
-use crate::{
-	io::{self, Buf, BufMut},
-	queue,
+use {
+	crate::{
+		io::{self, Buf, BufMut},
+		queue,
+	},
+	core::{
+		marker::PhantomData,
+		mem::{self, ManuallyDrop},
+		ops::Deref,
+	},
 };
-use core::{marker::PhantomData, mem, mem::ManuallyDrop, ops::Deref};
 
 #[repr(transparent)]
 pub struct AsyncObject(rt::Handle);
@@ -125,10 +131,7 @@ impl<'a> RefAsyncObject<'a> {
 	}
 
 	pub fn from_raw(handle: rt::Handle) -> Self {
-		Self {
-			handle,
-			_marker: PhantomData,
-		}
+		Self { handle, _marker: PhantomData }
 	}
 }
 
@@ -140,19 +143,13 @@ impl<'a> From<&'a rt::Object> for RefAsyncObject<'a> {
 
 impl<'a> From<&'a AsyncObject> for RefAsyncObject<'a> {
 	fn from(obj: &'a AsyncObject) -> Self {
-		Self {
-			handle: obj.0,
-			_marker: PhantomData,
-		}
+		Self { handle: obj.0, _marker: PhantomData }
 	}
 }
 
 impl<'a> From<rt::RefObject<'a>> for RefAsyncObject<'a> {
 	fn from(obj: rt::RefObject<'a>) -> Self {
-		Self {
-			handle: obj.as_raw(),
-			_marker: PhantomData,
-		}
+		Self { handle: obj.as_raw(), _marker: PhantomData }
 	}
 }
 

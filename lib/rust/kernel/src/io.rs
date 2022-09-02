@@ -178,12 +178,7 @@ impl Request {
 
 	#[inline(always)]
 	pub fn close(user_data: u64, handle: Handle) -> Self {
-		Self {
-			ty: Self::CLOSE,
-			handle,
-			user_data,
-			..Default::default()
-		}
+		Self { ty: Self::CLOSE, handle, user_data, ..Default::default() }
 	}
 
 	#[inline(always)]
@@ -199,12 +194,7 @@ impl Request {
 
 	#[inline(always)]
 	pub fn destroy(user_data: u64, handle: Handle) -> Self {
-		Self {
-			ty: Self::DESTROY,
-			handle,
-			user_data,
-			..Default::default()
-		}
+		Self { ty: Self::DESTROY, handle, user_data, ..Default::default() }
 	}
 }
 
@@ -298,20 +288,11 @@ pub enum DoIoOp<'a> {
 	/// Open an object at the given location.
 	Open { path: &'a [u8] },
 	/// Get meta-information about an object.
-	GetMeta {
-		property: &'a TinySlice<u8>,
-		value: &'a mut TinySlice<u8>,
-	},
+	GetMeta { property: &'a TinySlice<u8>, value: &'a mut TinySlice<u8> },
 	/// Get meta-information about an object.
-	GetMetaUninit {
-		property: &'a TinySlice<u8>,
-		value: &'a mut TinySlice<MaybeUninit<u8>>,
-	},
+	GetMetaUninit { property: &'a TinySlice<u8>, value: &'a mut TinySlice<MaybeUninit<u8>> },
 	/// Set meta-information about an object.
-	SetMeta {
-		property: &'a TinySlice<u8>,
-		value: &'a TinySlice<u8>,
-	},
+	SetMeta { property: &'a TinySlice<u8>, value: &'a TinySlice<u8> },
 	/// Create an object at the given location.
 	Create { path: &'a [u8] },
 	/// Destroy an object at the given location.
@@ -757,11 +738,8 @@ mod test {
 	#[test]
 	fn enqueue_request() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_request(Request::default()).unwrap();
 			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
@@ -772,17 +750,11 @@ mod test {
 	#[test]
 	fn dequeue_request() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue
-				.enqueue_request(Request {
-					user_data: 1337,
-					..Default::default()
-				})
+				.enqueue_request(Request { user_data: 1337, ..Default::default() })
 				.unwrap();
 			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
 			assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
@@ -796,11 +768,8 @@ mod test {
 	#[test]
 	fn enqueue_2_requests() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_request(Request::default()).unwrap();
 			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
@@ -814,11 +783,8 @@ mod test {
 	#[test]
 	fn enqueue_8_requests() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 7,
-			responses_mask: 7,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 7, responses_mask: 7 };
 		unsafe {
 			for i in 1..9 {
 				queue.enqueue_request(Request::default()).unwrap();
@@ -831,18 +797,12 @@ mod test {
 	#[test]
 	fn dequeue_8_requests() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 7,
-			responses_mask: 7,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 7, responses_mask: 7 };
 		unsafe {
 			for i in 1..9 {
 				queue
-					.enqueue_request(Request {
-						user_data: i.into(),
-						..Default::default()
-					})
+					.enqueue_request(Request { user_data: i.into(), ..Default::default() })
 					.unwrap();
 				assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), i);
 				assert_eq!(queue.request_ring().kernel_index.load(Ordering::Relaxed), 0);
@@ -859,11 +819,8 @@ mod test {
 	#[test]
 	fn fail_enqueue_request() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_request(Request::default()).unwrap();
 			assert_eq!(queue.request_ring().user_index.load(Ordering::Relaxed), 1);
@@ -878,11 +835,8 @@ mod test {
 	#[test]
 	fn fail_dequeue_request() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			assert!(queue.dequeue_request().is_err());
 		}
@@ -891,11 +845,8 @@ mod test {
 	#[test]
 	fn enqueue_response() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_response(Response::default()).unwrap();
 			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
@@ -909,17 +860,11 @@ mod test {
 	#[test]
 	fn dequeue_response() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue
-				.enqueue_response(Response {
-					user_data: 1337,
-					..Default::default()
-				})
+				.enqueue_response(Response { user_data: 1337, ..Default::default() })
 				.unwrap();
 			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
 			assert_eq!(
@@ -939,11 +884,8 @@ mod test {
 	#[test]
 	fn enqueue_2_responses() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_response(Response::default()).unwrap();
 			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
@@ -963,11 +905,8 @@ mod test {
 	#[test]
 	fn enqueue_8_responses() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 7,
-			responses_mask: 7,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 7, responses_mask: 7 };
 		unsafe {
 			for i in 1..9 {
 				queue.enqueue_response(Response::default()).unwrap();
@@ -983,18 +922,12 @@ mod test {
 	#[test]
 	fn dequeue_8_responses() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 7,
-			responses_mask: 7,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 7, responses_mask: 7 };
 		unsafe {
 			for i in 1..9 {
 				queue
-					.enqueue_response(Response {
-						user_data: i.into(),
-						..Default::default()
-					})
+					.enqueue_response(Response { user_data: i.into(), ..Default::default() })
 					.unwrap();
 				assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
 				assert_eq!(
@@ -1017,11 +950,8 @@ mod test {
 	#[test]
 	fn fail_enqueue_response() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			queue.enqueue_response(Response::default()).unwrap();
 			assert_eq!(queue.response_ring().user_index.load(Ordering::Relaxed), 0);
@@ -1042,11 +972,8 @@ mod test {
 	#[test]
 	fn fail_dequeue_response() {
 		let base = Box::new([0; 4096]);
-		let mut queue = Queue {
-			base: NonNull::from(&*base).cast(),
-			requests_mask: 1,
-			responses_mask: 1,
-		};
+		let mut queue =
+			Queue { base: NonNull::from(&*base).cast(), requests_mask: 1, responses_mask: 1 };
 		unsafe {
 			assert!(queue.dequeue_response().is_err());
 		}

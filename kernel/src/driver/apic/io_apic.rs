@@ -1,5 +1,4 @@
-use super::RegRW;
-use crate::memory::r#virtual::phys_to_virt;
+use {super::RegRW, crate::memory::r#virtual::phys_to_virt};
 
 #[repr(C)]
 struct IoApic {

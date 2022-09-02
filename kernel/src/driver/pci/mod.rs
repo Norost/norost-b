@@ -8,18 +8,20 @@
 
 mod mcfg;
 
-use crate::{
-	driver::apic::local_apic,
-	memory::r#virtual::phys_to_virt,
-	object_table::{self, Root},
-	sync::SpinLock,
-};
-use acpi::{sdt::Signature, AcpiHandler, AcpiTables};
-use alloc::sync::Arc;
-use core::ptr::NonNull;
-use pci::{
-	capability::{Capability, Msi, MsiX},
-	Pci,
+use {
+	crate::{
+		driver::apic::local_apic,
+		memory::r#virtual::phys_to_virt,
+		object_table::{self, Root},
+		sync::SpinLock,
+	},
+	acpi::{sdt::Signature, AcpiHandler, AcpiTables},
+	alloc::sync::Arc,
+	core::ptr::NonNull,
+	pci::{
+		capability::{Capability, Msi, MsiX},
+		Pci,
+	},
 };
 
 mod device;

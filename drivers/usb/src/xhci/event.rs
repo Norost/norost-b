@@ -1,8 +1,13 @@
-use crate::dma::Dma;
-use alloc::vec::Vec;
-use core::{marker::PhantomData, ptr::NonNull, sync::atomic};
-use xhci::accessor::{marker::ReadWrite, Mapper};
-use xhci::{registers::runtime::Interrupter, ring::trb::event::Allowed};
+use {
+	crate::dma::Dma,
+	alloc::vec::Vec,
+	core::{marker::PhantomData, ptr::NonNull, sync::atomic},
+	xhci::{
+		accessor::{marker::ReadWrite, Mapper},
+		registers::runtime::Interrupter,
+		ring::trb::event::Allowed,
+	},
+};
 
 pub struct Table {
 	buf: Dma<[SegmentEntry]>,
@@ -34,11 +39,8 @@ impl Table {
 		let (ptr, base) = Dma::<[[u32; 4]]>::new_slice(256)?.into_raw();
 		let (ptr, size) = ptr.to_raw_parts();
 		unsafe {
-			self.buf.as_mut()[self.segments.len()] = SegmentEntry {
-				base,
-				size: size.try_into().unwrap(),
-				_reserved: [0; 3],
-			};
+			self.buf.as_mut()[self.segments.len()] =
+				SegmentEntry { base, size: size.try_into().unwrap(), _reserved: [0; 3] };
 		}
 		self.segments.push(ptr.cast());
 		Ok(())

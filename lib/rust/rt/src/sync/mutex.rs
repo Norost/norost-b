@@ -1,6 +1,10 @@
-use super::RawMutex;
-use core::cell::UnsafeCell;
-use core::ops::{Deref, DerefMut};
+use {
+	super::RawMutex,
+	core::{
+		cell::UnsafeCell,
+		ops::{Deref, DerefMut},
+	},
+};
 
 #[derive(Debug, Default)]
 pub struct Mutex<T> {
@@ -16,10 +20,7 @@ pub struct Locked;
 
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
-		Self {
-			lock: RawMutex::new(),
-			value: UnsafeCell::new(value),
-		}
+		Self { lock: RawMutex::new(), value: UnsafeCell::new(value) }
 	}
 
 	pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, Locked> {

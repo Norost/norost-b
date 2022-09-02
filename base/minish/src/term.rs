@@ -1,6 +1,8 @@
-use core::num::Saturating;
-use std::io::{self, Read, Write};
-use term::{color::Color, Attr, Error, Terminal};
+use {
+	core::num::Saturating,
+	std::io::{self, Read, Write},
+	term::{color::Color, Attr, Error, Terminal},
+};
 
 /// Simple ANSI terminal
 pub struct AnsiTerminal<In, Out>
@@ -19,11 +21,7 @@ where
 	Out: Write,
 {
 	pub fn new(reader: In, writer: Out) -> Self {
-		Self {
-			reader,
-			writer,
-			prefix: "".into(),
-		}
+		Self { reader, writer, prefix: "".into() }
 	}
 
 	pub fn set_prefix(&mut self, prefix: impl Into<Box<str>>) {

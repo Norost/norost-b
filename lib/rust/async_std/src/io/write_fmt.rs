@@ -1,9 +1,11 @@
-use super::{Result, Write};
-use alloc::vec::Vec;
-use core::{
-	future::Future,
-	pin::Pin,
-	task::{Context, Poll},
+use {
+	super::{Result, Write},
+	alloc::vec::Vec,
+	core::{
+		future::Future,
+		pin::Pin,
+		task::{Context, Poll},
+	},
 };
 
 pub struct WriteFmtFuture<T: Write<Vec<u8>> + ?Sized>

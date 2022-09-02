@@ -1,6 +1,10 @@
-use super::CacheSeek;
-use std::io::{self, BufRead, Read, ReadBuf, Seek, SeekFrom, Write};
-use std::mem::MaybeUninit;
+use {
+	super::CacheSeek,
+	std::{
+		io::{self, BufRead, Read, ReadBuf, Seek, SeekFrom, Write},
+		mem::MaybeUninit,
+	},
+};
 
 /// A buffered I/O wrapper for block devices.
 ///

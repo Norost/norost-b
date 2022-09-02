@@ -1,6 +1,8 @@
-use super::{RegR, RegRW, RegW};
-use crate::memory::r#virtual::phys_to_virt;
-use core::fmt;
+use {
+	super::{RegR, RegRW, RegW},
+	crate::memory::r#virtual::phys_to_virt,
+	core::fmt,
+};
 
 const APIC_NMI: u32 = 1 << 4;
 const APIC_DISABLE: u32 = 0x1_0000;

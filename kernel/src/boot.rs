@@ -1,5 +1,4 @@
-use crate::memory::Page;
-use core::fmt;
+use {crate::memory::Page, core::fmt};
 
 #[repr(C)]
 pub struct Info {

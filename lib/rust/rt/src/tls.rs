@@ -1,6 +1,7 @@
-use core::mem;
-use core::ptr;
-use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+use core::{
+	mem, ptr,
+	sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
 
 const ENTRIES: usize = 128;
 
@@ -20,9 +21,8 @@ impl Bitset {
 	const BITS_PER_ENTRY: usize = mem::size_of::<AtomicUsize>() * 8;
 
 	const fn new() -> Self {
-		let mut slf = Self {
-			bits: [const { AtomicUsize::new(0) }; ENTRIES / Self::BITS_PER_ENTRY],
-		};
+		let mut slf =
+			Self { bits: [const { AtomicUsize::new(0) }; ENTRIES / Self::BITS_PER_ENTRY] };
 		// Reservations:
 		// 0) QUEUE_KEY in io.rs
 		slf.bits[0] = AtomicUsize::new(1);

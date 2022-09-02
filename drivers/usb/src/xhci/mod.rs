@@ -12,11 +12,13 @@ mod vendor;
 
 use errata::Errata;
 
-use crate::{dma::Dma, requests};
-use alloc::{boxed::Box, collections::BTreeMap};
-use command::Pending;
-use core::{mem, num::NonZeroU8, time::Duration};
-use xhci::ring::trb::command as cmd;
+use {
+	crate::{dma::Dma, requests},
+	alloc::{boxed::Box, collections::BTreeMap},
+	command::Pending,
+	core::{mem, num::NonZeroU8, time::Duration},
+	xhci::ring::trb::command as cmd,
+};
 
 pub use device::TransferError;
 
@@ -306,13 +308,7 @@ impl Xhci {
 						self.enqueue_command(cmd, Pending::SetAddress(e));
 						continue;
 					}
-					Event::Transfer {
-						id,
-						slot,
-						endpoint,
-						buffer: self.transfers.remove(&id),
-						code,
-					}
+					Event::Transfer { id, slot, endpoint, buffer: self.transfers.remove(&id), code }
 				}
 				Allowed::HostController(_) => todo!(),
 				Allowed::PortStatusChange(c) => {

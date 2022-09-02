@@ -1,6 +1,4 @@
-use crate::ControlHeader;
-use core::fmt;
-use endian::u32le;
+use {crate::ControlHeader, core::fmt, endian::u32le};
 
 #[derive(Clone, Copy)]
 #[repr(C)]

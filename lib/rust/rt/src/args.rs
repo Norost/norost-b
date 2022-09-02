@@ -12,19 +12,23 @@
 //!
 //! Each array is prefixed with a two-byte (`u16`) length.
 
-use crate::{
-	sync::{Mutex, MutexGuard},
-	RefObject,
+use {
+	crate::{
+		sync::{Mutex, MutexGuard},
+		RefObject,
+	},
+	alloc::{
+		alloc::AllocError,
+		borrow::Cow,
+		collections::{btree_map, BTreeMap},
+	},
+	core::{
+		fmt,
+		ptr::{self, NonNull},
+		slice,
+		sync::atomic::{AtomicPtr, Ordering},
+	},
 };
-use alloc::{
-	alloc::AllocError,
-	borrow::Cow,
-	collections::{btree_map, BTreeMap},
-};
-use core::fmt;
-use core::ptr::{self, NonNull};
-use core::slice;
-use core::sync::atomic::{AtomicPtr, Ordering};
 
 // See note in lib.rs
 #[export_name = "__rt_args_handles"]
@@ -48,17 +52,11 @@ pub struct Args {
 impl Args {
 	fn new() -> Self {
 		NonNull::new(ARGS_AND_ENV.load(Ordering::Relaxed)).map_or(
-			Self {
-				count: 0,
-				ptr: ptr::null(),
-			},
+			Self { count: 0, ptr: ptr::null() },
 			|ptr| {
 				let ptr = ptr.cast::<u16>();
 				unsafe {
-					Self {
-						count: ptr.as_ptr().read_unaligned(),
-						ptr: ptr.as_ptr().add(1).cast(),
-					}
+					Self { count: ptr.as_ptr().read_unaligned(), ptr: ptr.as_ptr().add(1).cast() }
 				}
 			},
 		)
@@ -70,10 +68,7 @@ impl Args {
 	pub fn next_back(&mut self) -> Option<&'static [u8]> {
 		self.count.checked_sub(1).map(|c| {
 			// Very inefficient but w/e, it shouldn't matter.
-			let args = Self {
-				count: self.count,
-				ptr: self.ptr,
-			};
+			let args = Self { count: self.count, ptr: self.ptr };
 			self.count = c;
 			args.last().unwrap()
 		})
@@ -82,10 +77,7 @@ impl Args {
 
 impl fmt::Debug for Args {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let args = Args {
-			count: self.count,
-			ptr: self.ptr,
-		};
+		let args = Args { count: self.count, ptr: self.ptr };
 		let mut f = f.debug_list();
 		for e in args {
 			f.entry(&e);
@@ -162,9 +154,7 @@ impl Env {
 		// "The returned iterator contains a snapshot of the process’s environment variables ..." &
 		// "Modifications to environment variables afterwards will not be reflected ..."
 		// means we need to clone it, or at least use some kind of CoW.
-		Self {
-			inner: Self::get_env().1.clone().into_iter(),
-		}
+		Self { inner: Self::get_env().1.clone().into_iter() }
 	}
 
 	pub fn get(key: &[u8]) -> Option<Cow<'static, [u8]>> {
@@ -249,10 +239,7 @@ impl Iterator for Handles {
 
 pub fn handles() -> Handles {
 	NonNull::new(HANDLES.load(Ordering::Relaxed)).map_or(
-		Handles {
-			ptr: NonNull::dangling(),
-			count: 0,
-		},
+		Handles { ptr: NonNull::dangling(), count: 0 },
 		|ptr| unsafe {
 			Handles {
 				ptr: NonNull::new_unchecked(ptr.as_ptr().add(2).cast()),

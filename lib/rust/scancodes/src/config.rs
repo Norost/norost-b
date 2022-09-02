@@ -2,9 +2,11 @@
 
 extern crate alloc;
 
-use crate::{KeyCode, SpecialKeyCode};
-use alloc::{boxed::Box, collections::BTreeMap};
-use core::{fmt, str};
+use {
+	crate::{KeyCode, SpecialKeyCode},
+	alloc::{boxed::Box, collections::BTreeMap},
+	core::{fmt, str},
+};
 
 pub struct RawMap {
 	/// Map for single-byte scancodes.
@@ -157,8 +159,7 @@ pub enum Error<'a> {
 }
 
 fn parse_keycode(s: &str) -> Result<KeyCode, Error> {
-	use KeyCode::*;
-	use SpecialKeyCode::*;
+	use {KeyCode::*, SpecialKeyCode::*};
 	Ok(match s {
 		"backspace" => Unicode('\x08'),
 		"space" => Unicode(' '),

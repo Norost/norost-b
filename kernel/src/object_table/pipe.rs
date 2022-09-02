@@ -1,6 +1,8 @@
-use super::{Object, Ticket, TicketWaker};
-use crate::sync::Mutex;
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec};
+use {
+	super::{Object, Ticket, TicketWaker},
+	crate::sync::Mutex,
+	alloc::{boxed::Box, collections::VecDeque, sync::Arc, vec::Vec},
+};
 
 // 64 KiB should be a reasonable maximum.
 const MAX_SIZE: usize = 1 << 16;

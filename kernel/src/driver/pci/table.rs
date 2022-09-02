@@ -1,6 +1,8 @@
-use crate::object_table::{Error, Object, Ticket};
-use alloc::{boxed::Box, format, string::String, sync::Arc};
-use core::sync::atomic::{AtomicU32, Ordering};
+use {
+	crate::object_table::{Error, Object, Ticket},
+	alloc::{boxed::Box, format, string::String, sync::Arc},
+	core::sync::atomic::{AtomicU32, Ordering},
+};
 
 /// Table with all PCI devices.
 pub struct PciTable;
@@ -8,19 +10,13 @@ pub struct PciTable;
 impl Object for PciTable {
 	fn open(self: Arc<Self>, path: &[u8]) -> Ticket<Arc<dyn Object>> {
 		Ticket::new_complete(match path {
-			b"" | b"/" => Ok(Arc::new(Query {
-				index: AtomicU32::new(0),
-			})),
+			b"" | b"/" => Ok(Arc::new(Query { index: AtomicU32::new(0) })),
 			b"info" | b"info/" => Ok(Arc::new(Info {
-				query: Query {
-					index: AtomicU32::new(0),
-				},
+				query: Query { index: AtomicU32::new(0) },
 				extended: false,
 			})),
 			b"xinfo" | b"xinfo/" => Ok(Arc::new(Info {
-				query: Query {
-					index: AtomicU32::new(0),
-				},
+				query: Query { index: AtomicU32::new(0) },
 				extended: true,
 			})),
 			_ => path_to_bdf(path)

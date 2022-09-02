@@ -1,8 +1,10 @@
-use alloc::vec::Vec;
-use smoltcp::{
-	iface::{Interface, SocketHandle},
-	phy::Device,
-	socket::{self, UdpPacketMetadata, UdpSocketBuffer},
+use {
+	alloc::vec::Vec,
+	smoltcp::{
+		iface::{Interface, SocketHandle},
+		phy::Device,
+		socket::{self, UdpPacketMetadata, UdpSocketBuffer},
+	},
 };
 
 pub struct UdpSocket {

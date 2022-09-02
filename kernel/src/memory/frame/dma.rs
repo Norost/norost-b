@@ -1,13 +1,15 @@
-use super::{fixed_bitmap::FixedBitmap, PPNBox, Page, PageFrameIter, PPN};
-use crate::{
-	boot,
-	memory::r#virtual::RWX,
-	object_table::{Error, Object, PageFlags, Root, Ticket},
-	scheduler::MemoryObject,
-	sync::SpinLock,
+use {
+	super::{fixed_bitmap::FixedBitmap, PPNBox, Page, PageFrameIter, PPN},
+	crate::{
+		boot,
+		memory::r#virtual::RWX,
+		object_table::{Error, Object, PageFlags, Root, Ticket},
+		scheduler::MemoryObject,
+		sync::SpinLock,
+	},
+	alloc::{boxed::Box, string::ToString, sync::Arc},
+	core::{num::NonZeroUsize, str},
 };
-use alloc::{boxed::Box, string::ToString, sync::Arc};
-use core::{num::NonZeroUsize, str};
 
 static DMA: SpinLock<FixedBitmap> = SpinLock::new(Default::default());
 
@@ -67,10 +69,7 @@ unsafe impl MemoryObject for DmaFrame {
 
 impl Drop for DmaFrame {
 	fn drop(&mut self) {
-		let mut iter = PageFrameIter {
-			base: self.base,
-			count: self.count.try_into().unwrap(),
-		};
+		let mut iter = PageFrameIter { base: self.base, count: self.count.try_into().unwrap() };
 		unsafe {
 			super::deallocate(self.count.try_into().unwrap(), || iter.next().unwrap()).unwrap();
 		}

@@ -15,20 +15,21 @@ macro_rules! log {
 mod keyboard;
 
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
-use alloc::boxed::Box;
-use async_std::{
-	io::{Read, Write},
-	object::RefAsyncObject,
-	task,
+use {
+	alloc::boxed::Box,
+	async_std::{
+		io::{Read, Write},
+		object::RefAsyncObject,
+		task,
+	},
+	core::time::Duration,
+	driver_utils::os::{
+		portio::PortIo,
+		stream_table::{JobId, Request, Response, StreamTable},
+	},
+	futures_util::future,
+	rt as _, rt_default as _,
 };
-use core::time::Duration;
-use driver_utils::os::{
-	portio::PortIo,
-	stream_table::{JobId, Request, Response, StreamTable},
-};
-use futures_util::future;
-use rt as _;
-use rt_default as _;
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
@@ -330,9 +331,7 @@ impl Ps2 {
 
 	fn init() -> (Self, [Option<Box<dyn Device>>; 2]) {
 		// https://wiki.osdev.org/%228042%22_PS/2_Controller#Initialising_the_PS.2F2_Controller
-		let mut slf = Self {
-			io: PortIo::new().unwrap(),
-		};
+		let mut slf = Self { io: PortIo::new().unwrap() };
 		let mut devices: [Option<Box<dyn Device>>; 2] = [None, None];
 		// Because shit's just broken on my laptop. Hoo fucking ha
 		let mut two_channels = rt::args::args().find(|a| a == b"disable-port2").is_none();

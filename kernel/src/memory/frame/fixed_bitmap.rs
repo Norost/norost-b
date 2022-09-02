@@ -1,8 +1,10 @@
 //! Bitmap-based allocator. Intended for DMA allocations.
 
-use super::{NonZeroUsize, Page, PPN};
-use crate::boot::MemoryRegion;
-use core::ops::{BitAnd, BitAndAssign, Not, Shl, Shr};
+use {
+	super::{NonZeroUsize, Page, PPN},
+	crate::boot::MemoryRegion,
+	core::ops::{BitAnd, BitAndAssign, Not, Shl, Shr},
+};
 
 pub(super) struct FixedBitmap {
 	base: PPN,
@@ -45,10 +47,7 @@ impl FixedBitmap {
 
 impl const Default for FixedBitmap {
 	fn default() -> Self {
-		Self {
-			base: PPN(0),
-			bitmap: Bitmap([0; 32]),
-		}
+		Self { base: PPN(0), bitmap: Bitmap([0; 32]) }
 	}
 }
 

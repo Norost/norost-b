@@ -1,22 +1,24 @@
-use super::*;
-use crate::{
-	memory::{
-		frame::{AllocateError, AllocateHints, OwnedPageFrames, PPN},
-		r#virtual::{AddressSpace, MapError, RWX},
-		Page,
+use {
+	super::*,
+	crate::{
+		memory::{
+			frame::{AllocateError, AllocateHints, OwnedPageFrames, PPN},
+			r#virtual::{AddressSpace, MapError, RWX},
+			Page,
+		},
+		object_table::{MemoryObject, TinySlice},
+		sync::Mutex,
 	},
-	object_table::{MemoryObject, TinySlice},
-	sync::Mutex,
+	alloc::{
+		boxed::Box,
+		sync::{Arc, Weak},
+		vec::Vec,
+	},
+	arena::Arena,
+	core::sync::atomic::Ordering,
+	nora_stream_table::{Buffers, ClientQueue, JobId, Request, Slice},
+	norostb_kernel::{io::SeekFrom, object::Pow2Size, syscall::Handle},
 };
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
-	vec::Vec,
-};
-use arena::Arena;
-use core::sync::atomic::Ordering;
-use nora_stream_table::{Buffers, ClientQueue, JobId, Request, Slice};
-use norostb_kernel::{io::SeekFrom, object::Pow2Size, syscall::Handle};
 
 pub struct StreamingTable {
 	jobs: Mutex<Arena<AnyTicketWaker, ()>>,
@@ -76,10 +78,7 @@ impl StreamingTable {
 			queue: Mutex::new(queue),
 			queue_mem,
 			buffer_mem: unsafe { Buffers::new(buffer_mem.cast(), buffer_mem_size, block_size) },
-			notify_singleton: Arc::new(Notify {
-				table: table.clone(),
-				..Default::default()
-			}),
+			notify_singleton: Arc::new(Notify { table: table.clone(), ..Default::default() }),
 			max_request_mem,
 			share_out: Default::default(),
 		}))
@@ -147,10 +146,7 @@ impl StreamingTable {
 							.remove(arena::Handle::from_raw(v as u32 as _, ()))
 							.unwrap()
 					} else {
-						Arc::new(StreamObject {
-							table: Arc::downgrade(self),
-							handle: v as _,
-						})
+						Arc::new(StreamObject { table: Arc::downgrade(self), handle: v as _ })
 					})),
 					AnyTicketWaker::Data(w) => {
 						let s = resp.as_slice().unwrap();

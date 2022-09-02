@@ -1,7 +1,6 @@
 //! Chain of pages with some memory set aside for DMA
 
-use super::PPN;
-use core::mem;
+use {super::PPN, core::mem};
 
 pub(super) struct Chain {
 	head: PPN,
@@ -10,10 +9,7 @@ pub(super) struct Chain {
 
 impl Chain {
 	pub const fn new() -> Self {
-		Self {
-			head: PPN(0),
-			count: 0,
-		}
+		Self { head: PPN(0), count: 0 }
 	}
 
 	pub fn push(&mut self, ppn: PPN) {

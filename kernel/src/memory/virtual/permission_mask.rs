@@ -1,8 +1,10 @@
 //! A `PermissionMask` object restricts the permissions that can be used when mapping an object.
 
-use super::{PPN, RWX};
-use crate::object_table::{MemoryObject, Object, PageFlags};
-use alloc::sync::Arc;
+use {
+	super::{PPN, RWX},
+	crate::object_table::{MemoryObject, Object, PageFlags},
+	alloc::sync::Arc,
+};
 
 macro_rules! pm {
 	($name:ident $perm:ident) => {

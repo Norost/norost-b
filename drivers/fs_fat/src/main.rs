@@ -1,12 +1,14 @@
 #![feature(norostb)]
 #![feature(seek_stream_len)]
 
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt::io::Pow2Size;
-use std::{
-	fs,
-	io::{Read, Seek, Write},
-	str,
+use {
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt::io::Pow2Size,
+	std::{
+		fs,
+		io::{Read, Seek, Write},
+		str,
+	},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

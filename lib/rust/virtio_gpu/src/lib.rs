@@ -7,19 +7,21 @@ extern crate alloc;
 
 pub use controlq::{resource::create_2d::Format, Rect};
 
-use controlq::{
-	resource::{AttachBacking, Create2D, Flush, MemoryEntry},
-	SetScanout, TransferToHost2D,
+use {
+	controlq::{
+		resource::{AttachBacking, Create2D, Flush, MemoryEntry},
+		SetScanout, TransferToHost2D,
+	},
+	core::{fmt, mem, num::NonZeroU32, ptr::NonNull},
+	cursorq::{CursorPosition, MoveCursor, UpdateCursor},
+	endian::{u32le, u64le},
+	virtio::{
+		pci::{CommonConfig, Notify},
+		queue::{NewQueueError, Queue},
+		PhysAddr, PhysMap,
+	},
+	volatile::VolatileCell,
 };
-use core::{fmt, mem, num::NonZeroU32, ptr::NonNull};
-use cursorq::{CursorPosition, MoveCursor, UpdateCursor};
-use endian::{u32le, u64le};
-use virtio::{
-	pci::{CommonConfig, Notify},
-	queue::{NewQueueError, Queue},
-	PhysAddr, PhysMap,
-};
-use volatile::VolatileCell;
 
 #[allow(dead_code)]
 const FEATURE_VIRGL: u32 = 0x1;
@@ -271,11 +273,7 @@ impl<'a> Device<'a> {
 				| CommonConfig::STATUS_DRIVER_OK,
 		);
 
-		Ok(Self {
-			controlq,
-			cursorq,
-			notify: dev.notify,
-		})
+		Ok(Self { controlq, cursorq, notify: dev.notify })
 	}
 
 	pub unsafe fn init_scanout(

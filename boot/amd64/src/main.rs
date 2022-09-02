@@ -35,13 +35,16 @@ macro_rules! err {
 	}};
 }
 
-use alloc::alloc;
-use core::alloc::Layout;
-use core::arch::asm;
-use core::fmt::{self, Write};
-use core::panic::PanicInfo;
-use core::slice;
-use core::str;
+use {
+	alloc::alloc,
+	core::{
+		alloc::Layout,
+		arch::asm,
+		fmt::{self, Write},
+		panic::PanicInfo,
+		slice, str,
+	},
+};
 
 extern "C" {
 	static boot_bottom: usize;
@@ -335,11 +338,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 		msr::wrmsr(msr::IA32_PAT, 0x0000_0106_0000_0106);
 	}
 
-	Return {
-		entry,
-		pml4,
-		buffer: alloc::buffer_ptr(),
-	}
+	Return { entry, pml4, buffer: alloc::buffer_ptr() }
 }
 
 #[panic_handler]

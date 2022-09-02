@@ -1,7 +1,11 @@
-use super::Uart;
-use crate::object_table::{Error, Object, Ticket, TicketWaker};
-use crate::sync::SpinLock;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use {
+	super::Uart,
+	crate::{
+		object_table::{Error, Object, Ticket, TicketWaker},
+		sync::SpinLock,
+	},
+	alloc::{boxed::Box, sync::Arc, vec::Vec},
+};
 
 /// Table with all UART devices.
 pub struct UartTable;

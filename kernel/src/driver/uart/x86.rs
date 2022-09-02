@@ -1,6 +1,10 @@
-use crate::arch::amd64::{self, asm::io};
-use crate::driver::apic::{io_apic, local_apic};
-use core::{fmt, mem::ManuallyDrop};
+use {
+	crate::{
+		arch::amd64::{self, asm::io},
+		driver::apic::{io_apic, local_apic},
+	},
+	core::{fmt, mem::ManuallyDrop},
+};
 
 pub struct Uart {
 	port: u16,

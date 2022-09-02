@@ -1,27 +1,28 @@
-use super::process::Process;
-use crate::arch;
-use crate::memory::{
-	frame::{self, AllocateHints, OwnedPageFrames},
-	r#virtual::{AddressSpace, RWX},
-	Page,
-};
-use crate::sync::SpinLock;
-use crate::time::Monotonic;
-use alloc::{
-	sync::{Arc, Weak},
-	vec::Vec,
-};
-use core::arch::asm;
-use core::cell::Cell;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 #[cfg(not(target_has_atomic = "64"))]
 use core::sync::atomic::AtomicU32;
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
-use core::sync::atomic::Ordering;
-use core::task::Waker;
-use norostb_kernel::Handle;
+use {
+	super::process::Process,
+	crate::{
+		arch,
+		memory::{
+			frame::{self, AllocateHints, OwnedPageFrames},
+			r#virtual::{AddressSpace, RWX},
+			Page,
+		},
+		sync::SpinLock,
+		time::Monotonic,
+	},
+	alloc::{
+		sync::{Arc, Weak},
+		vec::Vec,
+	},
+	core::{
+		arch::asm, cell::Cell, num::NonZeroUsize, ptr::NonNull, sync::atomic::Ordering, task::Waker,
+	},
+	norostb_kernel::Handle,
+};
 
 const KERNEL_STACK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(1) };
 
@@ -98,10 +99,7 @@ impl Thread {
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
-				AllocateHints {
-					address: 0 as _,
-					color: 0,
-				},
+				AllocateHints { address: 0 as _, color: 0 },
 			)?;
 			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)
@@ -179,10 +177,7 @@ impl Thread {
 		unsafe {
 			let kernel_stack_base = OwnedPageFrames::new(
 				KERNEL_STACK_SIZE,
-				AllocateHints {
-					address: 0 as _,
-					color: 0,
-				},
+				AllocateHints { address: 0 as _, color: 0 },
 			)?;
 			let (kernel_stack_base, _) =
 				AddressSpace::kernel_map_object(None, Arc::new(kernel_stack_base), RWX::RW)

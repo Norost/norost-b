@@ -5,10 +5,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-use core::time::Duration;
-use norostb_rt as rt;
-use rt_default as _;
+use {alloc::vec::Vec, core::time::Duration, norostb_rt as rt, rt_default as _};
 
 #[derive(Default)]
 struct Program<'a> {

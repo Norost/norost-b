@@ -1,11 +1,13 @@
-use super::{Error, Object};
-use crate::sync::SpinLock;
-use alloc::{boxed::Box, sync::Arc};
-use core::{
-	fmt,
-	future::Future,
-	pin::Pin,
-	task::{Context, Poll, Waker},
+use {
+	super::{Error, Object},
+	crate::sync::SpinLock,
+	alloc::{boxed::Box, sync::Arc},
+	core::{
+		fmt,
+		future::Future,
+		pin::Pin,
+		task::{Context, Poll, Waker},
+	},
 };
 
 /// A ticket referring to a job to be completed.
@@ -16,25 +18,13 @@ pub struct Ticket<T> {
 
 impl<T> Ticket<T> {
 	pub fn new_complete(status: Result<T, Error>) -> Self {
-		let inner = SpinLock::new(TicketInner {
-			waker: None,
-			status: Some(status),
-		})
-		.into();
+		let inner = SpinLock::new(TicketInner { waker: None, status: Some(status) }).into();
 		Self { inner }
 	}
 
 	pub fn new() -> (Self, TicketWaker<T>) {
-		let inner = Arc::new(SpinLock::new(TicketInner {
-			waker: None,
-			status: None,
-		}));
-		(
-			Self {
-				inner: inner.clone(),
-			},
-			TicketWaker { inner },
-		)
+		let inner = Arc::new(SpinLock::new(TicketInner { waker: None, status: None }));
+		(Self { inner: inner.clone() }, TicketWaker { inner })
 	}
 }
 

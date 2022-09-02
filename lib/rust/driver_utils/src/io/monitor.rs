@@ -8,21 +8,10 @@ pub struct Monitor<T, F: FnMut(Event<'_>)> {
 
 /// The I/O event that occured.
 pub enum Event<'a> {
-	Read {
-		data: &'a [u8],
-		result: &'a io::Result<usize>,
-	},
-	Write {
-		data: &'a [u8],
-		result: &'a io::Result<usize>,
-	},
-	Flush {
-		result: &'a io::Result<()>,
-	},
-	Seek {
-		from: SeekFrom,
-		result: &'a io::Result<u64>,
-	},
+	Read { data: &'a [u8], result: &'a io::Result<usize> },
+	Write { data: &'a [u8], result: &'a io::Result<usize> },
+	Flush { result: &'a io::Result<()> },
+	Seek { from: SeekFrom, result: &'a io::Result<u64> },
 }
 
 impl<T, F: FnMut(Event<'_>)> Monitor<T, F> {
@@ -34,10 +23,7 @@ impl<T, F: FnMut(Event<'_>)> Monitor<T, F> {
 impl<T: Read, F: FnMut(Event<'_>)> Read for Monitor<T, F> {
 	fn read(&mut self, data: &mut [u8]) -> io::Result<usize> {
 		let result = self.inner.read(data);
-		(self.callback)(Event::Read {
-			data,
-			result: &result,
-		});
+		(self.callback)(Event::Read { data, result: &result });
 		result
 	}
 }
@@ -45,10 +31,7 @@ impl<T: Read, F: FnMut(Event<'_>)> Read for Monitor<T, F> {
 impl<T: Write, F: FnMut(Event<'_>)> Write for Monitor<T, F> {
 	fn write(&mut self, data: &[u8]) -> io::Result<usize> {
 		let result = self.inner.write(data);
-		(self.callback)(Event::Write {
-			data,
-			result: &result,
-		});
+		(self.callback)(Event::Write { data, result: &result });
 		result
 	}
 
@@ -62,10 +45,7 @@ impl<T: Write, F: FnMut(Event<'_>)> Write for Monitor<T, F> {
 impl<T: Seek, F: FnMut(Event<'_>)> Seek for Monitor<T, F> {
 	fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
 		let result = self.inner.seek(from);
-		(self.callback)(Event::Seek {
-			from,
-			result: &result,
-		});
+		(self.callback)(Event::Seek { from, result: &result });
 		result
 	}
 }

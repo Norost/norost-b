@@ -6,16 +6,18 @@ pub use norostb_kernel::{
 	Handle,
 };
 
-use crate::RefObject;
-use core::{
-	fmt,
-	mem::{self, MaybeUninit},
-	ptr::NonNull,
-	sync::atomic::Ordering,
-};
-use norostb_kernel::{
-	io::{DoIo, DoIoOp},
-	syscall,
+use {
+	crate::RefObject,
+	core::{
+		fmt,
+		mem::{self, MaybeUninit},
+		ptr::NonNull,
+		sync::atomic::Ordering,
+	},
+	norostb_kernel::{
+		io::{DoIo, DoIoOp},
+		syscall,
+	},
 };
 
 macro_rules! transmute_handle {
@@ -102,20 +104,12 @@ pub fn read(handle: Handle, buf: &mut [u8]) -> Result<usize> {
 
 #[inline(always)]
 pub fn read_uninit(handle: Handle, buf: &mut [MaybeUninit<u8>]) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::ReadUninit { buf },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::ReadUninit { buf } }).map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn write(handle: Handle, data: &[u8]) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Write { data },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::Write { data } }).map(|v| v as _)
 }
 
 #[inline(always)]
@@ -124,11 +118,7 @@ pub fn get_meta(
 	property: &TinySlice<u8>,
 	value: &mut TinySlice<u8>,
 ) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::GetMeta { property, value },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::GetMeta { property, value } }).map(|v| v as _)
 }
 
 #[inline(always)]
@@ -137,62 +127,37 @@ pub fn get_meta_uninit(
 	property: &TinySlice<u8>,
 	value: &mut TinySlice<MaybeUninit<u8>>,
 ) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::GetMetaUninit { property, value },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::GetMetaUninit { property, value } }).map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn set_meta(handle: Handle, property: &TinySlice<u8>, value: &TinySlice<u8>) -> Result<usize> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::SetMeta { property, value },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::SetMeta { property, value } }).map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn open(handle: Handle, path: &[u8]) -> Result<Handle> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Open { path },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::Open { path } }).map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn create(handle: Handle, path: &[u8]) -> Result<Handle> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Create { path },
-	})
-	.map(|v| v as _)
+	syscall::do_io(DoIo { handle, op: DoIoOp::Create { path } }).map(|v| v as _)
 }
 
 #[inline(always)]
 pub fn destroy(handle: Handle, path: &[u8]) -> Result<u64> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Destroy { path },
-	})
+	syscall::do_io(DoIo { handle, op: DoIoOp::Destroy { path } })
 }
 
 #[inline(always)]
 pub fn seek(handle: Handle, from: SeekFrom) -> Result<u64> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Seek { from },
-	})
+	syscall::do_io(DoIo { handle, op: DoIoOp::Seek { from } })
 }
 
 #[inline(always)]
 pub fn share(handle: Handle, share: Handle) -> Result<u64> {
-	syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Share { share },
-	})
+	syscall::do_io(DoIo { handle, op: DoIoOp::Share { share } })
 }
 
 #[inline(always)]
@@ -214,10 +179,7 @@ pub fn map_object(
 
 #[inline]
 pub fn close(handle: Handle) {
-	let _ = syscall::do_io(DoIo {
-		handle,
-		op: DoIoOp::Close,
-	});
+	let _ = syscall::do_io(DoIo { handle, op: DoIoOp::Close });
 }
 
 #[doc(hidden)]

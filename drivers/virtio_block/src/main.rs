@@ -3,10 +3,12 @@
 
 extern crate alloc;
 
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt::{io::Pow2Size, Handle};
-use rt_default as _;
-use virtio_block::Sector;
+use {
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt::{io::Pow2Size, Handle},
+	rt_default as _,
+	virtio_block::Sector,
+};
 
 const SECTOR_SIZE: u32 = Sector::SIZE as _;
 

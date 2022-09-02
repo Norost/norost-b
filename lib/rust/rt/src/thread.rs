@@ -1,6 +1,8 @@
-use alloc::boxed::Box;
-use core::{mem, ptr, time::Duration};
-use norostb_kernel::{error, syscall, Handle};
+use {
+	alloc::boxed::Box,
+	core::{mem, ptr, time::Duration},
+	norostb_kernel::{error, syscall, Handle},
+};
 
 pub struct Thread(Handle);
 

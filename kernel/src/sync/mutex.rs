@@ -1,7 +1,9 @@
-use crate::{arch::sync, scheduler::Thread};
-use core::{
-	cell::UnsafeCell,
-	ops::{Deref, DerefMut},
+use {
+	crate::{arch::sync, scheduler::Thread},
+	core::{
+		cell::UnsafeCell,
+		ops::{Deref, DerefMut},
+	},
 };
 
 /// A very basic spinlock implementation. Intended for short sections that are mostly uncontended.
@@ -12,10 +14,7 @@ pub struct Mutex<T> {
 
 impl<T> Mutex<T> {
 	pub const fn new(value: T) -> Self {
-		Self {
-			lock: Default::default(),
-			value: UnsafeCell::new(value),
-		}
+		Self { lock: Default::default(), value: UnsafeCell::new(value) }
 	}
 
 	#[cfg_attr(debug_assertions, track_caller)]

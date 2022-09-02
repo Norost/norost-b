@@ -1,10 +1,12 @@
-use crate::{
-	memory::frame::{AllocateHints, OwnedPageFrames},
-	object_table::{Error, Object, Ticket},
-	scheduler::MemoryObject,
+use {
+	crate::{
+		memory::frame::{AllocateHints, OwnedPageFrames},
+		object_table::{Error, Object, Ticket},
+		scheduler::MemoryObject,
+	},
+	alloc::sync::Arc,
+	core::{cell::Cell, mem::ManuallyDrop},
 };
-use alloc::sync::Arc;
-use core::{cell::Cell, mem::ManuallyDrop};
 
 /// The table with all the processes running on this system.
 pub struct ProcessTable;
@@ -38,10 +40,7 @@ impl ProcessBuilder {
 			stack: Cell::new(Some({
 				let mut p = OwnedPageFrames::new(
 					1.try_into().unwrap(),
-					AllocateHints {
-						address: 0 as *const _,
-						color: 0,
-					},
+					AllocateHints { address: 0 as *const _, color: 0 },
 				)
 				.unwrap();
 				unsafe {

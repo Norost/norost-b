@@ -1,15 +1,19 @@
-use super::{float::FloatStorage, msr};
-use crate::memory::{frame, Page};
-use crate::scheduler::process::Process;
-use crate::scheduler::syscall;
-use crate::scheduler::Thread;
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
+use {
+	super::{float::FloatStorage, msr},
+	crate::{
+		memory::{frame, Page},
+		scheduler::{process::Process, syscall, Thread},
+	},
+	alloc::{
+		boxed::Box,
+		sync::{Arc, Weak},
+	},
+	core::{
+		arch::asm,
+		cell::{Cell, UnsafeCell},
+		ptr::{self, NonNull},
+	},
 };
-use core::arch::asm;
-use core::cell::{Cell, UnsafeCell};
-use core::ptr::{self, NonNull};
 
 pub unsafe fn init(tss: &'static super::tss::TSS) {
 	unsafe {
@@ -213,11 +217,7 @@ impl ThreadData {
 
 	/// Initialize thread data for kernel thread.
 	pub fn new_kernel() -> Self {
-		Self {
-			fs: 0.into(),
-			gs: 0.into(),
-			float: None.into(),
-		}
+		Self { fs: 0.into(), gs: 0.into(), float: None.into() }
 	}
 }
 

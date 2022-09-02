@@ -1,5 +1,7 @@
-use crate::{io, Handle, Object};
-use alloc::vec::Vec;
+use {
+	crate::{io, Handle, Object},
+	alloc::vec::Vec,
+};
 
 pub struct Process(Object);
 

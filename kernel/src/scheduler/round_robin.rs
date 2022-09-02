@@ -1,12 +1,14 @@
 //! # Round-robin scheduler
 
-use super::Thread;
-use crate::sync::SpinLock;
-use alloc::{
-	boxed::Box,
-	sync::{Arc, Weak},
+use {
+	super::Thread,
+	crate::sync::SpinLock,
+	alloc::{
+		boxed::Box,
+		sync::{Arc, Weak},
+	},
+	core::ptr::NonNull,
 };
-use core::ptr::NonNull;
 
 static THREAD_LIST: SpinLock<(usize, NonNull<Node>)> = SpinLock::new((0, NonNull::dangling()));
 
@@ -16,10 +18,7 @@ struct Node {
 }
 
 pub fn insert(thread: Weak<Thread>) {
-	let node = Box::new(Node {
-		next: NonNull::new(0x1 as *mut _).unwrap(),
-		thread,
-	});
+	let node = Box::new(Node { next: NonNull::new(0x1 as *mut _).unwrap(), thread });
 
 	let mut cur_ptr = THREAD_LIST.auto_lock();
 	let new = Box::leak(node);

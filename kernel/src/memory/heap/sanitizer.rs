@@ -1,10 +1,16 @@
 //! An allocator intended for debugging those pesky use-after-frees and other nasal demons.
 
-use super::super::frame::{self, PageFrame, PPN};
-use super::super::Page;
-use core::alloc::{GlobalAlloc, Layout};
-use core::num::NonZeroUsize;
-use core::ptr;
+use {
+	super::super::{
+		frame::{self, PageFrame, PPN},
+		Page,
+	},
+	core::{
+		alloc::{GlobalAlloc, Layout},
+		num::NonZeroUsize,
+		ptr,
+	},
+};
 
 #[global_allocator]
 static GLOBAL: Global = Global;

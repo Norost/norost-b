@@ -8,15 +8,11 @@
 	maybe_uninit_array_assume_init
 )]
 
-use core::alloc::Layout;
-use core::convert::TryInto;
-use core::fmt;
-use core::mem;
-use core::ptr::NonNull;
-use endian::{u16le, u32le};
-use virtio::pci::CommonConfig;
-use virtio::queue;
-use virtio::{PhysAddr, PhysRegion};
+use {
+	core::{alloc::Layout, convert::TryInto, fmt, mem, ptr::NonNull},
+	endian::{u16le, u32le},
+	virtio::{pci::CommonConfig, queue, PhysAddr, PhysRegion},
+};
 
 /// Device handles packets with partial checksum. This "checksum offload" is a common feature on
 /// modern network cards.
@@ -176,10 +172,7 @@ impl Packet {
 
 impl Default for Packet {
 	fn default() -> Self {
-		Self {
-			header: Default::default(),
-			data: [0; Self::MAX_ETH_SIZE],
-		}
+		Self { header: Default::default(), data: [0; Self::MAX_ETH_SIZE] }
 	}
 }
 
@@ -300,12 +293,7 @@ impl<'a> Device<'a> {
 
 		let mac = Mac(dev.device.cast::<Config>().mac);
 
-		let s = Self {
-			rx_queue,
-			tx_queue,
-			notify: dev.notify,
-			isr: dev.isr,
-		};
+		let s = Self { rx_queue, tx_queue, notify: dev.notify, isr: dev.isr };
 		Ok((s, mac))
 	}
 

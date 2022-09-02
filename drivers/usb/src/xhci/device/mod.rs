@@ -1,15 +1,17 @@
 //mod init;
 
-use super::{ring, DeviceConfig, Pending, Xhci};
-use crate::{
-	dma::Dma,
-	requests::{Direction, EndpointTransfer, RawRequest},
-};
-use alloc::{boxed::Box, vec::Vec};
-use core::num::NonZeroU8;
-use xhci::{
-	context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
-	ring::trb::{command, transfer},
+use {
+	super::{ring, DeviceConfig, Pending, Xhci},
+	crate::{
+		dma::Dma,
+		requests::{Direction, EndpointTransfer, RawRequest},
+	},
+	alloc::{boxed::Box, vec::Vec},
+	core::num::NonZeroU8,
+	xhci::{
+		context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
+		ring::trb::{command, transfer},
+	},
 };
 
 const FULL_SPEED: u8 = 1;

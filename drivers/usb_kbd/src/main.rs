@@ -3,10 +3,12 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-use ipc_usb::Recv;
-use rt_default as _;
-use scancodes::{Event, KeyCode, SpecialKeyCode};
+use {
+	alloc::vec::Vec,
+	ipc_usb::Recv,
+	rt_default as _,
+	scancodes::{Event, KeyCode, SpecialKeyCode},
+};
 
 /// # Boot protocol
 mod boot {

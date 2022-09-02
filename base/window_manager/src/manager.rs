@@ -1,10 +1,12 @@
-use crate::{
-	math::{Rect, Size, Vector},
-	window::{GlobalWindowParams, PathIter, Window},
-	workspace::{NewWorkspaceError, Workspace},
+use {
+	crate::{
+		math::{Rect, Size, Vector},
+		window::{GlobalWindowParams, PathIter, Window},
+		workspace::{NewWorkspaceError, Workspace},
+	},
+	alloc::boxed::Box,
+	driver_utils::{Arena, Handle},
 };
-use alloc::boxed::Box;
-use driver_utils::{Arena, Handle};
 
 pub struct Manager<U> {
 	windows: Arena<Window<U>>,

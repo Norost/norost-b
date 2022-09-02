@@ -1,20 +1,22 @@
 extern crate alloc;
 
-use alloc::{boxed::Box, rc::Rc};
-use async_std::{
-	compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
-	net::{Ipv4Addr, TcpListener, TcpStream},
-	process, AsyncObject,
+use {
+	alloc::{boxed::Box, rc::Rc},
+	async_std::{
+		compat::{AsyncWrapR, AsyncWrapRW, AsyncWrapW},
+		net::{Ipv4Addr, TcpListener, TcpStream},
+		process, AsyncObject,
+	},
+	core::str,
+	futures::io::{AsyncReadExt, ReadHalf, WriteHalf},
+	nora_ssh::{
+		auth::Auth,
+		cipher,
+		server::{IoSet, Server, ServerHandlers, SpawnType},
+		Identifier,
+	},
+	rand::rngs::StdRng,
 };
-use core::str;
-use futures::io::{AsyncReadExt, ReadHalf, WriteHalf};
-use nora_ssh::{
-	auth::Auth,
-	cipher,
-	server::{IoSet, Server, ServerHandlers, SpawnType},
-	Identifier,
-};
-use rand::rngs::StdRng;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let config = parse_config();
@@ -25,10 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let server = Server::new(
 			Identifier::new(b"SSH-2.0-nora_ssh example").unwrap(),
 			config.host_keys.ecdsa.expect("no host key"),
-			Handlers {
-				listener,
-				userdb: config.userdb,
-			},
+			Handlers { listener, userdb: config.userdb },
 		);
 
 		server.start().await
@@ -164,12 +163,7 @@ impl ServerHandlers for Handlers {
 		match auth {
 			Auth::None => Err(()),
 			Auth::Password(_) => Err(()),
-			Auth::PublicKey {
-				algorithm,
-				key,
-				signature,
-				message,
-			} => {
+			Auth::PublicKey { algorithm, key, signature, message } => {
 				use ed25519_dalek::Verifier;
 				let key = self
 					.get_user_key(user, algorithm, key)
@@ -180,10 +174,7 @@ impl ServerHandlers for Handlers {
 						.verify(message, &signature.try_into().map_err(|_| ())?)
 						.map_err(|_| ())?,
 				}
-				Ok(User {
-					shell: None,
-					context: self.get_user_context(user).await?,
-				})
+				Ok(User { shell: None, context: self.get_user_context(user).await? })
 			}
 		}
 	}

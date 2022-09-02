@@ -1,7 +1,9 @@
-use crate::{arch::amd64::asm::io, memory::r#virtual::phys_to_virt};
-use core::{
-	fmt,
-	sync::atomic::{AtomicU16, Ordering},
+use {
+	crate::{arch::amd64::asm::io, memory::r#virtual::phys_to_virt},
+	core::{
+		fmt,
+		sync::atomic::{AtomicU16, Ordering},
+	},
 };
 
 #[derive(Clone, Copy)]
@@ -24,13 +26,7 @@ impl Text {
 	const HEIGHT: u8 = 25;
 
 	pub const fn new() -> Self {
-		Self {
-			row: 0,
-			column: 0,
-			colors: 0xf,
-			lines: [[0; 80]; 25],
-			ansi_state: None,
-		}
+		Self { row: 0, column: 0, colors: 0xf, lines: [[0; 80]; 25], ansi_state: None }
 	}
 
 	#[allow(dead_code)]

@@ -13,23 +13,25 @@ extern crate alloc;
 
 use alloc::{format, vec::Vec};
 
-use async_std::{
-	io::Read,
-	net::Ipv6Addr,
-	object::{AsyncObject, RefAsyncObject},
+use {
+	async_std::{
+		io::Read,
+		net::Ipv6Addr,
+		object::{AsyncObject, RefAsyncObject},
+	},
+	core::{
+		future::Future,
+		pin::Pin,
+		str::{self, FromStr},
+		time::Duration,
+	},
+	driver_utils::os::stream_table::{JobId, Request, Response, StreamTable},
+	rt::Error,
+	rt_default as _,
+	smoltcp::wire,
+	tcp::{TcpConnection, TcpListener},
+	udp::UdpSocket,
 };
-use core::{
-	future::Future,
-	pin::Pin,
-	str::{self, FromStr},
-	time::Duration,
-};
-use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
-use rt::Error;
-use rt_default as _;
-use smoltcp::wire;
-use tcp::{TcpConnection, TcpListener};
-use udp::UdpSocket;
 
 enum Socket {
 	TcpListener(TcpListener<5>),
@@ -81,10 +83,7 @@ fn main() {
 					Ok((d.cast(), virtio::PhysAddr::new(a.try_into().unwrap())))
 				};
 
-				let msix = virtio_net::Msix {
-					receive_queue: Some(0),
-					transmit_queue: Some(1),
-				};
+				let msix = virtio_net::Msix { receive_queue: Some(0), transmit_queue: Some(1) };
 
 				unsafe { virtio_net::Device::new(h, map_bar, dma_alloc, msix).unwrap() }
 			}
@@ -515,11 +514,7 @@ impl Table {
 			.unwrap()
 			.share(&table.public())
 			.unwrap();
-		Self {
-			table,
-			objects: Default::default(),
-			dirty: false,
-		}
+		Self { table, objects: Default::default(), dirty: false }
 	}
 
 	fn insert(&mut self, job_id: JobId, object: Object) {

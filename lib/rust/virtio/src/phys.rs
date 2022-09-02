@@ -1,14 +1,16 @@
 //! Utilities to deal with physical addresses.
 
-use core::{
-	fmt,
-	marker::PhantomData,
-	mem,
-	ops::{Add, Sub},
-	ptr::{self, NonNull},
-	slice,
+use {
+	core::{
+		fmt,
+		marker::PhantomData,
+		mem,
+		ops::{Add, Sub},
+		ptr::{self, NonNull},
+		slice,
+	},
+	endian::u64le,
 };
-use endian::u64le;
 
 /// Representation of a physical address.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,12 +69,7 @@ impl<'a> PhysMap<'a> {
 	/// The lifetime must be valid.
 	#[inline(always)]
 	pub unsafe fn new(virt: NonNull<u8>, phys: PhysAddr, size: usize) -> Self {
-		Self {
-			virt,
-			phys,
-			size,
-			_marker: PhantomData,
-		}
+		Self { virt, phys, size, _marker: PhantomData }
 	}
 
 	#[inline(always)]
@@ -107,12 +104,7 @@ impl<'a> PhysMap<'a> {
 			Err(BufferTooSmall)
 		} else {
 			Ok((
-				Self {
-					virt: self.virt,
-					phys: self.phys,
-					size: index,
-					_marker: self._marker,
-				},
+				Self { virt: self.virt, phys: self.phys, size: index, _marker: self._marker },
 				Self {
 					// This should never overflow if the contract in Self::new() was upheld
 					virt: NonNull::new(self.virt.as_ptr().wrapping_add(index)).unwrap(),

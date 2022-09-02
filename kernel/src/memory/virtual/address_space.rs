@@ -1,12 +1,13 @@
-use crate::{
-	arch::r#virtual,
-	memory::{r#virtual::RWX, Page},
-	{scheduler::MemoryObject, sync::SpinLock},
+use {
+	crate::{
+		arch::r#virtual,
+		memory::{r#virtual::RWX, Page},
+		scheduler::MemoryObject,
+		sync::SpinLock,
+	},
+	alloc::{sync::Arc, vec::Vec},
+	core::{num::NonZeroUsize, ops::RangeInclusive, ptr::NonNull},
 };
-use alloc::{sync::Arc, vec::Vec};
-use core::num::NonZeroUsize;
-use core::ops::RangeInclusive;
-use core::ptr::NonNull;
 
 #[derive(Debug)]
 pub enum MapError {

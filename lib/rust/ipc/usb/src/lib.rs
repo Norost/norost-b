@@ -79,15 +79,8 @@ pub fn recv_parse(msg: &[u8]) -> Result<Recv<'_>, &'static str> {
 	let f1 = |i| f(i, i + 1).map(|l| l[0]);
 	let f4 = |i| f(i, i + 4).map(|l| u32::from_le_bytes(l[0..4].try_into().unwrap()));
 	Ok(match f1(0)? {
-		RECV_TY_DATA_IN => Recv::DataIn {
-			ep: f1(1)?,
-			data: fe(2)?,
-		},
-		RECV_TY_ERROR => Recv::Error {
-			id: f4(1)?,
-			code: f1(4)?,
-			message: fs(5)?,
-		},
+		RECV_TY_DATA_IN => Recv::DataIn { ep: f1(1)?, data: fe(2)? },
+		RECV_TY_ERROR => Recv::Error { id: f4(1)?, code: f1(4)?, message: fs(5)? },
 		_ => return Err("unknown message type"),
 	})
 }

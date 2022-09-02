@@ -1,5 +1,4 @@
-use crate::ControlHeader;
-use endian::u32le;
+use {crate::ControlHeader, endian::u32le};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -12,12 +11,7 @@ pub struct CursorPosition {
 
 impl CursorPosition {
 	pub fn new(scanout_id: u32, x: u32, y: u32) -> Self {
-		Self {
-			scanout_id: scanout_id.into(),
-			x: x.into(),
-			y: y.into(),
-			_padding: 0.into(),
-		}
+		Self { scanout_id: scanout_id.into(), x: x.into(), y: y.into(), _padding: 0.into() }
 	}
 }
 

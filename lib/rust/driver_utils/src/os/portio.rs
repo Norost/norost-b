@@ -1,5 +1,4 @@
-use core::mem;
-use norostb_rt as rt;
+use {core::mem, norostb_rt as rt};
 
 pub struct PortIo(rt::Object);
 

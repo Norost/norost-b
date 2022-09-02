@@ -4,13 +4,15 @@
 
 mod scanset2;
 
-use super::*;
-use alloc::collections::VecDeque;
-use core::cell::{Cell, RefCell};
-use driver_utils::os::stream_table::JobId;
-use scancodes::{
-	config::{Config, Modifiers},
-	Event, KeyCode, SpecialKeyCode,
+use {
+	super::*,
+	alloc::collections::VecDeque,
+	core::cell::{Cell, RefCell},
+	driver_utils::os::stream_table::JobId,
+	scancodes::{
+		config::{Config, Modifiers},
+		Event, KeyCode, SpecialKeyCode,
+	},
 };
 
 pub struct Keyboard {
@@ -44,11 +46,7 @@ struct LossyRingBuffer<T> {
 
 impl<T: Default + Copy> Default for LossyRingBuffer<T> {
 	fn default() -> Self {
-		Self {
-			push: 0,
-			pop: 0,
-			data: [Default::default(); 128],
-		}
+		Self { push: 0, pop: 0, data: [Default::default(); 128] }
 	}
 }
 

@@ -1,7 +1,9 @@
-use crate::thread;
-use core::{
-	intrinsics,
-	sync::atomic::{AtomicUsize, Ordering},
+use {
+	crate::thread,
+	core::{
+		intrinsics,
+		sync::atomic::{AtomicUsize, Ordering},
+	},
 };
 
 #[derive(Debug)]
@@ -13,9 +15,7 @@ const WRITE_LOCK_BIT: usize = 1 << (usize::BITS - 1);
 
 impl RawRwLock {
 	pub const fn new() -> Self {
-		Self {
-			lock: AtomicUsize::new(0),
-		}
+		Self { lock: AtomicUsize::new(0) }
 	}
 
 	/// Wait for the write bit to be cleared.

@@ -1,10 +1,12 @@
-use crate::{
-	io::{Buf, Read},
-	object::file_root,
-	AsyncObject,
+use {
+	crate::{
+		io::{Buf, Read},
+		object::file_root,
+		AsyncObject,
+	},
+	alloc::vec::Vec,
+	rt::io,
 };
-use alloc::vec::Vec;
-use rt::io;
 
 pub struct File(AsyncObject);
 

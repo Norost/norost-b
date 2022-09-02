@@ -1,9 +1,11 @@
-use crate::Handle;
-use core::{cell::RefCell, fmt, ops::Deref};
-use nora_stream_table::{Buffers, ServerQueue, Slice};
-use norostb_rt::{
-	self as rt,
-	io::{Pow2Size, SeekFrom},
+use {
+	crate::Handle,
+	core::{cell::RefCell, fmt, ops::Deref},
+	nora_stream_table::{Buffers, ServerQueue, Slice},
+	norostb_rt::{
+		self as rt,
+		io::{Pow2Size, SeekFrom},
+	},
 };
 
 pub use nora_stream_table::JobId;
@@ -46,13 +48,7 @@ impl StreamTable {
 
 		let notify = tbl.open(b"notify").unwrap();
 		let public = tbl.open(b"public").unwrap();
-		Self {
-			queue: queue.into(),
-			buffers,
-			notify,
-			table: tbl,
-			public,
-		}
+		Self { queue: queue.into(), buffers, notify, table: tbl, public }
 	}
 
 	pub fn public(&self) -> &rt::Object {
@@ -64,24 +60,16 @@ impl StreamTable {
 		let (h, id, r) = self.queue.borrow_mut().dequeue()?;
 		let r = match r {
 			R::Read { amount } => Request::Read { amount },
-			R::Write { data } => Request::Write {
-				data: self.get_owned_buf(data),
-			},
-			R::GetMeta { property } => Request::GetMeta {
-				property: Property(self.get_owned_buf(property)),
-			},
+			R::Write { data } => Request::Write { data: self.get_owned_buf(data) },
+			R::GetMeta { property } => {
+				Request::GetMeta { property: Property(self.get_owned_buf(property)) }
+			}
 			R::SetMeta { property_value } => Request::SetMeta {
 				property_value: PropertyValue(self.get_owned_buf(property_value)),
 			},
-			R::Open { path } => Request::Open {
-				path: self.get_owned_buf(path),
-			},
-			R::Create { path } => Request::Create {
-				path: self.get_owned_buf(path),
-			},
-			R::Destroy { path } => Request::Destroy {
-				path: self.get_owned_buf(path),
-			},
+			R::Open { path } => Request::Open { path: self.get_owned_buf(path) },
+			R::Create { path } => Request::Create { path: self.get_owned_buf(path) },
+			R::Destroy { path } => Request::Destroy { path: self.get_owned_buf(path) },
 			R::Close => Request::Close,
 			R::Seek { from } => Request::Seek {
 				from: match from {
@@ -90,9 +78,9 @@ impl StreamTable {
 					nora_stream_table::SeekFrom::End(n) => SeekFrom::End(n),
 				},
 			},
-			R::Share { share } => Request::Share {
-				share: self.table.open(&share.to_le_bytes()).unwrap(),
-			},
+			R::Share { share } => {
+				Request::Share { share: self.table.open(&share.to_le_bytes()).unwrap() }
+			}
 		};
 		Some((h, id, r))
 	}
@@ -136,10 +124,7 @@ impl StreamTable {
 	}
 
 	fn get_owned_buf(&self, slice: nora_stream_table::Slice) -> Data<'_> {
-		Data {
-			table: self,
-			data: self.buffers.get(slice),
-		}
+		Data { table: self, data: self.buffers.get(slice) }
 	}
 }
 

@@ -41,35 +41,20 @@ static MULTIBOOT: MultiBoot = {
 		.wrapping_sub(flags)
 		.wrapping_sub(header_length);
 	MultiBoot {
-		header: Header {
-			magic,
-			flags,
-			header_length,
-			checksum,
-		},
+		header: Header { magic, flags, header_length, checksum },
 		framebuffer: FramebufferTag {
-			tag: Tag {
-				typ: 5,
-				flags: 0,
-				size: core::mem::size_of::<FramebufferTag>() as _,
-			},
+			tag: Tag { typ: 5, flags: 0, size: core::mem::size_of::<FramebufferTag>() as _ },
 			width: 0,
 			height: 0,
 			depth: 32, // RGBX8888 or similar, hopefully
 		},
-		end_tag: Tag {
-			typ: 0,
-			flags: 0,
-			size: core::mem::size_of::<Tag>() as u32,
-		},
+		end_tag: Tag { typ: 0, flags: 0, size: core::mem::size_of::<Tag>() as u32 },
 	}
 };
 
 pub mod bootinfo {
 
-	use core::marker::PhantomData;
-	use core::mem;
-	use core::slice;
+	use core::{marker::PhantomData, mem, slice};
 
 	#[repr(C)]
 	#[repr(align(8))]

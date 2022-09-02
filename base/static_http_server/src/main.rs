@@ -3,18 +3,20 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, vec::Vec};
-use async_std::{
-	eprintln,
-	io::{Buf, Error, Read, Write},
-	net::{Ipv4Addr, TcpListener, TcpStream},
-	println,
+use {
+	alloc::{boxed::Box, vec::Vec},
+	async_std::{
+		eprintln,
+		io::{Buf, Error, Read, Write},
+		net::{Ipv4Addr, TcpListener, TcpStream},
+		println,
+	},
+	futures_util::{
+		future::{self, Either},
+		stream::{FuturesUnordered, StreamExt},
+	},
+	rt_default as _,
 };
-use futures_util::{
-	future::{self, Either},
-	stream::{FuturesUnordered, StreamExt},
-};
-use rt_default as _;
 
 const BAD_REQUEST: &[u8] = b"<!DOCTYPE html><h1>400 Bad Request</h1>";
 const NOT_FOUND: &[u8] = b"<!DOCTYPE html><h1>404 Not Found</h1>";

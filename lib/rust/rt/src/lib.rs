@@ -42,10 +42,12 @@ pub mod tls;
 
 use core::ptr::NonNull;
 
-pub use io::RWX;
-pub use norostb_kernel::{error::Error, syscall::exit, time, AtomicHandle, Handle};
-pub use process::Process;
-pub use table::{NewObject, Object, RefObject};
+pub use {
+	io::RWX,
+	norostb_kernel::{error::Error, syscall::exit, time, AtomicHandle, Handle},
+	process::Process,
+	table::{NewObject, Object, RefObject},
+};
 
 cfg_if::cfg_if! {
 	if #[cfg(target_arch = "x86_64")] {

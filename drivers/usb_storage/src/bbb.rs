@@ -31,12 +31,7 @@ impl<'a> Device<'a> {
 		wr: &'a rt::Object,
 		rd: &'a rt::Object,
 	) -> Self {
-		Self {
-			data_out,
-			data_in,
-			wr: wr.into(),
-			rd: rd.into(),
-		}
+		Self { data_out, data_in, wr: wr.into(), rd: rd.into() }
 	}
 
 	/// Perform a BBB Out transfer

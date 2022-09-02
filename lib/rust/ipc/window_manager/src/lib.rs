@@ -65,10 +65,7 @@ impl Flush {
 	#[inline]
 	pub fn decode(raw: [u8; 12]) -> Self {
 		let f = raw::Flush::from_raw(&raw, 0);
-		Self {
-			origin: Point::from_raw(f.origin()),
-			size: SizeInclusive::from_raw(f.size()),
-		}
+		Self { origin: Point::from_raw(f.origin()), size: SizeInclusive::from_raw(f.size()) }
 	}
 
 	#[inline]

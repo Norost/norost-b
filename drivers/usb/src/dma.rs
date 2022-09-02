@@ -1,5 +1,7 @@
-use core::{alloc::Layout, marker::PhantomData, mem, ptr::NonNull};
-use driver_utils::dma;
+use {
+	core::{alloc::Layout, marker::PhantomData, mem, ptr::NonNull},
+	driver_utils::dma,
+};
 
 pub struct Dma<T>
 where
@@ -46,11 +48,7 @@ impl<T> Dma<T> {
 			}
 			Err(_) => (NonNull::dangling(), 0),
 		};
-		Ok(Self {
-			ptr: ptr.cast(),
-			phys,
-			_marker: PhantomData,
-		})
+		Ok(Self { ptr: ptr.cast(), phys, _marker: PhantomData })
 	}
 }
 

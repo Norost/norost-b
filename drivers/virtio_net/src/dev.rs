@@ -1,12 +1,16 @@
-use core::{
-	cell::RefCell,
-	mem::{self, ManuallyDrop},
-	ptr::NonNull,
+use {
+	core::{
+		cell::RefCell,
+		mem::{self, ManuallyDrop},
+		ptr::NonNull,
+	},
+	smoltcp::{
+		phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken},
+		time::Instant,
+	},
+	virtio::{PhysAddr, PhysRegion},
+	virtio_net::Packet,
 };
-use smoltcp::phy::{Device, DeviceCapabilities, Medium, RxToken, TxToken};
-use smoltcp::time::Instant;
-use virtio::{PhysAddr, PhysRegion};
-use virtio_net::Packet;
 
 const MAX_RX_PKT: usize = 8;
 const MAX_TX_PKT: usize = 8;
@@ -55,14 +59,8 @@ impl<'d> Dev<'d> {
 		let dma_virt = dma_virt.cast();
 
 		let mut s = Self(
-			DevInner {
-				virtio,
-				dma_virt,
-				dma_phys,
-				rx_avail_map: 0x00ff,
-				tx_avail_map: 0xff00,
-			}
-			.into(),
+			DevInner { virtio, dma_virt, dma_phys, rx_avail_map: 0x00ff, tx_avail_map: 0xff00 }
+				.into(),
 		);
 
 		// Give first half to virtio device
@@ -125,25 +123,19 @@ impl<'a, 'd: 'a> Device<'a> for Dev<'d> {
 	fn receive(&'a mut self) -> Option<(Self::RxToken, Self::TxToken)> {
 		self.0.get_mut().pop_rx().and_then(|index| {
 			let tx = self.0.get_mut().pop_tx();
-			let rx = DevRxToken {
-				dev: &self.0,
-				index,
-			};
+			let rx = DevRxToken { dev: &self.0, index };
 			tx.map(|index| {
-				let tx = DevTxToken {
-					dev: &self.0,
-					index,
-				};
+				let tx = DevTxToken { dev: &self.0, index };
 				(rx, tx)
 			})
 		})
 	}
 
 	fn transmit(&'a mut self) -> Option<Self::TxToken> {
-		self.0.get_mut().pop_tx().map(|index| DevTxToken {
-			dev: &self.0,
-			index,
-		})
+		self.0
+			.get_mut()
+			.pop_tx()
+			.map(|index| DevTxToken { dev: &self.0, index })
 	}
 
 	fn capabilities(&self) -> DeviceCapabilities {
@@ -204,10 +196,7 @@ impl<'a, 'd: 'a> TxToken for DevTxToken<'a, 'd> {
 				.virtio
 				.send(
 					virt,
-					PhysRegion {
-						base: phys,
-						size: Packet::size_with_data(len),
-					},
+					PhysRegion { base: phys, size: Packet::size_with_data(len) },
 				)
 				.unwrap();
 			r

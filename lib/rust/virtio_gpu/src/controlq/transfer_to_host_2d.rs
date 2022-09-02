@@ -1,5 +1,4 @@
-use super::*;
-use core::fmt;
+use {super::*, core::fmt};
 
 #[derive(Clone, Copy)]
 #[repr(C)]

@@ -14,10 +14,10 @@ pub struct Driver {
 
 /// Format:
 /// ```
-///	(usb-drivers
-///		(<class> <subclass> <protocol>
-///			(<class> <subclass> <protocol> <driver>) ..) ..)
-///	```
+/// 	(usb-drivers
+/// 		(<class> <subclass> <protocol>
+/// 			(<class> <subclass> <protocol> <driver>) ..) ..)
+/// 	```
 pub fn parse(config: &rt::Object) -> Config {
 	let size = config.seek(rt::io::SeekFrom::End(0)).unwrap();
 	config.seek(rt::io::SeekFrom::Start(0)).unwrap();

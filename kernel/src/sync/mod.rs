@@ -1,5 +1,4 @@
 pub mod mutex;
 pub mod spinlock;
 
-pub use mutex::Mutex;
-pub use spinlock::SpinLock;
+pub use {mutex::Mutex, spinlock::SpinLock};

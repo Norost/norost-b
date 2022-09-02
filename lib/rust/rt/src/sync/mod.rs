@@ -4,6 +4,8 @@ mod raw_mutex;
 mod raw_rwlock;
 mod rwlock;
 
-pub use mutex::{Mutex, MutexGuard};
-pub use raw_mutex::RawMutex;
-pub use raw_rwlock::RawRwLock;
+pub use {
+	mutex::{Mutex, MutexGuard},
+	raw_mutex::RawMutex,
+	raw_rwlock::RawRwLock,
+};

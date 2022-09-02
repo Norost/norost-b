@@ -1,11 +1,13 @@
-use super::{AllocateError, AllocateHints, Page, PPN};
-use crate::{
-	memory::r#virtual::RWX,
-	object_table::{Object, PageFlags},
-	scheduler::MemoryObject,
+use {
+	super::{AllocateError, AllocateHints, Page, PPN},
+	crate::{
+		memory::r#virtual::RWX,
+		object_table::{Object, PageFlags},
+		scheduler::MemoryObject,
+	},
+	alloc::{boxed::Box, sync::Arc, vec::Vec},
+	core::num::NonZeroUsize,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::num::NonZeroUsize;
 
 /// An allocation of page frames.
 pub struct OwnedPageFrames {
@@ -20,9 +22,7 @@ impl OwnedPageFrames {
 		frames.reserve(size.get());
 		super::allocate(size.get(), |f| frames.push(f), hints.address, hints.color)?;
 		Ok({
-			let mut s = Self {
-				frames: frames.into(),
-			};
+			let mut s = Self { frames: frames.into() };
 			unsafe { s.clear() };
 			s
 		})

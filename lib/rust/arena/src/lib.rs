@@ -6,11 +6,13 @@
 #[cfg(not(feature = "rustc-dep-of-std"))]
 extern crate alloc;
 
-use alloc::vec;
-use core::{
-	fmt, iter, mem,
-	ops::{Index, IndexMut},
-	slice,
+use {
+	alloc::vec,
+	core::{
+		fmt, iter, mem,
+		ops::{Index, IndexMut},
+		slice,
+	},
 };
 
 /// A typed arena. A generation type can be specified which is used to prevent the ABA problem.
@@ -111,14 +113,8 @@ impl<V, G: Generation> Arena<V, G> {
 		let generation = self.generation.clone();
 		self.generation.increment();
 		if self.free != usize::MAX {
-			let handle = Handle {
-				index: self.free,
-				generation,
-			};
-			let entry = Entry::Occupied {
-				value: f(handle),
-				generation,
-			};
+			let handle = Handle { index: self.free, generation };
+			let entry = Entry::Occupied { value: f(handle), generation };
 			match mem::replace(&mut self.storage[self.free], entry) {
 				Entry::Free { next } => self.free = next,
 				Entry::Occupied { .. } => unreachable!(),
@@ -126,14 +122,9 @@ impl<V, G: Generation> Arena<V, G> {
 			self.count += 1;
 			handle
 		} else {
-			let handle = Handle {
-				index: self.storage.len(),
-				generation,
-			};
-			self.storage.push(Entry::Occupied {
-				value: f(handle),
-				generation,
-			});
+			let handle = Handle { index: self.storage.len(), generation };
+			self.storage
+				.push(Entry::Occupied { value: f(handle), generation });
 			self.count += 1;
 			handle
 		}
@@ -160,23 +151,17 @@ impl<V, G: Generation> Arena<V, G> {
 	}
 
 	pub fn iter(&self) -> Iter<'_, V, G> {
-		Iter {
-			inner: self.storage.iter().enumerate(),
-		}
+		Iter { inner: self.storage.iter().enumerate() }
 	}
 
 	pub fn iter_mut(&mut self) -> IterMut<'_, V, G> {
-		IterMut {
-			inner: self.storage.iter_mut().enumerate(),
-		}
+		IterMut { inner: self.storage.iter_mut().enumerate() }
 	}
 
 	pub fn drain(&mut self) -> Drain<'_, V, G> {
 		self.free = usize::MAX;
 		self.count = 0;
-		Drain {
-			inner: self.storage.drain(..).enumerate(),
-		}
+		Drain { inner: self.storage.drain(..).enumerate() }
 	}
 
 	pub fn get(&self, handle: Handle<G>) -> Option<&V> {

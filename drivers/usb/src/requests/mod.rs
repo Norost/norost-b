@@ -1,5 +1,7 @@
-use crate::dma::Dma;
-use core::{fmt, mem, slice::ArrayChunks};
+use {
+	crate::dma::Dma,
+	core::{fmt, mem, slice::ArrayChunks},
+};
 
 // https://wiki.osdev.org/USB#GET_DESCRIPTOR
 #[allow(dead_code)]
@@ -306,13 +308,8 @@ pub enum EndpointTransfer {
 pub struct DescriptorStringIter<'a>(ArrayChunks<'a, u8, 2>);
 
 pub enum Request {
-	GetDescriptor {
-		ty: GetDescriptor,
-		buffer: Dma<[u8]>,
-	},
-	SetConfiguration {
-		value: u8,
-	},
+	GetDescriptor { ty: GetDescriptor, buffer: Dma<[u8]> },
+	SetConfiguration { value: u8 },
 }
 
 pub struct RawRequest {

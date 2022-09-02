@@ -4,8 +4,7 @@ compile_error!("RTC driver is very likely broken");
 
 use core::arch::asm;
 
-use crate::time::Monotonic;
-use core::sync::atomic::AtomicU64;
+use {crate::time::Monotonic, core::sync::atomic::AtomicU64};
 
 static RTC_TICKS: AtomicU64 = AtomicU64::new(0);
 

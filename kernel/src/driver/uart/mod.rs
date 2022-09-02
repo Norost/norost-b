@@ -8,11 +8,15 @@ cfg_if::cfg_if! {
 }
 mod table;
 
-use crate::object_table;
-use crate::sync::spinlock::{AutoGuard, SpinLock};
-use alloc::sync::Arc;
-use core::fmt;
 pub use table::UartId;
+use {
+	crate::{
+		object_table,
+		sync::spinlock::{AutoGuard, SpinLock},
+	},
+	alloc::sync::Arc,
+	core::fmt,
+};
 
 pub static mut DEVICES: [Option<SpinLock<Uart>>; 8] = [const { None }; 8];
 

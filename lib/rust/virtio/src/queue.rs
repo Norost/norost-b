@@ -1,15 +1,17 @@
 //! Implementation of **split** virtqueues.
 
-use crate::{PhysAddr, PhysRegion};
-use core::{
-	cell::Cell,
-	convert::{TryFrom, TryInto},
-	fmt, mem,
-	ptr::NonNull,
-	slice,
-	sync::atomic::{self, Ordering},
+use {
+	crate::{PhysAddr, PhysRegion},
+	core::{
+		cell::Cell,
+		convert::{TryFrom, TryInto},
+		fmt, mem,
+		ptr::NonNull,
+		slice,
+		sync::atomic::{self, Ordering},
+	},
+	endian::{u16le, u32le},
 };
-use endian::{u16le, u32le};
 
 #[repr(C)]
 struct Descriptor {
@@ -179,10 +181,7 @@ impl<'a> Queue<'a> {
 			_config: config,
 			mask: size as u16 - 1,
 			last_used: 0,
-			alloc: DescriptorAlloc {
-				free_head: 0,
-				free_count: 0,
-			},
+			alloc: DescriptorAlloc { free_head: 0, free_count: 0 },
 			descriptors,
 			available,
 			used,

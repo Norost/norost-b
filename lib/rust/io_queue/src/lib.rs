@@ -2,8 +2,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(unused)]
 
-use core::{mem::MaybeUninit, time::Duration};
-use norostb_kernel::{io, syscall};
+use {
+	core::{mem::MaybeUninit, time::Duration},
+	norostb_kernel::{io, syscall},
+};
 
 pub use norostb_kernel::{
 	error,

@@ -5,14 +5,17 @@ mod sector;
 
 pub use sector::Sector;
 
-use core::convert::TryInto;
-use core::fmt;
-use core::mem;
-use core::ptr::NonNull;
-use core::sync::atomic::{self, Ordering};
-use endian::{u16le, u32le, u64le};
-use memoffset::offset_of_tuple;
-use virtio::{pci::CommonConfig, queue, PhysAddr, PhysRegion};
+use {
+	core::{
+		convert::TryInto,
+		fmt, mem,
+		ptr::NonNull,
+		sync::atomic::{self, Ordering},
+	},
+	endian::{u16le, u32le, u64le},
+	memoffset::offset_of_tuple,
+	virtio::{pci::CommonConfig, queue, PhysAddr, PhysRegion},
+};
 
 const SIZE_MAX: u32 = 1 << 1;
 const SEG_MAX: u32 = 1 << 2;

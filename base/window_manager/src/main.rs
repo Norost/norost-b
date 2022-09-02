@@ -23,11 +23,13 @@ mod math;
 mod window;
 mod workspace;
 
-use alloc::vec::Vec;
-use core::{cell::RefCell, ptr::NonNull};
-use driver_utils::os::stream_table::{JobId, Request, Response, StreamTable};
-use math::{Point, Rect, Size};
-use rt::io::{Error, Handle};
+use {
+	alloc::vec::Vec,
+	core::{cell::RefCell, ptr::NonNull},
+	driver_utils::os::stream_table::{JobId, Request, Response, StreamTable},
+	math::{Point, Rect, Size},
+	rt::io::{Error, Handle},
+};
 
 #[cfg(not(test))]
 #[global_allocator]
@@ -88,14 +90,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			&ipc_gpu::Flush {
 				offset: 0,
 				stride: rect.size().x,
-				origin: ipc_gpu::Point {
-					x: rect.low().x,
-					y: rect.low().y,
-				},
-				size: ipc_gpu::SizeInclusive {
-					x: rect.size().x as _,
-					y: rect.size().y as _,
-				},
+				origin: ipc_gpu::Point { x: rect.low().x, y: rect.low().y },
+				size: ipc_gpu::SizeInclusive { x: rect.size().x as _, y: rect.size().y as _ },
 			}
 			.encode(),
 		)
@@ -136,10 +132,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							for (w, ww) in manager.windows() {
 								let rect = manager.window_rect(w, size).unwrap();
-								let evt = ipc_wm::Resolution {
-									x: rect.size().x,
-									y: rect.size().y,
-								};
+								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 								let mut ue = ww.user_data.unread_events.borrow_mut();
 								ue.resize = Some(evt);
 								let evt = ipc_wm::Event::Resize(evt).encode();
@@ -242,10 +235,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for (w, ww) in manager.windows() {
 						let rect = manager.window_rect(w, size).unwrap();
-						let evt = ipc_wm::Resolution {
-							x: rect.size().x,
-							y: rect.size().y,
-						};
+						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 						let mut ue = ww.user_data.unread_events.borrow_mut();
 						ue.resize = Some(evt);
 						let evt = ipc_wm::Event::Resize(evt).encode();
@@ -318,10 +308,7 @@ impl Drop for FrameBuffer {
 
 impl Default for FrameBuffer {
 	fn default() -> Self {
-		Self {
-			base: NonNull::dangling(),
-			size: 0,
-		}
+		Self { base: NonNull::dangling(), size: 0 }
 	}
 }
 

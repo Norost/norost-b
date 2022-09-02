@@ -1,7 +1,9 @@
 //! # Trancoder AKA pipe configuration
 
-use crate::control::Control;
-use crate::mode::{self, Mode};
+use crate::{
+	control::Control,
+	mode::{self, Mode},
+};
 
 reg! {
 	Config

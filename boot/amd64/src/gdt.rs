@@ -1,5 +1,4 @@
-use core::arch::asm;
-use core::mem;
+use core::{arch::asm, mem};
 
 #[repr(C)]
 struct GDTEntry {
@@ -58,11 +57,7 @@ pub struct GDTPointer<'a> {
 
 impl<'a> GDTPointer<'a> {
 	pub const fn new(gdt: &'a GDT) -> Self {
-		Self {
-			_padding: [0; 1],
-			limit: (mem::size_of::<GDT>() - 1) as u16,
-			address: gdt,
-		}
+		Self { _padding: [0; 1], limit: (mem::size_of::<GDT>() - 1) as u16, address: gdt }
 	}
 
 	pub unsafe fn activate(&self) {

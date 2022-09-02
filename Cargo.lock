@@ -781,7 +781,7 @@ checksum = "43794a0ace135be66a25d3ae77d41b91615fb68ae937f904090203e81f755b65"
 
 [[package]]
 name = "nora"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "acpi",
  "arena",
@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "noraboot"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "compiler_builtins",
  "cpuid",

@@ -1,10 +1,9 @@
-use super::phys::PhysAddr;
-use core::convert::TryFrom;
-use core::fmt;
-use core::marker::PhantomData;
-use core::ptr::NonNull;
-use endian::{u16le, u32le};
-use volatile::VolatileCell;
+use {
+	super::phys::PhysAddr,
+	core::{convert::TryFrom, fmt, marker::PhantomData, ptr::NonNull},
+	endian::{u16le, u32le},
+	volatile::VolatileCell,
+};
 
 /// An identifier for a device type
 #[derive(Clone, Copy, Hash, PartialOrd, Ord, Eq, PartialEq)]
@@ -220,18 +219,9 @@ impl<'a> Device<'a> {
 			let isr = mb(isr).cast().as_ref();
 			let device = mb(device).cast().as_ref();
 
-			let notify = Notify {
-				address: notify.cast(),
-				multiplier: mul,
-				_marker: PhantomData,
-			};
+			let notify = Notify { address: notify.cast(), multiplier: mul, _marker: PhantomData };
 
-			Ok(Device {
-				common,
-				device,
-				notify,
-				isr,
-			})
+			Ok(Device { common, device, notify, isr })
 		}
 	}
 }

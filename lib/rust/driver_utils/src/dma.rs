@@ -1,6 +1,8 @@
-use alloc::string::ToString;
-use core::{num::NonZeroUsize, ptr::NonNull, str};
-use norostb_rt as rt;
+use {
+	alloc::string::ToString,
+	core::{num::NonZeroUsize, ptr::NonNull, str},
+	norostb_rt as rt,
+};
 
 pub fn alloc_dma(size: NonZeroUsize) -> rt::io::Result<(NonNull<u8>, u64, NonZeroUsize)> {
 	let (buf, buf_phys) = alloc_dma_object(size)?;

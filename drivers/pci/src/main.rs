@@ -4,8 +4,10 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use rt_default as _;
+use {
+	alloc::{boxed::Box, collections::BTreeMap, vec::Vec},
+	rt_default as _,
+};
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
@@ -108,10 +110,7 @@ fn load_config() -> Config {
 				s => panic!("unknown property {:?}", s),
 			}
 		}
-		Driver {
-			path: path.into(),
-			name: name.map(|n| n.into()),
-		}
+		Driver { path: path.into(), name: name.map(|n| n.into()) }
 	};
 
 	for item in cf.iter() {

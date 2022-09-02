@@ -1,8 +1,8 @@
-use crate::memory::r#virtual::phys_to_virt;
-use crate::time::Monotonic;
-use acpi::{hpet::HpetInfo, AcpiHandler, AcpiTables};
-use core::cell::UnsafeCell;
-use core::{fmt, ptr};
+use {
+	crate::{memory::r#virtual::phys_to_virt, time::Monotonic},
+	acpi::{hpet::HpetInfo, AcpiHandler, AcpiTables},
+	core::{cell::UnsafeCell, fmt, ptr},
+};
 
 // No atomic is strictly necessary since we only read from this after boot.
 static mut ADDRESS: *const Hpet = core::ptr::null();

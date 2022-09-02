@@ -5,8 +5,10 @@
 
 extern crate alloc;
 
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt_default as _;
+use {
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt_default as _,
+};
 
 mod bbb;
 
@@ -53,24 +55,13 @@ fn main() {
 
 	// Send inquiry since it seems to be required for MSD devices to work properly
 	dev.transfer_in(
-		scsi::Inquiry {
-			allocation_length: 0x24,
-			evpd: 0,
-			page_code: 0,
-			control: 0,
-		},
+		scsi::Inquiry { allocation_length: 0x24, evpd: 0, page_code: 0, control: 0 },
 		0x24,
 	)
 	.unwrap();
 
 	let data = dev
-		.transfer_in(
-			scsi::ReadCapacity10 {
-				_reserved: 0,
-				control: 0,
-			},
-			8,
-		)
+		.transfer_in(scsi::ReadCapacity10 { _reserved: 0, control: 0 }, 8)
 		.unwrap();
 	let attr = scsi::ReadCapacity10Data::from(<[u8; 8]>::try_from(&*data).unwrap());
 	assert!(attr.block_length.is_power_of_two());

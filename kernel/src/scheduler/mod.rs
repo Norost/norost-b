@@ -5,18 +5,21 @@ pub mod syscall;
 mod thread;
 mod waker;
 
-use crate::{
-	arch, driver::apic, memory::frame::AllocateError, object_table::Root, time::Monotonic,
+use {
+	crate::{
+		arch, driver::apic, memory::frame::AllocateError, object_table::Root, time::Monotonic,
+	},
+	alloc::sync::Arc,
+	core::{
+		future::Future,
+		marker::Unpin,
+		mem::MaybeUninit,
+		pin::Pin,
+		task::{Context, Poll},
+		time::Duration,
+	},
 };
-use alloc::sync::Arc;
-use core::future::Future;
-use core::marker::Unpin;
-use core::mem::MaybeUninit;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-use core::time::Duration;
-pub use memory_object::*;
-pub use thread::Thread;
+pub use {memory_object::*, thread::Thread};
 
 static mut SLEEP_THREADS: [MaybeUninit<Arc<Thread>>; 1] = MaybeUninit::uninit_array();
 

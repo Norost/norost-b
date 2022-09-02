@@ -16,10 +16,5 @@ static HEADER: Header = {
 		.wrapping_sub(magic)
 		.wrapping_sub(flags)
 		.wrapping_sub(header_length);
-	Header {
-		magic,
-		flags,
-		header_length,
-		checksum,
-	}
+	Header { magic, flags, header_length, checksum }
 };

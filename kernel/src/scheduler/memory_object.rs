@@ -1,5 +1,7 @@
-use crate::memory::{frame::PPN, r#virtual::RWX};
-use core::any::Any;
+use {
+	crate::memory::{frame::PPN, r#virtual::RWX},
+	core::any::Any,
+};
 
 pub use crate::arch::PageFlags;
 

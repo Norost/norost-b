@@ -9,9 +9,11 @@ mod owned;
 
 pub use owned::*;
 
-use super::Page;
-use crate::{boot, object_table::Root, sync::SpinLock};
-use core::{fmt, num::NonZeroUsize, ptr};
+use {
+	super::Page,
+	crate::{boot, object_table::Root, sync::SpinLock},
+	core::{fmt, num::NonZeroUsize, ptr},
+};
 
 /// A Physical Page Number.
 ///

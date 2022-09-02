@@ -23,9 +23,11 @@ pub use norostb_kernel::{
 	syscall::Handle,
 };
 
-pub use object::*;
-pub use query::*;
-pub use root::Root;
-pub use streaming::{NewStreamingTableError, StreamingTable};
-pub use subrange::SubRange;
-pub use ticket::*;
+pub use {
+	object::*,
+	query::*,
+	root::Root,
+	streaming::{NewStreamingTableError, StreamingTable},
+	subrange::SubRange,
+	ticket::*,
+};

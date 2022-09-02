@@ -53,15 +53,17 @@ mod loader;
 mod requests;
 mod xhci;
 
-use alloc::{collections::BTreeMap, vec::Vec};
-use core::{future::Future, num::NonZeroU8, pin::Pin, str, task::Context, time::Duration};
-use driver_utils::{
-	os::stream_table::{JobId, Request, Response, StreamTable},
-	task::waker,
+use {
+	alloc::{collections::BTreeMap, vec::Vec},
+	core::{future::Future, num::NonZeroU8, pin::Pin, str, task::Context, time::Duration},
+	driver_utils::{
+		os::stream_table::{JobId, Request, Response, StreamTable},
+		task::waker,
+	},
+	io_queue_rt::{Pow2Size, Queue},
+	rt::{Error, Handle},
+	rt_default as _,
 };
-use io_queue_rt::{Pow2Size, Queue};
-use rt::{Error, Handle};
-use rt_default as _;
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
@@ -124,13 +126,7 @@ fn main() -> ! {
 						trace!("id {:x}", e);
 						load_driver.insert(e, LoadDriver { base: None });
 					}
-					Event::Transfer {
-						slot,
-						endpoint,
-						id,
-						buffer,
-						code,
-					} => {
+					Event::Transfer { slot, endpoint, id, buffer, code } => {
 						trace!(
 							"transfer, slot {} ep {} id {:x}, {:?}",
 							slot,
@@ -421,19 +417,10 @@ impl Job {
 		let id = ctrl
 			.send_request(
 				slot,
-				requests::Request::GetDescriptor {
-					buffer,
-					ty: requests::GetDescriptor::Device,
-				},
+				requests::Request::GetDescriptor { buffer, ty: requests::GetDescriptor::Device },
 			)
 			.unwrap_or_else(|_| todo!());
-		jobs.insert(
-			id,
-			Self {
-				state: JobState::WaitDeviceInfo,
-				job_id,
-			},
-		);
+		jobs.insert(id, Self { state: JobState::WaitDeviceInfo, job_id });
 	}
 
 	fn progress<'a>(

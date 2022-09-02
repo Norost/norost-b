@@ -1,6 +1,5 @@
 #![no_std]
-use core::cell::UnsafeCell;
-use core::ptr;
+use core::{cell::UnsafeCell, ptr};
 
 // TODO how does this interact with Drop?
 #[repr(transparent)]

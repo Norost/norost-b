@@ -3,11 +3,15 @@
 
 mod term;
 
-use self::term::AnsiTerminal;
-use std::fs;
-use std::io::{self, Read, Write};
-use std::iter::Filter;
-use std::str;
+use {
+	self::term::AnsiTerminal,
+	std::{
+		fs,
+		io::{self, Read, Write},
+		iter::Filter,
+		str,
+	},
+};
 
 fn main() -> std::io::Result<()> {
 	let mut term = self::term::AnsiTerminal::new(std::io::stdin(), std::io::stderr());

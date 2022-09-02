@@ -3,15 +3,19 @@ mod sanitizer;
 
 #[cfg(not(feature = "debug-sanitize-heap"))]
 mod default {
-	use super::super::{
-		frame::{self, AllocateHints, OwnedPageFrames, PPN},
-		r#virtual::{AddressSpace, RWX},
-		Page,
+	use {
+		super::super::{
+			frame::{self, AllocateHints, OwnedPageFrames, PPN},
+			r#virtual::{AddressSpace, RWX},
+			Page,
+		},
+		alloc::sync::Arc,
+		core::{
+			alloc::{GlobalAlloc, Layout},
+			num::NonZeroUsize,
+			ptr::{self, NonNull},
+		},
 	};
-	use alloc::sync::Arc;
-	use core::alloc::{GlobalAlloc, Layout};
-	use core::num::NonZeroUsize;
-	use core::ptr::{self, NonNull};
 
 	#[global_allocator]
 	static GLOBAL: Global = Global;
@@ -25,14 +29,8 @@ mod default {
 			} else if let Some(c) = NonZeroUsize::new(Page::min_pages_for_bytes(layout.size())) {
 				if c.get() > 1 {
 					let frames = Arc::new(
-						OwnedPageFrames::new(
-							c,
-							AllocateHints {
-								address: 0 as _,
-								color: 0,
-							},
-						)
-						.unwrap(),
+						OwnedPageFrames::new(c, AllocateHints { address: 0 as _, color: 0 })
+							.unwrap(),
 					);
 					AddressSpace::kernel_map_object(None, frames, RWX::RW)
 						.unwrap()

@@ -4,11 +4,13 @@
 
 extern crate alloc;
 
-use alloc::string::ToString;
-use core::ptr::NonNull;
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt::io::{Error, Handle};
-use virtio_gpu::Rect;
+use {
+	alloc::string::ToString,
+	core::ptr::NonNull,
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt::io::{Error, Handle},
+	virtio_gpu::Rect,
+};
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -66,10 +68,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						.cast()
 				};
 
-				let msix = virtio_gpu::Msix {
-					control: Some(0),
-					cursor: Some(1),
-				};
+				let msix = virtio_gpu::Msix { control: Some(0), cursor: Some(1) };
 
 				unsafe { virtio_gpu::Device::new(h, map_bar, dma_alloc, msix).unwrap() }
 			}
@@ -207,11 +206,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							Response::Data(data)
 						}
 						(_, b"bin/resolution") => {
-							let r = ipc_gpu::Resolution {
-								x: width as _,
-								y: height as _,
-							}
-							.encode();
+							let r = ipc_gpu::Resolution { x: width as _, y: height as _ }.encode();
 							let data = tbl.alloc(r.len()).unwrap();
 							data.copy_from(0, &r);
 							Response::Data(data)

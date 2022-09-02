@@ -1,13 +1,15 @@
-use crate::{
-	memory::{
-		frame::{self, AllocateHints, OwnedPageFrames},
-		r#virtual::{MapError, RWX},
-		Page,
+use {
+	crate::{
+		memory::{
+			frame::{self, AllocateHints, OwnedPageFrames},
+			r#virtual::{MapError, RWX},
+			Page,
+		},
+		object_table::{MemoryObject, Object},
 	},
-	object_table::{MemoryObject, Object},
+	alloc::sync::Arc,
+	core::{mem, num::NonZeroUsize, ops::Range, ptr::NonNull},
 };
-use alloc::sync::Arc;
-use core::{mem, num::NonZeroUsize, ops::Range, ptr::NonNull};
 
 #[repr(C)]
 struct FileHeader {
@@ -190,10 +192,8 @@ impl super::Process {
 				if let Some(alloc) = NonZeroUsize::new(alloc) {
 					// Allocate & copy
 					let virt = NonNull::new(virt_address as *mut _).unwrap();
-					let hint = AllocateHints {
-						address: virt.cast().as_ptr(),
-						color: slf.hint_color,
-					};
+					let hint =
+						AllocateHints { address: virt.cast().as_ptr(), color: slf.hint_color };
 					let mem = OwnedPageFrames::new(alloc, hint).map_err(ElfError::AllocateError)?;
 					// FIXME this is utter shit
 					let mut offt = 0;
@@ -248,10 +248,8 @@ impl super::Process {
 				// TODO a dedicated zero page would make sense for this.
 				if let Some(size) = NonZeroUsize::new(alloc - count) {
 					let virt = NonNull::new((virt_address + count * Page::SIZE) as *mut _).unwrap();
-					let hint = AllocateHints {
-						address: virt.cast().as_ptr(),
-						color: slf.hint_color,
-					};
+					let hint =
+						AllocateHints { address: virt.cast().as_ptr(), color: slf.hint_color };
 					let mem = Arc::new(
 						OwnedPageFrames::new(size, hint).map_err(ElfError::AllocateError)?,
 					);

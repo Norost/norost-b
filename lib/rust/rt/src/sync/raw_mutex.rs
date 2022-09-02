@@ -1,5 +1,4 @@
-use crate::thread;
-use core::sync::atomic::Ordering;
+use {crate::thread, core::sync::atomic::Ordering};
 
 // We use an u32 because some platforms such as RISC-V don't have native
 // u8 or u16 atomic instructions. While it can be emulated it is quite a bit less efficient.
@@ -26,9 +25,7 @@ const LOCKED: AtomicVal = 1;
 
 impl RawMutex {
 	pub const fn new() -> Self {
-		Self {
-			lock: Atomic::new(UNLOCKED),
-		}
+		Self { lock: Atomic::new(UNLOCKED) }
 	}
 
 	#[inline]

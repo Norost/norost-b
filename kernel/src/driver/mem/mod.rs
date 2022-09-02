@@ -1,14 +1,16 @@
-use crate::{
-	boot,
-	memory::{
-		frame::{AtomicPPNBox, PPN},
-		r#virtual::RWX,
-		Page,
+use {
+	crate::{
+		boot,
+		memory::{
+			frame::{AtomicPPNBox, PPN},
+			r#virtual::RWX,
+			Page,
+		},
+		object_table::{MemoryObject, Object, PageFlags, Root},
 	},
-	object_table::{MemoryObject, Object, PageFlags, Root},
+	alloc::sync::Arc,
+	core::sync::atomic::Ordering,
 };
-use alloc::sync::Arc;
-use core::sync::atomic::Ordering;
 
 static TOP: AtomicPPNBox = AtomicPPNBox::new(0);
 

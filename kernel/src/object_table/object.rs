@@ -1,5 +1,7 @@
-use super::{Error, MemoryObject, Ticket, TinySlice};
-use alloc::{boxed::Box, sync::Arc};
+use {
+	super::{Error, MemoryObject, Ticket, TinySlice},
+	alloc::{boxed::Box, sync::Arc},
+};
 
 /// A single object.
 pub trait Object {

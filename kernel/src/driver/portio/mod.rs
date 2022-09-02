@@ -6,12 +6,14 @@
 //!
 //! [1]: http://www.os2museum.com/wp/the-history-of-a-security-hole/
 
-use crate::{
-	arch::asm::io,
-	object_table::{Error, Object, Root, SeekFrom, Ticket},
+use {
+	crate::{
+		arch::asm::io,
+		object_table::{Error, Object, Root, SeekFrom, Ticket},
+	},
+	alloc::{boxed::Box, sync::Arc},
+	core::sync::atomic::{AtomicU16, Ordering},
 };
-use alloc::{boxed::Box, sync::Arc};
-use core::sync::atomic::{AtomicU16, Ordering};
 
 pub fn post_init(root: &Root) {
 	let io = Arc::new(Io) as Arc<dyn Object>;

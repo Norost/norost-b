@@ -1,16 +1,18 @@
 //! # Allocatable IRQ's for userspace drivers.
 
-use super::apic::{
-	io_apic::{self, TriggerMode},
-	local_apic,
+use {
+	super::apic::{
+		io_apic::{self, TriggerMode},
+		local_apic,
+	},
+	crate::{
+		arch,
+		object_table::{Error, Object, Root, Ticket, TicketWaker},
+		sync::SpinLock,
+	},
+	alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec},
+	core::{mem, str},
 };
-use crate::{
-	arch,
-	object_table::{Error, Object, Root, Ticket, TicketWaker},
-	sync::SpinLock,
-};
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
-use core::{mem, str};
 
 // TODO add a vector and irq type to arch
 type InterruptVector = u8;
@@ -41,12 +43,7 @@ impl Object for InterruptTable {
 		}
 		LISTENERS.lock().insert(
 			vector,
-			Entry {
-				mode,
-				irq,
-				triggered: false,
-				wake: Default::default(),
-			},
+			Entry { mode, irq, triggered: false, wake: Default::default() },
 		);
 		Ticket::new_complete(Ok(Arc::new(Interrupt(vector))))
 	}

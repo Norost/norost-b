@@ -1,9 +1,11 @@
-use crate::{
-	math::{Point, Ratio, Rect, Size},
-	window::PathIter,
+use {
+	crate::{
+		math::{Point, Ratio, Rect, Size},
+		window::PathIter,
+	},
+	core::{fmt, mem},
+	driver_utils::{Arena, Handle},
 };
-use core::{fmt, mem};
-use driver_utils::{Arena, Handle};
 
 pub struct Workspace {
 	nodes: Arena<Node>,
@@ -12,23 +14,13 @@ pub struct Workspace {
 
 // TODO consider making it doubly linked to avoid excessive use of Paths
 enum Node {
-	Parent {
-		left: Handle,
-		right: Handle,
-		vertical: bool,
-		ratio: Ratio,
-	},
-	Leaf {
-		window: Handle,
-	},
+	Parent { left: Handle, right: Handle, vertical: bool, ratio: Ratio },
+	Leaf { window: Handle },
 }
 
 impl Workspace {
 	pub fn new() -> Result<Self, NewWorkspaceError> {
-		Ok(Self {
-			nodes: Arena::new(),
-			root: 0,
-		})
+		Ok(Self { nodes: Arena::new(), root: 0 })
 	}
 
 	/// Split the first leaf node along the given path. It returns the path of the new leaf
@@ -50,12 +42,7 @@ impl Workspace {
 		if !self.nodes.is_empty() {
 			for depth in 1..24 {
 				match &self.nodes[cur] {
-					Node::Parent {
-						left,
-						right,
-						vertical,
-						ratio,
-					} => {
+					Node::Parent { left, right, vertical, ratio } => {
 						let d = path.next().expect("path does not lead to a leaf");
 						directions |= u32::from(d) << (depth - 1);
 						let v = if *vertical { &mut size.y } else { &mut size.x };
@@ -87,21 +74,13 @@ impl Workspace {
 							Direction::Right | Direction::Left => false,
 							Direction::Up | Direction::Down => true,
 						};
-						self.nodes[cur] = Node::Parent {
-							left,
-							right,
-							vertical,
-							ratio,
-						};
+						self.nodes[cur] = Node::Parent { left, right, vertical, ratio };
 						directions |= u32::from(d) << (depth - 1);
 						return Ok((
 							Path { depth, directions },
 							Some((
 								w,
-								Path {
-									depth,
-									directions: directions ^ (1 << (depth - 1)),
-								},
+								Path { depth, directions: directions ^ (1 << (depth - 1)) },
 							)),
 						));
 					}
@@ -110,13 +89,7 @@ impl Workspace {
 			Err(SplitLeafError::TooDeep)
 		} else {
 			self.root = self.nodes.insert(Node::Leaf { window });
-			Ok((
-				Path {
-					depth: 0,
-					directions: 0,
-				},
-				None,
-			))
+			Ok((Path { depth: 0, directions: 0 }, None))
 		}
 	}
 
@@ -130,10 +103,7 @@ impl Workspace {
 	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<(Handle, Path)> {
 		let mut cur = self.root;
 		let mut prev = None;
-		let mut path = Path {
-			depth: 0,
-			directions: 0,
-		};
+		let mut path = Path { depth: 0, directions: 0 };
 		loop {
 			match &self.nodes[cur] {
 				Node::Parent { left, right, .. } => {
@@ -168,12 +138,7 @@ impl Workspace {
 		let mut rect = Rect::from_size(Point::ORIGIN, size);
 		loop {
 			match cur {
-				Node::Parent {
-					left,
-					right,
-					ratio,
-					vertical,
-				} => {
+				Node::Parent { left, right, ratio, vertical } => {
 					let dir = path.next().expect("path does not lead to a leaf");
 					rect = if *vertical {
 						let mid = ratio.partition_range(rect.y());

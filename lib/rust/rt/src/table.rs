@@ -1,10 +1,12 @@
-use crate::io::{self, TinySlice, RWX};
-use alloc::vec::Vec;
-use core::{
-	fmt,
-	marker::PhantomData,
-	mem::{self, MaybeUninit},
-	ptr::NonNull,
+use {
+	crate::io::{self, TinySlice, RWX},
+	alloc::vec::Vec,
+	core::{
+		fmt,
+		marker::PhantomData,
+		mem::{self, MaybeUninit},
+		ptr::NonNull,
+	},
 };
 
 pub use norostb_kernel::{io::DoIo, object::NewObject, Handle};
@@ -165,10 +167,7 @@ impl Object {
 				})
 			}
 		}
-		let mut f = Fmt {
-			obj: self.0,
-			res: Ok(()),
-		};
+		let mut f = Fmt { obj: self.0, res: Ok(()) };
 		let _ = fmt::write(&mut f, args);
 		f.res
 	}
@@ -190,10 +189,7 @@ pub struct RefObject<'a> {
 
 impl<'a> RefObject<'a> {
 	pub const fn from_raw(handle: Handle) -> Self {
-		Self {
-			handle,
-			_marker: PhantomData,
-		}
+		Self { handle, _marker: PhantomData }
 	}
 
 	pub const fn as_raw(&self) -> Handle {
@@ -207,10 +203,7 @@ impl<'a> RefObject<'a> {
 
 impl<'a> From<&'a Object> for RefObject<'a> {
 	fn from(obj: &'a Object) -> Self {
-		Self {
-			handle: obj.0,
-			_marker: PhantomData,
-		}
+		Self { handle: obj.0, _marker: PhantomData }
 	}
 }
 

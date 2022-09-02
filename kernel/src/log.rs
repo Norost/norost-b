@@ -1,9 +1,13 @@
-use crate::driver::uart;
 #[cfg(feature = "driver-vga")]
 use crate::driver::vga;
-use crate::object_table::{Error, Object, Root, Ticket};
-use alloc::sync::Arc;
-use core::fmt::{self, Write};
+use {
+	crate::{
+		driver::uart,
+		object_table::{Error, Object, Root, Ticket},
+	},
+	alloc::sync::Arc,
+	core::fmt::{self, Write},
+};
 
 struct SystemTable;
 

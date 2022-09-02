@@ -21,10 +21,7 @@ impl<U> Window<U> {
 	pub fn path(&self) -> (u8, PathIter) {
 		(
 			self.path as u8,
-			PathIter {
-				count: 24,
-				path: self.path >> 8,
-			},
+			PathIter { count: 24, path: self.path >> 8 },
 		)
 	}
 
@@ -42,10 +39,7 @@ pub struct PathIter {
 impl PathIter {
 	#[inline(always)]
 	pub fn new(depth: u8, directions: u32) -> Self {
-		Self {
-			count: depth,
-			path: directions,
-		}
+		Self { count: depth, path: directions }
 	}
 
 	/// Create a path iterator that goes to the right bottom for up to 24 levels.

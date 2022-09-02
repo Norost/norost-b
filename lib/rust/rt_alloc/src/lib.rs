@@ -6,13 +6,15 @@
 #![feature(slice_ptr_get, slice_ptr_len)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use core::{
-	alloc::{self, AllocError, Allocator as IAllocator, Layout},
-	ptr::{self, NonNull},
-};
-use norostb_kernel::{
-	syscall::{self, RWX},
-	Page,
+use {
+	core::{
+		alloc::{self, AllocError, Allocator as IAllocator, Layout},
+		ptr::{self, NonNull},
+	},
+	norostb_kernel::{
+		syscall::{self, RWX},
+		Page,
+	},
 };
 
 /// An allocator that gets its memory from the OS.

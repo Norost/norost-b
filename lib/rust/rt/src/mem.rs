@@ -1,6 +1,8 @@
-use crate::{io, RWX};
-use core::{num::NonZeroUsize, ptr::NonNull};
-use norostb_kernel::syscall;
+use {
+	crate::{io, RWX},
+	core::{num::NonZeroUsize, ptr::NonNull},
+	norostb_kernel::syscall,
+};
 
 #[inline]
 pub fn alloc(

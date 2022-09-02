@@ -1,5 +1,4 @@
-use crate::msr::rdmsr;
-use core::fmt;
+use {crate::msr::rdmsr, core::fmt};
 
 pub struct Cap(u64);
 
@@ -29,10 +28,7 @@ impl Range {
 	pub unsafe fn get(id: u8) -> Option<Self> {
 		let id = u32::from(id) * 2;
 		let mask = rdmsr(0x201 + id);
-		((mask & 1 << 11) > 0).then(|| Self {
-			base: rdmsr(0x200 + id),
-			mask: mask & !0xfff,
-		})
+		((mask & 1 << 11) > 0).then(|| Self { base: rdmsr(0x200 + id), mask: mask & !0xfff })
 	}
 
 	/// Checks whether an address is inside this range.
@@ -85,9 +81,7 @@ impl AllRanges {
 	///
 	/// MTRRs must be supported.
 	pub unsafe fn new() -> Self {
-		Self {
-			count: Cap::get().range_count(),
-		}
+		Self { count: Cap::get().range_count() }
 	}
 
 	/// Check whether the given 2MB frame intersects with any range.

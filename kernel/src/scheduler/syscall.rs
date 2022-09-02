@@ -1,24 +1,24 @@
-use crate::time::Monotonic;
-use crate::{
-	arch,
-	memory::{
-		frame,
-		frame::OwnedPageFrames,
-		r#virtual::{self, AddressSpace, MapError, RWX},
-		Page,
+use {
+	crate::{
+		arch,
+		memory::{
+			frame,
+			frame::OwnedPageFrames,
+			r#virtual::{self, AddressSpace, MapError, RWX},
+			Page,
+		},
+		object_table::{
+			message_pipe, pipe, Handle, NewStreamingTableError, Object, Root, SeekFrom,
+			StreamingTable, SubRange, TinySlice,
+		},
+		scheduler::{self, process::Process, Thread},
+		time::Monotonic,
+		util::{erase_handle, unerase_handle},
 	},
-	object_table::{
-		message_pipe, pipe, Handle, NewStreamingTableError, Object, Root, SeekFrom, StreamingTable,
-		SubRange, TinySlice,
-	},
-	scheduler::{self, process::Process, Thread},
-	util::{erase_handle, unerase_handle},
+	alloc::{boxed::Box, sync::Arc},
+	core::{mem, num::NonZeroUsize, ptr::NonNull},
+	norostb_kernel::{error::Error, io::Request, object::NewObject},
 };
-use alloc::{boxed::Box, sync::Arc};
-use core::mem;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
-use norostb_kernel::{error::Error, io::Request, object::NewObject};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -28,26 +28,17 @@ pub struct Return {
 }
 
 impl Return {
-	const OK: Self = Self {
-		status: 0,
-		value: 0,
-	};
+	const OK: Self = Self { status: 0, value: 0 };
 	const INVALID_OBJECT: Self = Self::error(Error::InvalidObject);
 	const INVALID_OPERATION: Self = Self::error(Error::InvalidObject);
 	const INVALID_DATA: Self = Self::error(Error::InvalidData);
 
 	const fn error(error: Error) -> Self {
-		Self {
-			status: error as _,
-			value: 0,
-		}
+		Self { status: error as _, value: 0 }
 	}
 
 	const fn handle(handle: Handle) -> Self {
-		Self {
-			status: 0,
-			value: handle as _,
-		}
+		Self { status: 0, value: handle as _ }
 	}
 }
 
@@ -113,31 +104,18 @@ extern "C" fn alloc(base: usize, size: usize, rwx: usize, _: usize, _: usize, _:
 		Ok(mut mem) => {
 			unsafe { mem.clear() };
 			proc.map_memory_object(NonNull::new(base.cast()), Box::new(mem), rwx)
-				.map_or(
-					Return {
-						status: Error::Unknown as _,
-						value: 0,
-					},
-					|base| Return {
-						status: count.get() * Page::SIZE,
-						value: base.as_ptr() as usize,
-					},
-				)
+				.map_or(Return { status: Error::Unknown as _, value: 0 }, |base| {
+					Return { status: count.get() * Page::SIZE, value: base.as_ptr() as usize }
+				})
 		}
-		Err(_) => Return {
-			status: Error::CantCreateObject as _,
-			value: 0,
-		},
+		Err(_) => Return { status: Error::CantCreateObject as _, value: 0 },
 	}
 }
 
 extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
 	debug!(syscall "dealloc {:#x} {}", base, size);
 	if base & Page::MASK != 0 || size & Page::MASK != 0 {
-		return Return {
-			status: Error::InvalidData as _,
-			value: 0,
-		};
+		return Return { status: Error::InvalidData as _, value: 0 };
 	}
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return {
@@ -154,16 +132,9 @@ extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _:
 	Process::current()
 		.unwrap()
 		.unmap_memory_object(base, count)
-		.map_or(
-			Return {
-				status: Error::Unknown as _,
-				value: 0,
-			},
-			|_| Return {
-				status: size,
-				value: base.as_ptr() as usize,
-			},
-		)
+		.map_or(Return { status: Error::Unknown as _, value: 0 }, |_| {
+			Return { status: size, value: base.as_ptr() as usize }
+		})
 }
 
 // Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
@@ -175,19 +146,13 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 	Process::current().unwrap().objects_operate(|objects| {
 		let Some(o) = objects.get(handle) else { return Return::INVALID_OBJECT };
 		let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
-		let return_u64 = |r| Return {
-			status: 0,
-			value: r as _,
-		};
+		let return_u64 = |r| Return { status: 0, value: r as _ };
 		let ins = |l: &mut arena::Arena<_, _>, o| Return::handle(erase_handle(l.insert(o)));
 		match ty {
 			Request::READ => block_on(o.clone().read(b)).map_or_else(Return::error, |r| {
 				assert!(r.len() <= b, "object returned too much data");
 				unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
-				Return {
-					status: 0,
-					value: r.len(),
-				}
+				Return { status: 0, value: r.len() }
 			}),
 			Request::WRITE => {
 				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
@@ -202,10 +167,7 @@ extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: u
 				block_on(o.clone().get_meta(prop)).map_or_else(Return::error, |r| {
 					let l = usize::from(value_len).min(r.len());
 					unsafe { (b as *mut u8).copy_from_nonoverlapping(r.as_ptr(), l) }
-					Return {
-						status: 0,
-						value: l.try_into().unwrap(),
-					}
+					Return { status: 0, value: l.try_into().unwrap() }
 				})
 			}
 			Request::SET_META => {
@@ -336,14 +298,8 @@ extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: u
 			.map_err(|e| match e {}),
 	}
 	.map_or_else(
-		|e| Return {
-			status: e as _,
-			value: 0,
-		},
-		|[a, b]| Return {
-			status: a.try_into().unwrap(),
-			value: b.try_into().unwrap(),
-		},
+		|e| Return { status: e as _, value: 0 },
+		|[a, b]| Return { status: a.try_into().unwrap(), value: b.try_into().unwrap() },
 	)
 }
 
@@ -387,10 +343,7 @@ extern "C" fn map_object(
 				}) as _,
 				value: 0,
 			},
-			|(base, length)| Return {
-				status: length,
-				value: base.as_ptr() as usize,
-			},
+			|(base, length)| Return { status: length, value: base.as_ptr() as usize },
 		)
 }
 
@@ -421,16 +374,10 @@ extern "C" fn spawn_thread(
 	Process::current()
 		.unwrap()
 		.spawn_thread(start, stack)
-		.map_or(
-			Return {
-				status: 1,
-				value: 0,
-			},
-			|handle| Return {
-				status: 0,
-				value: handle.try_into().unwrap(),
-			},
-		)
+		.map_or(Return { status: 1, value: 0 }, |handle| Return {
+			status: 0,
+			value: handle.try_into().unwrap(),
+		})
 }
 
 extern "C" fn create_io_queue(
@@ -450,14 +397,8 @@ extern "C" fn create_io_queue(
 			response_p2size as u8,
 		)
 		.map_or_else(
-			|_| Return {
-				status: 1,
-				value: 0,
-			},
-			|base| Return {
-				status: 0,
-				value: base.as_ptr() as usize,
-			},
+			|_| Return { status: 1, value: 0 },
+			|base| Return { status: 0, value: base.as_ptr() as usize },
 		)
 }
 
@@ -470,27 +411,15 @@ extern "C" fn destroy_io_queue(
 	_: usize,
 ) -> Return {
 	debug!(syscall "destroy_io_queue {:#x}", base);
-	NonNull::new(base as *mut _).map_or(
-		Return {
-			status: 1,
-			value: 0,
-		},
-		|base| {
-			Process::current()
-				.unwrap()
-				.destroy_io_queue(base)
-				.map_or_else(
-					|_| Return {
-						status: 1,
-						value: 0,
-					},
-					|()| Return {
-						status: 0,
-						value: 0,
-					},
-				)
-		},
-	)
+	NonNull::new(base as *mut _).map_or(Return { status: 1, value: 0 }, |base| {
+		Process::current()
+			.unwrap()
+			.destroy_io_queue(base)
+			.map_or_else(
+				|_| Return { status: 1, value: 0 },
+				|()| Return { status: 0, value: 0 },
+			)
+	})
 }
 
 extern "C" fn poll_io_queue(
@@ -505,13 +434,12 @@ extern "C" fn poll_io_queue(
 	let Some(base) = NonNull::new(base as *mut _) else {
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
-	Process::current().unwrap().process_io_queue(base).map_or(
-		Return {
-			status: Error::Unknown as usize,
-			value: 0,
-		},
-		|_| Return::OK,
-	)
+	Process::current()
+		.unwrap()
+		.process_io_queue(base)
+		.map_or(Return { status: Error::Unknown as usize, value: 0 }, |_| {
+			Return::OK
+		})
 }
 
 extern "C" fn wait_io_queue(
@@ -530,13 +458,9 @@ extern "C" fn wait_io_queue(
 	Process::current()
 		.unwrap()
 		.wait_io_queue(base, timeout)
-		.map_or(
-			Return {
-				status: Error::Unknown as usize,
-				value: 0,
-			},
-			|_| Return::OK,
-		)
+		.map_or(Return { status: Error::Unknown as usize, value: 0 }, |_| {
+			Return::OK
+		})
 }
 
 extern "C" fn exit_thread(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
@@ -577,19 +501,10 @@ extern "C" fn wait_thread(
 	Process::current()
 		.unwrap()
 		.get_thread(handle as u32)
-		.map_or(
-			Return {
-				status: usize::MAX,
-				value: 0,
-			},
-			|thread| {
-				thread.wait().unwrap();
-				Return {
-					status: 0,
-					value: 0,
-				}
-			},
-		)
+		.map_or(Return { status: usize::MAX, value: 0 }, |thread| {
+			thread.wait().unwrap();
+			Return { status: 0, value: 0 }
+		})
 }
 
 extern "C" fn exit(code: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {

@@ -1,8 +1,7 @@
-use super::tss::TSS;
-use core::arch::asm;
-use core::marker::PhantomData;
-use core::mem;
-use core::pin::Pin;
+use {
+	super::tss::TSS,
+	core::{arch::asm, marker::PhantomData, mem, pin::Pin},
+};
 
 // ~~stolen from~~ inspired by ToaruOS code
 
@@ -139,10 +138,7 @@ impl<'a> GDT<'a> {
 				granularity: 1 << 5,
 				base_high: (tss >> 24) as u8,
 			},
-			tss_extra: GDTEntryHigh {
-				base_higher: (tss >> 32) as u32,
-				_reserved: 0,
-			},
+			tss_extra: GDTEntryHigh { base_higher: (tss >> 32) as u32, _reserved: 0 },
 			_marker: PhantomData,
 		}
 	}

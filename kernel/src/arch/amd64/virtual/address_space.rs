@@ -1,14 +1,15 @@
-use super::{
-	super::{vsyscall, PageFlags},
-	common,
+use {
+	super::{
+		super::{vsyscall, PageFlags},
+		common,
+	},
+	crate::memory::{
+		frame::{self, PPN},
+		r#virtual::{phys_to_virt, RWX},
+		Page,
+	},
+	core::{arch::asm, mem::MaybeUninit, num::NonZeroUsize, ptr::NonNull},
 };
-use crate::memory::frame::{self, PPN};
-use crate::memory::r#virtual::{phys_to_virt, RWX};
-use crate::memory::Page;
-use core::arch::asm;
-use core::mem::MaybeUninit;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
 
 pub struct AddressSpace {
 	cr3: usize,

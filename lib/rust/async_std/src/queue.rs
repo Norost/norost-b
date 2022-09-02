@@ -1,7 +1,9 @@
-use crate::io::{Buf, BufMut};
-use alloc::boxed::Box;
-use core::{sync::atomic::Ordering, time::Duration};
-use io_queue_rt::{Full, Pow2Size, Queue};
+use {
+	crate::io::{Buf, BufMut},
+	alloc::boxed::Box,
+	core::{sync::atomic::Ordering, time::Duration},
+	io_queue_rt::{Full, Pow2Size, Queue},
+};
 
 static IO_QUEUE_KEY: rt::tls::AtomicKey = rt::tls::AtomicKey::default();
 

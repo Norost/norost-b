@@ -1,15 +1,17 @@
-use crate::{
-	memory::{
-		frame::{PageFrameIter, PPN},
-		r#virtual::{phys_to_virt, RWX},
-		Page,
+use {
+	crate::{
+		memory::{
+			frame::{PageFrameIter, PPN},
+			r#virtual::{phys_to_virt, RWX},
+			Page,
+		},
+		object_table::{Error, MemoryObject, Object, PageFlags, QueryIter, SeekFrom, Ticket},
 	},
-	object_table::{Error, MemoryObject, Object, PageFlags, QueryIter, SeekFrom, Ticket},
-};
-use alloc::{boxed::Box, sync::Arc};
-use core::{
-	slice,
-	sync::atomic::{AtomicUsize, Ordering},
+	alloc::{boxed::Box, sync::Arc},
+	core::{
+		slice,
+		sync::atomic::{AtomicUsize, Ordering},
+	},
 };
 
 /// A single file in the init filesystem.
@@ -93,18 +95,12 @@ impl Fs {
 			.map(|e| {
 				let start = e.offset(&self.header()).try_into().unwrap();
 				let size = e.size().try_into().unwrap();
-				Arc::new(File {
-					data: &self.data[start..][..size],
-					position: 0.into(),
-				})
+				Arc::new(File { data: &self.data[start..][..size], position: 0.into() })
 			})
 	}
 
 	fn io(&self) -> FsIo {
-		FsIo {
-			data: self.data,
-			cur: 0,
-		}
+		FsIo { data: self.data, cur: 0 }
 	}
 }
 

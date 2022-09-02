@@ -1,5 +1,7 @@
-use crate::Handle;
-use core::ops::{Index, IndexMut};
+use {
+	crate::Handle,
+	core::ops::{Index, IndexMut},
+};
 
 /// A typed arena that takes a [`Handle`] as key.
 ///
@@ -10,9 +12,7 @@ pub struct Arena<T> {
 
 impl<T> Arena<T> {
 	pub fn new() -> Self {
-		Self {
-			inner: ::arena::Arena::new(),
-		}
+		Self { inner: ::arena::Arena::new() }
 	}
 
 	pub fn insert(&mut self, value: T) -> Handle {
@@ -74,9 +74,7 @@ impl<T> Arena<T> {
 
 impl<T> Default for Arena<T> {
 	fn default() -> Self {
-		Self {
-			inner: Default::default(),
-		}
+		Self { inner: Default::default() }
 	}
 }
 

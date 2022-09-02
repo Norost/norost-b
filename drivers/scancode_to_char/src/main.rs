@@ -4,17 +4,19 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
-use async_std::{io::Read, object::RefAsyncObject};
-use core::{
-	cell::{Cell, RefCell},
-	future::Future,
-	task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
-	time::Duration,
+use {
+	alloc::{boxed::Box, collections::VecDeque, vec::Vec},
+	async_std::{io::Read, object::RefAsyncObject},
+	core::{
+		cell::{Cell, RefCell},
+		future::Future,
+		task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+		time::Duration,
+	},
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	norostb_kernel::{error::Error, object::Pow2Size},
+	rt_default as _,
 };
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use norostb_kernel::{error::Error, object::Pow2Size};
-use rt_default as _;
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {

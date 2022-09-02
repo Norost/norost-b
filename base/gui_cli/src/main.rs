@@ -7,10 +7,12 @@ extern crate alloc;
 
 mod rasterizer;
 
-use alloc::vec::Vec;
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use fontdue::{Font, FontSettings};
-use rt::{Error, Handle};
+use {
+	alloc::vec::Vec,
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	fontdue::{Font, FontSettings},
+	rt::{Error, Handle},
+};
 
 const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
 
@@ -56,14 +58,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	let font = Font::from_bytes(
-		FONT,
-		FontSettings {
-			scale: 160.0,
-			..Default::default()
-		},
-	)
-	.unwrap();
+	let font = Font::from_bytes(FONT, FontSettings { scale: 160.0, ..Default::default() }).unwrap();
 	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
 	let window = root.create(b"window_manager/window").unwrap();
@@ -97,10 +92,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		rasterizer.render_all(&mut fb);
 		let draw = ipc_wm::Flush {
 			origin: ipc_wm::Point { x: 0, y: 0 },
-			size: ipc_wm::SizeInclusive {
-				x: (width - 1) as _,
-				y: (height - 1) as _,
-			},
+			size: ipc_wm::SizeInclusive { x: (width - 1) as _, y: (height - 1) as _ },
 		};
 		window.write(&draw.encode()).unwrap();
 	};
@@ -118,9 +110,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	const WRITE_HANDLE: Handle = Handle::MAX - 1;
 
-	let mut parser = Parser {
-		state: ParserState::Idle,
-	};
+	let mut parser = Parser { state: ParserState::Idle };
 	let mut flushed @ mut dirty = false;
 	loop {
 		let mut flush = false;

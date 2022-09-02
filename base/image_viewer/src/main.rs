@@ -2,8 +2,7 @@
 
 use std::{
 	fs::File,
-	io::Write,
-	io::{Cursor, Read},
+	io::{Cursor, Read, Write},
 	os::norostb::prelude::*,
 };
 

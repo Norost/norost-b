@@ -17,10 +17,7 @@ impl Rect {
 	}
 
 	pub fn from_size(low: Point, size: Size) -> Self {
-		Self {
-			low,
-			high: low + size.into_vector() - Vector::ONE,
-		}
+		Self { low, high: low + size.into_vector() - Vector::ONE }
 	}
 
 	pub fn from_ranges(x: RangeInclusive<u32>, y: RangeInclusive<u32>) -> Self {

@@ -1,9 +1,11 @@
-use crate::dma::Dma;
-use core::{
-	marker::PhantomData,
-	sync::atomic::{self, Ordering},
+use {
+	crate::dma::Dma,
+	core::{
+		marker::PhantomData,
+		sync::atomic::{self, Ordering},
+	},
+	xhci::ring::trb,
 };
-use xhci::ring::trb;
 
 pub struct Ring<T>
 where
@@ -33,12 +35,7 @@ where
 			.into_raw();
 		let len = buf.len();
 		unsafe { buf.as_mut()[len - 1] = link }
-		Ok(Self {
-			buf,
-			enqueue_index: 0,
-			cycle_bit: true,
-			_marker: PhantomData,
-		})
+		Ok(Self { buf, enqueue_index: 0, cycle_bit: true, _marker: PhantomData })
 	}
 
 	pub fn enqueue(&mut self, item: T) -> EntryId {

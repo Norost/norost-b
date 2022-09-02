@@ -2,12 +2,16 @@ pub mod io_apic;
 pub mod local_apic;
 mod reg;
 
-use crate::arch::amd64::{self, msr};
-use crate::driver::hpet;
-use crate::memory::Page;
-use acpi::{AcpiHandler, AcpiTables};
-use core::time::Duration;
-use reg::*;
+use {
+	crate::{
+		arch::amd64::{self, msr},
+		driver::hpet,
+		memory::Page,
+	},
+	acpi::{AcpiHandler, AcpiTables},
+	core::time::Duration,
+	reg::*,
+};
 
 #[cfg(feature = "driver-pic")]
 compile_error!("The PIC driver must be disabled");

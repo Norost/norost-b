@@ -8,13 +8,15 @@
 
 extern crate alloc;
 
-use alloc::{
-	string::{String, ToString},
-	vec::Vec,
+use {
+	alloc::{
+		string::{String, ToString},
+		vec::Vec,
+	},
+	core::str,
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt_default as _,
 };
-use core::str;
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt_default as _;
 
 use core::{fmt, str::lossy::Utf8Lossy};
 
@@ -295,11 +297,7 @@ struct Controller {
 
 impl Controller {
 	fn new(dev: rt::RefObject<'static>) -> Self {
-		Self {
-			dev,
-			cache: [0; 512],
-			cache_pos: u64::MAX,
-		}
+		Self { dev, cache: [0; 512], cache_pos: u64::MAX }
 	}
 
 	fn read(&mut self, pos: u64) -> &[u8; 512] {

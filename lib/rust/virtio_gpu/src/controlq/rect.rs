@@ -1,5 +1,4 @@
-use super::*;
-use core::fmt;
+use {super::*, core::fmt};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -12,12 +11,7 @@ pub struct Rect {
 
 impl Rect {
 	pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-		Self {
-			x: x.into(),
-			y: y.into(),
-			width: width.into(),
-			height: height.into(),
-		}
+		Self { x: x.into(), y: y.into(), width: width.into(), height: height.into() }
 	}
 
 	#[inline(always)]

@@ -1,7 +1,9 @@
-use super::{MemoryObject, Object, PageFlags};
-use crate::memory::{frame::PPN, r#virtual::RWX, Page};
-use alloc::sync::Arc;
-use core::ops::RangeInclusive;
+use {
+	super::{MemoryObject, Object, PageFlags},
+	crate::memory::{frame::PPN, r#virtual::RWX, Page},
+	alloc::sync::Arc,
+	core::ops::RangeInclusive,
+};
 
 /// A subrange of a memory mappable object.
 pub struct SubRange {

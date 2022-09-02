@@ -1,19 +1,23 @@
 //! # I/O with user processes
 
-use super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket};
-use crate::memory::frame::OwnedPageFrames;
-use crate::memory::r#virtual::{MapError, UnmapError, RWX};
-use crate::memory::Page;
-use crate::{
-	object_table::{AnyTicketValue, Error, Handle, Object, TinySlice},
-	time::Monotonic,
+use {
+	super::{super::poll, erase_handle, unerase_handle, MemoryObject, PendingTicket},
+	crate::{
+		memory::{
+			frame::OwnedPageFrames,
+			r#virtual::{MapError, UnmapError, RWX},
+			Page,
+		},
+		object_table::{AnyTicketValue, Error, Handle, Object, TinySlice},
+		time::Monotonic,
+	},
+	alloc::{boxed::Box, sync::Arc, vec::Vec},
+	core::{
+		ptr::{self, NonNull},
+		task::Poll,
+	},
+	norostb_kernel::io::{self as k_io, Request, Response, SeekFrom},
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use core::{
-	ptr::{self, NonNull},
-	task::Poll,
-};
-use norostb_kernel::io::{self as k_io, Request, Response, SeekFrom};
 
 pub enum CreateQueueError {
 	TooLarge,
@@ -137,20 +141,11 @@ impl super::Process {
 			let mut push_resp = |value| {
 				// It is the responsibility of the user process to ensure no more requests are in
 				// flight than there is space for responses.
-				let _ = unsafe {
-					queue.enqueue_response(Response {
-						user_data: e.user_data,
-						value,
-					})
-				};
+				let _ =
+					unsafe { queue.enqueue_response(Response { user_data: e.user_data, value }) };
 			};
 			let mut push_pending = |data_ptr, data_len, ticket| {
-				tickets.push(PendingTicket {
-					user_data: e.user_data,
-					data_ptr,
-					data_len,
-					ticket,
-				})
+				tickets.push(PendingTicket { user_data: e.user_data, data_ptr, data_len, ticket })
 			};
 			let handle = unerase_handle(e.handle);
 			let Some(object) = objects.get(handle) else {

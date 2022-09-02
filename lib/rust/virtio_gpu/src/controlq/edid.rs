@@ -1,5 +1,4 @@
-use crate::ControlHeader;
-use endian::u32le;
+use {crate::ControlHeader, endian::u32le};
 
 #[allow(dead_code)]
 #[repr(C)]

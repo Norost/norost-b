@@ -1,6 +1,8 @@
-use super::{Error, Object, Ticket, TicketWaker};
-use crate::sync::Mutex;
-use alloc::{boxed::Box, collections::VecDeque, sync::Arc};
+use {
+	super::{Error, Object, Ticket, TicketWaker},
+	crate::sync::Mutex,
+	alloc::{boxed::Box, collections::VecDeque, sync::Arc},
+};
 
 // 64 KiB should be a reasonable soft limit.
 const SOFT_TOTAL_BYTE_LIMIT: usize = 1 << 16;

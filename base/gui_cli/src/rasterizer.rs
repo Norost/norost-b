@@ -1,10 +1,14 @@
-use alloc::{boxed::Box, collections::VecDeque, string::String};
-use core::{ptr::NonNull, slice};
-use fontdue::{
-	layout::{CoordinateSystem, GlyphRasterConfig, Layout, LayoutSettings, TextStyle, WrapStyle},
-	Font,
+use {
+	alloc::{boxed::Box, collections::VecDeque, string::String},
+	core::{ptr::NonNull, slice},
+	fontdue::{
+		layout::{
+			CoordinateSystem, GlyphRasterConfig, Layout, LayoutSettings, TextStyle, WrapStyle,
+		},
+		Font,
+	},
+	hashbrown::hash_map::HashMap,
 };
-use hashbrown::hash_map::HashMap;
 
 struct Letters {
 	font: Font,
@@ -13,10 +17,7 @@ struct Letters {
 
 impl Letters {
 	fn new(font: Font) -> Self {
-		Self {
-			font,
-			cache: Default::default(),
-		}
+		Self { font, cache: Default::default() }
 	}
 
 	fn get(&mut self, key: GlyphRasterConfig) -> &[u8] {
@@ -35,12 +36,7 @@ pub struct Rasterizer {
 
 impl Rasterizer {
 	pub fn new(font: Font, scale: f32) -> Self {
-		Self {
-			letters: Letters::new(font),
-			lines: Default::default(),
-			min_y: 0,
-			scale,
-		}
+		Self { letters: Letters::new(font), lines: Default::default(), min_y: 0, scale }
 	}
 
 	pub fn new_line(&mut self) {
@@ -102,11 +98,7 @@ pub struct FrameBuffer {
 
 impl FrameBuffer {
 	pub unsafe fn new(data: NonNull<[u8; 3]>, width: u32, height: u32) -> Self {
-		Self {
-			data,
-			width,
-			height,
-		}
+		Self { data, width, height }
 	}
 
 	pub fn draw_rect<F>(&mut self, x: u32, y: u32, width: u32, height: u32, mut f: F)

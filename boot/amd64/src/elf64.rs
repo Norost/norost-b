@@ -1,8 +1,10 @@
-use crate::{
-	info::{Info, VSYSCALL_VIRT_ADDR},
-	paging::{AddError, Page, PML4},
+use {
+	crate::{
+		info::{Info, VSYSCALL_VIRT_ADDR},
+		paging::{AddError, Page, PML4},
+	},
+	core::{fmt, mem},
 };
-use core::{fmt, mem};
 
 #[repr(C)]
 struct FileHeader {

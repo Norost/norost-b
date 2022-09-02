@@ -1,6 +1,9 @@
-use crate::Slice;
-use core::{
-	intrinsics, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, slice, sync::atomic::AtomicU32,
+use {
+	crate::Slice,
+	core::{
+		intrinsics, marker::PhantomData, mem::MaybeUninit, ptr::NonNull, slice,
+		sync::atomic::AtomicU32,
+	},
 };
 
 #[derive(Clone, Copy)]
@@ -11,11 +14,8 @@ pub struct Buffer<'a> {
 }
 
 impl Buffer<'_> {
-	pub const EMPTY: Buffer<'static> = Buffer {
-		base: NonNull::dangling(),
-		size: 0,
-		_marker: PhantomData,
-	};
+	pub const EMPTY: Buffer<'static> =
+		Buffer { base: NonNull::dangling(), size: 0, _marker: PhantomData };
 
 	unsafe fn from_offset(base: NonNull<u8>, offset: u32, size: u32) -> Self {
 		Self {
@@ -97,11 +97,7 @@ impl Buffer<'_> {
 
 	#[inline]
 	pub fn array_chunks<const N: usize>(&self) -> ArrayChunks<'_, N> {
-		ArrayChunks {
-			base: self.base,
-			len: self.size.try_into().unwrap(),
-			_marker: PhantomData,
-		}
+		ArrayChunks { base: self.base, len: self.size.try_into().unwrap(), _marker: PhantomData }
 	}
 }
 
@@ -119,31 +115,19 @@ impl Buffers {
 			1,
 			"block size is not a power of two"
 		);
-		Self {
-			base,
-			total_size,
-			block_size,
-		}
+		Self { base, total_size, block_size }
 	}
 
 	#[inline]
 	pub fn get<'a>(&'a self, slice: Slice) -> Data<'a> {
 		let max = slice.offset as usize * self.block_size as usize;
 		assert!(max < self.total_size, "out of bounds");
-		Data {
-			buffers: self,
-			offset: slice.offset,
-			len: slice.length.try_into().unwrap(),
-		}
+		Data { buffers: self, offset: slice.offset, len: slice.length.try_into().unwrap() }
 	}
 
 	#[inline]
 	pub fn alloc_empty<'a>(&'a self) -> Data<'a> {
-		Data {
-			buffers: self,
-			offset: 0,
-			len: 0,
-		}
+		Data { buffers: self, offset: 0, len: 0 }
 	}
 
 	#[inline]
@@ -177,11 +161,7 @@ impl Buffers {
 			}
 			l += self.block_size as usize;
 		}
-		Some(Data {
-			buffers: self,
-			offset,
-			len: size.try_into().unwrap(),
-		})
+		Some(Data { buffers: self, offset, len: size.try_into().unwrap() })
 	}
 
 	#[inline]
@@ -448,10 +428,7 @@ impl<'a, const N: usize> ArrayChunks<'a, N> {
 			let p = self.base.as_ptr();
 			intrinsics::volatile_copy_nonoverlapping_memory(a.as_mut_ptr().cast(), p, N)
 		}
-		FixedSlice {
-			storage: a,
-			len: self.len,
-		}
+		FixedSlice { storage: a, len: self.len }
 	}
 }
 

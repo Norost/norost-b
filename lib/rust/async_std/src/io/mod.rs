@@ -1,12 +1,12 @@
 mod write_fmt;
 
-pub use async_completion::*;
-pub use rt::io::*;
-pub use write_fmt::WriteFmtFuture;
+pub use {async_completion::*, rt::io::*, write_fmt::WriteFmtFuture};
 
-use crate::object::RefAsyncObject;
-use alloc::{string::String, vec::Vec};
-use core::{fmt, future::Future};
+use {
+	crate::object::RefAsyncObject,
+	alloc::{string::String, vec::Vec},
+	core::{fmt, future::Future},
+};
 
 pub trait Read<B: BufMut> {
 	type Future: Future<Output = (Result<usize>, B)>;
@@ -44,9 +44,7 @@ where
 		let res = core::fmt::write(&mut string, args)
 			.map(|_| string.into_bytes())
 			.map_err(|_| rt::Error::InvalidData);
-		WriteFmtFuture {
-			fut: Some(res.map(|b| self.write(b))),
-		}
+		WriteFmtFuture { fut: Some(res.map(|b| self.write(b))) }
 	}
 }
 

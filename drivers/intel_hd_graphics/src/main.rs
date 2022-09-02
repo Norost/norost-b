@@ -242,9 +242,11 @@ mod watermark;
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64;
-use core::ptr::NonNull;
-use driver_utils::os::stream_table::{Request, Response, StreamTable};
-use rt::{Error, Handle};
+use {
+	core::ptr::NonNull,
+	driver_utils::os::stream_table::{Request, Response, StreamTable},
+	rt::{Error, Handle},
+};
 
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -496,12 +498,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 				let base = memory.cast().try_into().unwrap();
 				let stride = stride / 4;
-				display_fb = DisplayFrameBuffer {
-					base,
-					width,
-					height,
-					stride,
-				};
+				display_fb = DisplayFrameBuffer { base, width, height, stride };
 			}
 			_ => unreachable!(),
 		}
@@ -537,11 +534,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					let prop = property.get(&mut tiny_buf);
 					match (handle, &*prop) {
 						(_, b"bin/resolution") => {
-							let r = ipc_gpu::Resolution {
-								x: width as _,
-								y: height as _,
-							}
-							.encode();
+							let r = ipc_gpu::Resolution { x: width as _, y: height as _ }.encode();
 							let data = table.alloc(r.len()).unwrap();
 							data.copy_from(0, &r);
 							Response::Data(data)
