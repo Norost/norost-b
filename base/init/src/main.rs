@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use core::{mem, time::Duration};
+use core::time::Duration;
 use norostb_rt as rt;
 use rt_default as _;
 
@@ -51,11 +51,10 @@ fn main() -> ! {
 	assert!(len2 >= len);
 	let cfg = unsafe { core::slice::from_raw_parts(ptr.as_ptr(), len) };
 	let mut cf = scf::parse2(cfg);
-	let mut it = cf.iter();
 
 	let mut stdout_path @ mut stderr_path = None;
 	let mut programs = Vec::new();
-	for item in it {
+	for item in cf.iter() {
 		let mut it = item.into_group().unwrap();
 		match it.next_str().unwrap() {
 			"stdout" => stdout_path = Some(it.next_str().unwrap()),

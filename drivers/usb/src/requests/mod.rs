@@ -1,17 +1,26 @@
 use crate::dma::Dma;
-use core::{char::DecodeUtf16Error, fmt, mem, num::NonZeroU8, slice::ArrayChunks};
+use core::{fmt, mem, slice::ArrayChunks};
 
 // https://wiki.osdev.org/USB#GET_DESCRIPTOR
+#[allow(dead_code)]
 const GET_STATUS: u8 = 0;
+#[allow(dead_code)]
 const CLEAR_FEATURE: u8 = 1;
+#[allow(dead_code)]
 const SET_FEATURE: u8 = 3;
+#[allow(dead_code)]
 const SET_ADDRESS: u8 = 5;
 const GET_DESCRIPTOR: u8 = 6;
+#[allow(dead_code)]
 const SET_DESCRIPTOR: u8 = 7;
+#[allow(dead_code)]
 const GET_CONFIGURATION: u8 = 8;
 const SET_CONFIGURATION: u8 = 9;
+#[allow(dead_code)]
 const GET_INTERFACE: u8 = 10;
+#[allow(dead_code)]
 const SET_INTERFACE: u8 = 11;
+#[allow(dead_code)]
 const SYNC_FRAME: u8 = 12;
 
 const DESCRIPTOR_DEVICE: u8 = 1;
@@ -19,17 +28,12 @@ const DESCRIPTOR_CONFIGURATION: u8 = 2;
 const DESCRIPTOR_STRING: u8 = 3;
 const DESCRIPTOR_INTERFACE: u8 = 4;
 const DESCRIPTOR_ENDPOINT: u8 = 5;
+#[allow(dead_code)]
 const DESCRIPTOR_DEVICE_QUALIFIER: u8 = 6;
+#[allow(dead_code)]
 const DESCRIPTOR_OTHER_SPEED_CONFIGURATION: u8 = 7;
+#[allow(dead_code)]
 const DESCRIPTOR_INTERFACE_POWER: u8 = 8;
-
-const FULL_SPEED: u8 = 1;
-const LOW_SPEED: u8 = 2;
-const HIGH_SPEED: u8 = 3;
-const SUPERSPEED_GEN1_X1: u8 = 4;
-const SUPERSPEED_GEN2_X1: u8 = 5;
-const SUPERSPEED_GEN1_X2: u8 = 6;
-const SUPERSPEED_GEN2_X2: u8 = 7;
 
 pub enum GetDescriptor {
 	Device,
@@ -37,6 +41,7 @@ pub enum GetDescriptor {
 	String { index: u8 },
 }
 
+#[derive(Debug)]
 pub enum DescriptorResult<'a> {
 	Device(Device),
 	Configuration(Configuration),
@@ -52,13 +57,6 @@ impl<'a> DescriptorResult<'a> {
 	pub fn into_device(self) -> Option<Device> {
 		match self {
 			Self::Device(v) => Some(v),
-			_ => None,
-		}
-	}
-
-	pub fn into_configuration(self) -> Option<Configuration> {
-		match self {
-			Self::Configuration(v) => Some(v),
 			_ => None,
 		}
 	}
@@ -103,10 +101,6 @@ pub struct Configuration {
 	pub max_power: u8,
 }
 
-impl Configuration {
-	const SIZE: usize = 2 + 7;
-}
-
 pub struct ConfigurationAttributes(u8);
 
 macro_rules! flag {
@@ -146,10 +140,6 @@ pub struct Interface {
 	pub index: u8,
 }
 
-impl Interface {
-	const SIZE: usize = 2 + 7;
-}
-
 #[derive(Debug)]
 // ditto
 #[repr(C)]
@@ -161,18 +151,14 @@ pub struct Endpoint {
 	pub interval: u8,
 }
 
-impl Endpoint {
-	const SIZE: usize = 2 + 5;
-}
-
 pub struct EndpointAddress(u8);
 
 impl EndpointAddress {
 	pub fn direction(&self) -> Direction {
-		if self.0 & 1 << 7 != 0 {
-			Direction::In
-		} else {
+		if self.0 & 1 << 7 == 0 {
 			Direction::Out
+		} else {
+			Direction::In
 		}
 	}
 
@@ -316,6 +302,7 @@ pub enum EndpointTransfer {
 	Interrupt,
 }
 
+#[derive(Debug)]
 pub struct DescriptorStringIter<'a>(ArrayChunks<'a, u8, 2>);
 
 pub enum Request {
@@ -348,7 +335,7 @@ impl Request {
 		match self {
 			Self::GetDescriptor { ty, buffer } => RawRequest {
 				request_type: 0b1000_0000,
-				direction: Direction::Out,
+				direction: Direction::In,
 				request: GET_DESCRIPTOR,
 				value: match ty {
 					GetDescriptor::Device => u16::from(DESCRIPTOR_DEVICE) << 8,
@@ -364,7 +351,7 @@ impl Request {
 			},
 			Self::SetConfiguration { value } => RawRequest {
 				request_type: 0b0000_0000,
-				direction: Direction::In,
+				direction: Direction::Out,
 				request: SET_CONFIGURATION,
 				value: value.into(),
 				index: 0,

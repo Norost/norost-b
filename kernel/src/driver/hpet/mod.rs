@@ -10,15 +10,13 @@ static mut ADDRESS: *const Hpet = core::ptr::null();
 static mut FEMTO_PERIOD: u32 = 0;
 const FEMTO_PER_NANO: u32 = 1_000_000;
 
-impl Monotonic {
-	pub fn now() -> Self {
-		// SAFETY: no other thread is writing to this variable after boot.
-		let fp = unsafe { FEMTO_PERIOD };
-		// With 128-bit integers there should *never* be an overflow
-		let t = u128::from(hpet().counter.get()) * u128::from(fp) / u128::from(FEMTO_PER_NANO);
-		// The timer will only overflow after >500 years, so just cast
-		Self::from_nanos(t as u64)
-	}
+pub fn now() -> Monotonic {
+	// SAFETY: no other thread is writing to this variable after boot.
+	let fp = unsafe { FEMTO_PERIOD };
+	// With 128-bit integers there should *never* be an overflow
+	let t = u128::from(hpet().counter.get()) * u128::from(fp) / u128::from(FEMTO_PER_NANO);
+	// The timer will only overflow after >500 years, so just cast
+	Monotonic::from_nanos(t as u64)
 }
 
 #[repr(C)]

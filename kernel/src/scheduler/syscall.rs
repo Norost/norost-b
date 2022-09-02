@@ -18,7 +18,6 @@ use alloc::{boxed::Box, sync::Arc};
 use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::NonNull;
-use core::time::Duration;
 use norostb_kernel::{error::Error, io::Request, object::NewObject};
 
 #[derive(Clone, Copy)]
@@ -29,6 +28,10 @@ pub struct Return {
 }
 
 impl Return {
+	const OK: Self = Self {
+		status: 0,
+		value: 0,
+	};
 	const INVALID_OBJECT: Self = Self::error(Error::InvalidObject);
 	const INVALID_OPERATION: Self = Self::error(Error::InvalidObject);
 	const INVALID_DATA: Self = Self::error(Error::InvalidData);
@@ -68,7 +71,7 @@ static SYSCALLS: SyscallTable = SyscallTable([
 	do_io,
 	poll_io_queue,
 	wait_io_queue,
-	monotonic_time,
+	undefined,
 	sleep,
 	exit,
 	spawn_thread,
@@ -161,10 +164,6 @@ extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _:
 				value: base.as_ptr() as usize,
 			},
 		)
-}
-
-extern "C" fn monotonic_time(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
-	get_mono_time()
 }
 
 // Limit to 64 bit for now since we can't pass enough data in registers on e.g. x86
@@ -382,7 +381,8 @@ extern "C" fn map_object(
 					MapError::Overflow
 					| MapError::ZeroSize
 					| MapError::Permission
-					| MapError::UnalignedOffset => Error::InvalidData,
+					| MapError::UnalignedOffset
+					| MapError::Reserved => Error::InvalidData,
 					MapError::Arch(e) => todo!("{:?}", e),
 				}) as _,
 				value: 0,
@@ -402,11 +402,11 @@ extern "C" fn sleep(
 	_: usize,
 	_: usize,
 ) -> Return {
-	debug!(syscall "sleep");
-	let time = merge_u64(time_l, time_h);
-	let time = Duration::from_nanos(time.into());
-	Thread::current().unwrap().sleep(time);
-	get_mono_time()
+	let t = merge_u64(time_l, time_h);
+	debug!(syscall "sleep {:?}", Duration::from_nanos(t));
+	let t = Monotonic::now().saturating_add_nanos(t);
+	Thread::current().unwrap().sleep_until(t);
+	Return::OK
 }
 
 extern "C" fn spawn_thread(
@@ -510,7 +510,7 @@ extern "C" fn poll_io_queue(
 			status: Error::Unknown as usize,
 			value: 0,
 		},
-		|_| get_mono_time(),
+		|_| Return::OK,
 	)
 }
 
@@ -527,7 +527,6 @@ extern "C" fn wait_io_queue(
 		return Return { status: Error::InvalidData as usize, value: 0 }
 	};
 	let timeout = merge_u64(timeout_l, timeout_h);
-	let timeout = Duration::from_nanos(timeout.into());
 	Process::current()
 		.unwrap()
 		.wait_io_queue(base, timeout)
@@ -536,7 +535,7 @@ extern "C" fn wait_io_queue(
 				status: Error::Unknown as usize,
 				value: 0,
 			},
-			|_| get_mono_time(),
+			|_| Return::OK,
 		)
 }
 
@@ -631,16 +630,6 @@ fn merge_u64(l: usize, h: usize) -> u64 {
 	}
 }
 
-fn get_mono_time() -> Return {
-	let now = Monotonic::now().as_nanos();
-	#[cfg(target_pointer_width = "32")]
-	return Return {
-		status: (now >> 32) as usize,
-		value: now as usize,
-	};
-	#[cfg(target_pointer_width = "64")]
-	return Return {
-		status: 0,
-		value: now as usize,
-	};
+extern "C" fn undefined(_: usize, _: usize, _: usize, _: usize, _: usize, _: usize) -> Return {
+	Return::INVALID_OPERATION
 }

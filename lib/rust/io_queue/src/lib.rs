@@ -166,11 +166,11 @@ impl Queue {
 		r
 	}
 
-	pub fn poll(&mut self) -> Monotonic {
+	pub fn poll(&mut self) {
 		syscall::process_io_queue(Some(self.inner.base.cast())).expect("failed to poll queue")
 	}
 
-	pub fn wait(&mut self, timeout: Duration) -> Monotonic {
+	pub fn wait(&mut self, timeout: Duration) {
 		syscall::wait_io_queue(Some(self.inner.base.cast()), timeout).expect("failed to wait queue")
 	}
 }

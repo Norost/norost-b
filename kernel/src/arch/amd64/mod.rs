@@ -12,8 +12,10 @@ pub mod sync;
 mod syscall;
 mod tss;
 pub mod r#virtual;
+mod vm;
+mod vsyscall;
 
-use crate::driver::apic;
+use crate::{boot, driver::apic};
 use core::{
 	arch::asm,
 	mem::MaybeUninit,
@@ -149,7 +151,7 @@ pub mod pic {
 	}
 }
 
-pub unsafe fn init() {
+pub unsafe fn init(_: &boot::Info) {
 	unsafe {
 		// Remap IBM-PC interrupts
 		// Even if the PIC is disabled it may generate spurious interrupts apparently *sigh*
@@ -218,6 +220,14 @@ pub unsafe fn init() {
 		r#virtual::init();
 
 		float::init(&features);
+	}
+}
+
+pub unsafe fn init_extra(boot: &boot::Info) {
+	unsafe {
+		let features = cpuid::Features::new();
+		vsyscall::init(boot);
+		vm::init(boot, &features);
 	}
 }
 

@@ -34,15 +34,15 @@ fn main() -> ! {
 		assert!(it.next().is_none());
 
 		let process_root = rt::io::process_root().unwrap();
-		if let Some(d) = cfg
+		if let Some(drv) = cfg
 			.drivers_by_id
 			.get(&(v, d))
 			.or_else(|| cfg.drivers_by_class.get(&class))
 		{
 			if let Err(e) = (|| {
 				let mut b = rt::process::Builder::new()?;
-				b.set_binary_by_name(d.path.as_bytes())?;
-				b.add_args([loc, d.name.as_deref().unwrap_or(loc)])?;
+				b.set_binary_by_name(drv.path.as_bytes())?;
+				b.add_args([loc, drv.name.as_deref().unwrap_or(loc)])?;
 				if let Some(o) = rt::io::stderr() {
 					b.add_object(b"err", &o)?;
 				}
@@ -51,12 +51,18 @@ fn main() -> ! {
 				b.add_object(b"pci", &pci.open(loc.as_ref())?)?;
 				b.spawn()
 			})() {
-				rt::eprintln!("failed to launch driver {:?}: {:?}", d.path, e);
+				rt::eprintln!("failed to launch driver {:?}: {:?}", drv.path, e);
 			} else {
-				rt::eprintln!("launched driver {:?} for {}", d.path, loc);
+				rt::eprintln!(
+					"launched driver {:?} for {:04x}:{:04x} at {}",
+					drv.path,
+					v,
+					d,
+					loc
+				);
 			}
 		} else {
-			rt::eprintln!("no driver for {:04x}:{:04x}", v, d);
+			rt::eprintln!("no driver for {:04x}:{:04x} at {}", v, d, loc);
 		}
 	}
 	todo!();
@@ -89,26 +95,17 @@ fn load_config() -> Config {
 		unsafe { buf.set_len(buf.len() + l) }
 	}
 	let mut cfg = Config::default();
-	let mut it = scf::parse(&buf).map(Result::unwrap);
+	let mut cf = scf::parse2(&buf);
 
-	let is_begin = |it: &mut dyn Iterator<Item = Token<'_>>| match it.next() {
-		Some(Token::Begin) => true,
-		Some(Token::End) => false,
-		_ => panic!("expected '(' or ')'"),
-	};
-	let get_str = for<'a, 'b> |it: &'b mut dyn Iterator<Item = Token<'a>>| -> Option<&'a str> {
-		it.next().and_then(|tk| tk.into_str())
-	};
-
-	let parse_driver = |it: &mut dyn Iterator<Item = Token<'_>>| {
-		let path = get_str(it).expect("expected driver path");
+	let parse_driver = |mut it: scf::GroupsIter<'_, '_>| {
+		let path = it.next_str().expect("expected driver path");
 		let mut name = None;
-		while is_begin(it) {
-			match get_str(it).expect("expected property name") {
+		for item in it {
+			let mut it = item.into_group().unwrap();
+			match it.next_str().expect("expected property name") {
 				"name" => {
-					let prev = name.replace(get_str(it).expect("expected property name"));
+					let prev = name.replace(it.next_str().expect("expected property name"));
 					assert!(prev.is_none(), "multiple names for driver");
-					assert!(it.next() == Some(Token::End));
 				}
 				s => panic!("unknown property {:?}", s),
 			}
@@ -119,20 +116,19 @@ fn load_config() -> Config {
 		}
 	};
 
-	use scf::Token;
-	while let Some(tk) = it.next() {
-		assert!(tk == Token::Begin);
-		match get_str(&mut it).expect("section name") {
+	for item in cf.iter() {
+		let mut it = item.into_group().unwrap();
+		match it.next_str().expect("section name") {
 			"id" => {
-				while is_begin(&mut it) {
-					let vendor = parse_hex_u16(get_str(&mut it).expect("expected vendor ID"))
+				for item in it {
+					let mut it = item.into_group().unwrap();
+					let vendor = parse_hex_u16(it.next_str().expect("expected vendor ID"))
 						.expect("invalid vendor ID");
-					while is_begin(&mut it) {
-						let device = parse_hex_u16(get_str(&mut it).expect("expected device ID"))
+					for item in it {
+						let mut it = item.into_group().unwrap();
+						let device = parse_hex_u16(it.next_str().expect("expected device ID"))
 							.expect("invalid device ID");
-						let prev = cfg
-							.drivers_by_id
-							.insert((vendor, device), parse_driver(&mut it));
+						let prev = cfg.drivers_by_id.insert((vendor, device), parse_driver(it));
 						assert!(
 							prev.is_none(),
 							"multiple drivers for {:04x}:{:04x}",
@@ -143,16 +139,17 @@ fn load_config() -> Config {
 				}
 			}
 			"class" => {
-				while is_begin(&mut it) {
-					let class = parse_hex_u8(get_str(&mut it).expect("expected class"))
+				for item in it {
+					let mut it = item.into_group().unwrap();
+					let class = parse_hex_u8(it.next_str().expect("expected class"))
 						.expect("invalid class");
-					let subclass = parse_hex_u8(get_str(&mut it).expect("expected subclass"))
+					let subclass = parse_hex_u8(it.next_str().expect("expected subclass"))
 						.expect("invalid subclass");
-					let interface = parse_hex_u8(get_str(&mut it).expect("expected interface"))
+					let interface = parse_hex_u8(it.next_str().expect("expected interface"))
 						.expect("invalid interface");
 					let prev = cfg
 						.drivers_by_class
-						.insert((class, subclass, interface), parse_driver(&mut it));
+						.insert((class, subclass, interface), parse_driver(it));
 					assert!(
 						prev.is_none(),
 						"multiple drivers for {:02x} {:02x} {:02x}",

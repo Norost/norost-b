@@ -1,4 +1,3 @@
-use crate::cpuid;
 use crate::mtrr;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -60,7 +59,7 @@ impl PML4 {
 		&mut self,
 		mut page_alloc: F,
 		memory_top: u64,
-		cpuid: &cpuid::Features,
+		cpuid: &cpuid::Cpuid,
 	) where
 		F: FnMut() -> *mut Page,
 	{

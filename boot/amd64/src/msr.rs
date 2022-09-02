@@ -16,7 +16,5 @@ pub unsafe fn rdmsr(msr: u32) -> u64 {
 /// MSRs must be supported.
 pub unsafe fn wrmsr(reg: u32, value: u64) {
 	let (high, low) = ((value >> 32) as u32, value as u32);
-	unsafe {
-		asm!("wrmsr", in("ecx") reg, in("edx") high, in("eax") low, options(nostack, nomem));
-	}
+	asm!("wrmsr", in("ecx") reg, in("edx") high, in("eax") low, options(nostack, nomem));
 }

@@ -20,6 +20,7 @@ pub mod syscall;
 pub mod io;
 pub mod object;
 pub mod time;
+pub mod vsyscall;
 
 #[repr(align(4096))]
 #[repr(C)]

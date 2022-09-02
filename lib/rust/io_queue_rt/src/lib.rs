@@ -41,6 +41,7 @@ impl fmt::Debug for Queue {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct(stringify!(Queue))
 			.field("inner", &self.inner)
+			.field("ready_responses", &self.ready_responses)
 			// Don't print the potentially huge inflight_buffers list.
 			.finish_non_exhaustive()
 	}
@@ -270,12 +271,15 @@ impl Queue {
 		self.ready_responses.set(self.ready_responses.get() + n);
 	}
 
-	pub fn poll(&self) -> Monotonic {
+	pub fn poll(&self) {
 		self.inner.borrow_mut().poll()
 	}
 
-	pub fn wait(&self, timeout: Duration) -> Option<Monotonic> {
-		(self.ready_responses.get() == 0).then(|| self.inner.borrow_mut().wait(timeout))
+	pub fn wait(&self, timeout: Duration) {
+		// Don't wait if there are still responses available to avoid "lost wakeup"-eque problems
+		if self.ready_responses.get() == 0 {
+			self.inner.borrow_mut().wait(timeout)
+		}
 	}
 }
 
@@ -384,7 +388,12 @@ impl<B: Buf> Drop for BufferFuture<'_, B> {
 					// We can't drop the buffer yet as it is still in use by the queue.
 					*s = BufferFutureState::Cancelled(Box::new(buf));
 				}
-				Some(BufferFutureState::Finished(_)) | None => {}
+				Some(BufferFutureState::Finished(_)) => {
+					self.queue
+						.ready_responses
+						.set(self.queue.ready_responses.get() - 1);
+				}
+				None => {}
 				Some(BufferFutureState::Cancelled(_)) => unreachable!(),
 			}
 		}

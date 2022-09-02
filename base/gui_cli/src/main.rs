@@ -36,6 +36,26 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 fn main(_: isize, _: *const *const u8) -> isize {
 	let root = rt::io::file_root().unwrap();
 
+	let mut scale = 20.0;
+	let mut no_quit = false;
+
+	let mut args = rt::args::args()
+		.skip(1)
+		.map(|s| core::str::from_utf8(s).unwrap());
+	while let Some(a) = args.next() {
+		match a {
+			"--scale" => {
+				scale = args
+					.next()
+					.expect("scale requires argument")
+					.parse()
+					.expect("invalid scale format")
+			}
+			"--no-quit" => no_quit = true,
+			a => panic!("unknown arg {:?}", a),
+		}
+	}
+
 	let font = Font::from_bytes(
 		FONT,
 		FontSettings {
@@ -44,7 +64,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		},
 	)
 	.unwrap();
-	let mut rasterizer = rasterizer::Rasterizer::new(font);
+	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
 	let window = root.create(b"window_manager/window").unwrap();
 
@@ -139,6 +159,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				},
 				Request::Close => match handle {
 					// Exit
+					WRITE_HANDLE if no_quit => continue,
 					WRITE_HANDLE => return 0,
 					_ => unreachable!(),
 				},

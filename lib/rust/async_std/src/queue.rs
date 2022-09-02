@@ -42,19 +42,17 @@ where
 	}
 }
 
-pub fn poll() -> rt::time::Monotonic {
+pub fn poll() {
 	let q = get();
-	let t = q.poll();
+	q.poll();
 	q.process();
-	t
 }
 
-pub fn wait(timeout: Duration) -> rt::time::Monotonic {
+pub fn wait(timeout: Duration) {
 	let q = get();
-	let t = q.poll();
-	let t = q.wait(timeout).unwrap_or(t);
+	q.poll();
+	q.wait(timeout);
 	q.process();
-	t
 }
 
 pub fn get() -> &'static Queue {

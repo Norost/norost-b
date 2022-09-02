@@ -27,20 +27,9 @@ features = ["no_send"]
 package = "nora_scf"
 path = "../../../lib/nora_scf"
 
-[dependencies.serde]
-version = "1.0"
-
-[dependencies.serde_derive]
-version = "1.0"
-
 [dependencies.rt]
 package = "norostb_rt"
 path = "../../lib/rust/rt"
-
-[dependencies.clap]
-version = "3.2"
-default-features = false
-features = ["std", "derive"]
 
 [dependencies.ed25519-dalek]
 version = "1.0"

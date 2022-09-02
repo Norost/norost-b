@@ -1,5 +1,5 @@
 use crate::Handle;
-use core::{cell::RefCell, ops::Deref};
+use core::{cell::RefCell, fmt, ops::Deref};
 use nora_stream_table::{Buffers, ServerQueue, Slice};
 use norostb_rt::{
 	self as rt,
@@ -143,6 +143,7 @@ impl StreamTable {
 	}
 }
 
+#[derive(Debug)]
 pub enum Request<'a> {
 	Read { amount: u32 },
 	Write { data: Data<'a> },
@@ -233,6 +234,13 @@ impl<'a> Drop for Data<'a> {
 	}
 }
 
+impl fmt::Debug for Data<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct(stringify!(Data)).finish_non_exhaustive()
+	}
+}
+
+#[derive(Debug)]
 pub struct Property<'a>(Data<'a>);
 
 impl<'a> Property<'a> {
@@ -250,6 +258,7 @@ impl<'a> Property<'a> {
 	}
 }
 
+#[derive(Debug)]
 pub struct PropertyValue<'a>(Data<'a>);
 
 impl<'a> PropertyValue<'a> {

@@ -46,7 +46,7 @@ unsafe impl MemoryObject for PciDevice {
 	}
 
 	fn page_flags(&self) -> (PageFlags, RWX) {
-		(Default::default(), RWX::R)
+		(Default::default(), RWX::RW)
 	}
 }
 
@@ -79,14 +79,11 @@ impl Object for PciDevice {
 						base: PPN::try_from_usize(addr.try_into().unwrap()).unwrap(),
 						count: size.get().try_into().unwrap(),
 					};
-					dbg!(addr as *const ());
-					dbg!(frames.count);
 					// FIXME there needs to be a better way to limit the amount of pages.
 					frames.count = frames.count.min(1 << 20);
 					let r = Arc::new(BarRegion {
 						frames: frames.collect(),
 					});
-					dbg!("ok");
 					Ok(r)
 				} else {
 					Err(Error::CantCreateObject)

@@ -20,25 +20,48 @@ fn main() {
 	let stdout = rt::io::stdout().unwrap();
 	let stdin = rt::io::stdin().unwrap();
 
-	let mut dev = bbb::Device::new(
-		ipc_usb::Endpoint::N2,
-		ipc_usb::Endpoint::N1,
-		&stdout,
-		&stdin,
-	);
+	let mut bulk_out @ mut bulk_in @ mut intr_in = None;
 
-	let data = dev
-		.transfer_in(
-			scsi::Inquiry {
-				allocation_length: 0x24,
-				evpd: 0,
-				page_code: 0,
-				control: 0,
-			},
-			0x24,
-		)
-		.unwrap();
-	rt::dbg!(scsi::InquiryData::try_from(&*data).unwrap());
+	let mut args = rt::args::args().skip(1);
+	while let Some(a) = args.next() {
+		let a = core::str::from_utf8(a).unwrap();
+		let decode_ep = |v: &mut Option<_>, args: &mut dyn Iterator<Item = &[u8]>| {
+			let n = args.next().expect("expected argument");
+			let ep = ipc_usb::Endpoint::try_from(n).expect("invalid endpoint");
+			let prev = v.replace(ep);
+			assert!(prev.is_none(), "{} already specified", a);
+		};
+		match a {
+			"--class" => {
+				// Just ignore for now.
+				args.next().unwrap();
+			}
+			"--bulk-out" => decode_ep(&mut bulk_out, &mut args),
+			"--bulk-in" => decode_ep(&mut bulk_in, &mut args),
+			"--intr-in" => decode_ep(&mut intr_in, &mut args),
+			"--intr-out" | "--isoch-out" | "--isoch-in" => {
+				panic!("did not expect {}", a)
+			}
+			_ => panic!("invalid argument {:?}", a),
+		}
+	}
+
+	let bulk_out = bulk_out.expect("bulk OUT endpoint not specified");
+	let bulk_in = bulk_in.expect("bulk IN endpoint not specified");
+
+	let mut dev = bbb::Device::new(bulk_out, bulk_in, &stdout, &stdin);
+
+	// Send inquiry since it seems to be required for MSD devices to work properly
+	dev.transfer_in(
+		scsi::Inquiry {
+			allocation_length: 0x24,
+			evpd: 0,
+			page_code: 0,
+			control: 0,
+		},
+		0x24,
+	)
+	.unwrap();
 
 	let data = dev
 		.transfer_in(
@@ -70,7 +93,6 @@ fn main() {
 				Request::Open { path } if handle == rt::Handle::MAX => {
 					let mut p = alloc::vec![0; path.len()];
 					path.copy_to(0, &mut p);
-					rt::dbg!(core::str::from_utf8(&p));
 					if &p == b"data" {
 						Response::Handle(obj.insert(0))
 					} else {

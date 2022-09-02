@@ -44,7 +44,6 @@ fn start(_: isize, _: *const *const u8) -> isize {
 }
 
 fn main() {
-	let file_root = rt::io::file_root().unwrap();
 	let table_name = rt::args::args()
 		.skip(1)
 		.next()
@@ -57,7 +56,7 @@ fn main() {
 	let poll = AsyncObject::from_raw(dev.open(b"poll").unwrap().into_raw());
 
 	let pci = dev.map_object(None, rt::RWX::R, 0, usize::MAX).unwrap();
-	let pci = unsafe { pci::Pci::new(pci.0.cast(), 0, 0, &[]) };
+	let pci = unsafe { pci::Pci::new(pci.0.cast(), 0, 4096, &[]) };
 
 	let pci = pci.get(0, 0, 0).unwrap();
 	// FIXME figure out why InterfaceBuilder causes a 'static lifetime requirement
@@ -456,11 +455,13 @@ fn main() {
 		if Pin::new(&mut table_notify).poll(&mut cx).is_ready() {
 			table_notify = RefAsyncObject::from(table.table.notifier()).read(());
 		}
-		t = async_std::queue::poll();
+		async_std::queue::poll();
+		t = rt::time::Monotonic::now();
 		if let Some(delay) = iface.poll_delay(time::Instant::from_micros(t.as_micros() as i64)) {
 			let delay = delay.into();
 			if delay != Duration::ZERO {
-				t = async_std::queue::wait(delay);
+				async_std::queue::wait(delay);
+				t = rt::time::Monotonic::now();
 			}
 		}
 

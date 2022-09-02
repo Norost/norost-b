@@ -1,5 +1,4 @@
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
-use nora_scf::Token;
 
 pub struct Config {
 	drivers: BTreeMap<((u8, u8, u8), (u8, u8, u8)), Driver>,
@@ -37,7 +36,6 @@ pub fn parse(config: &rt::Object) -> Config {
 
 	let mut drivers = BTreeMap::default();
 	let mut cf = nora_scf::parse2(&buf);
-	let mut it = cf.iter();
 
 	let trips = |it: &mut nora_scf::GroupsIter<'_, '_>| {
 		let c = it.next_str().and_then(parse_hex_u8).unwrap();
@@ -46,7 +44,7 @@ pub fn parse(config: &rt::Object) -> Config {
 		(c, sc, p)
 	};
 
-	for mut it in it.map(|e| e.into_group().unwrap()) {
+	for mut it in cf.iter().map(|e| e.into_group().unwrap()) {
 		match it.next_str().unwrap() {
 			"usb-drivers" => {
 				for mut it in it.map(|e| e.into_group().unwrap()) {

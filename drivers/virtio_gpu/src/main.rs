@@ -4,8 +4,8 @@
 
 extern crate alloc;
 
-use alloc::{string::ToString, vec::Vec};
-use core::{ptr::NonNull, str};
+use alloc::string::ToString;
+use core::ptr::NonNull;
 use driver_utils::os::stream_table::{Request, Response, StreamTable};
 use rt::io::{Error, Handle};
 use virtio_gpu::Rect;
@@ -27,12 +27,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 	rt::exit(128)
 }
 
-macro_rules! log {
-	($($arg:tt)*) => {{
-		let _ = rt::io::stderr().map(|o| writeln!(o, $($arg)*));
-	}};
-}
-
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
 	let table_name = rt::args::args()
@@ -40,8 +34,6 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.next()
 		.expect("expected table path");
 
-	let root = rt::io::file_root().unwrap();
-	let it = root.open(b"pci/info").unwrap();
 	let dev = rt::args::handles()
 		.find(|(name, _)| name == b"pci")
 		.expect("no 'pci' object")
