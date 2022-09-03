@@ -142,7 +142,7 @@ fn main() -> std::io::Result<()> {
 				};
 				match f.read(&mut buf2[..len]) {
 					Ok(l) => {
-						term.write(&buf2[..l])?;
+						term.write_all(&buf2[..l])?;
 						writeln!(term)?;
 					}
 					Err(e) => writeln!(term, "Failed to read from \"{}\": {}", name, e)?,
