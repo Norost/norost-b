@@ -21,16 +21,20 @@ const SIZE: usize = 1 << 16;
 const MSG_SIZE: usize = 1 << 8;
 
 /// The global kernel log buffer.
-static LOG: SpinLock<Log> = SpinLock::new(Log { buf: [0; SIZE], head: 0, readers: Vec::new() });
+static LOG: SpinLock<Log> = SpinLock::new(Log { head: 0, readers: Vec::new() });
+
+/// The actual buffer
+///
+/// This is stored separately so the .data section doesn't blow up.
+static mut BUF: [u8; SIZE] = [0; SIZE];
 
 /// # Message format
 ///
 /// * u64 little-endian timestamp in nanoseconds.
 /// * N bytes of arbitrary data.
 struct Log {
-	buf: [u8; SIZE],
-	head: usize,
 	readers: Vec<Arc<Reader>>,
+	head: usize,
 }
 
 /// Append a message to the log.
@@ -46,8 +50,11 @@ fn append(msg: &[u8]) -> usize {
 	};
 	let post = msg.len() - pre;
 	let h = log.head;
-	log.buf[h..][..pre].copy_from_slice(&msg[..pre]);
-	log.buf[..post].copy_from_slice(&msg[pre..]);
+	// SAFETY: we hold the LOG lock
+	unsafe {
+		BUF[h..][..pre].copy_from_slice(&msg[..pre]);
+		BUF[..post].copy_from_slice(&msg[pre..]);
+	}
 
 	for r in log.readers.iter_mut() {
 		// SAFETY: we hold the LOG lock
@@ -90,11 +97,11 @@ impl Object for Reader {
 				}
 				let mut l = log.head.wrapping_sub(t).min(length);
 				let mut v = Vec::with_capacity(l);
-				let b = &log.buf[t % SIZE..];
+				let b = &BUF[t % SIZE..];
 				let b = &b[..b.len().min(l)];
 				v.extend_from_slice(b);
 				l -= b.len();
-				v.extend_from_slice(&log.buf[..l]);
+				v.extend_from_slice(&BUF[..l]);
 				*self.tail.get() = t.wrapping_add(v.len());
 				Ticket::new_complete(Ok(b.into()))
 			} else if self.blocking {
