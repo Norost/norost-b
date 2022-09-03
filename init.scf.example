@@ -2,6 +2,7 @@
 	(minish
 		(objects
 			(file "")
+			(err gui_cli/write)
 			(in "keyboard/stream"))
 		(after "keyboard"))
 	(fs_fat

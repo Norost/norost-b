@@ -73,6 +73,14 @@ fn main() -> std::io::Result<()> {
 				writeln!(term, "  write    <name> <data>    Write to an object")?;
 				writeln!(term, "  vars                      List variables")?;
 				writeln!(term, "  exit     [code]           Exit this shell")?;
+				writeln!(
+					term,
+					"  copy     <from> <to>      Copy data from one object to a new object"
+				)?;
+				writeln!(
+					term,
+					"  dump     <file>           Dump the data of an object"
+				)?;
 			}
 			b"ls" => {
 				let Some(path) = maybe_next_str(&mut term, &mut args)? else { continue; };
@@ -142,7 +150,7 @@ fn main() -> std::io::Result<()> {
 				};
 				match f.read(&mut buf2[..len]) {
 					Ok(l) => {
-						term.write(&buf2[..l])?;
+						term.write_all(&buf2[..l])?;
 						writeln!(term)?;
 					}
 					Err(e) => writeln!(term, "Failed to read from \"{}\": {}", name, e)?,
@@ -181,6 +189,65 @@ fn main() -> std::io::Result<()> {
 					continue;
 				};
 				std::process::exit(code);
+			}
+			b"copy" => {
+				let Some(from) = next_str(&mut term, &mut args)? else { continue; };
+				let Some(to) = next_str(&mut term, &mut args)? else { continue; };
+				let mut from = match fs::File::open(from) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to open \"{}\": {}", from, e)?;
+						continue;
+					}
+				};
+				let mut to = match fs::File::create(to) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to create \"{}\": {}", to, e)?;
+						continue;
+					}
+				};
+				let mut total = 0;
+				loop {
+					match from.read(&mut buf2) {
+						Ok(0) => {
+							writeln!(term, "Copied {} bytes", total)?;
+							break;
+						}
+						Ok(l) => match to.write_all(&buf[..l]) {
+							Ok(()) => total += l,
+							Err(e) => {
+								writeln!(
+									term,
+									"Error writing after copying {} bytes: {}",
+									total, e
+								)?;
+								break;
+							}
+						},
+						Err(e) => {
+							writeln!(term, "Error reading after copying {} bytes: {}", total, e)?;
+							break;
+						}
+					}
+				}
+			}
+			b"dump" => {
+				let Some(file) = next_str(&mut term, &mut args)? else { continue; };
+				let mut f = match fs::File::open(file) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to open \"{}\": {}", file, e)?;
+						continue;
+					}
+				};
+				loop {
+					match f.read(&mut buf2) {
+						Ok(0) => break,
+						Ok(l) => term.write_all(&buf2[..l])?,
+						Err(e) => writeln!(term, "Error reading from \"{}\": {}", file, e)?,
+					}
+				}
 			}
 			c => writeln!(
 				term,

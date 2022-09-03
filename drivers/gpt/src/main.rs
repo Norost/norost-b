@@ -85,6 +85,7 @@ fn main() {
 					}
 				}
 				Request::Read { amount } if handle != rt::Handle::MAX => {
+					let amount = amount.min(512);
 					if handle & 1 << 31 != 0 {
 						let i = &mut ls[handle ^ 1 << 31];
 						let s = partitions

@@ -7,6 +7,8 @@ extern crate alloc;
 
 use {alloc::vec::Vec, core::time::Duration, norostb_rt as rt, rt_default as _};
 
+const SYSLOG: &str = "syslog/write";
+
 #[derive(Default)]
 struct Program<'a> {
 	path: &'a str,
@@ -34,7 +36,7 @@ fn main() -> ! {
 	// TODO we shouldn't hardcode the handle.
 	let root = rt::Object::from_raw(0 << 24 | 0);
 	let stderr = root
-		.open(b"system/log")
+		.open(SYSLOG.as_ref())
 		.map(|o| rt::RefObject::from_raw(o.into_raw()))
 		.ok();
 	rt::io::set_stderr(stderr);
@@ -105,7 +107,7 @@ fn main() -> ! {
 	// Add stderr by default, as it is used for panic & other output
 	for p in programs.iter_mut() {
 		if !p.objects.iter().find(|(n, _)| *n == "err").is_some() {
-			p.objects.push(("err", Vec::from(["system/log"])));
+			p.objects.push(("err", Vec::from([SYSLOG])));
 		}
 	}
 

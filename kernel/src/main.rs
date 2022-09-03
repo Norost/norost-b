@@ -28,7 +28,6 @@
 #![feature(bench_black_box)]
 #![deny(incomplete_features)]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![deny(unused_variables)]
 
 extern crate alloc;
 

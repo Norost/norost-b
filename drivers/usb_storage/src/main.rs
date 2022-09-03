@@ -91,6 +91,7 @@ fn main() {
 					}
 				}
 				Request::Read { amount } if handle != rt::Handle::MAX => {
+					let amount = amount.min(attr.block_length);
 					if amount != attr.block_length {
 						Response::Error(rt::Error::InvalidData)
 					} else {
