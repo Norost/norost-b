@@ -77,6 +77,10 @@ fn main() -> std::io::Result<()> {
 					term,
 					"  copy     <from> <to>      Copy data from one object to a new object"
 				)?;
+				writeln!(
+					term,
+					"  dump     <file>           Dump the data of an object"
+				)?;
 			}
 			b"ls" => {
 				let Some(path) = maybe_next_str(&mut term, &mut args)? else { continue; };
@@ -204,9 +208,8 @@ fn main() -> std::io::Result<()> {
 					}
 				};
 				let mut total = 0;
-				let mut buf = [0; 4096];
 				loop {
-					match from.read(&mut buf) {
+					match from.read(&mut buf2) {
 						Ok(0) => {
 							writeln!(term, "Copied {} bytes", total)?;
 							break;
@@ -226,6 +229,23 @@ fn main() -> std::io::Result<()> {
 							writeln!(term, "Error reading after copying {} bytes: {}", total, e)?;
 							break;
 						}
+					}
+				}
+			}
+			b"dump" => {
+				let Some(file) = next_str(&mut term, &mut args)? else { continue; };
+				let mut f = match fs::File::open(file) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to open \"{}\": {}", file, e)?;
+						continue;
+					}
+				};
+				loop {
+					match f.read(&mut buf2) {
+						Ok(0) => break,
+						Ok(l) => term.write_all(&buf2[..l])?,
+						Err(e) => writeln!(term, "Error reading from \"{}\": {}", file, e)?,
 					}
 				}
 			}
