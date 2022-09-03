@@ -73,6 +73,10 @@ fn main() -> std::io::Result<()> {
 				writeln!(term, "  write    <name> <data>    Write to an object")?;
 				writeln!(term, "  vars                      List variables")?;
 				writeln!(term, "  exit     [code]           Exit this shell")?;
+				writeln!(
+					term,
+					"  copy     <from> <to>      Copy data from one object to a new object"
+				)?;
 			}
 			b"ls" => {
 				let Some(path) = maybe_next_str(&mut term, &mut args)? else { continue; };
@@ -181,6 +185,49 @@ fn main() -> std::io::Result<()> {
 					continue;
 				};
 				std::process::exit(code);
+			}
+			b"copy" => {
+				let Some(from) = next_str(&mut term, &mut args)? else { continue; };
+				let Some(to) = next_str(&mut term, &mut args)? else { continue; };
+				let mut from = match fs::File::open(from) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to open \"{}\": {}", from, e)?;
+						continue;
+					}
+				};
+				let mut to = match fs::File::create(to) {
+					Ok(f) => f,
+					Err(e) => {
+						writeln!(term, "Failed to create \"{}\": {}", to, e)?;
+						continue;
+					}
+				};
+				let mut total = 0;
+				let mut buf = [0; 4096];
+				loop {
+					match from.read(&mut buf) {
+						Ok(0) => {
+							writeln!(term, "Copied {} bytes", total)?;
+							break;
+						}
+						Ok(l) => match to.write_all(&buf[..l]) {
+							Ok(()) => total += l,
+							Err(e) => {
+								writeln!(
+									term,
+									"Error writing after copying {} bytes: {}",
+									total, e
+								)?;
+								break;
+							}
+						},
+						Err(e) => {
+							writeln!(term, "Error reading after copying {} bytes: {}", total, e)?;
+							break;
+						}
+					}
+				}
 			}
 			c => writeln!(
 				term,
