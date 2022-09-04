@@ -22,8 +22,12 @@ mod workspace;
 
 use {
 	config::Config,
-	core::{cell::RefCell, ptr::NonNull},
-	driver_utils::os::stream_table::{JobId, Request, Response, StreamTable},
+	core::{cell::RefCell, pin::Pin, ptr::NonNull, time::Duration},
+	driver_utils::{
+		os::stream_table::{JobId, Request, Response, StreamTable},
+		task,
+	},
+	io_queue_rt::{Pow2Size, Queue},
 	math::{Point, Rect, Size},
 	rt::io::{Error, Handle},
 };
@@ -122,14 +126,48 @@ fn main() {
 		main.shmem[..r.len()].copy_from_slice(r);
 		let f = |n| u8::try_from(n - 1).unwrap();
 		sync.write(&[0xc5, f(c.width()), f(c.height())]).unwrap();
-		sync.set_meta(b"bin/cursor/pos".into(), (&[120, 0, 240, 0]).into())
-			.unwrap();
 	}
 
-	let mut prop_buf = [0; 511];
+	let mouse = root.open(b"ps2/mouse").expect("failed to open mouse");
+
+	let mut mouse_pos = Point::ORIGIN;
+
+	let mut queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
+	let mut poll_mouse = queue
+		.submit_read(mouse.as_raw(), Vec::with_capacity(4))
+		.unwrap();
+	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
+
 	loop {
+		if let Some((res, buf)) = task::poll(&mut poll_mouse) {
+			res.unwrap();
+			let [a, b, c, d]: [u8; 4] = (&*buf).try_into().unwrap();
+			let f = |a: &mut u32, b: i16, max: u32| {
+				*a = if b >= 0 {
+					(*a + b as u32).min(max)
+				} else {
+					a.saturating_sub((-b) as _)
+				}
+			};
+			f(&mut mouse_pos.x, i16::from_le_bytes([a, b]), size.x);
+			f(
+				&mut mouse_pos.y,
+				i16::from_le_bytes([c, d]).wrapping_neg(),
+				size.y,
+			);
+			let [a, b] = (mouse_pos.x as u16).to_le_bytes();
+			let [c, d] = (mouse_pos.y as u16).to_le_bytes();
+			sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
+				.unwrap();
+			poll_mouse = queue.submit_read(mouse.as_raw(), buf).unwrap();
+		}
+
+		if task::poll(&mut poll_table).is_some() {
+			poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
+		}
 		let mut send_notif = false;
 		while let Some((handle, job_id, req)) = table.dequeue() {
+			let mut prop_buf = [0; 511];
 			let response = match req {
 				Request::Create { path } => {
 					let mut p = [0; 8];
@@ -280,7 +318,9 @@ fn main() {
 			send_notif = true;
 		}
 		send_notif.then(|| table.flush());
-		table.wait();
+		queue.poll();
+		queue.wait(Duration::MAX);
+		queue.process();
 	}
 }
 

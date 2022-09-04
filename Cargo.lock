@@ -1543,6 +1543,7 @@ dependencies = [
  "gui3d",
  "ipc_gpu",
  "ipc_window_manager",
+ "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
  "png",

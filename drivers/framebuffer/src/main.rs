@@ -69,13 +69,45 @@ fn main() -> ! {
 
 	// AtomicU32 is more efficient than AtomicBool on some architectures (e.g. RISC-V).
 	static CHANGES: AtomicU32 = AtomicU32::new(0);
-	static CURSOR: Mutex<Cursor> = Mutex::new(Cursor { x: 0, y: 0, w: 0, h: 0, img: [0; 64 * 64] });
+	static CURSOR: Mutex<Cursor> = Mutex::new({
+		let cur @ prev = CursorRect { x: 0, y: 0, w: 0, h: 0 };
+		Cursor { cur, prev, img: [0; 64 * 64] }
+	});
 
-	struct Cursor {
+	let mut cursor_img = [0i32; 64 * 64];
+	let project_cursor = |fb: &Fb, cursor: &[i32; 64 * 64], cc: &mut Cursor| {
+		let c = &cc.cur;
+		let w = u16::from(c.w).min(width - c.x);
+		let h = u16::from(c.h).min(height - c.y);
+		let region = match fb {
+			Fb::Rgbx8888(fb) => fb.iter_region(c.x, c.y, w, h),
+			Fb::Bgrx8888(fb) => fb.iter_region(c.x, c.y, w, h),
+		};
+		for (y, r) in region.enumerate() {
+			for (x, e) in r.enumerate() {
+				let i = y * (usize::from(c.w) + 1) + x;
+				let [p @ .., a] = cursor[i].to_le_bytes();
+				let [q @ .., _] = e.to_le_bytes();
+				let mut w = [0; 4];
+				for ((w, p), q) in w.iter_mut().zip(p).zip(q) {
+					*w = ((p as u32 * a as u32 + q as u32 * (255 - a as u32)) / 255) as u8;
+				}
+				cc.img[i] = i32::from_le_bytes(w);
+			}
+		}
+	};
+
+	#[derive(Clone, Copy)]
+	struct CursorRect {
 		x: u16,
 		y: u16,
 		w: u8,
 		h: u8,
+	}
+
+	struct Cursor {
+		cur: CursorRect,
+		prev: CursorRect,
 		img: [i32; 64 * 64],
 	}
 
@@ -93,6 +125,8 @@ fn main() -> ! {
 				//
 				// TODO investigate methods to reduce the amount of data copied without adding
 				// excessive overhead.
+				// It is not high priority as it is still plenty fast (can flush 1080p in ~3ms!)
+				// but it would be nice to save some energy.
 				unsafe {
 					back_fb.copy_from_raw_untrusted_32(
 						fb_ptr.cast().as_ptr(),
@@ -105,12 +139,32 @@ fn main() -> ! {
 				}
 			}
 			if changes & 3 != 0 {
-				// Draw the cursor
-				let c = CURSOR.lock();
-				if c.x < width && c.y < height {
+				let mut cc = CURSOR.lock();
+				// Clear the previous cursor
+				let c = &cc.prev;
+				if changes & 1 == 0 && c.x <= width && c.y <= height {
 					unsafe {
-						back_fb.copy_from_raw_untrusted_32(
-							c.img.as_ptr(),
+						let ptr = fb_ptr
+							.as_ptr()
+							.add(fb_stride as usize * usize::from(c.y))
+							.cast::<i32>()
+							.add(usize::from(c.x));
+						back_fb.copy_from_raw_32(
+							ptr,
+							fb_stride,
+							c.x,
+							c.y,
+							u16::from(c.w).min(width - c.x),
+							u16::from(c.h).min(height - c.y),
+						)
+					}
+				}
+				// Draw the current cursor
+				let c = &cc.cur;
+				if c.x <= width && c.y <= height {
+					unsafe {
+						back_fb.copy_from_raw_32(
+							cc.img.as_ptr(),
 							u32::from(c.w + 1) * 4,
 							c.x,
 							c.y,
@@ -119,6 +173,7 @@ fn main() -> ! {
 						)
 					}
 				}
+				cc.prev = cc.cur;
 			}
 			if let Some(t) = next_t.checked_duration_since(rt::time::Monotonic::now()) {
 				rt::thread::sleep(t);
@@ -154,7 +209,8 @@ fn main() -> ! {
 						let x = u16::from_le_bytes([v[0], v[1]]);
 						let y = u16::from_le_bytes([v[2], v[3]]);
 						let mut c = CURSOR.lock();
-						(c.x, c.y) = (x, y);
+						(c.cur.x, c.cur.y) = (x, y);
+						project_cursor(&fb, &cursor_img, &mut c);
 						drop(c);
 						CHANGES.fetch_or(2, Ordering::Release);
 						Response::Amount(0)
@@ -190,21 +246,23 @@ fn main() -> ! {
 								),
 							}
 						}
+						project_cursor(&fb, &cursor_img, &mut CURSOR.lock());
 						CHANGES.store(1, Ordering::Release);
 						Response::Amount(d.len().try_into().unwrap())
 					} else if let Ok([0xc5, w, h]) = <[u8; 3]>::try_from(&*d) {
 						let l = (usize::from(w) + 1) * (usize::from(h) + 1);
 						if l * 4 <= command_buf.1 {
-							let mut c = CURSOR.lock();
 							// FIXME untrusted
 							unsafe {
 								command_buf
 									.0
 									.as_ptr()
 									.cast::<i32>()
-									.copy_to_nonoverlapping(c.img.as_mut_ptr(), l);
+									.copy_to_nonoverlapping(cursor_img.as_mut_ptr(), l);
 							}
-							(c.w, c.h) = (w, h);
+							let mut c = CURSOR.lock();
+							(c.cur.w, c.cur.h) = (w, h);
+							project_cursor(&fb, &cursor_img, &mut c);
 							drop(c);
 							CHANGES.fetch_or(2, Ordering::Release);
 							Response::Amount(l as _)

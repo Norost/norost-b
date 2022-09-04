@@ -21,3 +21,7 @@ version = "0.17"
 
 [dependencies.gui3d]
 path = "../../../lib/gui3d"
+
+[dependencies.io_queue_rt]
+package = "nora_io_queue_rt"
+path = "../../lib/rust/io_queue_rt"
