@@ -390,7 +390,7 @@ impl Thread {
 			waiters.push(waker);
 			drop(waiters);
 			while !self.destroyed() {
-				wake_thr.sleep_until(Monotonic::MAX);
+				wake_thr.wait_until(Monotonic::now(), u64::MAX);
 			}
 		}
 		Ok(())

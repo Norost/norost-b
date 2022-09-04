@@ -13,7 +13,6 @@ use {
 		},
 		scheduler::{self, process::Process, Thread},
 		time::Monotonic,
-		util::{erase_handle, unerase_handle},
 	},
 	alloc::{boxed::Box, sync::Arc},
 	core::{mem, num::NonZeroUsize, ptr::NonNull},
@@ -141,82 +140,80 @@ extern "C" fn dealloc(base: usize, size: usize, _: usize, _: usize, _: usize, _:
 #[cfg(target_pointer_width = "64")]
 extern "C" fn do_io(ty: usize, handle: usize, a: usize, b: usize, c: usize, _: usize) -> Return {
 	use super::block_on;
-	let handle = unerase_handle(handle as _);
 	debug!(syscall "do_io {} {:?} {:#x} {:#x} {:#x}", ty, handle, a, b, c);
-	Process::current().unwrap().objects_operate(|objects| {
-		let Some(o) = objects.get(handle) else { return Return::INVALID_OBJECT };
-		let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
-		let return_u64 = |r| Return { status: 0, value: r as _ };
-		let ins = |l: &mut arena::Arena<_, _>, o| Return::handle(erase_handle(l.insert(o)));
-		match ty {
-			Request::READ => block_on(o.clone().read(b)).map_or_else(Return::error, |r| {
-				assert!(r.len() <= b, "object returned too much data");
-				unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
-				Return { status: 0, value: r.len() }
-			}),
-			Request::WRITE => {
-				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
-				block_on(o.clone().write(r)).map_or_else(Return::error, |r| Return {
-					status: 0,
-					value: r.try_into().unwrap(),
-				})
-			}
-			Request::GET_META => {
-				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
-				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
-				block_on(o.clone().get_meta(prop)).map_or_else(Return::error, |r| {
-					let l = usize::from(value_len).min(r.len());
-					unsafe { (b as *mut u8).copy_from_nonoverlapping(r.as_ptr(), l) }
-					Return { status: 0, value: l.try_into().unwrap() }
-				})
-			}
-			Request::SET_META => {
-				let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
-				let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
-				let value = unsafe { TinySlice::from_raw_parts(b as *const u8, value_len) };
-				block_on(o.clone().set_meta(prop, value)).map_or_else(Return::error, |r| Return {
-					status: 0,
-					value: {
-						debug_assert_eq!(r & !1, 0, "meta result is not boolean");
-						r.try_into().unwrap()
-					},
-				})
-			}
-			Request::OPEN | Request::CREATE => {
-				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
-				let o = o.clone();
-				block_on(if ty == Request::OPEN {
-					o.open(r)
-				} else {
-					o.create(r)
-				})
-				.map_or_else(Return::error, |o| ins(objects, o))
-			}
-			Request::DESTROY => {
-				let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
-				block_on(o.clone().destroy(r)).map_or_else(Return::error, return_u64)
-			}
-			Request::SEEK => a
-				.try_into()
-				.ok()
-				.and_then(|a| SeekFrom::try_from_raw(a, b as _).ok())
-				.map_or(Return::INVALID_DATA, |s| {
-					block_on(o.seek(s)).map_or_else(Return::error, return_u64)
-				}),
-			Request::CLOSE => Return {
-				status: objects
-					.remove(handle)
-					.map_or(Error::InvalidObject as _, |_| 0),
-				value: 0,
-			},
-			Request::SHARE => objects
-				.get(unerase_handle(a as _))
-				.map_or(Return::INVALID_OBJECT, |s| {
-					block_on(o.share(s)).map_or_else(Return::error, return_u64)
-				}),
-			_ => Return::INVALID_OPERATION,
+	let Ok(ty) = ty.try_into() else { return Return::INVALID_OPERATION };
+	let process = Process::current().unwrap();
+	let Some(o) = process.get_object(handle as _) else { return Return::INVALID_OBJECT };
+	let return_u64 = |r| Return { status: 0, value: r as _ };
+	match ty {
+		Request::READ => block_on(o.read(b)).map_or_else(Return::error, |r| {
+			assert!(r.len() <= b, "object returned too much data");
+			unsafe { (a as *mut u8).copy_from_nonoverlapping(r.as_ptr(), r.len()) }
+			Return { status: 0, value: r.len() }
+		}),
+		Request::WRITE => {
+			let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+			block_on(o.write(r)).map_or_else(Return::error, |r| Return {
+				status: 0,
+				value: r.try_into().unwrap(),
+			})
 		}
-	})
+		Request::GET_META => {
+			let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+			let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+			block_on(o.get_meta(prop)).map_or_else(Return::error, |r| {
+				let l = usize::from(value_len).min(r.len());
+				unsafe { (b as *mut u8).copy_from_nonoverlapping(r.as_ptr(), l) }
+				Return { status: 0, value: l.try_into().unwrap() }
+			})
+		}
+		Request::SET_META => {
+			let (prop_len, value_len) = (c as u8, (c >> 8) as u8);
+			let prop = unsafe { TinySlice::from_raw_parts(a as *const u8, prop_len) };
+			let value = unsafe { TinySlice::from_raw_parts(b as *const u8, value_len) };
+			block_on(o.set_meta(prop, value)).map_or_else(Return::error, |r| Return {
+				status: 0,
+				value: {
+					debug_assert_eq!(r & !1, 0, "meta result is not boolean");
+					r.try_into().unwrap()
+				},
+			})
+		}
+		Request::OPEN | Request::CREATE => {
+			let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+			block_on(if ty == Request::OPEN {
+				o.open(r)
+			} else {
+				o.create(r)
+			})
+			.map_or_else(Return::error, |o| {
+				Return::handle(process.add_object(o).unwrap())
+			})
+		}
+		Request::DESTROY => {
+			let r = unsafe { core::slice::from_raw_parts(a as *const u8, b) };
+			block_on(o.destroy(r)).map_or_else(Return::error, return_u64)
+		}
+		Request::SEEK => a
+			.try_into()
+			.ok()
+			.and_then(|a| SeekFrom::try_from_raw(a, b as _).ok())
+			.map_or(Return::INVALID_DATA, |s| {
+				block_on(o.seek(s)).map_or_else(Return::error, return_u64)
+			}),
+		Request::CLOSE => Return {
+			status: process
+				.remove_object(handle as _)
+				.map_or_else(|e| e as _, |_| 0),
+			value: 0,
+		},
+		Request::SHARE => process
+			.get_object(a as _)
+			.map_or(Return::INVALID_OBJECT, |s| {
+				block_on(o.share(&s)).map_or_else(Return::error, return_u64)
+			}),
+		_ => Return::INVALID_OPERATION,
+	}
 }
 
 extern "C" fn new_object(ty: usize, a: usize, b: usize, c: usize, _: usize, _: usize) -> Return {

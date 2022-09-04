@@ -61,6 +61,11 @@ impl Process {
 		unsafe { self.address_space.isr_lock().activate() };
 	}
 
+	/// Get an object.
+	pub fn get_object(&self, handle: Handle) -> Option<Arc<dyn Object>> {
+		self.objects.lock().get(unerase_handle(handle)).cloned()
+	}
+
 	/// Add an object to the process' object table.
 	pub fn add_object(&self, object: Arc<dyn Object>) -> Result<Handle, AddObjectError> {
 		let mut objects = self.objects.lock();
@@ -78,6 +83,15 @@ impl Process {
 			erase_handle(objects.insert(a)),
 			erase_handle(objects.insert(b)),
 		])
+	}
+
+	/// Remove an object.
+	pub fn remove_object(&self, handle: Handle) -> Result<(), Error> {
+		self.objects
+			.lock()
+			.remove(unerase_handle(handle))
+			.map(|_| ())
+			.ok_or(Error::InvalidObject)
 	}
 
 	/// Map a memory object to a memory range.
@@ -129,14 +143,6 @@ impl Process {
 		} else {
 			None
 		}
-	}
-
-	/// Lock & operate on the objects handles held by this process.
-	pub fn objects_operate<'a, R, F>(&'a self, f: F) -> R
-	where
-		F: FnOnce(&mut Arena<Arc<dyn Object>, u8>) -> R,
-	{
-		f(&mut self.objects.lock())
 	}
 
 	/// Create a new object from another object.
