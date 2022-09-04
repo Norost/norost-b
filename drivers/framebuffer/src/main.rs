@@ -3,9 +3,15 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
+
 use {
 	alloc::string::ToString,
-	core::ptr::NonNull,
+	core::{
+		ptr::NonNull,
+		sync::atomic::{AtomicU32, Ordering},
+		time::Duration,
+	},
 	driver_utils::os::stream_table::{Request, Response, StreamTable},
 	framebuffer::{Bgrx8888, FrameBuffer, Rgbx8888},
 	rt::Error,
@@ -31,22 +37,26 @@ fn main() -> ! {
 	let [bpp, r_pos, r_mask, g_pos, g_mask, b_pos, b_mask]: [u8; 7] =
 		fb_info[8..].try_into().unwrap();
 
-	rt::eprintln!("stride {} width {} height {}", stride, width, height);
-
 	assert_eq!((bpp, r_mask, g_mask, b_mask), (32, 8, 8, 8));
 
 	let map_len = stride as usize * (height as usize + 1);
 	let (base, len) = fb.map_object(None, rt::RWX::RW, 0, map_len).unwrap();
 	assert!(len >= map_len);
 
+	// Encoding doesn't matter, really
+	let mut back_fb = unsafe { FrameBuffer::<Rgbx8888>::new(base.cast(), width, height, stride) };
+
+	let fb_stride = (u32::from(width) + 1) * 4;
+	let fb_len = fb_stride as usize * (usize::from(height) + 1);
+	let (fb_ptr, _) = rt::mem::alloc(None, fb_len, rt::RWX::RW).unwrap();
 	enum Fb {
 		Rgbx8888(FrameBuffer<Rgbx8888>),
 		Bgrx8888(FrameBuffer<Bgrx8888>),
 	}
 	let mut fb = unsafe {
 		match (r_pos, g_pos, b_pos) {
-			(0, 8, 16) => Fb::Rgbx8888(FrameBuffer::new(base.cast(), width, height, stride)),
-			(16, 8, 0) => Fb::Bgrx8888(FrameBuffer::new(base.cast(), width, height, stride)),
+			(0, 8, 16) => Fb::Rgbx8888(FrameBuffer::new(fb_ptr.cast(), width, height, fb_stride)),
+			(16, 8, 0) => Fb::Bgrx8888(FrameBuffer::new(fb_ptr.cast(), width, height, fb_stride)),
 			_ => panic!("unsupported pixel format"),
 		}
 	};
@@ -56,6 +66,36 @@ fn main() -> ! {
 	share.create(b"gpu").unwrap().share(tbl.public()).unwrap();
 
 	let mut command_buf = (NonNull::<u8>::dangling(), 0);
+
+	// AtomicU32 is more efficient than AtomicBool on some architectures (e.g. RISC-V).
+	static CHANGES: AtomicU32 = AtomicU32::new(0);
+
+	let huh = rt::thread::Thread::new(
+		1 << 10,
+		Box::new(move || loop {
+			let next_t = rt::time::Monotonic::now()
+				.checked_add(Duration::from_secs(1) / 60)
+				.unwrap();
+			// TODO implement some sort of semaphore to only wake this thread when necessary.
+			// Right now this thread wakes 60 times per second, which isn't very efficient.
+			if CHANGES.fetch_and(0, Ordering::Acquire) != 0 {
+				unsafe {
+					back_fb.copy_from_raw_untrusted_32(
+						fb_ptr.cast().as_ptr(),
+						fb_stride,
+						0,
+						0,
+						width,
+						height,
+					)
+				}
+			}
+			if let Some(t) = next_t.checked_duration_since(rt::time::Monotonic::now()) {
+				rt::thread::sleep(t);
+			}
+		}),
+	)
+	.unwrap();
 
 	loop {
 		tbl.wait();
@@ -86,7 +126,6 @@ fn main() -> ! {
 					if let Ok(d) = d.try_into() {
 						let cmd = ipc_gpu::Flush::decode(d);
 						assert!(cmd.stride != 0 && cmd.size.x != 0 && cmd.size.y != 0);
-						let t = rt::time::Monotonic::now();
 						unsafe {
 							match &mut fb {
 								Fb::Rgbx8888(fb) => fb.copy_from_raw_untrusted_rgb24_to_rgbx32(
@@ -107,8 +146,7 @@ fn main() -> ! {
 								),
 							}
 						}
-						let dt = rt::time::Monotonic::now().duration_since(t);
-						rt::eprintln!("{:?} {}", dt, u64::from(cmd.size.x) * u64::from(cmd.size.y));
+						CHANGES.store(1, Ordering::Release);
 						Response::Amount(d.len().try_into().unwrap())
 					} else {
 						Response::Error(Error::InvalidData as _)
