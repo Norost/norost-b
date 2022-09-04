@@ -34,8 +34,8 @@
 			(file "")
 			(process "process")))
 	(scancode_to_char
-		;(args "keyboard" "ps2/keyboard/stream")
-		;(after "ps2/keyboard/stream")
+		;(args "keyboard" "ps2/keyboard")
+		;(after "ps2/keyboard")
 		(args "keyboard" "usb/handlers/usb_keyboard_share_test_yay")
 		(after "usb/handlers/usb_keyboard_share_test_yay")
 		(objects

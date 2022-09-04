@@ -13,6 +13,8 @@ macro_rules! log {
 }
 
 mod keyboard;
+mod lossy_ring_buffer;
+mod mouse;
 
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use {
@@ -22,13 +24,15 @@ use {
 		object::RefAsyncObject,
 		task,
 	},
-	core::time::Duration,
+	core::{cell::RefCell, time::Duration},
 	driver_utils::os::{
 		portio::PortIo,
 		stream_table::{JobId, Request, Response, StreamTable},
 	},
 	futures_util::future,
-	rt as _, rt_default as _,
+	lossy_ring_buffer::LossyRingBuffer,
+	rt::{self as _, Error, Handle, NewObject, Object},
+	rt_default as _,
 };
 
 #[start]
@@ -37,13 +41,14 @@ fn start(_: isize, _: *const *const u8) -> isize {
 }
 
 async fn main() -> ! {
-	let (mut ps2, [dev1, _dev2]) = Ps2::init();
+	let (ps2, [dev1, dev2]) = Ps2::init();
 	let mut buf = [0; 16];
 
 	let dev1 = dev1.unwrap();
+	let dev2 = dev2.unwrap();
 
 	let tbl = {
-		let (buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 256 }).unwrap();
+		let (buf, _) = Object::new(NewObject::SharedMemory { size: 256 }).unwrap();
 		StreamTable::new(&buf, 8.try_into().unwrap(), 16 - 1)
 	};
 	rt::io::file_root()
@@ -55,40 +60,49 @@ async fn main() -> ! {
 
 	let tbl_notify = RefAsyncObject::from(tbl.notifier());
 	let dev1_intr = RefAsyncObject::from(dev1.interrupter());
+	let dev2_intr = RefAsyncObject::from(dev2.interrupter());
 
 	let tbl_loop = async {
 		let mut buf = [0; 16];
 		loop {
 			tbl_notify.read(()).await.0.unwrap();
 			let mut flush = false;
-			const KEYBOARD_STREAM_HANDLE: rt::Handle = rt::Handle::MAX - 1;
+			const KEYBOARD_HANDLE: Handle = Handle::MAX - 1;
+			const MOUSE_HANDLE: Handle = Handle::MAX - 2;
 			while let Some((handle, mut job_id, req)) = tbl.dequeue() {
 				let resp = match req {
-					Request::Open { path } => {
-						let l = path.len();
-						path.copy_to(0, &mut buf[..l]);
-						if &buf[..l] == b"keyboard/stream" {
-							Response::Handle(KEYBOARD_STREAM_HANDLE)
+					Request::Open { path } => match &*path.copy_into(&mut buf).0 {
+						b"keyboard" => Response::Handle(KEYBOARD_HANDLE),
+						b"mouse" => Response::Handle(MOUSE_HANDLE),
+						_ => Response::Error(rt::Error::DoesNotExist),
+					},
+					Request::Read { .. } if handle == Handle::MAX => {
+						Response::Error(Error::InvalidOperation)
+					}
+					Request::Read { amount } if handle == KEYBOARD_HANDLE => {
+						if amount < 4 {
+							Response::Error(Error::InvalidData)
+						} else if let Some((id, d)) = dev1.add_reader(job_id, &mut buf) {
+							job_id = id;
+							let data = tbl.alloc(d.len()).expect("out of buffers");
+							data.copy_from(0, d);
+							Response::Data(data)
 						} else {
-							Response::Error(rt::Error::DoesNotExist)
+							continue;
 						}
 					}
-					Request::Read { amount } => match handle {
-						rt::Handle::MAX => Response::Error(rt::Error::InvalidOperation),
-						KEYBOARD_STREAM_HANDLE => {
-							if amount < 4 {
-								Response::Error(rt::Error::InvalidData)
-							} else if let Some((id, d)) = dev1.add_reader(job_id, &mut buf) {
-								job_id = id;
-								let data = tbl.alloc(d.len()).expect("out of buffers");
-								data.copy_from(0, d);
-								Response::Data(data)
-							} else {
-								continue;
-							}
+					Request::Read { amount } if handle == MOUSE_HANDLE => {
+						if amount < 4 {
+							Response::Error(Error::InvalidData)
+						} else if let Some((id, d)) = dev2.add_reader(job_id, &mut buf) {
+							job_id = id;
+							let data = tbl.alloc(d.len()).expect("out of buffers");
+							data.copy_from(0, d);
+							Response::Data(data)
+						} else {
+							continue;
 						}
-						_ => unreachable!(),
-					},
+					}
 					Request::Close => continue,
 					_ => Response::Error(rt::Error::InvalidOperation),
 				};
@@ -98,21 +112,37 @@ async fn main() -> ! {
 			flush.then(|| tbl.flush());
 		}
 	};
-	let dev1_loop = async {
+	let ps2 = RefCell::new(ps2);
+	async fn f_loop(
+		tbl: &StreamTable,
+		ps2: &RefCell<Ps2>,
+		dev: &dyn Device,
+		dev_intr: RefAsyncObject<'_>,
+	) -> ! {
+		let mut buf = [0; 16];
 		loop {
-			dev1_intr.read(()).await.0.unwrap();
-			if let Some((job_id, d)) = dev1.handle_interrupt(&mut ps2, &mut buf) {
+			dev_intr.read(()).await.0.unwrap();
+			if let Some((job_id, d)) = dev.handle_interrupt(&mut ps2.borrow_mut(), &mut buf) {
 				let data = tbl.alloc(d.len()).expect("out of buffers");
 				data.copy_from(0, d);
 				tbl.enqueue(job_id, Response::Data(data));
 				tbl.flush();
 			}
-			dev1_intr.write(()).await.0.unwrap();
+			dev_intr.write(()).await.0.unwrap();
 		}
 	};
+	let dev1_loop = f_loop(&tbl, &ps2, &*dev1, dev1_intr);
+	let dev2_loop = f_loop(&tbl, &ps2, &*dev2, dev2_intr);
 	futures_util::pin_mut!(tbl_loop);
 	futures_util::pin_mut!(dev1_loop);
-	future::select(tbl_loop, dev1_loop).await.factor_first().0
+	futures_util::pin_mut!(dev2_loop);
+	match future::select(tbl_loop, future::select(dev1_loop, dev2_loop)).await {
+		future::Either::Left(v) => v.0,
+		future::Either::Right(v) => match v.0 {
+			future::Either::Left(v) => v.0,
+			future::Either::Right(v) => v.0,
+		},
+	}
 }
 
 const DATA: u16 = 0x60;
@@ -310,7 +340,7 @@ impl Ps2 {
 		use driver_utils::os::interrupt;
 		let irq = match port {
 			Port::P1 => 1,
-			Port::P2 => 4,
+			Port::P2 => 12,
 		};
 		let intr = interrupt::allocate(Some(irq), interrupt::TriggerMode::Level);
 
@@ -460,6 +490,11 @@ impl Ps2 {
 						=> {
 							log!("{:?}: found keyboard", port);
 							devices[i] = Some(Box::new(keyboard::Keyboard::init(&mut slf, port)));
+							continue;
+						}
+						&[0x00] => {
+							log!("{:?}: found mouse", port);
+							devices[i] = Some(Box::new(mouse::Mouse::init(&mut slf, port)));
 							continue;
 						}
 						&[a] => log!("{:?}: unsupported device {:#02x}", port, a),
