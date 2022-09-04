@@ -105,6 +105,8 @@ install window_manager     window_manager
 )
 install_ext userdb ../bin/userdb
 
+cp /tank/notes/norost/gui_sketches/button.png $A/button.png
+
 ./tools/nrofs.py -rv -C $A $O/boot/norost.nrofs .
 
 # Note: make sure grub-pc-bin is installed! Otherwise QEMU may hang on

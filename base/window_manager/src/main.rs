@@ -11,48 +11,70 @@
 //! <workspace id/name>:<window id>
 //! ```
 
-#![cfg_attr(not(test), no_std)]
-#![feature(alloc_error_handler)]
 #![feature(core_intrinsics)]
-#![feature(start)]
 
-extern crate alloc;
-
+mod config;
 mod manager;
 mod math;
+mod title_bar;
 mod window;
 mod workspace;
 
 use {
-	alloc::vec::Vec,
+	config::Config,
 	core::{cell::RefCell, ptr::NonNull},
 	driver_utils::os::stream_table::{JobId, Request, Response, StreamTable},
 	math::{Point, Rect, Size},
 	rt::io::{Error, Handle},
 };
 
-#[cfg(not(test))]
-#[global_allocator]
-static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
-
-#[cfg(not(test))]
-#[alloc_error_handler]
-fn alloc_error(_: core::alloc::Layout) -> ! {
-	// FIXME the runtime allocates memory by default to write things, so... crap
-	// We can run in similar trouble with the I/O queue. Some way to submit I/O requests
-	// without going through an queue may be useful.
-	rt::exit(129)
+pub struct Main<'a> {
+	size: Size,
+	shmem: &'a mut [u8],
+	sync: rt::RefObject<'a>,
 }
 
-#[cfg(not(test))]
-#[panic_handler]
-fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-	let _ = rt::io::stderr().map(|o| writeln!(o, "{}", info));
-	rt::exit(128)
+impl Main<'_> {
+	fn fill(&mut self, rect: Rect, color: [u8; 3]) {
+		let t = rect.size();
+		assert!(
+			t.x <= self.size.x && t.y <= self.size.y,
+			"rect out of bounds"
+		);
+		assert!(t.area() * 3 <= self.shmem.len() as u64, "shmem too small");
+		for y in 0..t.y {
+			for x in 0..t.x {
+				let i = y * t.x + x;
+				let s = &mut self.shmem[i as usize * 3..][..3];
+				s.copy_from_slice(&color);
+			}
+		}
+		self.sync_rect(rect);
+	}
+
+	fn sync_rect(&mut self, rect: Rect) {
+		self.sync
+			.write(
+				&ipc_gpu::Flush {
+					offset: 0,
+					stride: rect.size().x,
+					origin: ipc_gpu::Point { x: rect.low().x, y: rect.low().y },
+					size: ipc_gpu::SizeInclusive { x: rect.size().x as _, y: rect.size().y as _ },
+				}
+				.encode(),
+			)
+			.unwrap();
+	}
+
+	fn copy(&mut self, data: &[u8], to: Rect) {
+		self.shmem[..data.len()].copy_from_slice(data);
+		self.sync_rect(to);
+	}
 }
 
-#[start]
-fn main(_: isize, _: *const *const u8) -> isize {
+fn main() {
+	let config = config::load();
+
 	let root = rt::io::file_root().unwrap();
 	let sync = rt::args::handle(b"gpu").expect("gpu undefined");
 	let res = {
@@ -85,31 +107,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let gwp = window::GlobalWindowParams { border_width: 4 };
 	let mut manager = manager::Manager::<Client>::new(gwp).unwrap();
 
-	let sync_rect = |rect: math::Rect| {
-		sync.write(
-			&ipc_gpu::Flush {
-				offset: 0,
-				stride: rect.size().x,
-				origin: ipc_gpu::Point { x: rect.low().x, y: rect.low().y },
-				size: ipc_gpu::SizeInclusive { x: rect.size().x as _, y: rect.size().y as _ },
-			}
-			.encode(),
-		)
-		.unwrap();
-	};
-	let fill = |shmem: &mut [u8], rect: math::Rect, color: [u8; 3]| {
-		let t = rect.size();
-		assert!(t.x <= size.x && t.y <= size.y, "rect out of bounds");
-		assert!(t.area() * 3 <= shmem.len() as u64, "shmem too small");
-		for y in 0..t.y {
-			for x in 0..t.x {
-				let i = y * t.x + x;
-				let s = &mut shmem[i as usize * 3..][..3];
-				s.copy_from_slice(&color);
-			}
-		}
-		sync_rect(rect);
-	};
+	let mut main = Main { size, sync, shmem };
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
@@ -129,9 +127,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size, Default::default()).unwrap();
-							fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+							main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							for (w, ww) in manager.windows() {
 								let rect = manager.window_rect(w, size).unwrap();
+								let (title, rect) = title_bar::split(&config, rect);
+								title_bar::render(&mut main, &config, title);
 								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 								let mut ue = ww.user_data.unread_events.borrow_mut();
 								ue.resize = Some(evt);
@@ -154,6 +154,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/resolution") => {
 							let rect = manager.window_rect(h, size).unwrap();
+							let (_, rect) = title_bar::split(&config, rect);
 							let data = table.alloc(8).expect("out of buffers");
 							data.copy_from(0, &u32::from(rect.size().x).to_le_bytes());
 							data.copy_from(4, &u32::from(rect.size().y).to_le_bytes());
@@ -168,7 +169,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/cmd/fill") => {
 							if let &[r, g, b] = &*val {
-								fill(shmem, manager.window_rect(h, size).unwrap(), [r, g, b]);
+								let rect = manager.window_rect(h, size).unwrap();
+								let (_, rect) = title_bar::split(&config, rect);
+								main.fill(rect, [r, g, b]);
 								Response::Amount(0)
 							} else {
 								Response::Error(Error::InvalidData)
@@ -200,6 +203,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							let mut header = [0; 12];
 							data.copy_to(0, &mut header);
 							let rect = manager.window_rect(h, size).unwrap();
+							let (_, rect) = title_bar::split(&config, rect);
 							let draw = ipc_wm::Flush::decode(header);
 							let draw_size = draw.size;
 							// TODO do we actually want this?
@@ -220,21 +224,23 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							);
 							// TODO we can avoid this copy by passing shared memory buffers directly
 							// to the GPU
-							window
-								.user_data
-								.framebuffer
-								.copy_to_untrusted(0, &mut shmem[..draw_rect.area() as usize * 3]);
+							window.user_data.framebuffer.copy_to_untrusted(
+								0,
+								&mut main.shmem[..draw_rect.area() as usize * 3],
+							);
 							let l = data.len().try_into().unwrap();
-							sync_rect(draw_rect);
+							main.sync_rect(draw_rect);
 							Response::Amount(l)
 						}
 					}
 				}
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
-					fill(shmem, Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+					main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					for (w, ww) in manager.windows() {
 						let rect = manager.window_rect(w, size).unwrap();
+						let (title, rect) = title_bar::split(&config, rect);
+						title_bar::render(&mut main, &config, title);
 						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 						let mut ue = ww.user_data.unread_events.borrow_mut();
 						ue.resize = Some(evt);

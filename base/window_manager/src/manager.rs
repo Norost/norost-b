@@ -4,8 +4,8 @@ use {
 		window::{GlobalWindowParams, PathIter, Window},
 		workspace::{NewWorkspaceError, Workspace},
 	},
-	alloc::boxed::Box,
 	driver_utils::{Arena, Handle},
+	std::boxed::Box,
 };
 
 pub struct Manager<U> {
