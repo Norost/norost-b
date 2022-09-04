@@ -27,7 +27,7 @@ static mut INFO: FramebufferInfo = FramebufferInfo {
 
 #[repr(C)]
 struct FramebufferInfo {
-	pitch: u16,
+	pitch: u32,
 	width: u16,
 	height: u16,
 	bpp: u8,
@@ -47,7 +47,7 @@ impl Object for Framebuffer {
 			// SAFETY: INFO is not modified after init.
 			// There are no holes in FramebufferInfo.
 			b"bin/info" => {
-				Ok(unsafe { &*(&INFO as *const _ as *const [u8; 2 * 3 + 7]) }[..].into())
+				Ok(unsafe { &*(&INFO as *const _ as *const [u8; 4 + 2 * 2 + 7]) }[..].into())
 			}
 			_ => Err(Error::DoesNotExist),
 		})

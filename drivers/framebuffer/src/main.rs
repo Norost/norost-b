@@ -20,20 +20,22 @@ fn start(_: isize, _: *const *const u8) -> isize {
 fn main() -> ! {
 	let fb = rt::args::handle(b"framebuffer").expect("framebuffer undefined");
 	let share = rt::args::handle(b"share").expect("share undefined");
-	let mut fb_info = [0; 13];
+	let mut fb_info = [0; 15];
 	let l = fb
 		.get_meta(b"bin/info".into(), (&mut fb_info).into())
 		.unwrap();
 	assert!(l == fb_info.len());
-	let stride = u16::from_le_bytes(fb_info[0..][..2].try_into().unwrap());
-	let width = u16::from_le_bytes(fb_info[2..][..2].try_into().unwrap());
-	let height = u16::from_le_bytes(fb_info[4..][..2].try_into().unwrap());
+	let stride = u32::from_le_bytes(fb_info[0..][..4].try_into().unwrap());
+	let width = u16::from_le_bytes(fb_info[4..][..2].try_into().unwrap());
+	let height = u16::from_le_bytes(fb_info[6..][..2].try_into().unwrap());
 	let [bpp, r_pos, r_mask, g_pos, g_mask, b_pos, b_mask]: [u8; 7] =
-		fb_info[6..].try_into().unwrap();
+		fb_info[8..].try_into().unwrap();
+
+	rt::eprintln!("stride {} width {} height {}", stride, width, height);
 
 	assert_eq!((bpp, r_mask, g_mask, b_mask), (32, 8, 8, 8));
 
-	let map_len = (stride as usize + 1) * (height as usize + 1);
+	let map_len = stride as usize * (height as usize + 1);
 	let (base, len) = fb.map_object(None, rt::RWX::RW, 0, map_len).unwrap();
 	assert!(len >= map_len);
 
@@ -84,11 +86,12 @@ fn main() -> ! {
 					if let Ok(d) = d.try_into() {
 						let cmd = ipc_gpu::Flush::decode(d);
 						assert!(cmd.stride != 0 && cmd.size.x != 0 && cmd.size.y != 0);
+						let t = rt::time::Monotonic::now();
 						unsafe {
 							match &mut fb {
 								Fb::Rgbx8888(fb) => fb.copy_from_raw_untrusted_rgb24_to_rgbx32(
 									command_buf.0.as_ptr().add(cmd.offset as _).cast(),
-									(cmd.stride * 3 - 1) as _,
+									cmd.stride * 3,
 									cmd.origin.x as _,
 									cmd.origin.y as _,
 									(cmd.size.x - 1) as _,
@@ -96,7 +99,7 @@ fn main() -> ! {
 								),
 								Fb::Bgrx8888(fb) => fb.copy_from_raw_untrusted_rgb24_to_bgrx32(
 									command_buf.0.as_ptr().add(cmd.offset as _).cast(),
-									(cmd.stride * 3 - 1) as _,
+									cmd.stride * 3,
 									cmd.origin.x as _,
 									cmd.origin.y as _,
 									(cmd.size.x - 1) as _,
@@ -104,6 +107,8 @@ fn main() -> ! {
 								),
 							}
 						}
+						let dt = rt::time::Monotonic::now().duration_since(t);
+						rt::eprintln!("{:?} {}", dt, u64::from(cmd.size.x) * u64::from(cmd.size.y));
 						Response::Amount(d.len().try_into().unwrap())
 					} else {
 						Response::Error(Error::InvalidData as _)
