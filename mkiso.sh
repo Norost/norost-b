@@ -105,7 +105,10 @@ install window_manager     window_manager
 )
 install_ext userdb ../bin/userdb
 
-cp /tank/notes/norost/gui_sketches/button.png $A/button.png
+for img in button cursor
+do
+	cp /tank/notes/norost/gui_sketches/$img.png $A/$img.png
+done
 
 ./tools/nrofs.py -rv -C $A $O/boot/norost.nrofs .
 

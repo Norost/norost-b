@@ -14,7 +14,7 @@ use {
 	},
 	driver_utils::os::stream_table::{Request, Response, StreamTable},
 	framebuffer::{Bgrx8888, FrameBuffer, Rgbx8888},
-	rt::Error,
+	rt::{sync::Mutex, Error},
 	rt_default as _,
 };
 
@@ -69,6 +69,15 @@ fn main() -> ! {
 
 	// AtomicU32 is more efficient than AtomicBool on some architectures (e.g. RISC-V).
 	static CHANGES: AtomicU32 = AtomicU32::new(0);
+	static CURSOR: Mutex<Cursor> = Mutex::new(Cursor { x: 0, y: 0, w: 0, h: 0, img: [0; 64 * 64] });
+
+	struct Cursor {
+		x: u16,
+		y: u16,
+		w: u8,
+		h: u8,
+		img: [i32; 64 * 64],
+	}
 
 	let huh = rt::thread::Thread::new(
 		1 << 10,
@@ -78,7 +87,12 @@ fn main() -> ! {
 				.unwrap();
 			// TODO implement some sort of semaphore to only wake this thread when necessary.
 			// Right now this thread wakes 60 times per second, which isn't very efficient.
-			if CHANGES.fetch_and(0, Ordering::Acquire) != 0 {
+			let changes = CHANGES.fetch_and(0, Ordering::Acquire);
+			if changes & 1 != 0 {
+				// Flush the entire screen
+				//
+				// TODO investigate methods to reduce the amount of data copied without adding
+				// excessive overhead.
 				unsafe {
 					back_fb.copy_from_raw_untrusted_32(
 						fb_ptr.cast().as_ptr(),
@@ -88,6 +102,22 @@ fn main() -> ! {
 						width,
 						height,
 					)
+				}
+			}
+			if changes & 3 != 0 {
+				// Draw the cursor
+				let c = CURSOR.lock();
+				if c.x < width && c.y < height {
+					unsafe {
+						back_fb.copy_from_raw_untrusted_32(
+							c.img.as_ptr(),
+							u32::from(c.w + 1) * 4,
+							c.x,
+							c.y,
+							u16::from(c.w).min(width - c.x),
+							u16::from(c.h).min(height - c.y),
+						)
+					}
 				}
 			}
 			if let Some(t) = next_t.checked_duration_since(rt::time::Monotonic::now()) {
@@ -119,6 +149,20 @@ fn main() -> ! {
 					}
 					_ => Response::Error(Error::DoesNotExist),
 				},
+				Request::SetMeta { property_value } => match property_value.try_get(&mut [0; 64]) {
+					Ok((b"bin/cursor/pos", v)) if v.len() == 4 => {
+						let x = u16::from_le_bytes([v[0], v[1]]);
+						let y = u16::from_le_bytes([v[2], v[3]]);
+						let mut c = CURSOR.lock();
+						(c.x, c.y) = (x, y);
+						drop(c);
+						CHANGES.fetch_or(2, Ordering::Release);
+						Response::Amount(0)
+					}
+					Ok((b"bin/cursor/pos", v)) => Response::Error(Error::InvalidData),
+					Ok(_) => Response::Error(Error::DoesNotExist),
+					Err(_) => Response::Error(Error::InvalidData),
+				},
 				Request::Write { data } => {
 					let mut buf = [0; 64];
 					let (d, _) = data.copy_into(&mut buf);
@@ -148,8 +192,27 @@ fn main() -> ! {
 						}
 						CHANGES.store(1, Ordering::Release);
 						Response::Amount(d.len().try_into().unwrap())
+					} else if let Ok([0xc5, w, h]) = <[u8; 3]>::try_from(&*d) {
+						let l = (usize::from(w) + 1) * (usize::from(h) + 1);
+						if l * 4 <= command_buf.1 {
+							let mut c = CURSOR.lock();
+							// FIXME untrusted
+							unsafe {
+								command_buf
+									.0
+									.as_ptr()
+									.cast::<i32>()
+									.copy_to_nonoverlapping(c.img.as_mut_ptr(), l);
+							}
+							(c.w, c.h) = (w, h);
+							drop(c);
+							CHANGES.fetch_or(2, Ordering::Release);
+							Response::Amount(l as _)
+						} else {
+							Response::Error(Error::InvalidData)
+						}
 					} else {
-						Response::Error(Error::InvalidData as _)
+						Response::Error(Error::InvalidData)
 					}
 				}
 				Request::Share { share } => {

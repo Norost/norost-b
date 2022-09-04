@@ -116,6 +116,16 @@ fn main() {
 		.share(table.public())
 		.unwrap();
 
+	{
+		let c = &config.cursor;
+		let r = c.as_raw();
+		main.shmem[..r.len()].copy_from_slice(r);
+		let f = |n| u8::try_from(n - 1).unwrap();
+		sync.write(&[0xc5, f(c.width()), f(c.height())]).unwrap();
+		sync.set_meta(b"bin/cursor/pos".into(), (&[120, 0, 240, 0]).into())
+			.unwrap();
+	}
+
 	let mut prop_buf = [0; 511];
 	loop {
 		let mut send_notif = false;
