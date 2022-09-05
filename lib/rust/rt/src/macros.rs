@@ -23,20 +23,20 @@ macro_rules! dbg {
 
 #[macro_export]
 macro_rules! print {
-    ($fmt:literal) => {{
+    ($fmt:expr $(,)?) => {{
         $crate::io::_print_str($fmt);
     }};
-    ($fmt:literal, $($arg:tt)*) => {{
+    ($fmt:expr, $($arg:tt)*) => {{
         $crate::io::_print(format_args!($fmt, $($arg)*));
     }};
 }
 
 #[macro_export]
 macro_rules! eprint {
-    ($fmt:literal) => {{
+    ($fmt:expr $(,)?) => {{
         $crate::io::_eprint_str($fmt);
     }};
-    ($fmt:literal, $($arg:tt)*) => {{
+    ($fmt:expr, $($arg:tt)*) => {{
         $crate::io::_eprint(format_args!($fmt, $($arg)*));
     }};
 }
@@ -46,10 +46,10 @@ macro_rules! println {
 	() => {{
         $crate::io::_print_str("\n");
     }};
-    ($fmt:literal) => {{
+    ($fmt:expr $(,)?) => {{
         $crate::io::_print_str(concat!($fmt, "\n"));
     }};
-    ($fmt:literal, $($arg:tt)*) => {{
+    ($fmt:expr, $($arg:tt)*) => {{
         $crate::io::_print(format_args!(concat!($fmt, "\n"), $($arg)*));
     }};
 }
@@ -59,10 +59,10 @@ macro_rules! eprintln {
 	() => {{
         $crate::io::_eprint_str("\n");
     }};
-    ($fmt:literal) => {{
+    ($fmt:expr $(,)?) => {{
         $crate::io::_eprint_str(concat!($fmt, "\n"));
     }};
-    ($fmt:literal, $($arg:tt)*) => {{
+    ($fmt:expr, $($arg:tt)*) => {{
         $crate::io::_eprint(format_args!(concat!($fmt, "\n"), $($arg)*));
     }};
 }

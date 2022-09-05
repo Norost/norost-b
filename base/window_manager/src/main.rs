@@ -130,7 +130,11 @@ fn main() {
 
 	let mouse = root.open(b"ps2/mouse").expect("failed to open mouse");
 
-	let mut mouse_pos = Point::ORIGIN;
+	let mut mouse_pos = Point::new((size.x / 2).into(), (size.y / 2).into());
+	let [a, b] = (mouse_pos.x as u16).to_le_bytes();
+	let [c, d] = (mouse_pos.y as u16).to_le_bytes();
+	sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
+		.unwrap();
 
 	let mut queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
 	let mut poll_mouse = queue
