@@ -114,10 +114,7 @@ fn main() {
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
-	root.create(b"window_manager")
-		.unwrap()
-		.share(table.public())
-		.unwrap();
+	root.create(b"wm").unwrap().share(table.public()).unwrap();
 
 	{
 		let c = &config.cursor;

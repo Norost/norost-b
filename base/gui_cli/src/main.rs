@@ -36,8 +36,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
-	let root = rt::io::file_root().unwrap();
-
 	let mut scale = 20.0;
 	let mut no_quit = false;
 
@@ -61,7 +59,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let font = Font::from_bytes(FONT, FontSettings { scale: 160.0, ..Default::default() }).unwrap();
 	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
-	let window = root.create(b"window_manager/window").unwrap();
+	let window = rt::args::handle(b"window").expect("window undefined");
 
 	let mut res = [0; 8];
 	let l = window
@@ -103,10 +101,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
-	root.create(b"gui_cli")
-		.unwrap()
+	rt::args::handle(b"share")
+		.expect("share undefined")
 		.share(table.public())
-		.unwrap();
+		.expect("failed to share");
 
 	const WRITE_HANDLE: Handle = Handle::MAX - 1;
 
