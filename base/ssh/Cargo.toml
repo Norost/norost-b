@@ -24,8 +24,7 @@ git = "https://git.sr.ht/~demindiro/nora_ssh"
 features = ["no_send"]
 
 [dependencies.scf]
-package = "nora_scf"
-path = "../../../lib/nora_scf"
+version = "0.1"
 
 [dependencies.rt]
 package = "norostb_rt"

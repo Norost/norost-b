@@ -22,7 +22,6 @@ members = [
 	"lib/rust/async_std",
 	"lib/rust/driver_utils",
 	"lib/rust/pci",
-	"lib/rust/scancodes",
 	"lib/rust/virtio",
 	"lib/rust/virtio_block",
 	"lib/rust/virtio_gpu",

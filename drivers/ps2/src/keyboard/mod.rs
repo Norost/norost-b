@@ -69,16 +69,16 @@ impl Keyboard {
 	}
 
 	fn toggle_modifier(&self, event: Event) {
-		use {Event::*, KeyCode::*, SpecialKeyCode::*};
+		use {KeyCode::*, SpecialKeyCode::*};
 		let mut m = self.modifiers.get();
-		match event {
-			Press(Special(LeftShift)) => m |= MOD_LSHIFT,
-			Press(Special(RightShift)) => m |= MOD_RSHIFT,
-			Press(Special(AltGr)) => m |= MOD_ALTGR,
-			Release(Special(LeftShift)) => m &= !MOD_LSHIFT,
-			Release(Special(RightShift)) => m &= !MOD_RSHIFT,
-			Release(Special(AltGr)) => m &= !MOD_ALTGR,
-			Press(Special(CapsLock)) => m ^= MOD_CAPS,
+		match (event.is_press(), event.key()) {
+			(true, Special(LeftShift)) => m |= MOD_LSHIFT,
+			(true, Special(RightShift)) => m |= MOD_RSHIFT,
+			(true, Special(AltGr)) => m |= MOD_ALTGR,
+			(false, Special(LeftShift)) => m &= !MOD_LSHIFT,
+			(false, Special(RightShift)) => m &= !MOD_RSHIFT,
+			(false, Special(AltGr)) => m &= !MOD_ALTGR,
+			(true, Special(CapsLock)) => m ^= MOD_CAPS,
 			_ => {}
 		}
 		self.modifiers.set(m);
@@ -120,10 +120,7 @@ impl Device for Keyboard {
 				num: false,
 			},
 		)?;
-		let code = match release {
-			true => Event::Release(code),
-			false => Event::Press(code),
-		};
+		let code = Event::new(code, u16::from(!release) * 0x7ff);
 		self.toggle_modifier(code);
 		if let Some(id) = self.readers.borrow_mut().pop_front() {
 			let out_buf = &mut out_buf[..4];

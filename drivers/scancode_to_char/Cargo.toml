@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
-scancodes = { path = "../../lib/rust/scancodes" }
 
 [dependencies.rt]
 package = "norostb_rt"
@@ -23,3 +22,6 @@ features = ["alloc"]
 [dependencies.async_std]
 package = "norost_async_std"
 path = "../../lib/rust/async_std"
+
+[dependencies.scancodes]
+path = "../../../lib/scancodes"

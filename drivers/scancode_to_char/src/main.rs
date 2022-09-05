@@ -52,8 +52,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		res.unwrap();
 		assert_eq!(buf.len(), 4, "incomplete scancode");
 		let evt = u32::from_le_bytes(buf[..].try_into().unwrap());
-		let chr = match Event::try_from(evt).unwrap() {
-			Event::Press(KeyCode::Unicode(c)) => Some(c),
+		let evt = Event::try_from(evt).unwrap();
+		let chr = match (evt.is_press(), evt.key()) {
+			(true, KeyCode::Unicode(c)) => Some(c),
 			_ => None,
 		};
 		if let Some(chr) = chr {

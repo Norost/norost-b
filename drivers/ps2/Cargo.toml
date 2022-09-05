@@ -25,4 +25,4 @@ package = "norost_rt_default"
 path = "../../lib/rust/rt_default"
 
 [dependencies.scancodes]
-path = "../../lib/rust/scancodes"
+path = "../../../lib/scancodes"

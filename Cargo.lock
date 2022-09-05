@@ -322,10 +322,10 @@ dependencies = [
 name = "driver_pci"
 version = "0.1.0"
 dependencies = [
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "norostb_rt_alloc",
+ "scf",
 ]
 
 [[package]]
@@ -359,10 +359,10 @@ dependencies = [
  "driver_utils",
  "ipc_usb",
  "nora_io_queue_rt",
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "pci",
+ "scf",
  "xhci",
 ]
 
@@ -718,10 +718,10 @@ dependencies = [
 name = "init"
 version = "0.2.0"
 dependencies = [
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "norostb_rt_alloc",
+ "scf",
 ]
 
 [[package]]
@@ -880,10 +880,6 @@ dependencies = [
  "async_completion",
  "nora_io_queue",
 ]
-
-[[package]]
-name = "nora_scf"
-version = "0.1.0"
 
 [[package]]
 name = "nora_scsi"
@@ -1253,10 +1249,16 @@ checksum = "97477e48b4cf8603ad5f7aaf897467cf42ab4218a38ef76fb14c2d6773a6d6a8"
 
 [[package]]
 name = "scancodes"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "nora_scf",
+ "scf",
 ]
+
+[[package]]
+name = "scf"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39b4ff1781acf2f469645f5bac9e23ee18c71f73204f0244bc61a3c335dc75ab"
 
 [[package]]
 name = "sec1"
@@ -1345,12 +1347,12 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "n85",
- "nora_scf",
  "nora_ssh",
  "norost_async_std",
  "norostb_rt",
  "p256",
  "rand",
+ "scf",
 ]
 
 [[package]]

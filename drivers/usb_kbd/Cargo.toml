@@ -20,4 +20,4 @@ features = ["alloc", "accessor"]
 path = "../../lib/rust/ipc/usb"
 
 [dependencies.scancodes]
-path = "../../lib/rust/scancodes"
+path = "../../../lib/scancodes"

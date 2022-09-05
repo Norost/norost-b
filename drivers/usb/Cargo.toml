@@ -26,8 +26,8 @@ features = ["alloc", "accessor"]
 [dependencies.xhci]
 version = "0.9"
 
-[dependencies.nora_scf]
-path = "../../../lib/nora_scf"
+[dependencies.scf]
+version = "0.1"
 
 [dependencies.ipc_usb]
 path = "../../lib/rust/ipc/usb"

@@ -64,9 +64,9 @@ fn main() -> ! {
 					(mod_delta & mask != 0)
 						.then(|| {
 							let (k, d) = if data[0] & mask != 0 {
-								(Event::Press(KeyCode::Special(key)), 1)
+								(Event::new(KeyCode::Special(key), 0x7ff), 1)
 							} else {
-								(Event::Release(KeyCode::Special(key)), -1)
+								(Event::new(KeyCode::Special(key), 0), -1)
 							};
 							send(k);
 							d
@@ -92,9 +92,9 @@ fn main() -> ! {
 						let k = cfg.modified(k, m).unwrap_or(k);
 						send(if press {
 							toggle_capslock |= k == KeyCode::Special(SpecialKeyCode::CapsLock);
-							Event::Press(k)
+							Event::new(k, 0x7ff)
 						} else {
-							Event::Release(k)
+							Event::new(k, 0)
 						});
 					} else {
 						rt::eprintln!("unknown scancode {}", d);
