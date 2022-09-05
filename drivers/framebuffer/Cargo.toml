@@ -9,8 +9,8 @@ path = "../../lib/rust/driver_utils"
 default-features = false
 
 [dependencies.framebuffer]
-package = "framebuffer"
-git = "https://git.sr.ht/~demindiro/framebuffer"
+#git = "https://git.sr.ht/~demindiro/framebuffer"
+path = "../../../lib/framebuffer"
 
 [dependencies.ipc_gpu]
 path = "../../lib/rust/ipc/gpu"

@@ -526,8 +526,7 @@ dependencies = [
 
 [[package]]
 name = "framebuffer"
-version = "0.1.0"
-source = "git+https://git.sr.ht/~demindiro/framebuffer#94b82e117d06b24e8f27dd31574a33528ebb1be9"
+version = "0.2.0"
 
 [[package]]
 name = "futures"
@@ -1544,6 +1543,7 @@ dependencies = [
  "gui3d",
  "ipc_gpu",
  "ipc_window_manager",
+ "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
  "png",

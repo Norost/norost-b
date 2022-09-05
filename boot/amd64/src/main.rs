@@ -146,7 +146,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 				let f = |n: u32| n.checked_sub(1).and_then(|n| n.try_into().ok());
 				info.framebuffer = info::Framebuffer {
 					base: fb.addr,
-					pitch: f(fb.pitch).expect("pitch out of range"),
+					pitch: fb.pitch,
 					width: f(fb.width).expect("width out of range"),
 					height: f(fb.height).expect("height out of range"),
 					bpp: fb.bpp,

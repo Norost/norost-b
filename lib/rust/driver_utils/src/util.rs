@@ -11,5 +11,6 @@ pub fn u16_to_str(mut n: u16, base: u8, buf: &mut [u8]) -> usize {
 		l += 1;
 		n > 0
 	} {}
+	buf[..l].reverse();
 	l
 }

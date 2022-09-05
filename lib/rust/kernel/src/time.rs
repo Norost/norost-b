@@ -52,6 +52,12 @@ impl Monotonic {
 	pub fn duration_since(&self, earlier: Monotonic) -> Duration {
 		self.saturating_duration_since(earlier)
 	}
+
+	pub fn checked_add(&self, duration: Duration) -> Option<Self> {
+		self.ns
+			.checked_add(duration.as_nanos().try_into().ok()?)
+			.map(|ns| Self { ns })
+	}
 }
 
 impl fmt::Debug for Monotonic {
