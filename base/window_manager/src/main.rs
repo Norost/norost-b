@@ -21,8 +21,7 @@ mod window;
 mod workspace;
 
 use {
-	config::Config,
-	core::{cell::RefCell, pin::Pin, ptr::NonNull, time::Duration},
+	core::{cell::RefCell, ptr::NonNull, time::Duration},
 	driver_utils::{
 		os::stream_table::{JobId, Request, Response, StreamTable},
 		task,
@@ -136,7 +135,7 @@ fn main() {
 	sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
 		.unwrap();
 
-	let mut queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
+	let queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
 	let mut poll_mouse = queue
 		.submit_read(mouse.as_raw(), Vec::with_capacity(4))
 		.unwrap();

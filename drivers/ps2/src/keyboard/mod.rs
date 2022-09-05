@@ -15,10 +15,7 @@ use {
 	},
 };
 
-#[allow(dead_code)]
 pub mod cmd {
-	pub const SET_LED: u8 = 0xed;
-	pub const ECHO: u8 = 0xee;
 	pub const GET_SET_SCANCODE_SET: u8 = 0xf0;
 }
 

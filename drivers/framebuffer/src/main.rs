@@ -111,7 +111,7 @@ fn main() -> ! {
 		img: [i32; 64 * 64],
 	}
 
-	let huh = rt::thread::Thread::new(
+	rt::thread::Thread::new(
 		1 << 10,
 		Box::new(move || loop {
 			let next_t = rt::time::Monotonic::now()
@@ -205,9 +205,9 @@ fn main() -> ! {
 					_ => Response::Error(Error::DoesNotExist),
 				},
 				Request::SetMeta { property_value } => match property_value.try_get(&mut [0; 64]) {
-					Ok((b"bin/cursor/pos", v)) if v.len() == 4 => {
-						let x = u16::from_le_bytes([v[0], v[1]]);
-						let y = u16::from_le_bytes([v[2], v[3]]);
+					Ok((b"bin/cursor/pos", &mut [a, b, c, d])) => {
+						let x = u16::from_le_bytes([a, b]);
+						let y = u16::from_le_bytes([c, d]);
 						let mut c = CURSOR.lock();
 						(c.cur.x, c.cur.y) = (x, y);
 						project_cursor(&fb, &cursor_img, &mut c);
@@ -215,7 +215,7 @@ fn main() -> ! {
 						CHANGES.fetch_or(2, Ordering::Release);
 						Response::Amount(0)
 					}
-					Ok((b"bin/cursor/pos", v)) => Response::Error(Error::InvalidData),
+					Ok((b"bin/cursor/pos", _)) => Response::Error(Error::InvalidData),
 					Ok(_) => Response::Error(Error::DoesNotExist),
 					Err(_) => Response::Error(Error::InvalidData),
 				},

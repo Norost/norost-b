@@ -22,7 +22,6 @@ mod mouse;
 
 //use acpi::{fadt::Fadt, sdt::Signature, AcpiHandler, AcpiTables};
 use {
-	alloc::boxed::Box,
 	async_std::{
 		io::{Read, Write},
 		object::{AsyncObject, RefAsyncObject},
@@ -46,7 +45,6 @@ fn start(_: isize, _: *const *const u8) -> isize {
 
 async fn main() -> ! {
 	let (mut ps2, dev1, dev2) = Ps2::init();
-	let mut buf = [0; 16];
 
 	let tbl = {
 		let (buf, _) = Object::new(NewObject::SharedMemory { size: 256 }).unwrap();
@@ -133,7 +131,7 @@ async fn main() -> ! {
 			}
 			dev_intr.write(()).await.0.unwrap();
 		}
-	};
+	}
 	let dev1_loop = f_loop(&tbl, &ps2, &dev1, dev1_intr);
 	let dev2_loop = f_loop(&tbl, &ps2, &dev2, dev2_intr);
 	futures_util::pin_mut!(tbl_loop);
@@ -157,23 +155,8 @@ const STATUS_INPUT_FULL: u8 = 1 << 1;
 
 const CTRL_CFG_PORT_1_INTERRUPT_ENABLED: u8 = 1 << 0;
 const CTRL_CFG_PORT_2_INTERRUPT_ENABLED: u8 = 1 << 1;
-#[allow(dead_code)]
-const CTRL_CFG_SYSTEM_FLAG: u8 = 1 << 2;
-#[allow(dead_code)]
-const CTRL_CFG_PORT_1_CLOCK_DISABLED: u8 = 1 << 4;
-const CTRL_CFG_PORT_2_CLOCK_DISABLED: u8 = 1 << 5;
 const CTRL_CFG_PORT_1_TRANSLATION: u8 = 1 << 6;
 
-const TEST_PASSED: u8 = 0x55;
-const TEST_FAILED: u8 = 0xfc;
-
-const PORT_TEST_PASSED: u8 = 0x00;
-const PORT_TEST_CLOCK_STUCK_LOW: u8 = 0x01;
-const PORT_TEST_CLOCK_STUCK_HIGH: u8 = 0x02;
-const PORT_TEST_DATA_STUCK_LOW: u8 = 0x03;
-const PORT_TEST_DATA_STUCK_HIGH: u8 = 0x04;
-
-const PORT_SELF_TEST_PASSED: u8 = 0xaa;
 const PORT_ACKNOWLEDGE: u8 = 0xfa;
 const PORT_RESEND: u8 = 0xfe;
 
@@ -184,51 +167,14 @@ enum Command {
 	ReadControllerConfiguration = 0x20,
 	WriteControllerConfiguration = 0x60,
 	DisablePort2 = 0xa7,
-	#[allow(dead_code)]
 	EnablePort2 = 0xa8,
-	#[allow(dead_code)]
-	TestPort2 = 0xa9,
-	Test = 0xaa,
-	#[allow(dead_code)]
-	TestPort1 = 0xab,
-	#[allow(dead_code)]
-	DiagonosticDump = 0xac,
 	DisablePort1 = 0xad,
-	#[allow(dead_code)]
 	EnablePort1 = 0xae,
-	#[allow(dead_code)]
-	ReadControllerInput = 0xc0,
-	/// Copy 3:0 to 7:4
-	#[allow(dead_code)]
-	CopyLowerBitsToHigherStatus = 0xc1,
-	#[allow(dead_code)]
-	CopyHigherrBitsToHigherStatus = 0xc2,
-	#[allow(dead_code)]
-	ReadControllerOutput = 0xd0,
-	#[allow(dead_code)]
-	WriteNextByteToControllerOutput = 0xd1,
-	#[allow(dead_code)]
-	WriteNextByteToPort1Output = 0xd2,
-	#[allow(dead_code)]
-	WriteNextByteToPort2Output = 0xd3,
 	WriteNextByteToPort2Input = 0xd4,
-}
-
-enum PortCommand {
-	Identify = 0xf2,
-	EnableScanning = 0xf4,
-	DisableScanning = 0xf5,
-	Reset = 0xff,
 }
 
 #[derive(Debug, PartialEq)]
 struct Timeout;
-
-#[derive(Debug, PartialEq)]
-enum ReadError {
-	Timeout,
-	Resend,
-}
 
 #[derive(Debug, PartialEq)]
 enum ReadAckError {
@@ -271,16 +217,6 @@ impl Ps2 {
 		Err(Timeout)
 	}
 
-	fn wait_output(&self) -> Result<(), Timeout> {
-		for _ in 0..TIMEOUT_MS {
-			if self.io.in8(STATUS) & STATUS_OUTPUT_FULL != 0 {
-				return Ok(());
-			}
-			rt::thread::sleep(Duration::from_millis(1));
-		}
-		Err(Timeout)
-	}
-
 	fn write_cmd(&self, cmd: Command) -> Result<(), Timeout> {
 		self.wait_input()?;
 		self.io.out8(COMMAND, cmd as u8);
@@ -315,14 +251,6 @@ impl Ps2 {
 
 	fn read_port_data_nowait(&self) -> Result<u8, Timeout> {
 		self.read_data_nowait()
-	}
-
-	fn read_port_data_with_resend(&self) -> Result<u8, ReadError> {
-		match self.read_port_data() {
-			Ok(PORT_RESEND) => Err(ReadError::Resend),
-			Ok(data) => Ok(data),
-			Err(Timeout) => Err(ReadError::Timeout),
-		}
 	}
 
 	fn read_port_acknowledge(&self) -> Result<(), ReadAckError> {

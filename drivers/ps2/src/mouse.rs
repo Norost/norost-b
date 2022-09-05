@@ -3,13 +3,8 @@ use {
 	alloc::collections::VecDeque,
 	core::cell::{Cell, RefCell},
 	driver_utils::os::stream_table::JobId,
-	scancodes::{
-		config::{Config, Modifiers},
-		Event, KeyCode, SpecialKeyCode,
-	},
 };
 
-#[allow(dead_code)]
 pub mod cmd {
 	pub const SET_DEFAULTS: u8 = 0xf8;
 	pub const DATA_ON: u8 = 0xf4;
@@ -59,7 +54,7 @@ impl Device for Mouse {
 		self.buf.set(match self.buf.take() {
 			Buf::N0 => Buf::N1(x),
 			Buf::N1(p) => Buf::N2(p, x),
-			Buf::N2(p, q) => {
+			Buf::N2(_, q) => {
 				return if let Some(id) = self.readers.borrow_mut().pop_front() {
 					Some(finish_job(id, out_buf, q, x))
 				} else {

@@ -19,7 +19,6 @@ pub fn split(config: &Config, rect: Rect) -> (Rect, Rect) {
 
 /// Render the title bar in the given region.
 pub fn render(main: &mut Main, config: &Config, rect: Rect) {
-	let tbh = u32::from(config.title_bar.height);
 	let color = match &config.title_bar.style {
 		ElemStyle::Color(c) => *c,
 	};
