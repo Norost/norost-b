@@ -64,15 +64,15 @@ async fn main() -> ! {
 	let tbl_notify = RefAsyncObject::from(tbl.notifier());
 
 	let tbl_loop = async {
-		let mut buf = [0; 16];
 		loop {
 			tbl_notify.read(()).await.0.unwrap();
 			let mut flush = false;
+			let mut buf = [0; 4];
 			const KEYBOARD_HANDLE: Handle = Handle::MAX - 1;
 			const MOUSE_HANDLE: Handle = Handle::MAX - 2;
 			while let Some((handle, mut job_id, req)) = tbl.dequeue() {
 				let resp = match req {
-					Request::Open { path } => match &*path.copy_into(&mut buf).0 {
+					Request::Open { path } => match &*path.copy_into(&mut [0; 16]).0 {
 						b"keyboard" => Response::Handle(KEYBOARD_HANDLE),
 						b"mouse" => Response::Handle(MOUSE_HANDLE),
 						_ => Response::Error(rt::Error::DoesNotExist),
@@ -83,10 +83,10 @@ async fn main() -> ! {
 					Request::Read { amount } if handle == KEYBOARD_HANDLE => {
 						if amount < 4 {
 							Response::Error(Error::InvalidData)
-						} else if let Some((id, d)) = dev1.add_reader(job_id, &mut buf) {
+						} else if let Some(id) = dev1.add_reader(job_id, &mut buf) {
 							job_id = id;
-							let data = tbl.alloc(d.len()).expect("out of buffers");
-							data.copy_from(0, d);
+							let data = tbl.alloc(buf.len()).expect("out of buffers");
+							data.copy_from(0, &buf);
 							Response::Data(data)
 						} else {
 							continue;
@@ -95,10 +95,10 @@ async fn main() -> ! {
 					Request::Read { amount } if handle == MOUSE_HANDLE => {
 						if amount < 4 {
 							Response::Error(Error::InvalidData)
-						} else if let Some((id, d)) = dev2.add_reader(job_id, &mut buf) {
+						} else if let Some(id) = dev2.add_reader(job_id, &mut buf) {
 							job_id = id;
-							let data = tbl.alloc(d.len()).expect("out of buffers");
-							data.copy_from(0, d);
+							let data = tbl.alloc(buf.len()).expect("out of buffers");
+							data.copy_from(0, &buf);
 							Response::Data(data)
 						} else {
 							continue;
@@ -120,12 +120,12 @@ async fn main() -> ! {
 		dev: &dyn Device,
 		dev_intr: AsyncObject,
 	) -> ! {
-		let mut buf = [0; 16];
+		let mut buf = [0; 4];
 		loop {
 			dev_intr.read(()).await.0.unwrap();
-			if let Some((job_id, d)) = dev.handle_interrupt(&mut ps2.borrow_mut(), &mut buf) {
-				let data = tbl.alloc(d.len()).expect("out of buffers");
-				data.copy_from(0, d);
+			if let Some(job_id) = dev.handle_interrupt(&mut ps2.borrow_mut(), &mut buf) {
+				let data = tbl.alloc(buf.len()).expect("out of buffers");
+				data.copy_from(0, &buf);
 				tbl.enqueue(job_id, Response::Data(data));
 				tbl.flush();
 			}
@@ -185,14 +185,10 @@ enum ReadAckError {
 
 trait Device {
 	#[must_use]
-	fn add_reader<'a>(&self, job: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])>;
+	fn add_reader<'a>(&self, job: JobId, buf: &'a mut [u8; 4]) -> Option<JobId>;
 
 	#[must_use]
-	fn handle_interrupt<'a>(
-		&self,
-		ps2: &mut Ps2,
-		buf: &'a mut [u8; 16],
-	) -> Option<(JobId, &'a [u8])>;
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId>;
 }
 
 pub struct Ps2 {

@@ -86,26 +86,20 @@ impl Keyboard {
 }
 
 impl Device for Keyboard {
-	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])> {
+	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 4]) -> Option<JobId> {
 		if let Some(e) = self.events.borrow_mut().pop() {
-			let buf = &mut buf[..4];
 			buf.copy_from_slice(&u32::from(e).to_le_bytes());
-			Some((reader, buf))
+			Some(reader)
 		} else {
 			self.readers.borrow_mut().push_back(reader);
 			None
 		}
 	}
 
-	fn handle_interrupt<'a>(
-		&self,
-		ps2: &mut Ps2,
-		out_buf: &'a mut [u8; 16],
-	) -> Option<(JobId, &'a [u8])> {
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId> {
 		let b = ps2.read_port_data_nowait().unwrap();
-		let mut buf = [0; 4];
 		let mut tr = self.translator.borrow_mut();
-		let (release, seq) = tr.push(b, &mut buf)?;
+		let (release, seq) = tr.push(b, buf)?;
 
 		let Some(code) = self.config.raw(seq) else {
 			log!("unknown HID sequence {:02x?}", seq);
@@ -120,12 +114,11 @@ impl Device for Keyboard {
 				num: false,
 			},
 		)?;
-		let code = Event::new(code, u16::from(!release) * 0x7ff);
+		let code = Event::new(code, i16::from(!release) * i16::MAX);
 		self.toggle_modifier(code);
 		if let Some(id) = self.readers.borrow_mut().pop_front() {
-			let out_buf = &mut out_buf[..4];
-			out_buf.copy_from_slice(&u32::from(code).to_le_bytes());
-			Some((id, out_buf))
+			buf.copy_from_slice(&u32::from(code).to_le_bytes());
+			Some(id)
 		} else {
 			self.events.borrow_mut().push(code);
 			None

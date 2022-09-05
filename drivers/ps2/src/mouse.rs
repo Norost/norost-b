@@ -3,6 +3,7 @@ use {
 	alloc::collections::VecDeque,
 	core::cell::{Cell, RefCell},
 	driver_utils::os::stream_table::JobId,
+	scancodes::{Event, KeyCode, SpecialKeyCode},
 };
 
 pub mod cmd {
@@ -12,16 +13,33 @@ pub mod cmd {
 
 pub struct Mouse {
 	readers: RefCell<VecDeque<JobId>>,
-	events: RefCell<LossyRingBuffer<[u8; 2]>>,
+	events: RefCell<LossyRingBuffer<(Dir, u8)>>,
 	buf: Cell<Buf>,
+	send_empty: Cell<Option<Dir>>,
+}
+
+#[derive(Clone, Copy, Default)]
+enum Dir {
+	#[default]
+	X,
+	Y,
+}
+
+impl From<Dir> for KeyCode {
+	fn from(d: Dir) -> Self {
+		KeyCode::Special(match d {
+			Dir::X => SpecialKeyCode::MouseX,
+			Dir::Y => SpecialKeyCode::MouseY,
+		})
+	}
 }
 
 #[derive(Default)]
 enum Buf {
 	#[default]
 	N0,
-	N1(u8),
-	N2(u8, u8),
+	N1,
+	N2,
 }
 
 impl Mouse {
@@ -30,47 +48,57 @@ impl Mouse {
 			events: Default::default(),
 			readers: Default::default(),
 			buf: Default::default(),
+			send_empty: Default::default(),
+		}
+	}
+
+	fn add_event(&self, dir: Dir, lvl: u8, buf: &mut [u8; 4]) -> Option<JobId> {
+		if let Some(id) = self.readers.borrow_mut().pop_front() {
+			Some(finish_job(id, buf, dir, lvl))
+		} else {
+			self.events.borrow_mut().push((dir, lvl));
+			None
 		}
 	}
 }
 
 impl Device for Mouse {
-	fn add_reader<'a>(&self, id: JobId, out_buf: &'a mut [u8; 16]) -> Option<(JobId, &'a [u8])> {
-		if let Some([p, q]) = self.events.borrow_mut().pop() {
-			Some(finish_job(id, out_buf, p, q))
+	fn add_reader<'a>(&self, id: JobId, buf: &'a mut [u8; 4]) -> Option<JobId> {
+		if let Some(k) = self.send_empty.take() {
+			Some(finish_job(id, buf, k, 0))
+		} else if let Some((k, l)) = self.events.borrow_mut().pop() {
+			Some(finish_job(id, buf, k, l))
 		} else {
 			self.readers.borrow_mut().push_back(id);
 			None
 		}
 	}
 
-	fn handle_interrupt<'a>(
-		&self,
-		ps2: &mut Ps2,
-		out_buf: &'a mut [u8; 16],
-	) -> Option<(JobId, &'a [u8])> {
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId> {
 		let x = ps2.read_port_data_nowait().unwrap();
 
+		let mut id = None;
 		self.buf.set(match self.buf.take() {
-			Buf::N0 => Buf::N1(x),
-			Buf::N1(p) => Buf::N2(p, x),
-			Buf::N2(_, q) => {
-				return if let Some(id) = self.readers.borrow_mut().pop_front() {
-					Some(finish_job(id, out_buf, q, x))
-				} else {
-					self.events.borrow_mut().push([q, x]);
-					None
-				};
+			Buf::N0 => {
+				// Button presses.
+				Buf::N1
+			}
+			Buf::N1 => {
+				// X movement
+				id = self.add_event(Dir::X, x, buf);
+				Buf::N2
+			}
+			Buf::N2 => {
+				// Y movement
+				id = self.add_event(Dir::Y, x, buf);
+				Buf::N0
 			}
 		});
-		None
+		id
 	}
 }
 
-fn finish_job(id: JobId, buf: &mut [u8; 16], p: u8, q: u8) -> (JobId, &[u8]) {
-	let [a, b] = i16::from(p as i8).to_le_bytes();
-	let [c, d] = i16::from(q as i8).to_le_bytes();
-	let buf = &mut buf[..4];
-	buf.copy_from_slice(&[a, b, c, d]);
-	(id, buf)
+fn finish_job(id: JobId, buf: &mut [u8; 4], d: Dir, l: u8) -> JobId {
+	buf.copy_from_slice(&u32::from(Event::new(d.into(), l as i8 as i16)).to_le_bytes());
+	id
 }

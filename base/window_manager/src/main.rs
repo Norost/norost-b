@@ -143,25 +143,27 @@ fn main() {
 
 	loop {
 		if let Some((res, buf)) = task::poll(&mut poll_mouse) {
+			use scancodes::{Event, KeyCode, SpecialKeyCode};
 			res.unwrap();
-			let [a, b, c, d]: [u8; 4] = (&*buf).try_into().unwrap();
-			let f = |a: &mut u32, b: i16, max: u32| {
-				*a = if b >= 0 {
-					(*a + b as u32).min(max)
+			let k = u32::from_le_bytes((&*buf).try_into().unwrap());
+			let k = Event::try_from(k).unwrap();
+			let l = k.press_level();
+			if l != 0 {
+				let (k, m, l) = match k.key() {
+					KeyCode::Special(SpecialKeyCode::MouseX) => (&mut mouse_pos.x, size.x, l),
+					KeyCode::Special(SpecialKeyCode::MouseY) => (&mut mouse_pos.y, size.y, -l),
+					_ => todo!(),
+				};
+				*k = if l >= 0 {
+					(*k + l as u32).min(m)
 				} else {
-					a.saturating_sub((-b) as _)
-				}
-			};
-			f(&mut mouse_pos.x, i16::from_le_bytes([a, b]), size.x);
-			f(
-				&mut mouse_pos.y,
-				i16::from_le_bytes([c, d]).wrapping_neg(),
-				size.y,
-			);
-			let [a, b] = (mouse_pos.x as u16).to_le_bytes();
-			let [c, d] = (mouse_pos.y as u16).to_le_bytes();
-			sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
-				.unwrap();
+					k.saturating_sub((-l) as _)
+				};
+				let [a, b] = (mouse_pos.x as u16).to_le_bytes();
+				let [c, d] = (mouse_pos.y as u16).to_le_bytes();
+				sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
+					.unwrap();
+			}
 			poll_mouse = queue.submit_read(mouse.as_raw(), buf).unwrap();
 		}
 

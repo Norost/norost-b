@@ -1549,6 +1549,7 @@ dependencies = [
  "norostb_rt",
  "norostb_rt_alloc",
  "png",
+ "scancodes",
 ]
 
 [[package]]
