@@ -318,7 +318,7 @@ impl Ps2 {
 		log!("load keyboard driver");
 		let keyboard = keyboard::Keyboard::new();
 		log!("load mouse driver");
-		let mouse = mouse::Mouse::new();
+		let mouse = mouse::Mouse::default();
 
 		(slf, keyboard, mouse)
 	}
