@@ -310,11 +310,13 @@ impl<'a> Device<'a> {
 		&mut self,
 		scanout_id: u32,
 		resource_id: NonZeroU32,
+		x: u32,
+		y: u32,
 		hot_x: u32,
 		hot_y: u32,
 		buffer: &mut PhysMap,
 	) -> Result<CursorOpToken, UpdateCursorError> {
-		let pos = CursorPosition::new(scanout_id, 0, 0);
+		let pos = CursorPosition::new(scanout_id, x, y);
 		let cmd = UpdateCursor::new(pos, resource_id.get(), hot_x, hot_y, Some(0));
 		self.cursor_request(buffer, cmd).map_err(|_| todo!())
 	}
@@ -325,12 +327,13 @@ impl<'a> Device<'a> {
 	pub unsafe fn move_cursor(
 		&mut self,
 		scanout_id: u32,
+		resource_id: NonZeroU32,
 		x: u32,
 		y: u32,
 		buffer: &mut PhysMap,
 	) -> Result<CursorOpToken, MoveCursorError> {
 		let pos = CursorPosition::new(scanout_id, x, y);
-		let cmd = MoveCursor::new(pos, Some(0));
+		let cmd = MoveCursor::new(pos, resource_id.get(), Some(0));
 		self.cursor_request(buffer, cmd).map_err(|_| todo!())
 	}
 

@@ -374,7 +374,7 @@ fn main() {
 
 		if let Some(new) = draw_focus_borders {
 			for (r, c) in old
-				.map(|o| (o, [70; 3]))
+				.map(|o| (o, [50; 3]))
 				.into_iter()
 				.chain([(new, [127; 3])])
 			{
