@@ -39,12 +39,14 @@ impl Object for InterruptTable {
 		};
 		unsafe {
 			arch::amd64::set_interrupt_handler(vector.into(), handle_irq);
-			io_apic::set_irq(irq, 0, vector, mode, false);
 		}
 		LISTENERS.lock().insert(
 			vector,
 			Entry { mode, irq, triggered: false, wake: Default::default() },
 		);
+		unsafe {
+			io_apic::set_irq(irq, 0, vector, mode, false);
+		}
 		Ticket::new_complete(Ok(Arc::new(Interrupt(vector))))
 	}
 }
