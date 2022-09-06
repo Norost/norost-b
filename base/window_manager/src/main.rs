@@ -268,7 +268,7 @@ fn main() {
 									}
 								};
 								*k = if l >= 0 {
-									(*k + l as u32).min(m)
+									(*k + l as u32).min(m - 1)
 								} else {
 									k.saturating_sub((-l) as _)
 								};
