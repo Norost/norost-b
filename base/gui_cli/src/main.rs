@@ -67,32 +67,40 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let l = window
 		.get_meta(b"bin/resolution".into(), (&mut res).into())
 		.unwrap();
-	let width = u32::from_le_bytes(res[..4].try_into().unwrap());
-	let height = u32::from_le_bytes(res[4..l].try_into().unwrap());
+	let mut width = u32::from_le_bytes(res[..4].try_into().unwrap());
+	let mut height = u32::from_le_bytes(res[4..l].try_into().unwrap());
 
-	let (fb, _) = {
-		let size = width as usize * height as usize * 3;
-		let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
-		window
-			.share(
-				&rt::Object::new(rt::NewObject::PermissionMask {
-					handle: fb.as_raw(),
-					rwx: rt::io::RWX::R,
-				})
-				.unwrap()
-				.0,
-			)
-			.unwrap();
-		fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
+	let new_fb = |w, h| {
+		let (fb, _) = {
+			let size = w as usize * h as usize * 3;
+			let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
+			window
+				.share(
+					&rt::Object::new(rt::NewObject::PermissionMask {
+						handle: fb.as_raw(),
+						rwx: rt::io::RWX::R,
+					})
+					.unwrap()
+					.0,
+				)
+				.unwrap();
+			fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
+		};
+		unsafe { rasterizer::FrameBuffer::new(fb.cast(), w, h) }
 	};
-	let mut fb = unsafe { rasterizer::FrameBuffer::new(fb.cast(), width, height) };
+	let drop_fb = |fb: &mut rasterizer::FrameBuffer, w, h| {
+		let size = (w as usize * h as usize * 3 + 0xfff) & !0xfff;
+		unsafe { rt::mem::dealloc(fb.as_ptr().cast(), size).unwrap() };
+	};
 
-	let mut draw = |rasterizer: &mut rasterizer::Rasterizer| {
+	let mut fb = new_fb(width, height);
+
+	let mut draw = |fb: &mut rasterizer::FrameBuffer, rs: &mut rasterizer::Rasterizer, w, h| {
 		fb.as_mut().fill(0);
-		rasterizer.render_all(&mut fb);
+		rs.render_all(fb);
 		let draw = ipc_wm::Flush {
 			origin: ipc_wm::Point { x: 0, y: 0 },
-			size: ipc_wm::SizeInclusive { x: (width - 1) as _, y: (height - 1) as _ },
+			size: ipc_wm::SizeInclusive { x: (w - 1) as _, y: (h - 1) as _ },
 		};
 		window.write(&draw.encode()).unwrap();
 	};
@@ -132,8 +140,13 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		if let Some((res, b)) = driver_utils::task::poll(&mut poll_window) {
 			res.unwrap();
 			match ipc_wm::Event::decode((&*b).try_into().unwrap()).unwrap() {
-				ipc_wm::Event::Resize(_) => {}
-				ipc_wm::Event::Resize(_) => todo!(),
+				ipc_wm::Event::Resize(r) => {
+					drop_fb(&mut fb, width, height);
+					width = r.x;
+					height = r.y;
+					fb = new_fb(width, height);
+					next_draw = rt::time::Monotonic::ZERO;
+				}
 				ipc_wm::Event::Key(k) if k.is_press() => {
 					if let scancodes::KeyCode::Unicode(c) = k.key() {
 						if let Some(id) = read_jobs.pop_front() {
@@ -194,7 +207,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					// Exit
 					READ_HANDLE => continue,
 					WRITE_HANDLE if no_quit => continue,
-					WRITE_HANDLE => return 0,
+					// Exit immediately so we don't run *blocking* Drop of queue
+					// TODO perhaps Queue shouldn't be blocking on drop?
+					WRITE_HANDLE => rt::exit(0),
 					_ => unreachable!(),
 				},
 				Request::Read { amount } if handle == READ_HANDLE => {
@@ -208,7 +223,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 		flush.then(|| table.flush());
 		if next_draw <= rt::time::Monotonic::now() {
-			draw(&mut rasterizer);
+			draw(&mut fb, &mut rasterizer, width, height);
 			next_draw = rt::time::Monotonic::MAX;
 		}
 	}

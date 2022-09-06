@@ -13,6 +13,7 @@
 
 #![feature(core_intrinsics)]
 #![feature(norostb)]
+#![feature(let_else)]
 
 mod config;
 mod manager;
@@ -28,7 +29,7 @@ use {
 		task,
 	},
 	io_queue_rt::{Pow2Size, Queue},
-	math::{Point, Rect, Size},
+	math::{Point, Rect, Size, Vector},
 	rt::io::{Error, Handle},
 	std::collections::VecDeque,
 };
@@ -137,11 +138,18 @@ fn main() {
 	let queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
 	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
 
+	let mut old = None;
+
 	loop {
+		queue.poll();
+		queue.wait(Duration::MAX);
+		queue.process();
+
 		if task::poll(&mut poll_table).is_some() {
 			poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
 		}
 		let mut send_notif = false;
+		let mut draw_focus_borders = None;
 
 		const INPUT: Handle = Handle::MAX - 1;
 
@@ -155,9 +163,10 @@ fn main() {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size, Default::default()).unwrap();
 							main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+							old = None;
 							for (w, ww) in manager.windows() {
-								let rect = manager.window_rect(w, size).unwrap();
-								let (title, rect) = title_bar::split(&config, rect);
+								let full_rect = manager.window_rect(w, size).unwrap();
+								let (title, rect) = title_bar::split(&config, full_rect);
 								title_bar::render(&mut main, &config, title);
 								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 								let mut ue = ww.user_data.unread_events.borrow_mut();
@@ -168,6 +177,9 @@ fn main() {
 									let data = table.alloc(evt.len()).expect("out of buffers");
 									data.copy_from(0, &evt);
 									table.enqueue(id, Response::Data(data));
+								}
+								if Some(w) == manager.focused_window() {
+									draw_focus_borders = Some(full_rect);
 								}
 							}
 							Response::Handle(h)
@@ -221,6 +233,7 @@ fn main() {
 				}
 				Request::Write { data } if handle == INPUT => {
 					use scancodes::{Event, KeyCode, SpecialKeyCode};
+					let mut mouse_moved @ mut mouse_click = false;
 					for (_, b) in data.blocks() {
 						for i in (0..b.len() / 4).map(|i| i * 4) {
 							let mut buf = [0; 4];
@@ -236,8 +249,13 @@ fn main() {
 									KeyCode::Special(SpecialKeyCode::MouseY) => {
 										(&mut mouse_pos.y, size.y, -l)
 									}
+									KeyCode::Special(SpecialKeyCode::Mouse0) => {
+										mouse_click = true;
+										continue;
+									}
 									_ => {
-										let u = &mut manager.window_mut(0).unwrap().user_data;
+										let Some(w) = manager.focused_window() else { continue };
+										let u = &mut manager.window_mut(w).unwrap().user_data;
 										if let Some(id) = u.event_listeners.get_mut().pop_front() {
 											let evt = ipc_wm::Event::Key(k).encode();
 											let d = table.alloc(evt.len()).expect("out of buffers");
@@ -254,11 +272,25 @@ fn main() {
 								} else {
 									k.saturating_sub((-l) as _)
 								};
-								let [a, b] = (mouse_pos.x as u16).to_le_bytes();
-								let [c, d] = (mouse_pos.y as u16).to_le_bytes();
-								sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
-									.unwrap();
+								mouse_moved = true;
 							}
+						}
+					}
+					if mouse_moved {
+						let [a, b] = (mouse_pos.x as u16).to_le_bytes();
+						let [c, d] = (mouse_pos.y as u16).to_le_bytes();
+						sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
+							.unwrap();
+					}
+					if mouse_click {
+						let (h, r) = manager.window_at(mouse_pos, size).unwrap();
+						if Some(h) != manager.focused_window() {
+							manager.set_focused_window(h);
+							let r = Rect::from_points(
+								r.low() + Vector::ONE * 4,
+								r.high() - Vector::ONE * 4,
+							);
+							draw_focus_borders = Some(r);
 						}
 					}
 					Response::Amount(data.len() as _)
@@ -296,12 +328,13 @@ fn main() {
 					main.sync_rect(draw_rect);
 					Response::Amount(l)
 				}
-				Request::Close => {
+				Request::Close if handle != INPUT => {
 					manager.destroy_window(handle).unwrap();
 					main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+					old = None;
 					for (w, ww) in manager.windows() {
-						let rect = manager.window_rect(w, size).unwrap();
-						let (title, rect) = title_bar::split(&config, rect);
+						let full_rect = manager.window_rect(w, size).unwrap();
+						let (title, rect) = title_bar::split(&config, full_rect);
 						title_bar::render(&mut main, &config, title);
 						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 						let mut ue = ww.user_data.unread_events.borrow_mut();
@@ -314,9 +347,13 @@ fn main() {
 							table.enqueue(id, Response::Data(data));
 							send_notif = true;
 						}
+						if Some(w) == manager.focused_window() {
+							draw_focus_borders = Some(full_rect);
+						}
 					}
 					continue;
 				}
+				Request::Close => continue,
 				Request::Open { path } if handle == Handle::MAX => {
 					match &*path.copy_into(&mut [0; 16]).0 {
 						b"input" => Response::Handle(INPUT),
@@ -334,9 +371,27 @@ fn main() {
 			send_notif = true;
 		}
 		send_notif.then(|| table.flush());
-		queue.poll();
-		queue.wait(Duration::MAX);
-		queue.process();
+
+		if let Some(new) = draw_focus_borders {
+			for (r, c) in old
+				.map(|o| (o, [70; 3]))
+				.into_iter()
+				.chain([(new, [127; 3])])
+			{
+				let w = 4;
+				let (l, h) = (r.low() - Vector::ONE * w, r.high() + Vector::ONE);
+				let s = Size::new(r.size().x + w * 2, r.size().y + w * 2);
+				for r in [
+					Rect::from_size(Point::new(l.x, l.y), Size::new(w, s.y)),
+					Rect::from_size(Point::new(h.x, l.y), Size::new(w, s.y)),
+					Rect::from_size(Point::new(l.x, l.y), Size::new(s.x, w)),
+					Rect::from_size(Point::new(l.x, h.y), Size::new(s.x, w)),
+				] {
+					main.fill(r, c);
+				}
+			}
+			old = Some(new);
+		}
 	}
 }
 

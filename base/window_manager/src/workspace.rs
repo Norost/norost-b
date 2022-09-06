@@ -134,32 +134,68 @@ impl Workspace {
 	///
 	/// The path does not lead to a valid node.
 	pub fn calculate_rect(&self, mut path: PathIter, size: Size) -> Option<Rect> {
+		Some(
+			self.recurse(size, |l, r| {
+				path.next().expect("path does not lead to a leaf")
+			})?
+			.1,
+		)
+	}
+
+	/// Find the window at the given position.
+	pub fn window_at(&self, position: Point, size: Size) -> Option<(Handle, Rect)> {
+		self.recurse(size, |_, r| r.contains(position))
+	}
+
+	/// Return an iterator over all window handles held by this workspace.
+	pub fn windows(&self) -> impl Iterator<Item = Handle> + '_ {
+		self.nodes.iter().flat_map(|(_, n)| match n {
+			Node::Parent { .. } => None,
+			Node::Leaf { window } => Some(*window),
+		})
+	}
+
+	/// Whether this workspace contains any windows at all.
+	pub fn is_empty(&self) -> bool {
+		self.nodes.is_empty()
+	}
+
+	/// Recurse in the tree, going left (`false`) or right (`true`) based on the given predicate.
+	///
+	/// Returns the handle of the window if any were found as well as the calculated rect.
+	fn recurse<F>(&self, size: Size, mut pred: F) -> Option<(Handle, Rect)>
+	where
+		F: FnMut(&Rect, &Rect) -> bool,
+	{
 		let mut cur = self.nodes.get(self.root)?; // Having no root node is valid
 		let mut rect = Rect::from_size(Point::ORIGIN, size);
 		loop {
 			match cur {
 				Node::Parent { left, right, ratio, vertical } => {
-					let dir = path.next().expect("path does not lead to a leaf");
-					rect = if *vertical {
+					let (rect_l, rect_r) = if *vertical {
 						let mid = ratio.partition_range(rect.y());
-						let y = if dir {
-							mid + 1..=rect.high().y
-						} else {
-							rect.low().y..=mid
-						};
-						Rect::from_ranges(rect.x(), y)
+						let (y_l, y_r) = (rect.low().y..=mid, mid + 1..=rect.high().y);
+						(
+							Rect::from_ranges(rect.x(), y_l),
+							Rect::from_ranges(rect.x(), y_r),
+						)
 					} else {
 						let mid = ratio.partition_range(rect.x());
-						let x = if dir {
-							mid + 1..=rect.high().x
-						} else {
-							rect.low().x..=mid
-						};
-						Rect::from_ranges(x, rect.y())
+						let (x_l, x_r) = (rect.low().x..=mid, mid + 1..=rect.high().x);
+						(
+							Rect::from_ranges(x_l, rect.y()),
+							Rect::from_ranges(x_r, rect.y()),
+						)
 					};
-					cur = &self.nodes[*if dir { right } else { left }];
+					cur = &self.nodes[*if pred(&rect_l, &rect_r) {
+						rect = rect_r;
+						right
+					} else {
+						rect = rect_l;
+						left
+					}];
 				}
-				Node::Leaf { .. } => return Some(rect),
+				Node::Leaf { window } => return Some((*window, rect)),
 			}
 		}
 	}

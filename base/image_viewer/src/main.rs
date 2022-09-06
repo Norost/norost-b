@@ -9,14 +9,11 @@ use std::{
 static EXAMPLE: &[u8] = include_bytes!("/tank/stupid_memes/rust_evangelism_strike_force.jpg");
 
 fn main() {
-	let mut window = File::create("window_manager/window").unwrap();
+	let mut window = rt::args::handle(b"window").expect("window undefined");
 	let mut buf = [0; 8];
-	rt::io::get_meta(
-		window.as_handle(),
-		b"bin/resolution".into(),
-		(&mut buf).into(),
-	)
-	.unwrap();
+	window
+		.get_meta(b"bin/resolution".into(), (&mut buf).into())
+		.unwrap();
 	let mut res = ipc_wm::Resolution::decode(buf);
 
 	loop {
@@ -30,7 +27,7 @@ fn main() {
 				rwx: rt::io::RWX::R,
 			})
 			.unwrap();
-			rt::io::share(window.as_handle(), fb_rdonly.as_raw()).unwrap();
+			window.share(&fb_rdonly).unwrap();
 			fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
 		};
 		let fb = unsafe { std::slice::from_raw_parts_mut(fb_ptr.as_ptr(), fb_size) };
