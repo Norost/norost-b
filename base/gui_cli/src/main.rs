@@ -8,9 +8,11 @@ extern crate alloc;
 mod rasterizer;
 
 use {
-	alloc::vec::Vec,
+	alloc::{collections::VecDeque, vec::Vec},
+	core::time::Duration,
 	driver_utils::os::stream_table::{Request, Response, StreamTable},
 	fontdue::{Font, FontSettings},
+	io_queue_rt::{Pow2Size, Queue},
 	rt::{Error, Handle},
 };
 
@@ -107,11 +109,56 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.expect("failed to share");
 
 	const WRITE_HANDLE: Handle = Handle::MAX - 1;
+	const READ_HANDLE: Handle = Handle::MAX - 2;
+
+	let queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
+
+	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
+	let mut poll_window = queue
+		.submit_read(window.as_raw(), Vec::with_capacity(16))
+		.unwrap();
+
+	let mut read_jobs = VecDeque::new();
 
 	let mut parser = Parser { state: ParserState::Idle };
-	let mut flushed @ mut dirty = false;
+	let mut next_draw = rt::time::Monotonic::MAX;
 	loop {
+		queue.poll();
+		queue.wait(next_draw.duration_since(rt::time::Monotonic::now()));
+		queue.process();
+
 		let mut flush = false;
+
+		if let Some((res, b)) = driver_utils::task::poll(&mut poll_window) {
+			res.unwrap();
+			match ipc_wm::Event::decode((&*b).try_into().unwrap()).unwrap() {
+				ipc_wm::Event::Resize(_) => {}
+				ipc_wm::Event::Resize(_) => todo!(),
+				ipc_wm::Event::Key(k) if k.is_press() => {
+					if let scancodes::KeyCode::Unicode(c) = k.key() {
+						if let Some(id) = read_jobs.pop_front() {
+							let mut b = [0; 4];
+							let b = c.encode_utf8(&mut b);
+							let d = table.alloc(b.len()).expect("out of buffers");
+							d.copy_from(0, b.as_bytes());
+							table.enqueue(id, Response::Data(d));
+							flush = true;
+						} else {
+							todo!();
+						}
+					}
+				}
+				ipc_wm::Event::Key(_) => {}
+			}
+			poll_window = queue.submit_read(window.as_raw(), b).unwrap();
+		}
+
+		if driver_utils::task::poll(&mut poll_table).is_some() {
+			poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
+		}
+		let next_draw_t = rt::time::Monotonic::now()
+			.checked_add(Duration::from_millis(33))
+			.unwrap_or(rt::time::Monotonic::ZERO);
 		while let Some((handle, job_id, req)) = table.dequeue() {
 			let resp = match req {
 				Request::Open { path } => {
@@ -120,63 +167,49 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					path.copy_to(0, p);
 					match &*p {
 						b"write" => Response::Handle(WRITE_HANDLE),
+						b"read" => Response::Handle(READ_HANDLE),
 						_ => Response::Error(Error::DoesNotExist),
 					}
 				}
-				Request::Write { data } => match handle {
-					WRITE_HANDLE => {
-						let l = data.len().min(1024);
-						let mut v = Vec::with_capacity(l);
-						data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
-						unsafe { v.set_len(l) }
-						for c in v {
-							match parser.add(c) {
-								None => continue,
-								Some(Action::PushChar(c)) => rasterizer.push_char(c),
-								Some(Action::PopChar) => rasterizer.pop_char(),
-								Some(Action::NewLine) => rasterizer.new_line(),
-								Some(Action::ClearLine) => rasterizer.clear_line(),
-							}
-							dirty = true;
+				Request::Write { data } if handle == WRITE_HANDLE => {
+					let l = data.len().min(1024);
+					let mut v = Vec::with_capacity(l);
+					data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
+					unsafe { v.set_len(l) }
+					for c in v {
+						match parser.add(c) {
+							None => continue,
+							Some(Action::PushChar(c)) => rasterizer.push_char(c),
+							Some(Action::PopChar) => rasterizer.pop_char(),
+							Some(Action::NewLine) => rasterizer.new_line(),
+							Some(Action::ClearLine) => rasterizer.clear_line(),
 						}
-
-						let len = data.len().try_into().unwrap();
-						Response::Amount(len)
 					}
-					_ => Response::Error(Error::InvalidOperation),
-				},
+
+					let len = data.len().try_into().unwrap();
+					next_draw = next_draw.min(next_draw_t);
+					Response::Amount(len)
+				}
 				Request::Close => match handle {
 					// Exit
+					READ_HANDLE => continue,
 					WRITE_HANDLE if no_quit => continue,
 					WRITE_HANDLE => return 0,
 					_ => unreachable!(),
 				},
-				Request::Read { .. } => todo!(),
-				Request::GetMeta { .. } => todo!(),
-				Request::SetMeta { .. } => todo!(),
-				Request::Create { .. } => todo!(),
-				Request::Destroy { .. } => todo!(),
-				Request::Seek { .. } => todo!(),
-				Request::Share { .. } => todo!(),
+				Request::Read { amount } if handle == READ_HANDLE => {
+					read_jobs.push_back(job_id);
+					continue;
+				}
+				_ => Response::Error(Error::InvalidOperation),
 			};
 			table.enqueue(job_id, resp);
 			flush = true;
 		}
-		if flush {
-			table.flush();
-			flushed = true;
-		} else if flushed {
-			// TODO lazy hack, add some kind of table.wait_until instead (i.e. use
-			// async I/O queue).
-			for _ in 0..10 {
-				rt::thread::yield_now();
-			}
-			flushed = false;
-		} else if dirty {
+		flush.then(|| table.flush());
+		if next_draw <= rt::time::Monotonic::now() {
 			draw(&mut rasterizer);
-			dirty = false;
-		} else {
-			table.wait();
+			next_draw = rt::time::Monotonic::MAX;
 		}
 	}
 }

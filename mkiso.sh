@@ -90,6 +90,7 @@ install usb_storage        driver_usb_storage
 install virtio_block       driver_virtio_block
 install virtio_gpu         driver_virtio_gpu
 install virtio_net         driver_virtio_net
+install join               join
 install init               init
 install gui_cli            gui_cli
 install image_viewer       image_viewer

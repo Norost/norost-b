@@ -82,19 +82,25 @@ impl Flush {
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
 	Resize(Resolution),
+	Key(scancodes::Event),
 }
+
+#[derive(Debug)]
+pub struct InvalidEvent;
 
 impl Event {
 	#[inline]
-	pub fn decode(raw: [u8; 9]) -> Self {
+	pub fn decode(raw: [u8; 10]) -> Result<Self, InvalidEvent> {
 		let e = raw::Event::from_raw(&raw, 0);
-		match e.ty() {
+		Ok(match e.ty() {
 			raw::EventType::Resize => Self::Resize(Resolution::from_raw(e.args().resize())),
-		}
+			raw::EventType::Key => Self::Key(e.args().key().try_into().map_err(|_| InvalidEvent)?),
+			_ => return Err(InvalidEvent),
+		})
 	}
 
 	#[inline]
-	pub fn encode(self) -> [u8; 9] {
+	pub fn encode(self) -> [u8; 10] {
 		let mut e = raw::Event::default();
 		match self {
 			Self::Resize(r) => {
@@ -103,8 +109,14 @@ impl Event {
 				a.set_resize(r.to_raw());
 				e.set_args(a);
 			}
+			Self::Key(k) => {
+				e.set_ty(raw::EventType::Key);
+				let mut a = raw::EventArgs::default();
+				a.set_key(k.into());
+				e.set_args(a);
+			}
 		}
-		let mut r = [0; 9];
+		let mut r = [0; 10];
 		e.to_raw(&mut r, 0);
 		r
 	}

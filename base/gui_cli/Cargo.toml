@@ -14,3 +14,10 @@ hashbrown = "0.11"
 path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
+
+[dependencies.io_queue_rt]
+package = "nora_io_queue_rt"
+path = "../../lib/rust/io_queue_rt"
+
+[dependencies.scancodes]
+path = "../../../lib/scancodes"

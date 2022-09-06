@@ -20,7 +20,7 @@ pub fn load() -> Config {
 	let direction = gui3d::Vec3::new(-2.0, -3.0, 5.0).normalize();
 
 	let (close, maximize) = {
-		let img = load_normal_map("drivers/button.png");
+		let img = load_normal_map("button.png");
 
 		let close = img.apply_lighting(&gui3d::Params {
 			lighting: gui3d::Lighting {
@@ -46,7 +46,7 @@ pub fn load() -> Config {
 	};
 
 	let cursor = {
-		load_normal_map("drivers/cursor.png").apply_lighting(&gui3d::Params {
+		load_normal_map("cursor.png").apply_lighting(&gui3d::Params {
 			lighting: gui3d::Lighting {
 				//ambient: gui3d::Rgb::new(0.7, 0.7, 0.7),
 				ambient: gui3d::Rgb::new(0.5, 0.5, 0.5),

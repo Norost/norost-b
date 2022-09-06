@@ -36,6 +36,7 @@ members = [
 	"lib/rust/ipc/window_manager",
 	"lib/rust/ipc/stream_table",
 	"lib/rust/ipc/usb",
+	"base/join",
 	"base/gui_cli",
 	"base/image_viewer",
 	"base/init",

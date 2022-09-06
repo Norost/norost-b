@@ -62,8 +62,9 @@ fn main() {
 
 		let mut evt = [0; 16];
 		let l = window.read(&mut evt).unwrap();
-		match ipc_wm::Event::decode(evt[..l].try_into().unwrap()) {
+		match ipc_wm::Event::decode(evt[..l].try_into().unwrap()).unwrap() {
 			ipc_wm::Event::Resize(r) => res = r,
+			_ => {}
 		}
 	}
 }

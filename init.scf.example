@@ -1,49 +1,63 @@
 (programs
-	(minish
-		(objects
-			(file "")
-			(err gui_cli/write)
-			(in "keyboard/stream"))
-		(after "keyboard"))
+	(gpt
+		(after "usb/handlers/storage0")
+		(open
+			(data "usb/handlers/storage0" "data")
+			(share "")))
+	(framebuffer
+		(args file)
+		(open
+			(share "")
+			(framebuffer framebuffer)))
+	(fs_fat
+		(args "file")
+		(after "gpt/1")
+		(open
+			(data "gpt/1")
+			(share "")))
 	(fs_fat
 		(disabled)
-		(args "file" "disk/data")
+		(args "file")
 		(after "disk/data")
-		(objects
-			(file "")))
+		(open
+			(data "disk/data")
+			(share "")))
 	(gui_cli
-		(after "window_manager")
-		(objects
-			(file "")))
+		(after wm)
+		(args --scale 10 --no-quit)
+		(create
+			(window wm/window)
+			(share cli_a)))
+	(gui_cli
+		(after wm)
+		(args --scale 20 --no-quit)
+		(create
+			(window wm/window)
+			(share cli_b)))
 	(image_viewer
-		(after "window_manager")
-		(objects
+		(disabled)
+		(after wm)
+		(open
 			(file "")))
 	(static_http_server
 		(disabled)
 		(after "file" "net")
-		(objects
+		(open
 			(file file)
 			(net net)))
-	(ps2
-		(objects
-			(file "")))
+	(ps2 (open (file "")))
 	(pci
-		(args "drivers/pci.scf")
-		(objects
+		;(after cli_a)
+		(open
+			;(err cli_a/write)
 			(file "")
+			(pci pci)
+			(cfg drivers/pci.scf)
 			(process "process")))
-	(scancode_to_char
-		;(args "keyboard" "ps2/keyboard")
-		;(after "ps2/keyboard")
-		(args "keyboard" "usb/handlers/usb_keyboard_share_test_yay")
-		(after "usb/handlers/usb_keyboard_share_test_yay")
-		(objects
-			(file "")))
 	(ssh
-		(args drivers/ssh_conf/ssh.scf)
+		(disabled)
 		(after net userdb)
-		(objects
+		(open
 			(cfg drivers/sshd.scf)
 			(cfg_secret drivers/sshd_secret.scf)
 			(net net)
@@ -51,11 +65,15 @@
 			(process process)
 			(userdb userdb)))
 	(window_manager
-		(after "gpu/sync")
-		(objects
-			(file "")))
+		(after gpu ps2)
+		(open (gpu gpu) (file drivers))
+		(create (share wm)))
+	(join (after ps2 wm) (open (out wm/input) (in ps2/mouse)))
+	(join (after ps2 wm) (open (out wm/input) (in ps2/keyboard)))
+	(minish (after cli_a) (open (in cli_a/read) (err cli_a/write) (file "")))
+	(minish (after cli_b) (open (in cli_b/read) (err cli_b/write) (file drivers)))
 	(userdb
-		(objects
+		(open
 			(share "")
 			(users "")
 			(cfg drivers/userdb.scf))))

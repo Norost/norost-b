@@ -12,6 +12,7 @@
 //! ```
 
 #![feature(core_intrinsics)]
+#![feature(norostb)]
 
 mod config;
 mod manager;
@@ -29,6 +30,7 @@ use {
 	io_queue_rt::{Pow2Size, Queue},
 	math::{Point, Rect, Size},
 	rt::io::{Error, Handle},
+	std::collections::VecDeque,
 };
 
 pub struct Main<'a> {
@@ -78,7 +80,6 @@ impl Main<'_> {
 fn main() {
 	let config = config::load();
 
-	let root = rt::io::file_root().unwrap();
 	let sync = rt::args::handle(b"gpu").expect("gpu undefined");
 	let res = {
 		let mut b = [0; 8];
@@ -114,7 +115,10 @@ fn main() {
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
-	root.create(b"wm").unwrap().share(table.public()).unwrap();
+	rt::args::handle(b"share")
+		.expect("share undefined")
+		.share(table.public())
+		.expect("failed to share");
 
 	{
 		let c = &config.cursor;
@@ -124,8 +128,6 @@ fn main() {
 		sync.write(&[0xc5, f(c.width()), f(c.height())]).unwrap();
 	}
 
-	let mouse = root.open(b"ps2/mouse").expect("failed to open mouse");
-
 	let mut mouse_pos = Point::new((size.x / 2).into(), (size.y / 2).into());
 	let [a, b] = (mouse_pos.x as u16).to_le_bytes();
 	let [c, d] = (mouse_pos.y as u16).to_le_bytes();
@@ -133,41 +135,16 @@ fn main() {
 		.unwrap();
 
 	let queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
-	let mut poll_mouse = queue
-		.submit_read(mouse.as_raw(), Vec::with_capacity(4))
-		.unwrap();
 	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
 
 	loop {
-		if let Some((res, buf)) = task::poll(&mut poll_mouse) {
-			use scancodes::{Event, KeyCode, SpecialKeyCode};
-			res.unwrap();
-			let k = u32::from_le_bytes((&*buf).try_into().unwrap());
-			let k = Event::try_from(k).unwrap();
-			let l = k.press_level();
-			if l != 0 {
-				let (k, m, l) = match k.key() {
-					KeyCode::Special(SpecialKeyCode::MouseX) => (&mut mouse_pos.x, size.x, l),
-					KeyCode::Special(SpecialKeyCode::MouseY) => (&mut mouse_pos.y, size.y, -l),
-					_ => todo!(),
-				};
-				*k = if l >= 0 {
-					(*k + l as u32).min(m)
-				} else {
-					k.saturating_sub((-l) as _)
-				};
-				let [a, b] = (mouse_pos.x as u16).to_le_bytes();
-				let [c, d] = (mouse_pos.y as u16).to_le_bytes();
-				sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
-					.unwrap();
-			}
-			poll_mouse = queue.submit_read(mouse.as_raw(), buf).unwrap();
-		}
-
 		if task::poll(&mut poll_table).is_some() {
 			poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
 		}
 		let mut send_notif = false;
+
+		const INPUT: Handle = Handle::MAX - 1;
+
 		while let Some((handle, job_id, req)) = table.dequeue() {
 			let mut prop_buf = [0; 511];
 			let response = match req {
@@ -230,59 +207,94 @@ fn main() {
 						(_, _) => Response::Error(Error::DoesNotExist as _),
 					}
 				}
-				Request::Read { amount: _ } => match handle {
-					Handle::MAX => Response::Error(Error::InvalidOperation),
-					_ => {
-						let w = &mut manager.window_mut(handle).unwrap().user_data;
-						if let Some(evt) = w.unread_events.get_mut().pop() {
-							let evt = evt.encode();
-							let data = table.alloc(evt.len()).expect("out of buffers");
-							data.copy_from(0, &evt);
-							Response::Data(data)
-						} else {
-							w.event_listeners.get_mut().push(job_id);
-							continue;
+				Request::Read { amount: _ } if handle != Handle::MAX => {
+					let w = &mut manager.window_mut(handle).unwrap().user_data;
+					if let Some(evt) = w.unread_events.get_mut().pop() {
+						let evt = evt.encode();
+						let data = table.alloc(evt.len()).expect("out of buffers");
+						data.copy_from(0, &evt);
+						Response::Data(data)
+					} else {
+						w.event_listeners.get_mut().push_back(job_id);
+						continue;
+					}
+				}
+				Request::Write { data } if handle == INPUT => {
+					use scancodes::{Event, KeyCode, SpecialKeyCode};
+					for (_, b) in data.blocks() {
+						for i in (0..b.len() / 4).map(|i| i * 4) {
+							let mut buf = [0; 4];
+							b.copy_to(i, &mut buf);
+							let k = u32::from_le_bytes(buf);
+							let k = Event::try_from(k).unwrap();
+							let l = k.press_level();
+							if l != 0 {
+								let (k, m, l) = match k.key() {
+									KeyCode::Special(SpecialKeyCode::MouseX) => {
+										(&mut mouse_pos.x, size.x, l)
+									}
+									KeyCode::Special(SpecialKeyCode::MouseY) => {
+										(&mut mouse_pos.y, size.y, -l)
+									}
+									_ => {
+										let u = &mut manager.window_mut(0).unwrap().user_data;
+										if let Some(id) = u.event_listeners.get_mut().pop_front() {
+											let evt = ipc_wm::Event::Key(k).encode();
+											let d = table.alloc(evt.len()).expect("out of buffers");
+											d.copy_from(0, &evt);
+											table.enqueue(id, Response::Data(d));
+										} else {
+											u.unread_events.get_mut().keypresses.push_back(k);
+										}
+										continue;
+									}
+								};
+								*k = if l >= 0 {
+									(*k + l as u32).min(m)
+								} else {
+									k.saturating_sub((-l) as _)
+								};
+								let [a, b] = (mouse_pos.x as u16).to_le_bytes();
+								let [c, d] = (mouse_pos.y as u16).to_le_bytes();
+								sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
+									.unwrap();
+							}
 						}
 					}
-				},
-				Request::Write { data } => {
-					match handle {
-						Handle::MAX => Response::Error(Error::InvalidOperation),
-						h => {
-							let window = manager.window(handle).unwrap();
-							let mut header = [0; 12];
-							data.copy_to(0, &mut header);
-							let rect = manager.window_rect(h, size).unwrap();
-							let (_, rect) = title_bar::split(&config, rect);
-							let draw = ipc_wm::Flush::decode(header);
-							let draw_size = draw.size;
-							// TODO do we actually want this?
-							let draw_size = Size::new(
-								(u32::from(draw_size.x) + 1).min(rect.size().x),
-								(u32::from(draw_size.y) + 1).min(rect.size().y),
-							);
-							let draw_orig = draw.origin;
-							let draw_orig = Point::new(draw_orig.x, draw_orig.y);
-							let draw_rect = rect
-								.calc_global_pos(Rect::from_size(draw_orig, draw_size))
-								.unwrap();
-							debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
-							debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
-							assert!(
-								draw_rect.high().x * size.y as u32 + draw_rect.high().y
-									<= size.x * size.y
-							);
-							// TODO we can avoid this copy by passing shared memory buffers directly
-							// to the GPU
-							window.user_data.framebuffer.copy_to_untrusted(
-								0,
-								&mut main.shmem[..draw_rect.area() as usize * 3],
-							);
-							let l = data.len().try_into().unwrap();
-							main.sync_rect(draw_rect);
-							Response::Amount(l)
-						}
-					}
+					Response::Amount(data.len() as _)
+				}
+				Request::Write { data } if handle != Handle::MAX => {
+					let window = manager.window(handle).unwrap();
+					let mut header = [0; 12];
+					data.copy_to(0, &mut header);
+					let rect = manager.window_rect(handle, size).unwrap();
+					let (_, rect) = title_bar::split(&config, rect);
+					let draw = ipc_wm::Flush::decode(header);
+					let draw_size = draw.size;
+					// TODO do we actually want this?
+					let draw_size = Size::new(
+						(u32::from(draw_size.x) + 1).min(rect.size().x),
+						(u32::from(draw_size.y) + 1).min(rect.size().y),
+					);
+					let draw_orig = draw.origin;
+					let draw_orig = Point::new(draw_orig.x, draw_orig.y);
+					let draw_rect = rect
+						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
+						.unwrap();
+					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
+					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
+					assert!(
+						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
+					);
+					// TODO we can avoid this copy by passing shared memory buffers directly
+					// to the GPU
+					window
+						.user_data
+						.framebuffer
+						.copy_to_untrusted(0, &mut main.shmem[..draw_rect.area() as usize * 3]);
+					let l = data.len().try_into().unwrap();
+					main.sync_rect(draw_rect);
+					Response::Amount(l)
 				}
 				Request::Close => {
 					manager.destroy_window(handle).unwrap();
@@ -305,16 +317,18 @@ fn main() {
 					}
 					continue;
 				}
-				Request::Open { .. } => todo!(),
-				Request::Share { share } => match handle {
-					Handle::MAX => Response::Error(Error::InvalidOperation),
-					_ => {
-						manager.window_mut(handle).unwrap().user_data.framebuffer =
-							FrameBuffer::wrap(&share);
-						Response::Amount(0)
+				Request::Open { path } if handle == Handle::MAX => {
+					match &*path.copy_into(&mut [0; 16]).0 {
+						b"input" => Response::Handle(INPUT),
+						_ => Response::Error(Error::DoesNotExist),
 					}
-				},
-				_ => todo!(),
+				}
+				Request::Share { share } if handle != Handle::MAX => {
+					manager.window_mut(handle).unwrap().user_data.framebuffer =
+						FrameBuffer::wrap(&share);
+					Response::Amount(0)
+				}
+				_ => Response::Error(Error::InvalidOperation),
 			};
 			table.enqueue(job_id, response);
 			send_notif = true;
@@ -374,16 +388,20 @@ impl Default for FrameBuffer {
 struct Client {
 	framebuffer: FrameBuffer,
 	unread_events: RefCell<Events>,
-	event_listeners: RefCell<Vec<JobId>>,
+	event_listeners: RefCell<VecDeque<JobId>>,
 }
 
 #[derive(Default)]
 struct Events {
 	resize: Option<ipc_wm::Resolution>,
+	keypresses: VecDeque<scancodes::Event>,
 }
 
 impl Events {
 	fn pop(&mut self) -> Option<ipc_wm::Event> {
-		self.resize.take().map(ipc_wm::Event::Resize)
+		self.resize
+			.take()
+			.map(ipc_wm::Event::Resize)
+			.or_else(|| self.keypresses.pop_front().map(ipc_wm::Event::Key))
 	}
 }

@@ -683,8 +683,10 @@ dependencies = [
  "fontdue",
  "hashbrown",
  "ipc_window_manager",
+ "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
+ "scancodes",
 ]
 
 [[package]]
@@ -749,6 +751,15 @@ name = "ipc_window_manager"
 version = "0.2.0"
 dependencies = [
  "norost_ipc_spec",
+ "scancodes",
+]
+
+[[package]]
+name = "join"
+version = "0.1.0"
+dependencies = [
+ "norost_rt_default",
+ "norostb_rt",
 ]
 
 [[package]]

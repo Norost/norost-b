@@ -144,7 +144,6 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 			bi::Info::AcpiRsdp(r) => rsdp = Some(r),
 			bi::Info::FramebufferInfo(fb) => {
 				let f = |n: u32| n.checked_sub(1).and_then(|n| n.try_into().ok());
-				log!("{:?}", &fb);
 				info.framebuffer = info::Framebuffer {
 					base: fb.addr,
 					pitch: fb.pitch,

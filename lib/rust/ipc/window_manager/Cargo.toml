@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies.norost_ipc_spec]
 git = "https://git.sr.ht/~demindiro/norost_ipc_spec"
+
+[dependencies.scancodes]
+path = "../../../../../lib/scancodes"
