@@ -54,7 +54,7 @@ mod requests;
 mod xhci;
 
 use {
-	alloc::{collections::BTreeMap, vec::Vec},
+	alloc::{boxed::Box, collections::BTreeMap, vec::Vec},
 	core::{future::Future, num::NonZeroU8, pin::Pin, str, task::Context, time::Duration},
 	dma::Dma,
 	driver_utils::{
@@ -62,6 +62,7 @@ use {
 		task::waker,
 	},
 	io_queue_rt::{Pow2Size, Queue},
+	requests::{Configuration, DescriptorResult, Device, Endpoint, Interface},
 	rt::{Error, Handle},
 	rt_default as _,
 };
@@ -85,13 +86,6 @@ fn main() -> ! {
 	let mut ctrl = xhci::Xhci::new(&dev).unwrap();
 	let mut drivers = driver::Drivers::new(&queue);
 
-	let mut jobs = BTreeMap::<u64, Job>::default();
-	let mut load_driver = BTreeMap::<u64, LoadDriver>::default();
-
-	let mut conf_driver = BTreeMap::default();
-	let mut wait_finish_config = BTreeMap::default();
-	let mut get_report = BTreeMap::default();
-
 	let (tbl_buf, _) = driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
 	let tbl = StreamTable::new(&tbl_buf, 512.try_into().unwrap(), (1 << 12) - 1);
 	file_root
@@ -103,6 +97,34 @@ fn main() -> ! {
 
 	let mut poll_ctrl = queue.submit_read(ctrl.notifier().as_raw(), ()).unwrap();
 	let mut poll_tbl = queue.submit_read(tbl.notifier().as_raw(), ()).unwrap();
+
+	let mut transfers = BTreeMap::default();
+	let mut wait_finish_config = BTreeMap::default();
+
+	enum Transfer<'a> {
+		Job(Job),
+		GetDevice,
+		GetConfiguration(GetConfiguration),
+		SetConfiguration(Box<SetConfiguration<'a>>),
+		GetReport(),
+	}
+	struct GetConfiguration {
+		device: Device,
+	}
+	struct SetConfiguration<'a> {
+		driver: &'a config::Driver,
+		endpoints: Vec<Endpoint>,
+		interface: Interface,
+		device: Device,
+		config: Configuration,
+	}
+	struct EvaluateContext<'a> {
+		driver: &'a config::Driver,
+		endpoints: Vec<Endpoint>,
+		interface: Interface,
+		device: Device,
+		config: Configuration,
+	}
 
 	loop {
 		let w = waker::dummy();
@@ -126,7 +148,7 @@ fn main() -> ! {
 							)
 							.unwrap_or_else(|_| todo!());
 						trace!("id {:x}", e);
-						load_driver.insert(e, LoadDriver { base: None });
+						transfers.insert(e, Transfer::GetDevice);
 					}
 					Event::Transfer { slot, endpoint, id, buffer, code } => {
 						trace!(
@@ -141,27 +163,33 @@ fn main() -> ! {
 							Ok(CompletionCode::Success) | Ok(CompletionCode::ShortPacket) => {}
 							e => todo!("{:?}", e),
 						}
-						if let Some(j) = jobs.remove(&id) {
-							trace!("progress job");
-							if let Some((job_id, resp)) =
-								j.progress(&mut jobs, &mut ctrl, slot, buffer.unwrap(), &tbl)
-							{
-								trace!("finish job");
-								tbl.enqueue(job_id, resp);
-								tbl.flush();
-							}
-						} else if let Some(mut j) = load_driver.remove(&id) {
-							trace!("load driver");
-							let buffer = buffer.unwrap();
-							let mut it = requests::decode(unsafe { buffer.as_ref() });
-							match it.next().unwrap() {
-								requests::DescriptorResult::Device(info) => {
-									j.base = Some((info.class, info.subclass, info.protocol));
+						if let Some(trf) = transfers.remove(&id) {
+							match trf {
+								Transfer::Job(mut j) => {
+									trace!("Job");
+									match j.progress(&mut ctrl, slot, buffer.unwrap(), &tbl) {
+										JobResult::Done { job_id, response } => {
+											trace!("finish job");
+											tbl.enqueue(job_id, response);
+											tbl.flush();
+										}
+										JobResult::Next { id, job } => {
+											trace!("continue job");
+											transfers.insert(id, Transfer::Job(job));
+										}
+									}
+								}
+								Transfer::GetDevice => {
+									trace!("GetDevice");
+									let buffer = buffer.unwrap();
+									let mut it = requests::decode(unsafe { buffer.as_ref() });
+									let device = it.next().unwrap().into_device().unwrap();
+									let base = (device.class, device.subclass, device.protocol);
 									info!(
 										"slot {}: device {:02x}/{:02x}/{:02x}",
-										slot, info.class, info.subclass, info.protocol
+										slot, device.class, device.subclass, device.protocol
 									);
-									let e = ctrl
+									let id = ctrl
 										.send_request(
 											slot,
 											requests::Request::GetDescriptor {
@@ -172,39 +200,48 @@ fn main() -> ! {
 											},
 										)
 										.unwrap_or_else(|_| todo!());
-									load_driver.insert(e, j);
+									transfers.insert(
+										id,
+										Transfer::GetConfiguration(GetConfiguration { device }),
+									);
 								}
-								requests::DescriptorResult::Configuration(config) => {
-									let base = j.base.unwrap();
+								Transfer::GetConfiguration(j) => {
+									trace!("GetConfiguration");
+									let buffer = buffer.unwrap();
+									let mut it = requests::decode(unsafe { buffer.as_ref() });
+									let config = it.next().unwrap().into_configuration().unwrap();
 									let mut n = usize::from(config.num_interfaces);
 									let mut driver = None;
 									let mut endpoints = Vec::new();
 									let mut last_intf = None;
+									let base =
+										(j.device.class, j.device.subclass, j.device.protocol);
 									while n > 0 {
 										match it.next().unwrap() {
 											requests::DescriptorResult::Interface(i) => {
 												last_intf = Some(i.index);
-												let intf = (i.class, i.subclass, i.protocol);
 												info!(
 													"slot {}: interface {:02x}/{:02x}/{:02x}",
-													slot, intf.0, intf.1, intf.2
+													slot, i.class, i.subclass, i.protocol
 												);
+												let intf = (i.class, i.subclass, i.protocol);
 												if driver.is_none() {
 													n += usize::from(i.num_endpoints);
 													conf.get_driver(base, intf)
-														.map(|d| driver = Some((d, i, intf)));
+														.map(|d| driver = Some((d, i)));
 												} else {
 													break;
 												}
+												n -= 1;
 											}
 											requests::DescriptorResult::Endpoint(e) => {
 												if driver.is_some() {
 													endpoints.push(e)
 												}
+												n -= 1;
 											}
 											requests::DescriptorResult::Unknown { ty, .. } => {
 												warn!("Unknown descriptor type {}", ty);
-												continue;
 											}
 											requests::DescriptorResult::Invalid => {
 												todo!("invalid descr")
@@ -232,14 +269,12 @@ fn main() -> ! {
 													interface: last_intf.unwrap(),
 												})).unwrap();
 												rt::dbg!(h);
-												get_report.insert(id, ());
-												continue;
+												transfers.insert(id, Transfer::GetReport());
 											}
 										}
-										n -= 1;
 									}
 
-									let Some((driver, interface, intf)) = driver else {
+									let Some((driver, interface)) = driver else {
 										trace!("no driver found");
 										continue;
 									};
@@ -252,34 +287,46 @@ fn main() -> ! {
 											},
 										)
 										.unwrap_or_else(|_| todo!());
-									conf_driver.insert(
+									transfers.insert(
 										id,
-										(config, driver, interface, intf, endpoints, base),
+										Transfer::SetConfiguration(
+											SetConfiguration {
+												device: j.device,
+												driver,
+												interface,
+												endpoints,
+												config,
+											}
+											.into(),
+										),
 									);
 								}
-								requests::DescriptorResult::Hid(_) => todo!(),
-								requests::DescriptorResult::String(_) => todo!(),
-								requests::DescriptorResult::Endpoint(_) => todo!(),
-								requests::DescriptorResult::Unknown { .. } => todo!(),
-								requests::DescriptorResult::Interface(_) => todo!(),
-								requests::DescriptorResult::Truncated { .. } => todo!(),
-								requests::DescriptorResult::Invalid => todo!(),
+								Transfer::SetConfiguration(c) => {
+									trace!("SetConfiguration");
+									let id = ctrl.configure_device(
+										slot,
+										xhci::DeviceConfig {
+											config: &c.config,
+											interface: &c.interface,
+											endpoints: &c.endpoints,
+										},
+									);
+									wait_finish_config.insert(
+										id,
+										EvaluateContext {
+											driver: c.driver,
+											endpoints: c.endpoints,
+											interface: c.interface,
+											device: c.device,
+											config: c.config,
+										}
+										.into(),
+									);
+								}
+								Transfer::GetReport() => {
+									rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
+								}
 							}
-						} else if let Some((config, driver, interface, intf, endpoints, base)) =
-							conf_driver.remove(&id)
-						{
-							trace!("SetConfigured");
-							let id = ctrl.configure_device(
-								slot,
-								xhci::DeviceConfig {
-									config: &config,
-									interface: &interface,
-									endpoints: &endpoints,
-								},
-							);
-							wait_finish_config.insert(id, (driver, intf, endpoints, base));
-						} else if let Some(h) = get_report.remove(&id) {
-							rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
 						} else {
 							trace!("driver transfer");
 							let buf = buffer.unwrap();
@@ -298,10 +345,15 @@ fn main() -> ! {
 					Event::DeviceConfigured { slot, id, code } => {
 						assert_eq!(code, Ok(::xhci::ring::trb::event::CompletionCode::Success));
 						trace!("configured device slot {}, {:?}", slot, code);
-						let (driver, intf, endpoints, base) =
-							wait_finish_config.remove(&id).unwrap();
+						let c: EvaluateContext = wait_finish_config.remove(&id).unwrap();
+						let base = (c.device.class, c.device.subclass, c.device.protocol);
+						let intf = (
+							c.interface.class,
+							c.interface.subclass,
+							c.interface.protocol,
+						);
 						drivers
-							.load_driver(slot, driver, base, intf, &endpoints)
+							.load_driver(slot, c.driver, base, intf, &c.endpoints)
 							.unwrap();
 						code.unwrap();
 					}
@@ -399,8 +451,8 @@ fn main() -> ! {
 						Object::ListDevices { slot } => {
 							if let Some(s) = ctrl.next_slot(NonZeroU8::new(*slot)) {
 								*slot = s.get();
-								Job::get_info(&mut jobs, &mut ctrl, s, job_id);
-								//Job::get_string(&mut jobs, &mut ctrl, s, job_id);
+								let (id, job) = Job::get_info(&mut ctrl, s, job_id);
+								transfers.insert(id, Transfer::Job(job));
 								continue 'req;
 							} else {
 								*slot = 255;
@@ -447,12 +499,7 @@ enum JobState {
 }
 
 impl Job {
-	fn get_info(
-		jobs: &mut BTreeMap<u64, Self>,
-		ctrl: &mut xhci::Xhci,
-		slot: NonZeroU8,
-		job_id: JobId,
-	) {
+	fn get_info(ctrl: &mut xhci::Xhci, slot: NonZeroU8, job_id: JobId) -> (u64, Self) {
 		let buffer = Dma::new_slice(64).unwrap();
 		let id = ctrl
 			.send_request(
@@ -460,17 +507,16 @@ impl Job {
 				requests::Request::GetDescriptor { buffer, ty: requests::GetDescriptor::Device },
 			)
 			.unwrap_or_else(|_| todo!());
-		jobs.insert(id, Self { state: JobState::WaitDeviceInfo, job_id });
+		(id, Self { state: JobState::WaitDeviceInfo, job_id })
 	}
 
 	fn progress<'a>(
 		mut self,
-		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
 		slot: NonZeroU8,
 		buf: Dma<[u8]>,
 		tbl: &'a StreamTable,
-	) -> Option<(JobId, Response<'a, 'static>)> {
+	) -> JobResult<'a> {
 		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
 		match &self.state {
 			JobState::WaitDeviceInfo => {
@@ -486,12 +532,11 @@ impl Job {
 						)
 						.unwrap_or_else(|_| todo!());
 					self.state = JobState::WaitDeviceName;
-					jobs.insert(id, self);
-					None
+					JobResult::Next { id, job: self }
 				} else {
 					let name = tbl.alloc(3).expect("out of buffers");
 					name.copy_from(0, b"N/A");
-					Some((self.job_id, Response::Data(name)))
+					JobResult::Done { job_id: self.job_id, response: Response::Data(name) }
 				}
 			}
 			JobState::WaitDeviceName => {
@@ -503,12 +548,13 @@ impl Job {
 					}
 					name.copy_from(i, &[c as _]);
 				}
-				Some((self.job_id, Response::Data(name)))
+				JobResult::Done { job_id: self.job_id, response: Response::Data(name) }
 			}
 		}
 	}
 }
 
-struct LoadDriver {
-	base: Option<(u8, u8, u8)>,
+enum JobResult<'a> {
+	Next { id: u64, job: Job },
+	Done { job_id: JobId, response: Response<'a, 'static> },
 }

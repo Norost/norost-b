@@ -59,20 +59,21 @@ pub enum DescriptorResult<'a> {
 	Invalid,
 }
 
-impl<'a> DescriptorResult<'a> {
-	pub fn into_device(self) -> Option<Device> {
-		match self {
-			Self::Device(v) => Some(v),
-			_ => None,
+macro_rules! into {
+	($v:ident $f:ident $t:ty) => {
+		pub fn $f(self) -> Option<$t> {
+			match self {
+				Self::$v(v) => Some(v),
+				_ => None,
+			}
 		}
-	}
+	};
+}
 
-	pub fn into_string(self) -> Option<DescriptorStringIter<'a>> {
-		match self {
-			Self::String(v) => Some(v),
-			_ => None,
-		}
-	}
+impl<'a> DescriptorResult<'a> {
+	into!(Device into_device Device);
+	into!(String into_string DescriptorStringIter<'a>);
+	into!(Configuration into_configuration Configuration);
 }
 
 #[derive(Debug)]
