@@ -377,9 +377,11 @@ impl DeviceContextBaseAddressArray {
 			.max_scratchpad_buffers();
 		let sp_count = usize::try_from(sp_count).unwrap();
 		trace!("{} scratch pages", sp_count);
-		let mut storage = Dma::<[u64; 256]>::new()?;
+		let mut storage = Dma::<[u64; 256]>::new_zeroed()?;
 		let mut scratchpad_array = Dma::new_slice(sp_count)?;
-		let scratchpad_pages = (0..sp_count).map(|_| Dma::new()).try_collect::<Box<_>>()?;
+		let scratchpad_pages = (0..sp_count)
+			.map(|_| Dma::new_zeroed())
+			.try_collect::<Box<_>>()?;
 		for (e, p) in unsafe { scratchpad_array.as_mut() }
 			.iter_mut()
 			.zip(&*scratchpad_pages)

@@ -2,6 +2,7 @@
 
 #![no_std]
 #![feature(start)]
+#![feature(ptr_as_uninit)]
 #![feature(inline_const, const_option)]
 #![feature(let_else)]
 #![feature(array_chunks)]
@@ -368,7 +369,7 @@ fn main() -> ! {
 					assert!(endpoint > 0);
 					let ep = endpoint << 1 | 1;
 					assert!(ep < 32);
-					let buf = Dma::new_slice(size.try_into().unwrap()).unwrap();
+					let mut buf = Dma::new_slice(size.try_into().unwrap()).unwrap();
 					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true)
 				}
 				Event::DataOut { endpoint, data } => {

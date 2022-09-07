@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-#default = ["trace"]
+#default = ["trace", "poison"]
 trace = []
+poison = []
 
 [dependencies.pci]
 path = "../../lib/rust/pci"

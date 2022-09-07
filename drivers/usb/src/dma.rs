@@ -39,8 +39,25 @@ where
 	}
 }
 
-impl<T> Dma<T> {
+impl<T> Dma<T>
+where
+	T: Default,
+{
 	pub fn new() -> Result<Self, rt::Error> {
+		let s = Self::new_uninit()?;
+		unsafe { s.ptr.as_ptr().write(Default::default()) };
+		Ok(s)
+	}
+}
+
+impl<T> Dma<T> {
+	pub fn new_zeroed() -> Result<Self, rt::Error> {
+		let s = Self::new_uninit()?;
+		unsafe { s.ptr.as_ptr().write_bytes(0, 1) };
+		Ok(s)
+	}
+
+	pub fn new_uninit() -> Result<Self, rt::Error> {
 		let (ptr, phys) = match mem::size_of::<T>().try_into() {
 			Ok(l) => {
 				let (a, b, _) = dma::alloc_dma(l)?;
@@ -48,12 +65,37 @@ impl<T> Dma<T> {
 			}
 			Err(_) => (NonNull::dangling(), 0),
 		};
+		#[cfg(feature = "poison")]
+		unsafe {
+			ptr.as_ptr().write_bytes(0xcc, 1)
+		};
 		Ok(Self { ptr: ptr.cast(), phys, _marker: PhantomData })
 	}
 }
 
-impl<T> Dma<[T]> {
+impl<T> Dma<[T]>
+where
+	T: Default,
+{
 	pub fn new_slice(len: usize) -> Result<Self, rt::Error> {
+		let s = Self::new_slice_uninit(len)?;
+		unsafe {
+			for p in s.ptr.as_uninit_slice_mut() {
+				p.write(Default::default());
+			}
+		}
+		Ok(s)
+	}
+}
+
+impl<T> Dma<[T]> {
+	pub fn new_slice_zeroed(len: usize) -> Result<Self, rt::Error> {
+		let s = Self::new_slice_uninit(len)?;
+		unsafe { s.ptr.as_ptr().as_mut_ptr().write_bytes(0, len) };
+		Ok(s)
+	}
+
+	pub fn new_slice_uninit(len: usize) -> Result<Self, rt::Error> {
 		let (layout, _) = Layout::new::<T>().repeat(len).unwrap();
 		let (ptr, phys) = match layout.size().try_into() {
 			Ok(l) => {
@@ -61,6 +103,10 @@ impl<T> Dma<[T]> {
 				(a, b)
 			}
 			Err(_) => (NonNull::dangling(), 0),
+		};
+		#[cfg(feature = "poison")]
+		unsafe {
+			ptr.as_ptr().write_bytes(0xcc, len)
 		};
 		Ok(Self {
 			ptr: NonNull::slice_from_raw_parts(ptr.cast(), len),
