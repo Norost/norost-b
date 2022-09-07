@@ -1,3 +1,5 @@
+pub mod hid;
+
 use {
 	crate::dma::Dma,
 	core::{fmt, mem, slice::ArrayChunks},
@@ -37,6 +39,7 @@ const DESCRIPTOR_OTHER_SPEED_CONFIGURATION: u8 = 7;
 #[allow(dead_code)]
 const DESCRIPTOR_INTERFACE_POWER: u8 = 8;
 
+#[derive(Debug)]
 pub enum GetDescriptor {
 	Device,
 	Configuration { index: u8 },
@@ -50,6 +53,7 @@ pub enum DescriptorResult<'a> {
 	String(DescriptorStringIter<'a>),
 	Interface(Interface),
 	Endpoint(Endpoint),
+	Hid(hid::descriptor::Hid),
 	Unknown { ty: u8, data: &'a [u8] },
 	Truncated { length: u8 },
 	Invalid,
@@ -307,9 +311,11 @@ pub enum EndpointTransfer {
 #[derive(Debug)]
 pub struct DescriptorStringIter<'a>(ArrayChunks<'a, u8, 2>);
 
+#[derive(Debug)]
 pub enum Request {
 	GetDescriptor { ty: GetDescriptor, buffer: Dma<[u8]> },
 	SetConfiguration { value: u8 },
+	Hid(hid::report::Request),
 }
 
 pub struct RawRequest {
@@ -321,6 +327,20 @@ pub struct RawRequest {
 	pub buffer: Option<Dma<[u8]>>,
 }
 
+mod request_type {
+	pub const DIR_OUT: u8 = 0 << 7;
+	pub const DIR_IN: u8 = 1 << 7;
+
+	pub const TYPE_STANDARD: u8 = 0 << 5;
+	pub const TYPE_CLASS: u8 = 1 << 5;
+	pub const TYPE_VENDOR: u8 = 2 << 5;
+
+	pub const RECIPIENT_DEVICE: u8 = 0;
+	pub const RECIPIENT_INTERFACE: u8 = 1;
+	pub const RECIPIENT_ENDPOINT: u8 = 2;
+	pub const RECIPIENT_OTHER: u8 = 3;
+}
+
 #[derive(Debug)]
 pub enum Direction {
 	In,
@@ -329,9 +349,10 @@ pub enum Direction {
 
 impl Request {
 	pub fn into_raw(self) -> RawRequest {
+		use request_type::*;
 		match self {
 			Self::GetDescriptor { ty, buffer } => RawRequest {
-				request_type: 0b1000_0000,
+				request_type: DIR_IN | TYPE_STANDARD | RECIPIENT_DEVICE,
 				direction: Direction::In,
 				request: GET_DESCRIPTOR,
 				value: match ty {
@@ -347,13 +368,14 @@ impl Request {
 				buffer: Some(buffer),
 			},
 			Self::SetConfiguration { value } => RawRequest {
-				request_type: 0b0000_0000,
+				request_type: DIR_OUT | TYPE_STANDARD | RECIPIENT_DEVICE,
 				direction: Direction::Out,
 				request: SET_CONFIGURATION,
 				value: value.into(),
 				index: 0,
 				buffer: None,
 			},
+			Self::Hid(h) => h.into_raw(),
 		}
 	}
 }
@@ -474,6 +496,7 @@ impl<'a> Iterator for Iter<'a> {
 				DESCRIPTOR_STRING => DescriptorResult::String(decode_string(b)),
 				DESCRIPTOR_INTERFACE => DescriptorResult::Interface(decode_interface(b)),
 				DESCRIPTOR_ENDPOINT => DescriptorResult::Endpoint(decode_endpoint(b)),
+				hid::descriptor::HID => DescriptorResult::Hid(hid::descriptor::decode_hid(b)),
 				ty => DescriptorResult::Unknown { ty, data: b },
 			};
 			self.buf = &buf[usize::from(l)..];

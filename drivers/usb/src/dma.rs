@@ -1,5 +1,5 @@
 use {
-	core::{alloc::Layout, marker::PhantomData, mem, ptr::NonNull},
+	core::{alloc::Layout, fmt, marker::PhantomData, mem, ptr::NonNull},
 	driver_utils::dma,
 };
 
@@ -71,5 +71,14 @@ impl<T> Dma<[T]> {
 
 	pub fn len(&self) -> usize {
 		self.ptr.len()
+	}
+}
+
+impl<T> fmt::Debug for Dma<T>
+where
+	T: ?Sized,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_list().entry(&format_args!("..")).finish()
 	}
 }

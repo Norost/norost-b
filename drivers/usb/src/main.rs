@@ -56,6 +56,7 @@ mod xhci;
 use {
 	alloc::{collections::BTreeMap, vec::Vec},
 	core::{future::Future, num::NonZeroU8, pin::Pin, str, task::Context, time::Duration},
+	dma::Dma,
 	driver_utils::{
 		os::stream_table::{JobId, Request, Response, StreamTable},
 		task::waker,
@@ -89,6 +90,7 @@ fn main() -> ! {
 
 	let mut conf_driver = BTreeMap::default();
 	let mut wait_finish_config = BTreeMap::default();
+	let mut get_report = BTreeMap::default();
 
 	let (tbl_buf, _) = driver_utils::dma::alloc_dma_object((1 << 20).try_into().unwrap()).unwrap();
 	let tbl = StreamTable::new(&tbl_buf, 512.try_into().unwrap(), (1 << 12) - 1);
@@ -113,7 +115,7 @@ fn main() -> ! {
 				match e {
 					Event::NewDevice { slot } => {
 						trace!("new device, slot {}", slot);
-						let buffer = dma::Dma::new_slice(1024).unwrap_or_else(|_| todo!());
+						let buffer = Dma::new_slice(1024).unwrap_or_else(|_| todo!());
 						let e = ctrl
 							.send_request(
 								slot,
@@ -155,6 +157,10 @@ fn main() -> ! {
 							match it.next().unwrap() {
 								requests::DescriptorResult::Device(info) => {
 									j.base = Some((info.class, info.subclass, info.protocol));
+									info!(
+										"slot {}: device {:02x}/{:02x}/{:02x}",
+										slot, info.class, info.subclass, info.protocol
+									);
 									let e = ctrl
 										.send_request(
 											slot,
@@ -173,10 +179,16 @@ fn main() -> ! {
 									let mut n = usize::from(config.num_interfaces);
 									let mut driver = None;
 									let mut endpoints = Vec::new();
+									let mut last_intf = None;
 									while n > 0 {
 										match it.next().unwrap() {
 											requests::DescriptorResult::Interface(i) => {
+												last_intf = Some(i.index);
 												let intf = (i.class, i.subclass, i.protocol);
+												info!(
+													"slot {}: interface {:02x}/{:02x}/{:02x}",
+													slot, intf.0, intf.1, intf.2
+												);
 												if driver.is_none() {
 													n += usize::from(i.num_endpoints);
 													conf.get_driver(base, intf)
@@ -190,14 +202,39 @@ fn main() -> ! {
 													endpoints.push(e)
 												}
 											}
-											requests::DescriptorResult::Unknown { .. } => continue,
+											requests::DescriptorResult::Unknown { ty, .. } => {
+												warn!("Unknown descriptor type {}", ty);
+												continue;
+											}
 											requests::DescriptorResult::Invalid => {
 												todo!("invalid descr")
 											}
 											requests::DescriptorResult::Truncated { length } => {
 												todo!("fetch more ({})", length)
 											}
-											_ => todo!("unexpected"),
+											requests::DescriptorResult::Device(_) => {
+												todo!("unexpected")
+											}
+											requests::DescriptorResult::Configuration(_) => {
+												todo!("unexpected")
+											}
+											requests::DescriptorResult::String(_) => {
+												todo!("unexpected")
+											}
+											requests::DescriptorResult::Hid(h) => {
+												let mut buffer =
+													Dma::new_slice(h.len.into()).unwrap();
+												unsafe { buffer.as_mut().fill(0xcc) }
+												let id = ctrl.send_request(slot, requests::Request::Hid(requests::hid::report::Request::GetReport {
+													buffer,
+													ty: 3,//h.ty,
+													id: h.ty,
+													interface: last_intf.unwrap(),
+												})).unwrap();
+												rt::dbg!(h);
+												get_report.insert(id, ());
+												continue;
+											}
 										}
 										n -= 1;
 									}
@@ -220,6 +257,7 @@ fn main() -> ! {
 										(config, driver, interface, intf, endpoints, base),
 									);
 								}
+								requests::DescriptorResult::Hid(_) => todo!(),
 								requests::DescriptorResult::String(_) => todo!(),
 								requests::DescriptorResult::Endpoint(_) => todo!(),
 								requests::DescriptorResult::Unknown { .. } => todo!(),
@@ -240,6 +278,8 @@ fn main() -> ! {
 								},
 							);
 							wait_finish_config.insert(id, (driver, intf, endpoints, base));
+						} else if let Some(h) = get_report.remove(&id) {
+							rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
 						} else {
 							trace!("driver transfer");
 							let buf = buffer.unwrap();
@@ -276,7 +316,7 @@ fn main() -> ! {
 					assert!(endpoint > 0);
 					let ep = endpoint << 1 | 1;
 					assert!(ep < 32);
-					let buf = dma::Dma::new_slice(size.try_into().unwrap()).unwrap();
+					let buf = Dma::new_slice(size.try_into().unwrap()).unwrap();
 					ctrl.transfer(slot, ep.try_into().unwrap(), buf, true)
 				}
 				Event::DataOut { endpoint, data } => {
@@ -413,7 +453,7 @@ impl Job {
 		slot: NonZeroU8,
 		job_id: JobId,
 	) {
-		let buffer = dma::Dma::new_slice(64).unwrap();
+		let buffer = Dma::new_slice(64).unwrap();
 		let id = ctrl
 			.send_request(
 				slot,
@@ -428,24 +468,20 @@ impl Job {
 		jobs: &mut BTreeMap<u64, Self>,
 		ctrl: &mut xhci::Xhci,
 		slot: NonZeroU8,
-		buf: dma::Dma<[u8]>,
+		buf: Dma<[u8]>,
 		tbl: &'a StreamTable,
 	) -> Option<(JobId, Response<'a, 'static>)> {
 		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
 		match &self.state {
 			JobState::WaitDeviceInfo => {
 				let info = res.into_device().unwrap();
-				//if info.index_product != 0 {
-				if info.index_manufacturer != 0 {
+				if info.index_product != 0 {
 					let id = ctrl
 						.send_request(
 							slot,
 							requests::Request::GetDescriptor {
 								buffer: buf,
-								ty: requests::GetDescriptor::String {
-									//index: info.index_product,
-									index: info.index_manufacturer,
-								},
+								ty: requests::GetDescriptor::String { index: info.index_product },
 							},
 						)
 						.unwrap_or_else(|_| todo!());
