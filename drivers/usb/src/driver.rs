@@ -1,5 +1,4 @@
 use {
-	crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer},
 	alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec},
 	core::{
 		future::Future,
@@ -8,6 +7,7 @@ use {
 		task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 	},
 	io_queue_rt::{Open, Queue, Read, Write},
+	usb_request::descriptor::{Direction, Endpoint, EndpointNumber, EndpointTransfer},
 };
 
 const MSG_SIZE: usize = 32;

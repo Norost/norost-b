@@ -13,10 +13,11 @@ mod vendor;
 use errata::Errata;
 
 use {
-	crate::{dma::Dma, requests},
+	crate::dma::Dma,
 	alloc::{boxed::Box, collections::BTreeMap},
 	command::Pending,
 	core::{num::NonZeroU8, time::Duration},
+	usb_request::descriptor::{Configuration, Endpoint, Interface},
 	xhci::{
 		registers::{
 			operational::DeviceContextBaseAddressArrayPointerRegister,
@@ -237,13 +238,20 @@ impl Xhci {
 	pub fn send_request(
 		&mut self,
 		slot: NonZeroU8,
-		req: crate::requests::Request,
+		req: usb_request::Request,
+		buf: Dma<[u8]>,
 	) -> Result<ring::EntryId, ()> {
 		trace!("send request, slot {}", slot);
 		let mut req = req.into_raw();
-		let id = self.devices.get_mut(&slot).unwrap().send_request(0, &req)?;
+		let id = self
+			.devices
+			.get_mut(&slot)
+			.unwrap()
+			.send_request(0, &req, &buf)?;
 		self.ring(slot.get(), 0, 1);
-		req.buffer.take().map(|b| self.transfers.insert(id, b));
+		if buf.len() != 0 {
+			self.transfers.insert(id, buf);
+		}
 		Ok(id)
 	}
 
@@ -424,7 +432,7 @@ pub enum Event {
 }
 
 pub struct DeviceConfig<'a> {
-	pub config: &'a requests::Configuration,
-	pub interface: &'a requests::Interface,
-	pub endpoints: &'a [requests::Endpoint],
+	pub config: &'a Configuration,
+	pub interface: &'a Interface,
+	pub endpoints: &'a [Endpoint],
 }

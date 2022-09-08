@@ -2,12 +2,13 @@
 
 use {
 	super::{ring, DeviceConfig, Pending, Xhci},
-	crate::{
-		dma::Dma,
-		requests::{Direction, EndpointTransfer, RawRequest},
-	},
+	crate::dma::Dma,
 	alloc::{boxed::Box, vec::Vec},
 	core::num::NonZeroU8,
+	usb_request::{
+		descriptor::{Direction, EndpointTransfer},
+		RawRequest,
+	},
 	xhci::{
 		context::{Device32Byte, EndpointState, EndpointType, Input32Byte, InputHandler},
 		ring::trb::{command, transfer},
@@ -36,26 +37,24 @@ impl Device {
 		&mut self,
 		interrupter: u16,
 		req: &RawRequest,
+		buf: &Dma<[u8]>,
 	) -> Result<ring::EntryId, ()> {
 		// Setup
-		let (phys, len) = req
-			.buffer
-			.as_ref()
-			.map_or((0, 0), |b| (b.as_phys(), b.len()));
-		let len = u16::try_from(len).unwrap_or(u16::MAX);
+		let len = u16::try_from(buf.len()).unwrap_or(u16::MAX);
 		trace!(
 			"send request ty {:#x} val {:#x} index {:#x} phys {:#x} len {}",
 			req.request_type,
 			req.value,
 			req.index,
-			phys,
-			len
+			buf.as_phys(),
+			buf.len()
 		);
 		let ring = &mut self.transfer_ring;
 
-		let (dir, trf) = match req.direction {
-			Direction::In => (transfer::Direction::In, transfer::TransferType::In),
-			Direction::Out => (transfer::Direction::Out, transfer::TransferType::Out),
+		let (dir, trf) = if req.direction_in() {
+			(transfer::Direction::In, transfer::TransferType::In)
+		} else {
+			(transfer::Direction::Out, transfer::TransferType::Out)
 		};
 
 		// Page 85 of manual for example
@@ -73,7 +72,7 @@ impl Device {
 			ring.enqueue(transfer::Allowed::DataStage(
 				*transfer::DataStage::new()
 					.set_direction(dir)
-					.set_data_buffer_pointer(phys)
+					.set_data_buffer_pointer(buf.as_phys())
 					// FIXME qemu crashes if this is less than length in SetupStage
 					.set_trb_transfer_length(len.into()),
 			));

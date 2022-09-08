@@ -102,7 +102,7 @@ impl<T> Dma<[T]> {
 				let (a, b, _) = dma::alloc_dma(l)?;
 				(a, b)
 			}
-			Err(_) => (NonNull::dangling(), 0),
+			Err(_) => (NonNull::<T>::dangling().cast(), 0),
 		};
 		#[cfg(feature = "poison")]
 		unsafe {

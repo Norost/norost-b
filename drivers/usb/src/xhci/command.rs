@@ -1,6 +1,6 @@
 use {
 	super::{device, ring::EntryId, Event, Xhci},
-	crate::{dma::Dma, requests},
+	crate::dma::Dma,
 	core::num::NonZeroU8,
 	xhci::ring::trb::{
 		command::Allowed,
@@ -49,14 +49,16 @@ impl Xhci {
 				assert_eq!(code, Ok(CompletionCode::Success));
 				if e.should_adjust_packet_size() {
 					trace!("adjust packet size: get descriptor");
-					let req = crate::requests::Request::GetDescriptor {
-						buffer: Dma::new_slice(8).unwrap(),
-						ty: requests::GetDescriptor::Device,
+					let req = usb_request::Request::GetDescriptor {
+						ty: usb_request::descriptor::GetDescriptor::Device,
 					}
 					.into_raw();
-					let id = e.dev.send_request(0, &req).unwrap_or_else(|_| todo!());
+					let buf = Dma::new_slice(8).unwrap();
+					let id = e
+						.dev
+						.send_request(0, &req, &buf)
+						.unwrap_or_else(|_| todo!());
 					self.ring(e.dev.slot().get(), 0, 1);
-					let buf = req.buffer.unwrap();
 					self.transfers_config_packet_size.insert(id, (e, buf));
 					return None;
 				}

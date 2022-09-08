@@ -363,6 +363,7 @@ dependencies = [
  "norostb_rt",
  "pci",
  "scf",
+ "usb_request",
  "xhci",
 ]
 
@@ -1469,6 +1470,10 @@ dependencies = [
  "generic-array",
  "subtle",
 ]
+
+[[package]]
+name = "usb_request"
+version = "0.1.0"
 
 [[package]]
 name = "version_check"

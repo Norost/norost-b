@@ -51,7 +51,6 @@ mod config;
 mod dma;
 mod driver;
 mod loader;
-mod requests;
 mod xhci;
 
 use {
@@ -63,9 +62,9 @@ use {
 		task::waker,
 	},
 	io_queue_rt::{Pow2Size, Queue},
-	requests::{Configuration, DescriptorResult, Device, Endpoint, Interface},
 	rt::{Error, Handle},
 	rt_default as _,
+	usb_request::descriptor::{Configuration, Descriptor, Device, Endpoint, Interface},
 };
 
 #[start]
@@ -142,10 +141,10 @@ fn main() -> ! {
 						let e = ctrl
 							.send_request(
 								slot,
-								requests::Request::GetDescriptor {
-									buffer,
-									ty: requests::GetDescriptor::Device,
+								usb_request::Request::GetDescriptor {
+									ty: usb_request::descriptor::GetDescriptor::Device,
 								},
+								buffer,
 							)
 							.unwrap_or_else(|_| todo!());
 						trace!("id {:x}", e);
@@ -183,8 +182,9 @@ fn main() -> ! {
 								Transfer::GetDevice => {
 									trace!("GetDevice");
 									let buffer = buffer.unwrap();
-									let mut it = requests::decode(unsafe { buffer.as_ref() });
-									let device = it.next().unwrap().into_device().unwrap();
+									let mut it =
+										usb_request::descriptor::decode(unsafe { buffer.as_ref() });
+									let device = it.next().unwrap().unwrap().into_device().unwrap();
 									let base = (device.class, device.subclass, device.protocol);
 									info!(
 										"slot {}: device {:02x}/{:02x}/{:02x}",
@@ -193,12 +193,12 @@ fn main() -> ! {
 									let id = ctrl
 										.send_request(
 											slot,
-											requests::Request::GetDescriptor {
-												buffer,
-												ty: requests::GetDescriptor::Configuration {
+											usb_request::Request::GetDescriptor {
+												ty: usb_request::descriptor::GetDescriptor::Configuration {
 													index: 0,
 												},
 											},
+											buffer,
 										)
 										.unwrap_or_else(|_| todo!());
 									transfers.insert(
@@ -209,8 +209,10 @@ fn main() -> ! {
 								Transfer::GetConfiguration(j) => {
 									trace!("GetConfiguration");
 									let buffer = buffer.unwrap();
-									let mut it = requests::decode(unsafe { buffer.as_ref() });
-									let config = it.next().unwrap().into_configuration().unwrap();
+									let mut it =
+										usb_request::descriptor::decode(unsafe { buffer.as_ref() });
+									let config =
+										it.next().unwrap().unwrap().into_configuration().unwrap();
 									let mut n = usize::from(config.num_interfaces);
 									let mut driver = None;
 									let mut endpoints = Vec::new();
@@ -218,8 +220,8 @@ fn main() -> ! {
 									let base =
 										(j.device.class, j.device.subclass, j.device.protocol);
 									while n > 0 {
-										match it.next().unwrap() {
-											requests::DescriptorResult::Interface(i) => {
+										match it.next().unwrap().unwrap() {
+											Descriptor::Interface(i) => {
 												last_intf = Some(i.index);
 												info!(
 													"slot {}: interface {:02x}/{:02x}/{:02x}",
@@ -235,48 +237,36 @@ fn main() -> ! {
 												}
 												n -= 1;
 											}
-											requests::DescriptorResult::Endpoint(e) => {
+											Descriptor::Endpoint(e) => {
 												if driver.is_some() {
 													endpoints.push(e)
 												}
 												n -= 1;
 											}
-											requests::DescriptorResult::Unknown { ty, .. } => {
+											Descriptor::Unknown { ty, .. } => {
 												warn!("Unknown descriptor type {}", ty);
 											}
-											requests::DescriptorResult::Invalid => {
-												todo!("invalid descr")
-											}
-											requests::DescriptorResult::Truncated { length } => {
-												todo!("fetch more ({})", length)
-											}
-											requests::DescriptorResult::Device(_) => {
+											Descriptor::Device(_) => {
 												todo!("unexpected")
 											}
-											requests::DescriptorResult::Configuration(_) => {
+											Descriptor::Configuration(_) => {
 												todo!("unexpected")
 											}
-											requests::DescriptorResult::String(_) => {
+											Descriptor::String(_) => {
 												todo!("unexpected")
 											}
-											requests::DescriptorResult::Hid(h) => {
-												let mut buffer =
-													Dma::new_slice(h.len.into()).unwrap();
-												unsafe { buffer.as_mut().fill(0xcc) }
+											Descriptor::Hid(h) => {
 												let id = ctrl
 													.send_request(
 														slot,
-														requests::Request::GetDescriptor {
-															buffer,
-															ty: requests::GetDescriptor::Report,
+														usb_request::Request::GetDescriptor {
+															ty: usb_request::descriptor::GetDescriptor::Report,
 														},
+														Dma::new_slice(h.len.into()).unwrap(),
 													)
 													.unwrap();
 												rt::dbg!(h);
 												transfers.insert(id, Transfer::GetReport());
-											}
-											requests::DescriptorResult::Report(_) => {
-												todo!("unexpected")
 											}
 										}
 									}
@@ -289,9 +279,10 @@ fn main() -> ! {
 									let id = ctrl
 										.send_request(
 											slot,
-											requests::Request::SetConfiguration {
+											usb_request::Request::SetConfiguration {
 												value: config.index_configuration,
 											},
+											Dma::new_slice(0).unwrap(),
 										)
 										.unwrap_or_else(|_| todo!());
 									transfers.insert(
@@ -331,7 +322,7 @@ fn main() -> ! {
 									);
 								}
 								Transfer::GetReport() => {
-									rt::eprintln!("{:#04x?}", unsafe { buffer.unwrap().as_ref() });
+									rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
 								}
 							}
 						} else {
@@ -511,7 +502,10 @@ impl Job {
 		let id = ctrl
 			.send_request(
 				slot,
-				requests::Request::GetDescriptor { buffer, ty: requests::GetDescriptor::Device },
+				usb_request::Request::GetDescriptor {
+					ty: usb_request::descriptor::GetDescriptor::Device,
+				},
+				buffer,
 			)
 			.unwrap_or_else(|_| todo!());
 		(id, Self { state: JobState::WaitDeviceInfo, job_id })
@@ -524,7 +518,10 @@ impl Job {
 		buf: Dma<[u8]>,
 		tbl: &'a StreamTable,
 	) -> JobResult<'a> {
-		let res = requests::DescriptorResult::decode(unsafe { buf.as_ref() });
+		let res = usb_request::descriptor::decode(unsafe { buf.as_ref() })
+			.next()
+			.unwrap()
+			.unwrap();
 		match &self.state {
 			JobState::WaitDeviceInfo => {
 				let info = res.into_device().unwrap();
@@ -532,10 +529,12 @@ impl Job {
 					let id = ctrl
 						.send_request(
 							slot,
-							requests::Request::GetDescriptor {
-								buffer: buf,
-								ty: requests::GetDescriptor::String { index: info.index_product },
+							usb_request::Request::GetDescriptor {
+								ty: usb_request::descriptor::GetDescriptor::String {
+									index: info.index_product,
+								},
 							},
+							Dma::new_slice(0).unwrap(),
 						)
 						.unwrap_or_else(|_| todo!());
 					self.state = JobState::WaitDeviceName;
