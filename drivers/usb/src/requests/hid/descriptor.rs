@@ -39,3 +39,11 @@ pub fn decode_hid(buf: &[u8]) -> Hid {
 		panic!("unexpected HID descriptor length");
 	}
 }
+
+#[derive(Debug)]
+pub struct Report {}
+
+pub fn decode_report(buf: &[u8]) -> Report {
+	rt::eprintln!("{:02x?}", buf);
+	todo!();
+}

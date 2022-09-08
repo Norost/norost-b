@@ -44,6 +44,7 @@ pub enum GetDescriptor {
 	Device,
 	Configuration { index: u8 },
 	String { index: u8 },
+	Report,
 }
 
 #[derive(Debug)]
@@ -54,6 +55,7 @@ pub enum DescriptorResult<'a> {
 	Interface(Interface),
 	Endpoint(Endpoint),
 	Hid(hid::descriptor::Hid),
+	Report(hid::descriptor::Report),
 	Unknown { ty: u8, data: &'a [u8] },
 	Truncated { length: u8 },
 	Invalid,
@@ -353,7 +355,13 @@ impl Request {
 		use request_type::*;
 		match self {
 			Self::GetDescriptor { ty, buffer } => RawRequest {
-				request_type: DIR_IN | TYPE_STANDARD | RECIPIENT_DEVICE,
+				request_type: DIR_IN
+					| TYPE_STANDARD | match ty {
+					GetDescriptor::Device
+					| GetDescriptor::Configuration { .. }
+					| GetDescriptor::String { .. } => RECIPIENT_DEVICE,
+					GetDescriptor::Report => RECIPIENT_INTERFACE,
+				},
 				direction: Direction::In,
 				request: GET_DESCRIPTOR,
 				value: match ty {
@@ -364,6 +372,7 @@ impl Request {
 					GetDescriptor::String { index } => {
 						u16::from(DESCRIPTOR_STRING) << 8 | u16::from(index)
 					}
+					GetDescriptor::Report => u16::from(hid::descriptor::REPORT) << 8 | 1,
 				},
 				index: 0,
 				buffer: Some(buffer),
@@ -498,6 +507,9 @@ impl<'a> Iterator for Iter<'a> {
 				DESCRIPTOR_INTERFACE => DescriptorResult::Interface(decode_interface(b)),
 				DESCRIPTOR_ENDPOINT => DescriptorResult::Endpoint(decode_endpoint(b)),
 				hid::descriptor::HID => DescriptorResult::Hid(hid::descriptor::decode_hid(b)),
+				hid::descriptor::REPORT => {
+					DescriptorResult::Report(hid::descriptor::decode_report(b))
+				}
 				ty => DescriptorResult::Unknown { ty, data: b },
 			};
 			self.buf = &buf[usize::from(l)..];

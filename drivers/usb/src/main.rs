@@ -263,14 +263,20 @@ fn main() -> ! {
 												let mut buffer =
 													Dma::new_slice(h.len.into()).unwrap();
 												unsafe { buffer.as_mut().fill(0xcc) }
-												let id = ctrl.send_request(slot, requests::Request::Hid(requests::hid::report::Request::GetReport {
-													buffer,
-													ty: 3,//h.ty,
-													id: h.ty,
-													interface: last_intf.unwrap(),
-												})).unwrap();
+												let id = ctrl
+													.send_request(
+														slot,
+														requests::Request::GetDescriptor {
+															buffer,
+															ty: requests::GetDescriptor::Report,
+														},
+													)
+													.unwrap();
 												rt::dbg!(h);
 												transfers.insert(id, Transfer::GetReport());
+											}
+											requests::DescriptorResult::Report(_) => {
+												todo!("unexpected")
 											}
 										}
 									}
@@ -325,7 +331,7 @@ fn main() -> ! {
 									);
 								}
 								Transfer::GetReport() => {
-									rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
+									rt::eprintln!("{:#04x?}", unsafe { buffer.unwrap().as_ref() });
 								}
 							}
 						} else {
