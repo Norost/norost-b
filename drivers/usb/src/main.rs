@@ -106,7 +106,6 @@ fn main() -> ! {
 		GetDevice,
 		GetConfiguration(GetConfiguration),
 		SetConfiguration(Box<SetConfiguration<'a>>),
-		GetReport(),
 	}
 	struct GetConfiguration {
 		device: Device,
@@ -255,24 +254,12 @@ fn main() -> ! {
 											Descriptor::String(_) => {
 												todo!("unexpected")
 											}
-											Descriptor::Hid(h) => {
-												let id = ctrl
-													.send_request(
-														slot,
-														usb_request::Request::GetDescriptor {
-															ty: usb_request::descriptor::GetDescriptor::Report,
-														},
-														Dma::new_slice(h.len.into()).unwrap(),
-													)
-													.unwrap();
-												rt::dbg!(h);
-												transfers.insert(id, Transfer::GetReport());
-											}
+											Descriptor::Hid(_) => {}
 										}
 									}
 
 									let Some((driver, interface)) = driver else {
-										trace!("no driver found");
+										info!("no driver found");
 										continue;
 									};
 
@@ -320,9 +307,6 @@ fn main() -> ! {
 										}
 										.into(),
 									);
-								}
-								Transfer::GetReport() => {
-									rt::eprintln!("{:02x?}", unsafe { buffer.unwrap().as_ref() });
 								}
 							}
 						} else {
@@ -374,6 +358,21 @@ fn main() -> ! {
 					let ep = endpoint << 1;
 					assert!(ep < 32);
 					ctrl.transfer(slot, ep.try_into().unwrap(), data, false)
+				}
+				Event::GetDescriptor { recipient, ty, index, len } => {
+					use usb_request::RawRequest as R;
+					let buf = Dma::new_slice(len.into()).unwrap();
+					let recipient = match recipient {
+						driver::Recipient::Device => R::RECIPIENT_DEVICE,
+						driver::Recipient::Interface => R::RECIPIENT_INTERFACE,
+					};
+					let req = R {
+						request_type: R::DIR_IN | R::TYPE_STANDARD | recipient,
+						request: R::GET_DESCRIPTOR,
+						value: u16::from(ty) << 8 | u16::from(index),
+						index: 0,
+					};
+					ctrl.send_request(slot, req, buf).map_err(|_| todo!())
 				}
 			};
 			match res {

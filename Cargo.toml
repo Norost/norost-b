@@ -15,6 +15,7 @@ members = [
 	"drivers/virtio_gpu",
 	"drivers/virtio_net",
 	"drivers/usb",
+	"drivers/usb_hid",
 	"drivers/usb_kbd",
 	"drivers/usb_storage",
 	"lib/rust/arena",
@@ -67,3 +68,8 @@ dirs-next = { git = "https://git.sr.ht/~demindiro/dirs", branch = "norost" }
 getrandom = { git = "https://git.sr.ht/~demindiro/getrandom" }
 #xhci = { git = "https://github.com/Demindiro/xhci/", branch = "fix-try_from-type-range" }
 xhci = { path = "../thirdparty/xhci" }
+
+[patch."https://github.com/rust-osdev/usb"]
+usb_hid_item = { path = "../lib/usb/usb_hid_item" }
+usb_hid_usage = { path = "../lib/usb/usb_hid_usage" }
+usb_request = { path = "../lib/usb/usb_request" }

@@ -52,7 +52,7 @@ impl Xhci {
 					let req = usb_request::Request::GetDescriptor {
 						ty: usb_request::descriptor::GetDescriptor::Device,
 					}
-					.into_raw();
+					.into();
 					let buf = Dma::new_slice(8).unwrap();
 					let id = e
 						.dev

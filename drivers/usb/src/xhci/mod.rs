@@ -238,11 +238,19 @@ impl Xhci {
 	pub fn send_request(
 		&mut self,
 		slot: NonZeroU8,
-		req: usb_request::Request,
+		req: impl Into<usb_request::RawRequest>,
+		buf: Dma<[u8]>,
+	) -> Result<ring::EntryId, ()> {
+		self.send_request_inner(slot, req.into(), buf)
+	}
+
+	fn send_request_inner(
+		&mut self,
+		slot: NonZeroU8,
+		req: usb_request::RawRequest,
 		buf: Dma<[u8]>,
 	) -> Result<ring::EntryId, ()> {
 		trace!("send request, slot {}", slot);
-		let mut req = req.into_raw();
 		let id = self
 			.devices
 			.get_mut(&slot)
@@ -309,11 +317,13 @@ impl Xhci {
 					let endpoint = c.endpoint_id();
 					let id = c.trb_pointer();
 					let code = c.completion_code();
+					let length = c.trb_transfer_length();
 					trace!(
-						"transfer event slot {} ep {} id {:x}, {:?}",
+						"transfer event slot {} ep {} id {:x} length {}, {:?}",
 						slot,
 						endpoint,
 						id,
+						length,
 						code
 					);
 					if let Some((mut e, buf)) = self.transfers_config_packet_size.remove(&id) {

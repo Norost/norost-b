@@ -55,8 +55,6 @@ fn main() -> ! {
 			Recv::DataIn { ep: _, data } => {
 				enqueue_read();
 				let f = |i| u16::from_le_bytes(data[i..i + 2].try_into().unwrap());
-				rt::eprintln!("{:02x?} {} {}", data, f(1), f(3));
-				continue;
 				assert!(data.len() == 8, "unexpected data size");
 
 				let mut toggle_capslock = false;
@@ -125,6 +123,7 @@ fn main() -> ! {
 			Recv::Error { id, code, message } => {
 				panic!("{} (message {}, code {})", message, id, code)
 			}
+			_ => todo!(),
 		}
 	}
 }

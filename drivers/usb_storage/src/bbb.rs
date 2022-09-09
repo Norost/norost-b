@@ -116,6 +116,7 @@ impl<'a> Device<'a> {
 			ipc_usb::Recv::Error { id, code, message } => {
 				panic!("{} (message {}, code {})", message, id, code)
 			}
+			_ => todo!(),
 		}
 	}
 }

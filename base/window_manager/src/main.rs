@@ -242,16 +242,30 @@ fn main() {
 							let k = Event::try_from(k).unwrap();
 							let l = k.press_level();
 							if l != 0 {
-								let (k, m, l) = match k.key() {
+								match k.key() {
 									KeyCode::Special(SpecialKeyCode::MouseX) => {
-										(&mut mouse_pos.x, size.x, l)
+										mouse_pos.x = mouse_pos.x.wrapping_add(l as u32);
+										mouse_pos.x = mouse_pos.x.min(size.x - 1);
+										mouse_moved = true;
 									}
 									KeyCode::Special(SpecialKeyCode::MouseY) => {
-										(&mut mouse_pos.y, size.y, -l)
+										mouse_pos.y = mouse_pos.y.wrapping_add(l as u32);
+										mouse_pos.y = mouse_pos.y.min(size.y - 1);
+										mouse_moved = true;
+									}
+									KeyCode::Special(SpecialKeyCode::AbsoluteX) => {
+										//mouse_pos.x = l as u64 * size.x as u64 / (1 << 32);
+										mouse_pos.x =
+											(l as u64 * size.x as u64 / 0x400 as u64) as _;
+										mouse_moved = true;
+									}
+									KeyCode::Special(SpecialKeyCode::AbsoluteY) => {
+										mouse_pos.y =
+											(l as u64 * size.y as u64 / 0x400 as u64) as _;
+										mouse_moved = true;
 									}
 									KeyCode::Special(SpecialKeyCode::Mouse0) => {
 										mouse_click = true;
-										continue;
 									}
 									_ => {
 										let Some(w) = manager.focused_window() else { continue };
@@ -264,15 +278,8 @@ fn main() {
 										} else {
 											u.unread_events.get_mut().keypresses.push_back(k);
 										}
-										continue;
 									}
 								};
-								*k = if l >= 0 {
-									(*k + l as u32).min(m - 1)
-								} else {
-									k.saturating_sub((-l) as _)
-								};
-								mouse_moved = true;
 							}
 						}
 					}

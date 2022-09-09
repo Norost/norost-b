@@ -368,6 +368,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver_usb_hid"
+version = "0.1.0"
+dependencies = [
+ "ipc_usb",
+ "norost_rt_default",
+ "norostb_rt",
+ "scancodes",
+ "usb_hid_item",
+ "usb_hid_usage",
+ "usb_request",
+]
+
+[[package]]
 name = "driver_usb_kbd"
 version = "0.1.0"
 dependencies = [
@@ -1470,6 +1483,14 @@ dependencies = [
  "generic-array",
  "subtle",
 ]
+
+[[package]]
+name = "usb_hid_item"
+version = "0.1.0"
+
+[[package]]
+name = "usb_hid_usage"
+version = "0.1.0"
 
 [[package]]
 name = "usb_request"

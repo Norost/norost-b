@@ -38,4 +38,4 @@ package = "nora_io_queue_rt"
 path = "../../lib/rust/io_queue_rt"
 
 [dependencies.usb_request]
-path = "../../../lib/usb/usb_request"
+git = "https://github.com/rust-osdev/usb"
