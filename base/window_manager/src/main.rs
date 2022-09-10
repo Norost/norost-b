@@ -244,13 +244,19 @@ fn main() {
 							if l != 0 {
 								match k.key() {
 									KeyCode::Special(SpecialKeyCode::MouseX) => {
-										mouse_pos.x = mouse_pos.x.wrapping_add(l as u32);
-										mouse_pos.x = mouse_pos.x.min(size.x - 1);
+										mouse_pos.x = if l >= 0 {
+											(mouse_pos.x + l as u32).min(size.x - 1)
+										} else {
+											mouse_pos.x.saturating_sub(-l as u32)
+										};
 										mouse_moved = true;
 									}
 									KeyCode::Special(SpecialKeyCode::MouseY) => {
-										mouse_pos.y = mouse_pos.y.wrapping_add(l as u32);
-										mouse_pos.y = mouse_pos.y.min(size.y - 1);
+										mouse_pos.y = if l >= 0 {
+											mouse_pos.y.saturating_sub(l as u32)
+										} else {
+											(mouse_pos.y + -l as u32).min(size.y - 1)
+										};
 										mouse_moved = true;
 									}
 									KeyCode::Special(SpecialKeyCode::AbsoluteX) => {
