@@ -79,6 +79,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	ipc_usb::send_public_object(|d| stdout.write(d)).unwrap();
 	stdout.share(&public_out).unwrap();
 
+	let mut input_buf = alloc::vec::Vec::new();
 	loop {
 		let mut buf = [0; 32];
 		let len = stdin.read(&mut buf).unwrap();
@@ -86,6 +87,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 			Recv::DataIn { ep: _, data } => {
 				enqueue_read();
 				let mut offt = 0;
+				input_buf.clear();
 				for (usages, f) in &report.fields {
 					if usages.is_empty() {
 						// padding
@@ -102,10 +104,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 							assert_eq!(f.logical_min, 0, "todo");
 							let lvl = v as u64 * (1 << 31) / (f.logical_max as u64 + 1);
 							let evt = Input::new(k, lvl as _);
-							public_in.write(&u64::from(evt).to_le_bytes()).unwrap();
+							input_buf.extend_from_slice(&u64::from(evt).to_le_bytes());
 						}
 					}
 				}
+				public_in.write(&input_buf).unwrap();
 			}
 			Recv::Error { id, code, message } => {
 				panic!("{} (message {}, code {})", message, id, code)
