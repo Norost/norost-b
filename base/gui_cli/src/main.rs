@@ -66,6 +66,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		b.add_object(b"in", &p_inp).unwrap();
 		b.add_object(b"out", &p_out).unwrap();
 		b.add_object(b"err", &p_out).unwrap();
+		for (name, obj) in rt::args::handles() {
+			if let Some(name) = name.strip_prefix(b"spawn/") {
+				b.add_object(name, &obj).unwrap();
+			}
+		}
 		b.add_args(rt::args::args().take(1)).unwrap();
 		(b.spawn().unwrap(), inp, out)
 	};

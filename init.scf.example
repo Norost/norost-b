@@ -58,10 +58,14 @@
 	(join (after ps2 wm) (open (out wm/input) (in ps2/keyboard)))
 	(join (after usb/handlers/hid0 wm) (open (out wm/input) (in usb/handlers/hid0)))
 	(gui_cli (after wm) (args --scale 10)
-		(open (process process) (spawn drivers/minish))
+		(open
+			(spawn/file "")
+			(process process) (font drivers/font.tff) (spawn drivers/minish))
 		(create (window wm/window)))
 	(gui_cli (after wm) (args --scale 20)
-		(open (process process) (spawn drivers/minish))
+		(open
+			(spawn/file drivers)
+			(process process) (font drivers/font.tff) (spawn drivers/minish))
 		(create (window wm/window)))
 	(userdb
 		(open
