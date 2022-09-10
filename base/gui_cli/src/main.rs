@@ -58,6 +58,20 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
+	// Spawn process
+	let (process, inp, out) = {
+		let bin = rt::args::handle(b"spawn").expect("spawn undefined");
+		let (inp, p_inp) = rt::Object::new(rt::NewObject::Pipe).unwrap();
+		let (p_out, out) = rt::Object::new(rt::NewObject::Pipe).unwrap();
+		let mut b = rt::process::Builder::new().unwrap();
+		b.set_binary(&bin).unwrap();
+		b.add_object(b"in", &p_inp).unwrap();
+		b.add_object(b"out", &p_out).unwrap();
+		b.add_object(b"err", &p_out).unwrap();
+		b.add_args(rt::args::args().take(1)).unwrap();
+		(b.spawn().unwrap(), inp, out)
+	};
+
 	let font = Font::from_bytes(FONT, FontSettings { scale: 160.0, ..Default::default() }).unwrap();
 	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
@@ -113,24 +127,12 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
 		.unwrap();
 
-	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
-	rt::args::handle(b"share")
-		.expect("share undefined")
-		.share(table.public())
-		.expect("failed to share");
-
-	const WRITE_HANDLE: Handle = Handle::MAX - 1;
-	const READ_HANDLE: Handle = Handle::MAX - 2;
-
 	let queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
+	let read = |h: &rt::Object, b| queue.submit_read(h.as_raw(), b).unwrap();
+	let mut writes = Vec::<io_queue_rt::Write<_>>::new();
 
-	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
-	let mut poll_window = queue
-		.submit_read(window.as_raw(), Vec::with_capacity(16))
-		.unwrap();
-
-	let mut read_jobs = VecDeque::new();
+	let mut poll_out = read(&out, Vec::with_capacity(16));
+	let mut poll_window = read(&window, Vec::with_capacity(128));
 
 	let mut parser = Parser { state: ParserState::Idle };
 	let mut next_draw = rt::time::Monotonic::MAX;
@@ -139,8 +141,15 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		queue.wait(next_draw.duration_since(rt::time::Monotonic::now()));
 		queue.process();
 
-		let mut flush = false;
+		// Finish writes
+		for i in (0..writes.len()).rev() {
+			if let Some((res, _)) = driver_utils::task::poll(&mut writes[i]) {
+				writes.swap_remove(i);
+				res.unwrap();
+			}
+		}
 
+		// Window events
 		if let Some((res, b)) = driver_utils::task::poll(&mut poll_window) {
 			res.unwrap();
 			match ipc_wm::Event::decode((&*b).try_into().unwrap()) {
@@ -153,80 +162,39 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				Ok(ipc_wm::Event::Input(k)) if k.is_press() => {
 					if let input::Type::Unicode(c) = k.ty {
-						if let Some(id) = read_jobs.pop_front() {
-							let mut b = [0; 4];
-							let b = c.encode_utf8(&mut b);
-							let d = table.alloc(b.len()).expect("out of buffers");
-							d.copy_from(0, b.as_bytes());
-							table.enqueue(id, Response::Data(d));
-							flush = true;
-						} else {
-							todo!();
-						}
+						let mut b = [0; 4];
+						let b = c.encode_utf8(&mut b).as_bytes();
+						let b = Vec::from(b);
+						let wr = queue.submit_write(inp.as_raw(), b).unwrap();
+						writes.push(wr);
 					}
 				}
 				Ok(ipc_wm::Event::Input(_)) => {}
 				Err(e) => todo!("{:?}", e),
 			}
-			poll_window = queue.submit_read(window.as_raw(), b).unwrap();
+			poll_window = read(&window, b);
 		}
 
-		if driver_utils::task::poll(&mut poll_table).is_some() {
-			poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
-		}
-		let next_draw_t = rt::time::Monotonic::now()
-			.checked_add(Duration::from_millis(33))
-			.unwrap_or(rt::time::Monotonic::ZERO);
-		while let Some((handle, job_id, req)) = table.dequeue() {
-			let resp = match req {
-				Request::Open { path } => {
-					let mut p = [0; 16];
-					let p = &mut p[..path.len()];
-					path.copy_to(0, p);
-					match &*p {
-						b"write" => Response::Handle(WRITE_HANDLE),
-						b"read" => Response::Handle(READ_HANDLE),
-						_ => Response::Error(Error::DoesNotExist),
-					}
+		// Process wrote something
+		if let Some((res, b)) = driver_utils::task::poll(&mut poll_out) {
+			let len = res.unwrap();
+			for &c in &b[..len] {
+				match parser.add(c) {
+					None => continue,
+					Some(Action::PushChar(c)) => rasterizer.push_char(c),
+					Some(Action::PopChar) => rasterizer.pop_char(),
+					Some(Action::NewLine) => rasterizer.new_line(),
+					Some(Action::ClearLine) => rasterizer.clear_line(),
 				}
-				Request::Write { data } if handle == WRITE_HANDLE => {
-					let l = data.len().min(1024);
-					let mut v = Vec::with_capacity(l);
-					data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
-					unsafe { v.set_len(l) }
-					for c in v {
-						match parser.add(c) {
-							None => continue,
-							Some(Action::PushChar(c)) => rasterizer.push_char(c),
-							Some(Action::PopChar) => rasterizer.pop_char(),
-							Some(Action::NewLine) => rasterizer.new_line(),
-							Some(Action::ClearLine) => rasterizer.clear_line(),
-						}
-					}
+			}
+			let next_draw_t = rt::time::Monotonic::now()
+				.checked_add(Duration::from_millis(33))
+				.unwrap_or(rt::time::Monotonic::ZERO);
+			next_draw = next_draw.min(next_draw_t);
+			poll_out = read(&out, b);
+		}
 
-					let len = data.len().try_into().unwrap();
-					next_draw = next_draw.min(next_draw_t);
-					Response::Amount(len)
-				}
-				Request::Close => match handle {
-					// Exit
-					READ_HANDLE => continue,
-					WRITE_HANDLE if no_quit => continue,
-					// Exit immediately so we don't run *blocking* Drop of queue
-					// TODO perhaps Queue shouldn't be blocking on drop?
-					WRITE_HANDLE => rt::exit(0),
-					_ => unreachable!(),
-				},
-				Request::Read { amount } if handle == READ_HANDLE => {
-					read_jobs.push_back(job_id);
-					continue;
-				}
-				_ => Response::Error(Error::InvalidOperation),
-			};
-			table.enqueue(job_id, resp);
-			flush = true;
-		}
-		flush.then(|| table.flush());
+		// Draw window
 		if next_draw <= rt::time::Monotonic::now() {
 			draw(&mut fb, &mut rasterizer, width, height);
 			next_draw = rt::time::Monotonic::MAX;

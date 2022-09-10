@@ -5,6 +5,7 @@
 			(data "usb/handlers/storage0" "data")
 			(share "")))
 	(framebuffer
+		;(disabled)
 		(args file)
 		(open
 			(share "")
@@ -22,23 +23,10 @@
 		(open
 			(data "disk/data")
 			(share "")))
-	(gui_cli
-		(after wm)
-		(args --scale 10 --no-quit)
-		(create
-			(window wm/window)
-			(share cli_a)))
-	(gui_cli
-		(after wm)
-		(args --scale 20 --no-quit)
-		(create
-			(window wm/window)
-			(share cli_b)))
 	(image_viewer
-		(disabled)
 		(after wm)
-		(open
-			(file "")))
+		(create (window wm/window))
+		(open (file "")))
 	(static_http_server
 		(disabled)
 		(after "file" "net")
@@ -47,9 +35,7 @@
 			(net net)))
 	(ps2 (open (file "")))
 	(pci
-		;(after cli_a)
 		(open
-			;(err cli_a/write)
 			(file "")
 			(pci pci)
 			(cfg drivers/pci.scf)
@@ -70,8 +56,13 @@
 		(create (share wm)))
 	(join (after ps2 wm) (open (out wm/input) (in ps2/mouse)))
 	(join (after ps2 wm) (open (out wm/input) (in ps2/keyboard)))
-	(minish (after cli_a) (open (in cli_a/read) (err cli_a/write) (file "")))
-	(minish (after cli_b) (open (in cli_b/read) (err cli_b/write) (file drivers)))
+	(join (after usb/handlers/hid0 wm) (open (out wm/input) (in usb/handlers/hid0)))
+	(gui_cli (after wm) (args --scale 10)
+		(open (process process) (spawn drivers/minish))
+		(create (window wm/window)))
+	(gui_cli (after wm) (args --scale 20)
+		(open (process process) (spawn drivers/minish))
+		(create (window wm/window)))
 	(userdb
 		(open
 			(share "")
