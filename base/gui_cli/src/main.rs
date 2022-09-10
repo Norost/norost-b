@@ -16,8 +16,6 @@ use {
 	rt::{Error, Handle},
 };
 
-const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
-
 #[cfg(not(test))]
 #[global_allocator]
 static ALLOC: rt_alloc::Allocator = rt_alloc::Allocator;
@@ -72,7 +70,11 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		(b.spawn().unwrap(), inp, out)
 	};
 
-	let font = Font::from_bytes(FONT, FontSettings { scale: 160.0, ..Default::default() }).unwrap();
+	let font = {
+		let font = rt::args::handle(b"font").expect("font undefined");
+		let font = font.read_file_all().unwrap();
+		Font::from_bytes(&*font, FontSettings { scale: 160.0, ..Default::default() }).unwrap()
+	};
 	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
 	let window = rt::args::handle(b"window").expect("window undefined");
