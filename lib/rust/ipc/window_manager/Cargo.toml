@@ -3,8 +3,8 @@ name = "ipc_window_manager"
 version = "0.2.0"
 edition = "2021"
 
+[dependencies.input]
+path = "../../../../../lib/input"
+
 [dependencies.norost_ipc_spec]
 git = "https://git.sr.ht/~demindiro/norost_ipc_spec"
-
-[dependencies.scancodes]
-path = "../../../../../lib/scancodes"

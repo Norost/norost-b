@@ -6,7 +6,7 @@ extern crate alloc;
 mod report;
 mod translate;
 
-use {ipc_usb::Recv, rt_default as _, scancodes::Event};
+use {input::Input, ipc_usb::Recv, rt_default as _};
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
@@ -100,9 +100,9 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 						if let Some(k) = k {
 							assert_eq!(f.logical_min, 0, "todo");
-							let lvl = v as u64 * 0x400 / (f.logical_max as u64 + 1);
-							let evt = Event::new(k, lvl as _);
-							public_in.write(&u32::from(evt).to_le_bytes()).unwrap();
+							let lvl = v as u64 * (1 << 31) / (f.logical_max as u64 + 1);
+							let evt = Input::new(k, lvl as _);
+							public_in.write(&u64::from(evt).to_le_bytes()).unwrap();
 						}
 					}
 				}

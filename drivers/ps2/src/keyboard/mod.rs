@@ -9,9 +9,9 @@ use {
 	alloc::collections::VecDeque,
 	core::cell::{Cell, RefCell},
 	driver_utils::os::stream_table::JobId,
-	scancodes::{
+	input::{
 		config::{Config, Modifiers},
-		Event, KeyCode, SpecialKeyCode,
+		Input, Keyboard as Kbd, Type,
 	},
 };
 
@@ -21,7 +21,7 @@ pub mod cmd {
 
 pub struct Keyboard {
 	readers: RefCell<VecDeque<JobId>>,
-	events: RefCell<LossyRingBuffer<Event>>,
+	events: RefCell<LossyRingBuffer<Input>>,
 	config: Config,
 	translator: RefCell<scanset2::Translator>,
 	modifiers: Cell<u8>,
@@ -56,7 +56,7 @@ impl Keyboard {
 					.len();
 			}
 			unsafe { buf.set_len(len) };
-			scancodes::config::parse(&buf).expect("failed to parse config")
+			input::config::parse(&buf).expect("failed to parse config")
 		};
 
 		Self {
@@ -68,17 +68,17 @@ impl Keyboard {
 		}
 	}
 
-	fn toggle_modifier(&self, event: Event) {
-		use {KeyCode::*, SpecialKeyCode::*};
+	fn toggle_modifier(&self, input: Input) {
+		use {Kbd::*, Type::Keyboard as K};
 		let mut m = self.modifiers.get();
-		match (event.is_press(), event.key()) {
-			(true, Special(LeftShift)) => m |= MOD_LSHIFT,
-			(true, Special(RightShift)) => m |= MOD_RSHIFT,
-			(true, Special(AltGr)) => m |= MOD_ALTGR,
-			(false, Special(LeftShift)) => m &= !MOD_LSHIFT,
-			(false, Special(RightShift)) => m &= !MOD_RSHIFT,
-			(false, Special(AltGr)) => m &= !MOD_ALTGR,
-			(true, Special(CapsLock)) => m ^= MOD_CAPS,
+		match (input.is_press(), input.ty) {
+			(true, K(LeftShift)) => m |= MOD_LSHIFT,
+			(true, K(RightShift)) => m |= MOD_RSHIFT,
+			(true, K(AltGr)) => m |= MOD_ALTGR,
+			(false, K(LeftShift)) => m &= !MOD_LSHIFT,
+			(false, K(RightShift)) => m &= !MOD_RSHIFT,
+			(false, K(AltGr)) => m &= !MOD_ALTGR,
+			(true, K(CapsLock)) => m ^= MOD_CAPS,
 			_ => {}
 		}
 		self.modifiers.set(m);
@@ -86,9 +86,9 @@ impl Keyboard {
 }
 
 impl Device for Keyboard {
-	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 4]) -> Option<JobId> {
+	fn add_reader<'a>(&self, reader: JobId, buf: &'a mut [u8; 8]) -> Option<JobId> {
 		if let Some(e) = self.events.borrow_mut().pop() {
-			buf.copy_from_slice(&u32::from(e).to_le_bytes());
+			buf.copy_from_slice(&u64::from(e).to_le_bytes());
 			Some(reader)
 		} else {
 			self.readers.borrow_mut().push_back(reader);
@@ -96,7 +96,7 @@ impl Device for Keyboard {
 		}
 	}
 
-	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId> {
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 8]) -> Option<JobId> {
 		let b = ps2.read_port_data_nowait().unwrap();
 		let mut tr = self.translator.borrow_mut();
 		let (release, seq) = tr.push(b, buf)?;
@@ -113,11 +113,11 @@ impl Device for Keyboard {
 				caps: m & APPLY_CAPS != m & MOD_CAPS,
 				num: false,
 			},
-		)?;
-		let code = Event::new(code, i16::from(!release) * i16::MAX);
+		);
+		let code = Input::new(code, i32::from(!release) * i32::MAX);
 		self.toggle_modifier(code);
 		if let Some(id) = self.readers.borrow_mut().pop_front() {
-			buf.copy_from_slice(&u32::from(code).to_le_bytes());
+			buf.copy_from_slice(&u64::from(code).to_le_bytes());
 			Some(id)
 		} else {
 			self.events.borrow_mut().push(code);

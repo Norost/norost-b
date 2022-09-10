@@ -67,7 +67,7 @@ async fn main() -> ! {
 		loop {
 			tbl_notify.read(()).await.0.unwrap();
 			let mut flush = false;
-			let mut buf = [0; 4];
+			let mut buf = [0; 8];
 			const KEYBOARD_HANDLE: Handle = Handle::MAX - 1;
 			const MOUSE_HANDLE: Handle = Handle::MAX - 2;
 			while let Some((handle, mut job_id, req)) = tbl.dequeue() {
@@ -120,7 +120,7 @@ async fn main() -> ! {
 		dev: &dyn Device,
 		dev_intr: AsyncObject,
 	) -> ! {
-		let mut buf = [0; 4];
+		let mut buf = [0; 8];
 		loop {
 			dev_intr.read(()).await.0.unwrap();
 			if let Some(job_id) = dev.handle_interrupt(&mut ps2.borrow_mut(), &mut buf) {
@@ -185,10 +185,10 @@ enum ReadAckError {
 
 trait Device {
 	#[must_use]
-	fn add_reader<'a>(&self, job: JobId, buf: &'a mut [u8; 4]) -> Option<JobId>;
+	fn add_reader<'a>(&self, job: JobId, buf: &'a mut [u8; 8]) -> Option<JobId>;
 
 	#[must_use]
-	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId>;
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 8]) -> Option<JobId>;
 }
 
 pub struct Ps2 {

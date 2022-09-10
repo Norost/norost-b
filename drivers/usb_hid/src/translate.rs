@@ -1,29 +1,27 @@
 use {
-	scancodes::{
-		KeyCode::{self, *},
-		SpecialKeyCode::*,
-	},
+	input::{Movement, Type},
 	usb_hid_item::MainFlags,
 	usb_hid_usage::{button, generic_desktop, Usage},
 };
 
 /// Translate HID usage IDs to keycodes
-pub fn hid_to_keycode(usage: (u16, u16), flags: MainFlags) -> Option<KeyCode> {
+pub fn hid_to_keycode(usage: (u16, u16), flags: MainFlags) -> Option<Type> {
+	let mov = |m| {
+		flags
+			.relative()
+			.then(|| Type::Relative(0, m))
+			.unwrap_or(Type::Absolute(0, m))
+	};
 	Some(match Usage::try_from(usage).ok()? {
 		Usage::GenericDesktop(u) => match u {
-			generic_desktop::Usage::X => Special(if flags.relative() { MouseX } else { AbsoluteX }),
-			generic_desktop::Usage::Y => Special(if flags.relative() { MouseY } else { AbsoluteY }),
+			generic_desktop::Usage::X => mov(Movement::TranslationX),
+			generic_desktop::Usage::Y => mov(Movement::TranslationY),
+			generic_desktop::Usage::Z => mov(Movement::TranslationZ),
 			_ => return None,
 		},
 		Usage::Button(u) => match u {
 			button::Usage::NoButton => return None,
-			button::Usage::Button(n) => Special(
-				*[
-					Mouse0, Mouse1, Mouse2, Mouse3, Mouse4, Mouse5, Mouse6, Mouse7, Mouse8, Mouse9,
-					Mouse10, Mouse11, Mouse12, Mouse13, Mouse14, Mouse15,
-				]
-				.get(usize::from(n.get() - 1))?,
-			),
+			button::Usage::Button(n) => Type::Button(n.get() - 1),
 			_ => return None,
 		},
 		_ => return None,

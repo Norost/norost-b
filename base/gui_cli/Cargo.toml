@@ -15,9 +15,9 @@ path = "../../lib/rust/driver_utils"
 default-features = false
 features = ["alloc"]
 
+[dependencies.input]
+path = "../../../lib/input"
+
 [dependencies.io_queue_rt]
 package = "nora_io_queue_rt"
 path = "../../lib/rust/io_queue_rt"
-
-[dependencies.scancodes]
-path = "../../../lib/scancodes"

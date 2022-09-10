@@ -3,6 +3,9 @@ name = "driver_usb_hid"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies.input]
+path = "../../../lib/input"
+
 [dependencies.ipc_usb]
 path = "../../lib/rust/ipc/usb"
 
@@ -22,6 +25,3 @@ path = "../../lib/rust/rt"
 [dependencies.rt_default]
 package = "norost_rt_default"
 path = "../../lib/rust/rt_default"
-
-[dependencies.scancodes]
-path = "../../../lib/scancodes"

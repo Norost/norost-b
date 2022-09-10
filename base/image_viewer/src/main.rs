@@ -16,6 +16,10 @@ fn main() {
 		.unwrap();
 	let mut res = ipc_wm::Resolution::decode(buf);
 
+	window
+		.set_meta(b"title".into(), b"rust_evangelism_strike_force.jpg".into())
+		.unwrap();
+
 	loop {
 		let (fb_ptr, fb_size) = {
 			let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory {

@@ -167,7 +167,7 @@ fn main() {
 							for (w, ww) in manager.windows() {
 								let full_rect = manager.window_rect(w, size).unwrap();
 								let (title, rect) = title_bar::split(&config, full_rect);
-								title_bar::render(&mut main, &config, title);
+								title_bar::render(&mut main, &config, title, &ww.user_data.title);
 								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 								let mut ue = ww.user_data.unread_events.borrow_mut();
 								ue.resize = Some(evt);
@@ -216,6 +216,14 @@ fn main() {
 								Response::Error(Error::InvalidData)
 							}
 						}
+						(h, b"title") => {
+							let s = String::from_utf8_lossy(val).into_owned().into_boxed_str();
+							let r = manager.window_rect(h, size).unwrap();
+							let (r, _) = title_bar::split(&config, r);
+							title_bar::render(&mut main, &config, r, &s);
+							manager.window_mut(h).unwrap().user_data.title = s;
+							Response::Amount(0)
+						}
 						(_, _) => Response::Error(Error::DoesNotExist as _),
 					}
 				}
@@ -232,18 +240,18 @@ fn main() {
 					}
 				}
 				Request::Write { data } if handle == INPUT => {
-					use scancodes::{Event, KeyCode, SpecialKeyCode};
+					use input::{Input, Movement, Type};
 					let mut mouse_moved @ mut mouse_click = false;
 					for (_, b) in data.blocks() {
-						for i in (0..b.len() / 4).map(|i| i * 4) {
-							let mut buf = [0; 4];
+						for i in (0..b.len() / 8).map(|i| i * 8) {
+							let mut buf = [0; 8];
 							b.copy_to(i, &mut buf);
-							let k = u32::from_le_bytes(buf);
-							let k = Event::try_from(k).unwrap();
-							let l = k.press_level();
+							let k = u64::from_le_bytes(buf);
+							let Ok(k) = Input::try_from(k) else { continue };
+							let l = k.press_level;
 							if l != 0 {
-								match k.key() {
-									KeyCode::Special(SpecialKeyCode::MouseX) => {
+								match k.ty {
+									Type::Relative(0, Movement::TranslationX) => {
 										mouse_pos.x = if l >= 0 {
 											(mouse_pos.x + l as u32).min(size.x - 1)
 										} else {
@@ -251,7 +259,7 @@ fn main() {
 										};
 										mouse_moved = true;
 									}
-									KeyCode::Special(SpecialKeyCode::MouseY) => {
+									Type::Relative(0, Movement::TranslationY) => {
 										mouse_pos.y = if l >= 0 {
 											mouse_pos.y.saturating_sub(l as u32)
 										} else {
@@ -259,30 +267,25 @@ fn main() {
 										};
 										mouse_moved = true;
 									}
-									KeyCode::Special(SpecialKeyCode::AbsoluteX) => {
-										//mouse_pos.x = l as u64 * size.x as u64 / (1 << 32);
-										mouse_pos.x =
-											(l as u64 * size.x as u64 / 0x400 as u64) as _;
+									Type::Absolute(0, Movement::TranslationX) => {
+										mouse_pos.x = (l as u64 * size.x as u64 / (1 << 31)) as _;
 										mouse_moved = true;
 									}
-									KeyCode::Special(SpecialKeyCode::AbsoluteY) => {
-										mouse_pos.y =
-											(l as u64 * size.y as u64 / 0x400 as u64) as _;
+									Type::Absolute(0, Movement::TranslationY) => {
+										mouse_pos.y = (l as u64 * size.y as u64 / (1 << 31)) as _;
 										mouse_moved = true;
 									}
-									KeyCode::Special(SpecialKeyCode::Mouse0) => {
-										mouse_click = true;
-									}
+									Type::Button(0) => mouse_click |= k.is_press(),
 									_ => {
 										let Some(w) = manager.focused_window() else { continue };
 										let u = &mut manager.window_mut(w).unwrap().user_data;
 										if let Some(id) = u.event_listeners.get_mut().pop_front() {
-											let evt = ipc_wm::Event::Key(k).encode();
+											let evt = ipc_wm::Event::Input(k).encode();
 											let d = table.alloc(evt.len()).expect("out of buffers");
 											d.copy_from(0, &evt);
 											table.enqueue(id, Response::Data(d));
 										} else {
-											u.unread_events.get_mut().keypresses.push_back(k);
+											u.unread_events.get_mut().inputs.push_back(k);
 										}
 									}
 								};
@@ -348,7 +351,7 @@ fn main() {
 					for (w, ww) in manager.windows() {
 						let full_rect = manager.window_rect(w, size).unwrap();
 						let (title, rect) = title_bar::split(&config, full_rect);
-						title_bar::render(&mut main, &config, title);
+						title_bar::render(&mut main, &config, title, &ww.user_data.title);
 						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 						let mut ue = ww.user_data.unread_events.borrow_mut();
 						ue.resize = Some(evt);
@@ -457,12 +460,13 @@ struct Client {
 	framebuffer: FrameBuffer,
 	unread_events: RefCell<Events>,
 	event_listeners: RefCell<VecDeque<JobId>>,
+	title: Box<str>,
 }
 
 #[derive(Default)]
 struct Events {
 	resize: Option<ipc_wm::Resolution>,
-	keypresses: VecDeque<scancodes::Event>,
+	inputs: VecDeque<input::Input>,
 }
 
 impl Events {
@@ -470,6 +474,6 @@ impl Events {
 		self.resize
 			.take()
 			.map(ipc_wm::Event::Resize)
-			.or_else(|| self.keypresses.pop_front().map(ipc_wm::Event::Key))
+			.or_else(|| self.inputs.pop_front().map(ipc_wm::Event::Input))
 	}
 }

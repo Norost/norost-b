@@ -45,18 +45,19 @@ fn main(_: isize, _: *const *const u8) -> isize {
 	let pending_read = Cell::new(None);
 
 	let do_read = || async {
-		use scancodes::{Event, KeyCode};
+		use input::{Input, Type};
 		// FIXME https://github.com/rust-lang/rust/issues/99385
 		// It *was* fine up until recently. Imma keep using it for now...
-		let (res, mut buf) = input.read(Vec::with_capacity(4)).await;
+		let (res, mut buf) = input.read(Vec::with_capacity(8)).await;
 		res.unwrap();
-		assert_eq!(buf.len(), 4, "incomplete scancode");
-		let evt = u32::from_le_bytes(buf[..].try_into().unwrap());
-		let evt = Event::try_from(evt).unwrap();
-		let chr = match (evt.is_press(), evt.key()) {
-			(true, KeyCode::Unicode(c)) => Some(c),
-			_ => None,
-		};
+		assert_eq!(buf.len(), 8, "incomplete input");
+		let evt = u64::from_le_bytes(buf[..].try_into().unwrap());
+		let chr = Input::try_from(evt)
+			.ok()
+			.and_then(|evt| match (evt.is_press(), evt.ty) {
+				(true, Type::Unicode(c)) => Some(c),
+				_ => None,
+			});
 		if let Some(chr) = chr {
 			let mut b = [0; 4];
 			let chr = chr.encode_utf8(&mut b).as_bytes();

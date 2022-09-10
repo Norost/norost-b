@@ -86,7 +86,6 @@ install ps2                driver_ps2
 install scancode_to_char   driver_scancode_to_char
 install usb                driver_usb
 install usb_hid            driver_usb_hid
-install usb_kbd            driver_usb_kbd
 install usb_storage        driver_usb_storage
 install virtio_block       driver_virtio_block
 install virtio_gpu         driver_virtio_gpu
@@ -111,6 +110,7 @@ for img in button cursor
 do
 	cp /tank/notes/norost/gui_sketches/$img.png $A/$img.png
 done
+cp thirdparty/font/inconsolata/Inconsolata-VF.ttf $A/font.tff
 
 ./tools/nrofs.py -rv -C $A $O/boot/norost.nrofs .
 

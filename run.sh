@@ -19,8 +19,8 @@ exec qemu-system-x86_64 \
 	-netdev user,id=net0,hostfwd=tcp::5555-:80,hostfwd=tcp::2222-:22 \
 	-device virtio-net-pci,netdev=net0 \
 	-device qemu-xhci,p2=6,p3=0 \
-	-device usb-storage,drive=usb0,id=usbmsd \
 	-device usb-tablet \
+	-device usb-storage,drive=usb0,id=usbmsd \
 	-vga virtio \
 	-s \
 	"$@"

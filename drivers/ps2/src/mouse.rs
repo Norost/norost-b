@@ -3,7 +3,7 @@ use {
 	alloc::collections::VecDeque,
 	core::cell::{Cell, RefCell},
 	driver_utils::os::stream_table::JobId,
-	scancodes::{Event, KeyCode, SpecialKeyCode},
+	input::{Input, Movement, Type},
 };
 
 pub mod cmd {
@@ -29,15 +29,15 @@ enum Evt {
 	BtnM,
 }
 
-impl From<Evt> for KeyCode {
+impl From<Evt> for Type {
 	fn from(d: Evt) -> Self {
-		KeyCode::Special(match d {
-			Evt::X => SpecialKeyCode::MouseX,
-			Evt::Y => SpecialKeyCode::MouseY,
-			Evt::BtnL => SpecialKeyCode::Mouse0,
-			Evt::BtnR => SpecialKeyCode::Mouse1,
-			Evt::BtnM => SpecialKeyCode::Mouse2,
-		})
+		match d {
+			Evt::X => Type::Relative(0, Movement::TranslationX),
+			Evt::Y => Type::Relative(0, Movement::TranslationY),
+			Evt::BtnL => Type::Button(0),
+			Evt::BtnR => Type::Button(1),
+			Evt::BtnM => Type::Button(2),
+		}
 	}
 }
 
@@ -50,7 +50,7 @@ enum Buf {
 }
 
 impl Mouse {
-	fn add_event(&self, dir: Evt, lvl: u8, buf: &mut [u8; 4], pop: bool) -> Option<JobId> {
+	fn add_event(&self, dir: Evt, lvl: u8, buf: &mut [u8; 8], pop: bool) -> Option<JobId> {
 		if let Some(id) = pop.then(|| self.readers.borrow_mut().pop_front()).flatten() {
 			Some(finish_job(id, buf, dir, lvl))
 		} else {
@@ -61,7 +61,7 @@ impl Mouse {
 }
 
 impl Device for Mouse {
-	fn add_reader<'a>(&self, id: JobId, buf: &'a mut [u8; 4]) -> Option<JobId> {
+	fn add_reader<'a>(&self, id: JobId, buf: &'a mut [u8; 8]) -> Option<JobId> {
 		if let Some((k, l)) = self.events.borrow_mut().pop() {
 			Some(finish_job(id, buf, k, l))
 		} else {
@@ -70,7 +70,7 @@ impl Device for Mouse {
 		}
 	}
 
-	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 4]) -> Option<JobId> {
+	fn handle_interrupt<'a>(&self, ps2: &mut Ps2, buf: &'a mut [u8; 8]) -> Option<JobId> {
 		let x = ps2.read_port_data_nowait().unwrap();
 
 		let mut id = None;
@@ -104,7 +104,7 @@ impl Device for Mouse {
 	}
 }
 
-fn finish_job(id: JobId, buf: &mut [u8; 4], d: Evt, l: u8) -> JobId {
-	buf.copy_from_slice(&u32::from(Event::new(d.into(), l as i8 as i16)).to_le_bytes());
+fn finish_job(id: JobId, buf: &mut [u8; 8], d: Evt, l: u8) -> JobId {
+	buf.copy_from_slice(&u64::from(Input::new(d.into(), l as i8 as _)).to_le_bytes());
 	id
 }

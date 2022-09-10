@@ -3,6 +3,7 @@ use std::fs::File;
 pub struct Config {
 	pub title_bar: TitleBar,
 	pub cursor: gui3d::Texture,
+	pub font: fontdue::Font,
 }
 
 pub struct TitleBar {
@@ -59,6 +60,8 @@ pub fn load() -> Config {
 		})
 	};
 
+	let font = load_font("font.tff");
+
 	Config {
 		title_bar: TitleBar {
 			height: 16 + 4,
@@ -67,6 +70,7 @@ pub fn load() -> Config {
 			maximize,
 		},
 		cursor,
+		font,
 	}
 }
 
@@ -86,4 +90,9 @@ fn load_normal_map(path: &str) -> gui3d::NormalMap {
 	let h = info.height.try_into().unwrap();
 	img.next_frame(&mut buf).unwrap();
 	gui3d::NormalMap::from_raw(buf, w, h)
+}
+
+fn load_font(path: &str) -> fontdue::Font {
+	let font = std::fs::read(path).unwrap();
+	fontdue::Font::from_bytes(font, fontdue::FontSettings { ..Default::default() }).unwrap()
 }

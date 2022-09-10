@@ -7,7 +7,7 @@ struct Flush {
 	size: SizeInclusive
 }
 
-alias Key: u32
+alias Input: u64
 
 struct Event {
 	ty: EventType
@@ -18,14 +18,14 @@ struct Event {
 
 enum EventType {
 	Resize
-	Key
+	Input
 	_UglyWorkAroundA
 	_UglyWorkAroundB
 }
 
 union EventArgs {
 	resize: Resolution
-	key: Key
+	input: Input
 }
 
 struct Point {

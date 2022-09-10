@@ -25,7 +25,7 @@ enum PauseState {
 }
 
 impl Translator {
-	pub fn push<'a>(&mut self, byte: u8, buf: &'a mut [u8; 4]) -> Option<(bool, &'a [u8])> {
+	pub fn push<'a>(&mut self, byte: u8, buf: &'a mut [u8; 8]) -> Option<(bool, &'a [u8])> {
 		match byte {
 			0xe0 => {
 				if !matches!(self.state, State::None) {

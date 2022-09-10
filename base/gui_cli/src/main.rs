@@ -63,6 +63,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 	let window = rt::args::handle(b"window").expect("window undefined");
 
+	window
+		.set_meta(b"title".into(), b"Terminal".into())
+		.unwrap();
+
 	let mut res = [0; 8];
 	let l = window
 		.get_meta(b"bin/resolution".into(), (&mut res).into())
@@ -139,16 +143,16 @@ fn main(_: isize, _: *const *const u8) -> isize {
 
 		if let Some((res, b)) = driver_utils::task::poll(&mut poll_window) {
 			res.unwrap();
-			match ipc_wm::Event::decode((&*b).try_into().unwrap()).unwrap() {
-				ipc_wm::Event::Resize(r) => {
+			match ipc_wm::Event::decode((&*b).try_into().unwrap()) {
+				Ok(ipc_wm::Event::Resize(r)) => {
 					drop_fb(&mut fb, width, height);
 					width = r.x;
 					height = r.y;
 					fb = new_fb(width, height);
 					next_draw = rt::time::Monotonic::ZERO;
 				}
-				ipc_wm::Event::Key(k) if k.is_press() => {
-					if let scancodes::KeyCode::Unicode(c) = k.key() {
+				Ok(ipc_wm::Event::Input(k)) if k.is_press() => {
+					if let input::Type::Unicode(c) = k.ty {
 						if let Some(id) = read_jobs.pop_front() {
 							let mut b = [0; 4];
 							let b = c.encode_utf8(&mut b);
@@ -161,7 +165,8 @@ fn main(_: isize, _: *const *const u8) -> isize {
 						}
 					}
 				}
-				ipc_wm::Event::Key(_) => {}
+				Ok(ipc_wm::Event::Input(_)) => {}
+				Err(e) => todo!("{:?}", e),
 			}
 			poll_window = queue.submit_read(window.as_raw(), b).unwrap();
 		}

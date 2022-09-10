@@ -334,10 +334,10 @@ version = "0.2.0"
 dependencies = [
  "driver_utils",
  "futures-util",
+ "input",
  "norost_async_std",
  "norost_rt_default",
  "norostb_rt",
- "scancodes",
 ]
 
 [[package]]
@@ -345,11 +345,11 @@ name = "driver_scancode_to_char"
 version = "0.2.0"
 dependencies = [
  "driver_utils",
+ "input",
  "norost_async_std",
  "norost_rt_default",
  "norostb_kernel",
  "norostb_rt",
- "scancodes",
 ]
 
 [[package]]
@@ -371,24 +371,13 @@ dependencies = [
 name = "driver_usb_hid"
 version = "0.1.0"
 dependencies = [
+ "input",
  "ipc_usb",
  "norost_rt_default",
  "norostb_rt",
- "scancodes",
  "usb_hid_item",
  "usb_hid_usage",
  "usb_request",
-]
-
-[[package]]
-name = "driver_usb_kbd"
-version = "0.1.0"
-dependencies = [
- "driver_utils",
- "ipc_usb",
- "norost_rt_default",
- "norostb_rt",
- "scancodes",
 ]
 
 [[package]]
@@ -696,11 +685,11 @@ dependencies = [
  "driver_utils",
  "fontdue",
  "hashbrown",
+ "input",
  "ipc_window_manager",
  "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
- "scancodes",
 ]
 
 [[package]]
@@ -750,6 +739,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "input"
+version = "0.3.0"
+dependencies = [
+ "scf",
+]
+
+[[package]]
 name = "ipc_gpu"
 version = "0.2.0"
 dependencies = [
@@ -764,8 +760,8 @@ version = "0.1.0"
 name = "ipc_window_manager"
 version = "0.2.0"
 dependencies = [
+ "input",
  "norost_ipc_spec",
- "scancodes",
 ]
 
 [[package]]
@@ -1273,13 +1269,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97477e48b4cf8603ad5f7aaf897467cf42ab4218a38ef76fb14c2d6773a6d6a8"
 
 [[package]]
-name = "scancodes"
-version = "0.3.0"
-dependencies = [
- "scf",
-]
-
-[[package]]
 name = "scf"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1579,14 +1568,15 @@ name = "window_manager"
 version = "0.2.0"
 dependencies = [
  "driver_utils",
+ "fontdue",
  "gui3d",
+ "input",
  "ipc_gpu",
  "ipc_window_manager",
  "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
  "png",
- "scancodes",
 ]
 
 [[package]]
