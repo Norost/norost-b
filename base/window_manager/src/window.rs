@@ -1,33 +1,37 @@
-use crate::workspace::Path;
+use {
+	crate::workspace::Path,
+	core::fmt::{self, Write},
+};
 
 pub struct Window<U> {
+	/// Workspace containing this window.
+	workspace: u8,
 	/// Node path in bitmap format.
-	///
-	/// The lower 8 bits indicate the workspace ID. Each bit after indicates left or right in
-	/// the node tree.
-	///
-	/// 24 bits allows up to 24 levels of windows which ought to be plenty.
 	path: u32,
 	pub user_data: U,
 }
 
 impl<U> Window<U> {
 	pub fn new(workspace: u8, path: Path, user_data: U) -> Self {
-		let mut s = Self { path: 0, user_data };
+		let mut s = Self { workspace, path: 0, user_data };
 		s.set_path(workspace, path);
 		s
 	}
 
 	pub fn path(&self) -> (u8, PathIter) {
-		(
-			self.path as u8,
-			PathIter { count: 24, path: self.path >> 8 },
-		)
+		(self.workspace, PathIter { count: 32, path: self.path })
 	}
 
 	pub fn set_path(&mut self, workspace: u8, path: Path) {
-		assert!(path.depth <= 24, "deeper than 24 levels");
-		self.path = u32::from(workspace) | (path.directions << 8)
+		assert!(path.depth <= 32, "deeper than 32 levels");
+		self.workspace = workspace;
+		self.path = path.directions;
+	}
+
+	/// Move this window one layer up the tree.
+	pub fn move_up(&mut self, from: usize) {
+		let mask = (1 << from) - 1;
+		self.path = self.path & mask | self.path >> 1 & !mask;
 	}
 }
 
@@ -65,6 +69,18 @@ impl Iterator for PathIter {
 			self.path >>= 1;
 			v
 		})
+	}
+}
+
+impl fmt::Debug for PathIter {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut p = self.path;
+		f.write_char('<')?;
+		for _ in 0..self.count {
+			f.write_char(['_', '#'][(p & 1) as usize])?;
+			p >>= 1;
+		}
+		f.write_char('>')
 	}
 }
 

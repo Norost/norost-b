@@ -95,12 +95,12 @@ impl Workspace {
 
 	/// Remove a leaf, replacing its parent with its sibling.
 	///
-	/// Returns the path of the sibling along with its new path, if any.
+	/// Returns the path to the sibling node, if any.
 	///
 	/// # Panics
 	///
 	/// The path does not lead to a leaf.
-	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<(Handle, Path)> {
+	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<Path> {
 		let mut cur = self.root;
 		let mut prev = None;
 		let mut path = Path { depth: 0, directions: 0 };
@@ -119,13 +119,37 @@ impl Workspace {
 					self.nodes.remove(cur).unwrap();
 					return if let Some((parent, sibling, path)) = prev {
 						self.nodes[parent] = self.nodes.remove(sibling).unwrap();
-						Some((w, path))
+						Some(path)
 					} else {
 						None
 					};
 				}
 			}
 		}
+	}
+
+	/// Call the closure with the handles in all leaves with the given path as prefix.
+	pub fn apply_with_prefix(&self, mut prefix: PathIter, mut cb: impl FnMut(Handle)) {
+		let mut cur = self.root;
+		for d in prefix {
+			match &self.nodes[cur] {
+				Node::Parent { left, right, .. } => {
+					let s = *if d { left } else { right };
+					cur = *if d { right } else { left };
+				}
+				Node::Leaf { window } => return,
+			}
+		}
+		fn f(slf: &Workspace, cur: Handle, cb: &mut impl FnMut(Handle)) {
+			match &slf.nodes[cur] {
+				Node::Parent { left, right, .. } => {
+					f(slf, *left, cb);
+					f(slf, *right, cb);
+				}
+				Node::Leaf { window } => cb(*window),
+			}
+		}
+		f(self, cur, &mut cb)
 	}
 
 	/// Calculate the [`Rect`] a leaf occupies.

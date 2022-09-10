@@ -51,7 +51,11 @@ impl<U> Manager<U> {
 	pub fn destroy_window(&mut self, handle: Handle) -> Result<(), ()> {
 		let w = self.windows.remove(handle).ok_or(())?;
 		let (ws, path) = w.path();
-		self.workspaces[usize::from(ws)].remove_leaf(path);
+		let path = self.workspaces[usize::from(ws)].remove_leaf(path).unwrap();
+		let len = path.depth.into();
+		self.workspaces[usize::from(ws)].apply_with_prefix(path.into_iter(), |h| {
+			self.windows[h].move_up(len);
+		});
 		Ok(())
 	}
 
