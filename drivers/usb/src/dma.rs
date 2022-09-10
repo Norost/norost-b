@@ -1,7 +1,11 @@
 use {
-	core::{alloc::Layout, fmt, marker::PhantomData, mem, ptr::NonNull},
+	alloc::vec::Vec,
+	core::{alloc::Layout, fmt, marker::PhantomData, mem, num::NonZeroUsize, ptr::NonNull},
 	driver_utils::dma,
+	rt::sync::Mutex,
 };
+
+static POOL_4K: Mutex<Vec<(NonNull<()>, u64)>> = Mutex::new(Vec::new());
 
 pub struct Dma<T>
 where
@@ -58,13 +62,7 @@ impl<T> Dma<T> {
 	}
 
 	pub fn new_uninit() -> Result<Self, rt::Error> {
-		let (ptr, phys) = match mem::size_of::<T>().try_into() {
-			Ok(l) => {
-				let (a, b, _) = dma::alloc_dma(l)?;
-				(a, b)
-			}
-			Err(_) => (NonNull::dangling(), 0),
-		};
+		let (ptr, phys) = alloc_raw(mem::size_of::<T>())?;
 		#[cfg(feature = "poison")]
 		unsafe {
 			ptr.as_ptr().write_bytes(0xcc, 1)
@@ -97,13 +95,7 @@ impl<T> Dma<[T]> {
 
 	pub fn new_slice_uninit(len: usize) -> Result<Self, rt::Error> {
 		let (layout, _) = Layout::new::<T>().repeat(len).unwrap();
-		let (ptr, phys) = match layout.size().try_into() {
-			Ok(l) => {
-				let (a, b, _) = dma::alloc_dma(l)?;
-				(a, b)
-			}
-			Err(_) => (NonNull::<T>::dangling().cast(), 0),
-		};
+		let (ptr, phys) = alloc_raw(layout.size())?;
 		#[cfg(feature = "poison")]
 		unsafe {
 			ptr.as_ptr().write_bytes(0xcc, len)
@@ -120,6 +112,24 @@ impl<T> Dma<[T]> {
 	}
 }
 
+impl<T> Drop for Dma<T>
+where
+	T: ?Sized,
+{
+	fn drop(&mut self) {
+		unsafe {
+			let l = mem::size_of_val(&*self.ptr.as_ptr());
+			if l == 0 {
+				// Do nothing
+			} else if l <= 4096 {
+				POOL_4K.lock().push((self.ptr.to_raw_parts().0, self.phys));
+			} else {
+				// TODO avoid leaking
+			}
+		}
+	}
+}
+
 impl<T> fmt::Debug for Dma<T>
 where
 	T: ?Sized,
@@ -127,4 +137,19 @@ where
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_list().entry(&format_args!("..")).finish()
 	}
+}
+
+fn alloc_raw(l: usize) -> Result<(NonNull<u8>, u64), rt::Error> {
+	Ok(match NonZeroUsize::new(l) {
+		Some(l) => {
+			let v = (l.get() <= 4096).then(|| POOL_4K.lock().pop()).flatten();
+			if let Some((a, b)) = v {
+				(a.cast(), b)
+			} else {
+				let (a, b, _) = dma::alloc_dma(l)?;
+				(a, b)
+			}
+		}
+		None => (NonNull::dangling(), 0),
+	})
 }

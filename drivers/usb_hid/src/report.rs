@@ -1,7 +1,7 @@
 use {
 	alloc::vec::Vec,
 	core::{mem, ops::RangeInclusive},
-	usb_hid_item::tree::{Field, Value},
+	usb_hid_item::{Field, Value},
 };
 
 #[derive(Debug)]
@@ -47,16 +47,14 @@ pub fn parse(data: &[u8]) -> Report {
 
 	fn f(val: Value, report: &mut Report, usages: &mut Usages) {
 		match val {
-			Value::Collection(c) => {
-				usages.0.clear();
-				c.for_each(|c| f(c.unwrap(), report, usages));
-			}
+			Value::Collection(_) | Value::EndCollection => usages.0.clear(),
 			Value::Usage { page, ids } => usages.0.push((page, ids)),
 			Value::Field(f) => report.fields.push((mem::take(usages), f)),
+			Value::StackFrame(s) => s.for_each(|e| f(e.unwrap(), report, usages)),
 		}
 	}
-	usb_hid_item::tree::parse(data)
+	usb_hid_item::parse(data)
 		.iter()
-		.for_each(|c| f(c.unwrap(), &mut report, &mut usages));
+		.for_each(|e| f(e.unwrap(), &mut report, &mut usages));
 	report
 }

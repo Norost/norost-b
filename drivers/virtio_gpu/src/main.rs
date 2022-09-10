@@ -243,16 +243,27 @@ fn main(_: isize, _: *const *const u8) -> isize {
 				}
 				Request::SetMeta { property_value } => match property_value.try_get(&mut [0; 32]) {
 					Ok((b"bin/cursor/pos", &mut [a, b, c, d])) => {
-						/*
 						let x = u16::from_le_bytes([a, b]);
 						let y = u16::from_le_bytes([c, d]);
 						unsafe {
+							// In QEMU 7.0, if a Data IN is sent to the USB tablet *after*
+							// the cursor texture is set it will disappear.
+							// The easiest workaround is to always use update_cursor.
+							// If this proves to be too inefficient we can refresh it, say, every second.
 							let tk = dev
-								.move_cursor(0, cursor_resource_id, x.into(), y.into(), &mut buf)
+								.update_cursor(
+									0,
+									cursor_resource_id,
+									x.into(),
+									y.into(),
+									0,
+									0,
+									&mut buf,
+								)
+								//.move_cursor(0, cursor_resource_id, x.into(), y.into(), &mut buf)
 								.unwrap();
 							wait_tk2(&mut dev, tk);
 						}
-						*/
 						Response::Amount(0)
 					}
 					Ok((b"bin/cursor/pos", _)) => Response::Error(Error::InvalidData),

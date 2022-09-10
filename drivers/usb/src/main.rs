@@ -69,7 +69,6 @@ use {
 
 #[start]
 fn start(_: isize, _: *const *const u8) -> isize {
-	rt::thread::sleep(Duration::from_millis(200));
 	main()
 }
 
