@@ -83,6 +83,7 @@ impl Flush {
 pub enum Event {
 	Resize(Resolution),
 	Input(input::Input),
+	Close,
 }
 
 #[derive(Debug)]
@@ -97,6 +98,7 @@ impl Event {
 			raw::EventType::Input => {
 				Self::Input(e.args().input().try_into().map_err(|_| InvalidEvent)?)
 			}
+			raw::EventType::Close => Self::Close,
 			_ => return Err(InvalidEvent),
 		})
 	}
@@ -116,6 +118,9 @@ impl Event {
 				let mut a = raw::EventArgs::default();
 				a.set_input(k.into());
 				e.set_args(a);
+			}
+			Self::Close => {
+				e.set_ty(raw::EventType::Close);
 			}
 		}
 		let mut r = [0; 14];

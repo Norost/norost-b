@@ -140,6 +140,8 @@ fn main() {
 
 	let mut old = None;
 
+	let mut mouse_clicked = false;
+
 	loop {
 		queue.poll();
 		queue.wait(Duration::MAX);
@@ -167,7 +169,13 @@ fn main() {
 							for (w, ww) in manager.windows() {
 								let full_rect = manager.window_rect(w, size).unwrap();
 								let (title, rect) = title_bar::split(&config, full_rect);
-								title_bar::render(&mut main, &config, title, &ww.user_data.title);
+								title_bar::render(
+									&mut main,
+									&config,
+									title,
+									mouse_pos,
+									&ww.user_data.title,
+								);
 								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 								let mut ue = ww.user_data.unread_events.borrow_mut();
 								ue.resize = Some(evt);
@@ -220,7 +228,7 @@ fn main() {
 							let s = String::from_utf8_lossy(val).into_owned().into_boxed_str();
 							let r = manager.window_rect(h, size).unwrap();
 							let (r, _) = title_bar::split(&config, r);
-							title_bar::render(&mut main, &config, r, &s);
+							title_bar::render(&mut main, &config, r, mouse_pos, &s);
 							manager.window_mut(h).unwrap().user_data.title = s;
 							Response::Amount(0)
 						}
@@ -241,7 +249,8 @@ fn main() {
 				}
 				Request::Write { data } if handle == INPUT => {
 					use input::{Input, Movement, Type};
-					let mut mouse_moved @ mut mouse_click = false;
+					let mut mouse_moved = false;
+					let mouse_was_clicked = mouse_clicked;
 					for (_, b) in data.blocks() {
 						for i in (0..b.len() / 8).map(|i| i * 8) {
 							let mut buf = [0; 8];
@@ -249,56 +258,84 @@ fn main() {
 							let k = u64::from_le_bytes(buf);
 							let Ok(k) = Input::try_from(k) else { continue };
 							let l = k.press_level;
-							if l != 0 {
-								match k.ty {
-									Type::Relative(0, Movement::TranslationX) => {
-										mouse_pos.x = if l >= 0 {
-											(mouse_pos.x + l as u32).min(size.x - 1)
-										} else {
-											mouse_pos.x.saturating_sub(-l as u32)
-										};
-										mouse_moved = true;
+							match k.ty {
+								Type::Relative(0, Movement::TranslationX) => {
+									mouse_pos.x = if l >= 0 {
+										(mouse_pos.x + l as u32).min(size.x - 1)
+									} else {
+										mouse_pos.x.saturating_sub(-l as u32)
+									};
+									mouse_moved = true;
+								}
+								Type::Relative(0, Movement::TranslationY) => {
+									mouse_pos.y = if l >= 0 {
+										mouse_pos.y.saturating_sub(l as u32)
+									} else {
+										(mouse_pos.y + -l as u32).min(size.y - 1)
+									};
+									mouse_moved = true;
+								}
+								Type::Absolute(0, Movement::TranslationX) => {
+									mouse_pos.x = (l as u64 * size.x as u64 / (1 << 31)) as _;
+									mouse_moved = true;
+								}
+								Type::Absolute(0, Movement::TranslationY) => {
+									mouse_pos.y = (l as u64 * size.y as u64 / (1 << 31)) as _;
+									mouse_moved = true;
+								}
+								Type::Button(0) => mouse_clicked = k.is_press(),
+								_ => {
+									let Some(w) = manager.focused_window() else { continue };
+									let u = &mut manager.window_mut(w).unwrap().user_data;
+									if let Some(id) = u.event_listeners.get_mut().pop_front() {
+										let evt = ipc_wm::Event::Input(k).encode();
+										let d = table.alloc(evt.len()).expect("out of buffers");
+										d.copy_from(0, &evt);
+										table.enqueue(id, Response::Data(d));
+									} else {
+										u.unread_events.get_mut().inputs.push_back(k);
 									}
-									Type::Relative(0, Movement::TranslationY) => {
-										mouse_pos.y = if l >= 0 {
-											mouse_pos.y.saturating_sub(l as u32)
-										} else {
-											(mouse_pos.y + -l as u32).min(size.y - 1)
-										};
-										mouse_moved = true;
-									}
-									Type::Absolute(0, Movement::TranslationX) => {
-										mouse_pos.x = (l as u64 * size.x as u64 / (1 << 31)) as _;
-										mouse_moved = true;
-									}
-									Type::Absolute(0, Movement::TranslationY) => {
-										mouse_pos.y = (l as u64 * size.y as u64 / (1 << 31)) as _;
-										mouse_moved = true;
-									}
-									Type::Button(0) => mouse_click |= k.is_press(),
-									_ => {
-										let Some(w) = manager.focused_window() else { continue };
-										let u = &mut manager.window_mut(w).unwrap().user_data;
-										if let Some(id) = u.event_listeners.get_mut().pop_front() {
-											let evt = ipc_wm::Event::Input(k).encode();
-											let d = table.alloc(evt.len()).expect("out of buffers");
-											d.copy_from(0, &evt);
-											table.enqueue(id, Response::Data(d));
-										} else {
-											u.unread_events.get_mut().inputs.push_back(k);
-										}
-									}
-								};
-							}
+								}
+							};
 						}
 					}
+					let edge = !mouse_was_clicked & mouse_clicked;
 					if mouse_moved {
 						let [a, b] = (mouse_pos.x as u16).to_le_bytes();
 						let [c, d] = (mouse_pos.y as u16).to_le_bytes();
 						sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
 							.unwrap();
+						for (w, ww) in manager.windows() {
+							let full_rect = manager.window_rect(w, size).unwrap();
+							let (title, rect) = title_bar::split(&config, full_rect);
+							let close = title_bar::Button::Close.render(
+								&mut main,
+								&config,
+								title,
+								mouse_pos,
+								mouse_clicked,
+							);
+							title_bar::Button::Maximize.render(
+								&mut main,
+								&config,
+								title,
+								mouse_pos,
+								mouse_clicked,
+							);
+							if edge & close {
+								let u = &ww.user_data;
+								if let Some(id) = u.event_listeners.borrow_mut().pop_front() {
+									let evt = ipc_wm::Event::Close.encode();
+									let d = table.alloc(evt.len()).expect("out of buffers");
+									d.copy_from(0, &evt);
+									table.enqueue(id, Response::Data(d));
+								} else {
+									u.unread_events.borrow_mut().close = true;
+								}
+							}
+						}
 					}
-					if mouse_click {
+					if edge {
 						let (h, r) = manager.window_at(mouse_pos, size).unwrap();
 						if Some(h) != manager.focused_window() {
 							manager.set_focused_window(h);
@@ -351,7 +388,13 @@ fn main() {
 					for (w, ww) in manager.windows() {
 						let full_rect = manager.window_rect(w, size).unwrap();
 						let (title, rect) = title_bar::split(&config, full_rect);
-						title_bar::render(&mut main, &config, title, &ww.user_data.title);
+						title_bar::render(
+							&mut main,
+							&config,
+							title,
+							mouse_pos,
+							&ww.user_data.title,
+						);
 						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
 						let mut ue = ww.user_data.unread_events.borrow_mut();
 						ue.resize = Some(evt);
@@ -466,11 +509,15 @@ struct Client {
 #[derive(Default)]
 struct Events {
 	resize: Option<ipc_wm::Resolution>,
+	close: bool,
 	inputs: VecDeque<input::Input>,
 }
 
 impl Events {
 	fn pop(&mut self) -> Option<ipc_wm::Event> {
+		if core::mem::take(&mut self.close) {
+			return Some(ipc_wm::Event::Close);
+		}
 		self.resize
 			.take()
 			.map(ipc_wm::Event::Resize)

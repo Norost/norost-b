@@ -19,7 +19,7 @@ struct Event {
 enum EventType {
 	Resize
 	Input
-	_UglyWorkAroundA
+	Close
 	_UglyWorkAroundB
 }
 

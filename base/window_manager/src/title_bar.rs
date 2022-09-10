@@ -24,7 +24,7 @@ pub fn split(config: &Config, rect: Rect) -> (Rect, Rect) {
 }
 
 /// Render the title bar in the given region.
-pub fn render(main: &mut Main, config: &Config, rect: Rect, text: &str) {
+pub fn render(main: &mut Main, config: &Config, rect: Rect, cursor: Point, text: &str) {
 	let color = match &config.title_bar.style {
 		ElemStyle::Color(c) => *c,
 	};
@@ -64,21 +64,61 @@ pub fn render(main: &mut Main, config: &Config, rect: Rect, text: &str) {
 		main.copy(&bm, r);
 	}
 
-	let mut v = Vec::with_capacity(3 * usize::from(w) * usize::from(h));
-	let mut f = |btn: &gui3d::Texture, offset: i32| {
-		v.clear();
-		for c in btn.as_raw().chunks_exact(4) {
+	Button::Close.render(main, config, rect, cursor, false);
+	Button::Maximize.render(main, config, rect, cursor, false);
+}
+
+pub enum Button {
+	Close,
+	Maximize,
+}
+
+impl Button {
+	/// Render only this button of the title bar.
+	pub fn render(
+		&self,
+		main: &mut Main,
+		config: &Config,
+		rect: Rect,
+		cursor: Point,
+		click: bool,
+	) -> bool {
+		let color = match &config.title_bar.style {
+			ElemStyle::Color(c) => *c,
+		};
+		let tex = match self {
+			Self::Close => &config.title_bar.close,
+			Self::Maximize => &config.title_bar.maximize,
+		};
+
+		let (w, h) = (tex.width(), tex.height());
+		let mut v = Vec::with_capacity(3 * usize::from(w) * usize::from(h));
+		let r = self.calc(Size::new(w.into(), h.into()), rect);
+		for c in tex.as_raw().chunks_exact(4) {
 			let a = u32::from(c[3]);
+			let a = if r.contains(cursor) {
+				u32::from(a) * 2 / [3, 4][usize::from(click)]
+			} else {
+				a
+			};
 			for (&x, &y) in c[..3].iter().zip(&color) {
-				v.push(((u32::from(x) * a + u32::from(y) * (255 - a)) / 255) as _);
+				v.push(((u32::from(x) * a + u32::from(y) * (255 - a)) / 255) as _)
 			}
 		}
-		let h = u32::from(btn.height());
+		main.copy(&v, r);
+
+		r.contains(cursor)
+	}
+
+	/// Calculate the rect for a button.
+	fn calc(&self, size: Size, rect: Rect) -> Rect {
+		let (w, h) = (size.x, size.y);
+		let offt = match self {
+			Self::Close => 0,
+			Self::Maximize => w as i32 + 4,
+		};
 		let d = (rect.size().y - h) / 2;
-		let pos = rect.high() - Vector::ONE * (d + h) - Vector::new(offset, 0);
-		let rect = Rect::from_size(pos, Size::new(16, 16));
-		main.copy(&v, rect);
-	};
-	f(c, 0);
-	f(m, i32::from(c.width()) + 4);
+		let pos = rect.high() - Vector::ONE * (d + h) - Vector::new(offt, 0);
+		Rect::from_size(pos, size)
+	}
 }

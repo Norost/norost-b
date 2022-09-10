@@ -177,6 +177,7 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 				Ok(ipc_wm::Event::Input(_)) => {}
+				Ok(ipc_wm::Event::Close) => rt::exit(0),
 				Err(e) => todo!("{:?}", e),
 			}
 			poll_window = read(&window, b);
