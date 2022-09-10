@@ -53,6 +53,8 @@ fn main() -> ! {
 		let len = stdin.read(&mut buf).unwrap();
 		match ipc_usb::recv_parse(&buf[..len]).unwrap() {
 			Recv::DataIn { ep: _, data } => {
+				enqueue_read();
+				let f = |i| u16::from_le_bytes(data[i..i + 2].try_into().unwrap());
 				assert!(data.len() == 8, "unexpected data size");
 
 				let mut toggle_capslock = false;
@@ -121,8 +123,8 @@ fn main() -> ! {
 			Recv::Error { id, code, message } => {
 				panic!("{} (message {}, code {})", message, id, code)
 			}
+			_ => todo!(),
 		}
-		enqueue_read();
 	}
 }
 

@@ -13,10 +13,11 @@ mod vendor;
 use errata::Errata;
 
 use {
-	crate::{dma::Dma, requests},
+	crate::dma::Dma,
 	alloc::{boxed::Box, collections::BTreeMap},
 	command::Pending,
 	core::{num::NonZeroU8, time::Duration},
+	usb_request::descriptor::{Configuration, Endpoint, Interface},
 	xhci::{
 		registers::{
 			operational::DeviceContextBaseAddressArrayPointerRegister,
@@ -237,13 +238,28 @@ impl Xhci {
 	pub fn send_request(
 		&mut self,
 		slot: NonZeroU8,
-		req: crate::requests::Request,
+		req: impl Into<usb_request::RawRequest>,
+		buf: Dma<[u8]>,
+	) -> Result<ring::EntryId, ()> {
+		self.send_request_inner(slot, req.into(), buf)
+	}
+
+	fn send_request_inner(
+		&mut self,
+		slot: NonZeroU8,
+		req: usb_request::RawRequest,
+		buf: Dma<[u8]>,
 	) -> Result<ring::EntryId, ()> {
 		trace!("send request, slot {}", slot);
-		let mut req = req.into_raw();
-		let id = self.devices.get_mut(&slot).unwrap().send_request(0, &req)?;
+		let id = self
+			.devices
+			.get_mut(&slot)
+			.unwrap()
+			.send_request(0, &req, &buf)?;
 		self.ring(slot.get(), 0, 1);
-		req.buffer.take().map(|b| self.transfers.insert(id, b));
+		if buf.len() != 0 {
+			self.transfers.insert(id, buf);
+		}
 		Ok(id)
 	}
 
@@ -301,11 +317,13 @@ impl Xhci {
 					let endpoint = c.endpoint_id();
 					let id = c.trb_pointer();
 					let code = c.completion_code();
+					let length = c.trb_transfer_length();
 					trace!(
-						"transfer event slot {} ep {} id {:x}, {:?}",
+						"transfer event slot {} ep {} id {:x} length {}, {:?}",
 						slot,
 						endpoint,
 						id,
+						length,
 						code
 					);
 					if let Some((mut e, buf)) = self.transfers_config_packet_size.remove(&id) {
@@ -377,9 +395,11 @@ impl DeviceContextBaseAddressArray {
 			.max_scratchpad_buffers();
 		let sp_count = usize::try_from(sp_count).unwrap();
 		trace!("{} scratch pages", sp_count);
-		let mut storage = Dma::<[u64; 256]>::new()?;
+		let mut storage = Dma::<[u64; 256]>::new_zeroed()?;
 		let mut scratchpad_array = Dma::new_slice(sp_count)?;
-		let scratchpad_pages = (0..sp_count).map(|_| Dma::new()).try_collect::<Box<_>>()?;
+		let scratchpad_pages = (0..sp_count)
+			.map(|_| Dma::new_zeroed())
+			.try_collect::<Box<_>>()?;
 		for (e, p) in unsafe { scratchpad_array.as_mut() }
 			.iter_mut()
 			.zip(&*scratchpad_pages)
@@ -422,7 +442,7 @@ pub enum Event {
 }
 
 pub struct DeviceConfig<'a> {
-	pub config: &'a requests::Configuration,
-	pub interface: &'a requests::Interface,
-	pub endpoints: &'a [requests::Endpoint],
+	pub config: &'a Configuration,
+	pub interface: &'a Interface,
+	pub endpoints: &'a [Endpoint],
 }

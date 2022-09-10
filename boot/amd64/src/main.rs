@@ -83,7 +83,7 @@ extern "fastcall" fn main(magic: u32, arg: *const u8) -> Return {
 	// Ensure either invariant TSC or pvclock is supported, as we can't do proper timekeeping
 	// otherwise.
 	assert!(
-		cpuid.invariant_tsc() || cpuid.kvm_feature_clocksource2(),
+		true | cpuid.invariant_tsc() || cpuid.kvm_feature_clocksource2(),
 		"no invariant TSC or pvclock"
 	);
 

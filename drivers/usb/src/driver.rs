@@ -1,5 +1,4 @@
 use {
-	crate::requests::{Direction, Endpoint, EndpointNumber, EndpointTransfer},
 	alloc::{boxed::Box, collections::BTreeMap, string::ToString, vec::Vec},
 	core::{
 		future::Future,
@@ -8,6 +7,7 @@ use {
 		task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 	},
 	io_queue_rt::{Open, Queue, Read, Write},
+	usb_request::descriptor::{Direction, Endpoint, EndpointNumber, EndpointTransfer},
 };
 
 const MSG_SIZE: usize = 32;
@@ -70,6 +70,16 @@ impl<'a> Drivers<'a> {
 						let mut data = crate::dma::Dma::new_slice(l).unwrap();
 						unsafe { data.as_mut().copy_from_slice(&buf[..l]) }
 						Some(Event::DataOut { endpoint, data })
+					}
+					ipc_usb::SEND_TY_GET_DESCRIPTOR => {
+						let [_, recp, ty, index, a, b]: [u8; 6] = (&*buf).try_into().unwrap();
+						let len = u16::from_le_bytes([a, b]);
+						let recipient = match recp {
+							0 => Recipient::Device,
+							1 => Recipient::Interface,
+							_ => todo!(),
+						};
+						Some(Event::GetDescriptor { recipient, ty, index, len })
 					}
 					_ => todo!(
 						"invalid msg: {:?}",
@@ -255,6 +265,12 @@ impl<'a> DeviceDriver<'a> {
 pub enum Event {
 	DataIn { endpoint: u8, size: u32 },
 	DataOut { endpoint: u8, data: crate::dma::Dma<[u8]> },
+	GetDescriptor { recipient: Recipient, ty: u8, index: u8, len: u16 },
+}
+
+pub enum Recipient {
+	Device,
+	Interface,
 }
 
 pub enum Message<'a> {
