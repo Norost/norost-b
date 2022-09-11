@@ -1,6 +1,6 @@
 use {
 	crate::{
-		math::{Point, Rect, Size, Vector},
+		math::{Point2, Rect, Size, Vec2},
 		window::{PathIter, Window},
 		workspace::{NewWorkspaceError, Workspace},
 	},
@@ -65,7 +65,7 @@ impl<U> Manager<U> {
 			.flatten()
 	}
 
-	pub fn window_at(&self, position: Point, total_size: Size) -> Option<(Handle, Rect)> {
+	pub fn window_at(&self, position: Point2, total_size: Size) -> Option<(Handle, Rect)> {
 		self.current_workspace().window_at(position, total_size)
 	}
 

@@ -1,7 +1,7 @@
 use {
 	crate::{
 		config::{Config, ElemStyle},
-		math::{Point, Rect, Size, Vector},
+		math::{Point2, Rect, Size, Vec2},
 		Main,
 	},
 	core::slice,
@@ -15,8 +15,8 @@ use {
 pub fn split(config: &Config, rect: Rect) -> (Rect, Rect) {
 	let tbh = u32::from(config.title_bar.height);
 	let mid = rect.low().y + tbh;
-	let m1 = Point::new(rect.high().x, mid);
-	let m2 = Point::new(rect.low().x, mid);
+	let m1 = Point2::new(rect.high().x, mid);
+	let m2 = Point2::new(rect.low().x, mid);
 	(
 		Rect::from_points(rect.low(), m1),
 		Rect::from_points(m2, rect.high()),
@@ -24,7 +24,7 @@ pub fn split(config: &Config, rect: Rect) -> (Rect, Rect) {
 }
 
 /// Render the title bar in the given region.
-pub fn render(main: &mut Main, config: &Config, rect: Rect, cursor: Point, text: &str) {
+pub fn render(main: &mut Main, config: &Config, rect: Rect, cursor: Point2, text: &str) {
 	let color = match &config.title_bar.style {
 		ElemStyle::Color(c) => *c,
 	};
@@ -48,7 +48,7 @@ pub fn render(main: &mut Main, config: &Config, rect: Rect, cursor: Point, text:
 		&TextStyle { text, font_index: 0, px: 16., user_data: () },
 	);
 	for g in layout.glyphs().iter().filter(|g| g.char_data.rasterize()) {
-		let pos = Point::new(g.x as u32, g.y as u32);
+		let pos = Point2::new(g.x as u32, g.y as u32);
 		let size = Size::new(g.width as u32, g.height as u32);
 		let (_, bm) = config.font.rasterize_config(g.key);
 		let bm = bm
@@ -80,7 +80,7 @@ impl Button {
 		main: &mut Main,
 		config: &Config,
 		rect: Rect,
-		cursor: Point,
+		cursor: Point2,
 		click: bool,
 	) -> bool {
 		let color = match &config.title_bar.style {
@@ -118,7 +118,7 @@ impl Button {
 			Self::Maximize => w as i32 + 4,
 		};
 		let d = (rect.size().y - h) / 2;
-		let pos = rect.high() - Vector::ONE * (d + h) - Vector::new(offt, 0);
+		let pos = rect.high() - Vec2::ONE * (d + h) - Vec2::new(offt, 0);
 		Rect::from_size(pos, size)
 	}
 }

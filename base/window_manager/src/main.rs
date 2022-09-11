@@ -17,7 +17,6 @@
 
 mod config;
 mod manager;
-mod math;
 mod title_bar;
 mod window;
 mod workspace;
@@ -28,8 +27,9 @@ use {
 		os::stream_table::{JobId, Request, Response, StreamTable},
 		task,
 	},
+	gui3d::math::int as math,
 	io_queue_rt::{Pow2Size, Queue},
-	math::{Point, Rect, Size, Vector},
+	math::{Point2, Rect, Size, Vec2},
 	rt::io::{Error, Handle},
 	std::collections::VecDeque,
 };
@@ -128,7 +128,7 @@ fn main() {
 		sync.write(&[0xc5, f(c.width()), f(c.height())]).unwrap();
 	}
 
-	let mut mouse_pos = Point::new((size.x / 2).into(), (size.y / 2).into());
+	let mut mouse_pos = Point2::new((size.x / 2).into(), (size.y / 2).into());
 	let [a, b] = (mouse_pos.x as u16).to_le_bytes();
 	let [c, d] = (mouse_pos.y as u16).to_le_bytes();
 	sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
@@ -157,13 +157,13 @@ fn main() {
 		let size_x2 = Size::new((size.x - config.margin) * 2, (size.y - config.margin) * 2);
 		let unsize_x2 = |r: Rect| {
 			let m = config.margin;
-			let l = Point::new((r.low().x + m) / 2, (r.low().y + m) / 2);
-			let h = Point::new((r.high().x + m) / 2, (r.high().y + m) / 2);
+			let l = Point2::new((r.low().x + m) / 2, (r.low().y + m) / 2);
+			let h = Point2::new((r.high().x + m) / 2, (r.high().y + m) / 2);
 			Rect::from_points(l, h)
 		};
 		let apply_margin = |r: Rect| {
-			let l = r.low() + Vector::ONE * config.margin;
-			let h = r.high() - Vector::ONE * config.margin;
+			let l = r.low() + Vec2::ONE * config.margin;
+			let h = r.high() - Vec2::ONE * config.margin;
 			Rect::from_points(l, h)
 		};
 		let window_rect = |mgr: &manager::Manager<Client>, h| {
@@ -171,8 +171,8 @@ fn main() {
 			let r = apply_margin(r);
 			unsize_x2(r)
 		};
-		let window_at = |mgr: &mut manager::Manager<Client>, pos: Point| {
-			let pos = Point::new(pos.x * 2 - config.margin, pos.y * 2 - config.margin);
+		let window_at = |mgr: &mut manager::Manager<Client>, pos: Point2| {
+			let pos = Point2::new(pos.x * 2 - config.margin, pos.y * 2 - config.margin);
 			let (h, r) = mgr.window_at(pos, size_x2).unwrap();
 			if Some(h) != mgr.focused_window() {
 				mgr.set_focused_window(h);
@@ -193,7 +193,7 @@ fn main() {
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
 							let h = manager.new_window(size, Default::default()).unwrap();
-							main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+							main.fill(Rect::from_size(Point2::ORIGIN, size), [50, 50, 50]);
 							old = None;
 							for (w, ww) in manager.windows() {
 								let full_rect = window_rect(&manager, w);
@@ -387,7 +387,7 @@ fn main() {
 						(u32::from(draw_size.y) + 1).min(rect.size().y),
 					);
 					let draw_orig = draw.origin;
-					let draw_orig = Point::new(draw_orig.x, draw_orig.y);
+					let draw_orig = Point2::new(draw_orig.x, draw_orig.y);
 					let draw_rect = rect
 						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
 						.unwrap();
@@ -408,7 +408,7 @@ fn main() {
 				}
 				Request::Close if handle != INPUT => {
 					manager.destroy_window(handle).unwrap();
-					main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
+					main.fill(Rect::from_size(Point2::ORIGIN, size), [50, 50, 50]);
 					old = None;
 					for (w, ww) in manager.windows() {
 						let full_rect = window_rect(&manager, w);
@@ -463,13 +463,13 @@ fn main() {
 				.chain([(new, [127; 3])])
 			{
 				let w = config.margin;
-				let (l, h) = (r.low() - Vector::ONE * w, r.high() + Vector::ONE);
+				let (l, h) = (r.low() - Vec2::ONE * w, r.high() + Vec2::ONE);
 				let s = Size::new(r.size().x + w * 2, r.size().y + w * 2);
 				for r in [
-					Rect::from_size(Point::new(l.x, l.y), Size::new(w, s.y)),
-					Rect::from_size(Point::new(h.x, l.y), Size::new(w, s.y)),
-					Rect::from_size(Point::new(l.x, l.y), Size::new(s.x, w)),
-					Rect::from_size(Point::new(l.x, h.y), Size::new(s.x, w)),
+					Rect::from_size(Point2::new(l.x, l.y), Size::new(w, s.y)),
+					Rect::from_size(Point2::new(h.x, l.y), Size::new(w, s.y)),
+					Rect::from_size(Point2::new(l.x, l.y), Size::new(s.x, w)),
+					Rect::from_size(Point2::new(l.x, h.y), Size::new(s.x, w)),
 				] {
 					main.fill(r, c);
 				}

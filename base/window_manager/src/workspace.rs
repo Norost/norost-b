@@ -1,6 +1,6 @@
 use {
 	crate::{
-		math::{Point, Ratio, Rect, Size},
+		math::{Point2, Ratio, Rect, Size},
 		window::PathIter,
 	},
 	core::{fmt, mem},
@@ -167,7 +167,7 @@ impl Workspace {
 	}
 
 	/// Find the window at the given position.
-	pub fn window_at(&self, position: Point, size: Size) -> Option<(Handle, Rect)> {
+	pub fn window_at(&self, position: Point2, size: Size) -> Option<(Handle, Rect)> {
 		self.recurse(size, |_, r| r.contains(position))
 	}
 
@@ -192,7 +192,7 @@ impl Workspace {
 		F: FnMut(&Rect, &Rect) -> bool,
 	{
 		let mut cur = self.nodes.get(self.root)?; // Having no root node is valid
-		let mut rect = Rect::from_size(Point::ORIGIN, size);
+		let mut rect = Rect::from_size(Point2::ORIGIN, size);
 		loop {
 			match cur {
 				Node::Parent { left, right, ratio, vertical } => {
@@ -291,7 +291,7 @@ mod test {
 		let size = Size::new(100, 100);
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
-			Some(Rect::from_size(Point::ORIGIN, size)),
+			Some(Rect::from_size(Point2::ORIGIN, size)),
 		);
 	}
 
@@ -304,7 +304,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::ORIGIN,
+				Point2::ORIGIN,
 				Size::new(size.x / 2, size.y)
 			)),
 		);
@@ -319,7 +319,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::new(50, 0),
+				Point2::new(50, 0),
 				Size::new(size.x / 2, size.y)
 			)),
 		);
@@ -334,7 +334,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::ORIGIN,
+				Point2::ORIGIN,
 				Size::new(size.x, size.y / 2)
 			)),
 		);
