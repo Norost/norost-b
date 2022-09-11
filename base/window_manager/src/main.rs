@@ -172,7 +172,7 @@ fn main() {
 			unsize_x2(r)
 		};
 		let window_at = |mgr: &mut manager::Manager<Client>, pos: Point| {
-			let pos = Point::new(pos.x * 2, pos.y * 2);
+			let pos = Point::new(pos.x * 2 - config.margin, pos.y * 2 - config.margin);
 			let (h, r) = mgr.window_at(pos, size_x2).unwrap();
 			if Some(h) != mgr.focused_window() {
 				mgr.set_focused_window(h);
