@@ -308,7 +308,7 @@ impl SetAddress {
 ///
 /// # Note
 ///
-/// The speed must come from the **link** register.
+/// The speed comes from the `portsc` register.
 fn calc_packet_size(speed: u8) -> (u16, bool) {
 	match speed {
 		0 => panic!("uninitialized"),
