@@ -1,8 +1,8 @@
 use {
 	crate::{
 		config::{Config, ElemStyle},
+		gpu::Gpu,
 		math::{Point2, Rect, Size, Vec2},
-		Main,
 	},
 	core::slice,
 	fontdue::layout::{
@@ -24,7 +24,7 @@ pub fn split(config: &Config, rect: Rect) -> (Rect, Rect) {
 }
 
 /// Render the title bar in the given region.
-pub fn render(main: &mut Main, config: &Config, rect: Rect, cursor: Point2, text: &str) {
+pub fn render(main: &mut Gpu, config: &Config, rect: Rect, cursor: Point2, text: &str) {
 	let color = match &config.title_bar.style {
 		ElemStyle::Color(c) => *c,
 	};
@@ -77,7 +77,7 @@ impl Button {
 	/// Render only this button of the title bar.
 	pub fn render(
 		&self,
-		main: &mut Main,
+		main: &mut Gpu,
 		config: &Config,
 		rect: Rect,
 		cursor: Point2,

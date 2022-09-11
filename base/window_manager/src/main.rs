@@ -16,6 +16,7 @@
 #![feature(let_else)]
 
 mod config;
+mod gpu;
 mod manager;
 mod title_bar;
 mod window;
@@ -34,84 +35,12 @@ use {
 	std::collections::VecDeque,
 };
 
-pub struct Main<'a> {
-	size: Size,
-	shmem: &'a mut [u8],
-	sync: rt::RefObject<'a>,
-}
-
-impl Main<'_> {
-	fn fill(&mut self, rect: Rect, color: [u8; 3]) {
-		let t = rect.size();
-		assert!(
-			t.x <= self.size.x && t.y <= self.size.y,
-			"rect out of bounds"
-		);
-		assert!(t.area() * 3 <= self.shmem.len() as u64, "shmem too small");
-		for y in 0..t.y {
-			for x in 0..t.x {
-				let i = y * t.x + x;
-				let s = &mut self.shmem[i as usize * 3..][..3];
-				s.copy_from_slice(&color);
-			}
-		}
-		self.sync_rect(rect);
-	}
-
-	fn sync_rect(&mut self, rect: Rect) {
-		self.sync
-			.write(
-				&ipc_gpu::Flush {
-					offset: 0,
-					stride: rect.size().x,
-					origin: ipc_gpu::Point { x: rect.low().x, y: rect.low().y },
-					size: ipc_gpu::SizeInclusive { x: rect.size().x as _, y: rect.size().y as _ },
-				}
-				.encode(),
-			)
-			.unwrap();
-	}
-
-	fn copy(&mut self, data: &[u8], to: Rect) {
-		self.shmem[..data.len()].copy_from_slice(data);
-		self.sync_rect(to);
-	}
-}
-
 fn main() {
 	let config = config::load();
 
-	let sync = rt::args::handle(b"gpu").expect("gpu undefined");
-	let res = {
-		let mut b = [0; 8];
-		sync.get_meta(b"bin/resolution".into(), (&mut b).into())
-			.unwrap();
-		ipc_gpu::Resolution::decode(b)
-	};
-	let size = Size::new(res.x, res.y);
-
-	let shmem_size = size.x as usize * size.y as usize * 3;
-	let shmem_size = (shmem_size + 0xfff) & !0xfff;
-	let (shmem_obj, _) =
-		rt::Object::new(rt::io::NewObject::SharedMemory { size: shmem_size }).unwrap();
-	let (shmem, shmem_size) = shmem_obj
-		.map_object(None, rt::io::RWX::RW, 0, shmem_size)
-		.unwrap();
-	sync.share(
-		&rt::Object::new(rt::io::NewObject::PermissionMask {
-			handle: shmem_obj.as_raw(),
-			rwx: rt::io::RWX::R,
-		})
-		.unwrap()
-		.0,
-	)
-	.expect("failed to share mem with GPU");
-	// SAFETY: only we can write to this slice. The other side can go figure.
-	let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
-
 	let mut manager = manager::Manager::<Client>::new().unwrap();
 
-	let mut main = Main { size, sync, shmem };
+	let mut main = gpu::Gpu::new();
 
 	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
 	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(5), (1 << 8) - 1);
@@ -120,19 +49,10 @@ fn main() {
 		.share(table.public())
 		.expect("failed to share");
 
-	{
-		let c = &config.cursor;
-		let r = c.as_raw();
-		main.shmem[..r.len()].copy_from_slice(r);
-		let f = |n| u8::try_from(n - 1).unwrap();
-		sync.write(&[0xc5, f(c.width()), f(c.height())]).unwrap();
-	}
+	main.set_cursor(&config.cursor);
 
-	let mut mouse_pos = Point2::new((size.x / 2).into(), (size.y / 2).into());
-	let [a, b] = (mouse_pos.x as u16).to_le_bytes();
-	let [c, d] = (mouse_pos.y as u16).to_le_bytes();
-	sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
-		.unwrap();
+	let mut mouse_pos = Point2::new((main.size().x / 2).into(), (main.size().y / 2).into());
+	main.move_cursor(mouse_pos);
 
 	let queue = Queue::new(Pow2Size::P2, Pow2Size::P2).unwrap();
 	let mut poll_table = queue.submit_read(table.notifier().as_raw(), ()).unwrap();
@@ -154,7 +74,10 @@ fn main() {
 
 		const INPUT: Handle = Handle::MAX - 1;
 
-		let size_x2 = Size::new((size.x - config.margin) * 2, (size.y - config.margin) * 2);
+		let size_x2 = Size::new(
+			(main.size().x - config.margin) * 2,
+			(main.size().y - config.margin) * 2,
+		);
 		let unsize_x2 = |r: Rect| {
 			let m = config.margin;
 			let l = Point2::new((r.low().x + m) / 2, (r.low().y + m) / 2);
@@ -192,8 +115,8 @@ fn main() {
 					let (p, _) = path.copy_into(&mut p);
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
-							let h = manager.new_window(size, Default::default()).unwrap();
-							main.fill(Rect::from_size(Point2::ORIGIN, size), [50, 50, 50]);
+							let h = manager.new_window(main.size(), Default::default()).unwrap();
+							main.fill(Rect::from_size(Point2::ORIGIN, main.size()), [50; 3]);
 							old = None;
 							for (w, ww) in manager.windows() {
 								let full_rect = window_rect(&manager, w);
@@ -290,7 +213,7 @@ fn main() {
 							match k.ty {
 								Type::Relative(0, Movement::TranslationX) => {
 									mouse_pos.x = if l >= 0 {
-										(mouse_pos.x + l as u32).min(size.x - 1)
+										(mouse_pos.x + l as u32).min(main.size().x - 1)
 									} else {
 										mouse_pos.x.saturating_sub(-l as u32)
 									};
@@ -300,16 +223,18 @@ fn main() {
 									mouse_pos.y = if l >= 0 {
 										mouse_pos.y.saturating_sub(l as u32)
 									} else {
-										(mouse_pos.y + -l as u32).min(size.y - 1)
+										(mouse_pos.y + -l as u32).min(main.size().y - 1)
 									};
 									mouse_moved = true;
 								}
 								Type::Absolute(0, Movement::TranslationX) => {
-									mouse_pos.x = (l as u64 * size.x as u64 / (1 << 31)) as _;
+									mouse_pos.x =
+										(l as u64 * main.size().x as u64 / (1 << 31)) as _;
 									mouse_moved = true;
 								}
 								Type::Absolute(0, Movement::TranslationY) => {
-									mouse_pos.y = (l as u64 * size.y as u64 / (1 << 31)) as _;
+									mouse_pos.y =
+										(l as u64 * main.size().y as u64 / (1 << 31)) as _;
 									mouse_moved = true;
 								}
 								Type::Button(0) => mouse_clicked = k.is_press(),
@@ -330,10 +255,7 @@ fn main() {
 					}
 					let edge = !mouse_was_clicked & mouse_clicked;
 					if mouse_moved {
-						let [a, b] = (mouse_pos.x as u16).to_le_bytes();
-						let [c, d] = (mouse_pos.y as u16).to_le_bytes();
-						sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
-							.unwrap();
+						main.move_cursor(mouse_pos);
 					}
 					if mouse_moved | edge {
 						for (w, ww) in manager.windows() {
@@ -391,24 +313,19 @@ fn main() {
 					let draw_rect = rect
 						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
 						.unwrap();
-					debug_assert_eq!((0..draw_size.x).count(), draw_rect.x().count());
-					debug_assert_eq!((0..draw_size.y).count(), draw_rect.y().count());
-					assert!(
-						draw_rect.high().x * size.y as u32 + draw_rect.high().y <= size.x * size.y
-					);
 					// TODO we can avoid this copy by passing shared memory buffers directly
 					// to the GPU
-					window
-						.user_data
-						.framebuffer
-						.copy_to_untrusted(0, &mut main.shmem[..draw_rect.area() as usize * 3]);
+					// FIXME unsafe as the client may be malicious
+					let fb = &window.user_data.framebuffer;
+					let fb = unsafe { core::slice::from_raw_parts(fb.base.as_ptr(), fb.size) };
+					main.copy(fb, draw_rect);
 					let l = data.len().try_into().unwrap();
 					main.sync_rect(draw_rect);
 					Response::Amount(l)
 				}
 				Request::Close if handle != INPUT => {
 					manager.destroy_window(handle).unwrap();
-					main.fill(Rect::from_size(Point2::ORIGIN, size), [50, 50, 50]);
+					main.fill(Rect::from_size(Point2::ORIGIN, main.size()), [50, 50, 50]);
 					old = None;
 					for (w, ww) in manager.windows() {
 						let full_rect = window_rect(&manager, w);
