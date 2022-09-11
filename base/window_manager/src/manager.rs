@@ -1,7 +1,7 @@
 use {
 	crate::{
 		math::{Point, Rect, Size, Vector},
-		window::{GlobalWindowParams, PathIter, Window},
+		window::{PathIter, Window},
 		workspace::{NewWorkspaceError, Workspace},
 	},
 	core::cell::Cell,
@@ -14,18 +14,16 @@ pub struct Manager<U> {
 	workspaces: Box<[Workspace]>,
 	current_workspace: u8,
 	focused_window: Cell<Handle>,
-	global_window_params: GlobalWindowParams,
 }
 
 impl<U> Manager<U> {
-	pub fn new(global_window_params: GlobalWindowParams) -> Result<Self, NewManagerError> {
+	pub fn new() -> Result<Self, NewManagerError> {
 		let ws = Workspace::new().map_err(NewManagerError::NewWorkspace)?;
 		Ok(Self {
 			windows: Arena::new(),
 			workspaces: [ws].into(),
 			current_workspace: 0,
 			focused_window: Handle::MAX.into(),
-			global_window_params,
 		})
 	}
 
@@ -65,10 +63,6 @@ impl<U> Manager<U> {
 		(self.current_workspace == ws)
 			.then(|| self.workspaces[usize::from(ws)].calculate_rect(path, total_size))
 			.flatten()
-			.map(|rect| {
-				let d = Vector::ONE * self.global_window_params.margin;
-				Rect::from_points(rect.low() + d, rect.high() - d)
-			})
 	}
 
 	pub fn window_at(&self, position: Point, total_size: Size) -> Option<(Handle, Rect)> {

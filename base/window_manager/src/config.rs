@@ -72,7 +72,7 @@ pub fn load() -> Config {
 		},
 		cursor,
 		font,
-		margin: 2,
+		margin: 7,
 	}
 }
 

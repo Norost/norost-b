@@ -83,8 +83,3 @@ impl fmt::Debug for PathIter {
 		f.write_char('>')
 	}
 }
-
-#[derive(Default)]
-pub struct GlobalWindowParams {
-	pub margin: u32,
-}

@@ -109,8 +109,7 @@ fn main() {
 	// SAFETY: only we can write to this slice. The other side can go figure.
 	let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
 
-	let gwp = window::GlobalWindowParams { margin: config.margin };
-	let mut manager = manager::Manager::<Client>::new(gwp).unwrap();
+	let mut manager = manager::Manager::<Client>::new().unwrap();
 
 	let mut main = Main { size, sync, shmem };
 
@@ -155,6 +154,36 @@ fn main() {
 
 		const INPUT: Handle = Handle::MAX - 1;
 
+		let size_x2 = Size::new((size.x - config.margin) * 2, (size.y - config.margin) * 2);
+		let unsize_x2 = |r: Rect| {
+			let m = config.margin;
+			let l = Point::new((r.low().x + m) / 2, (r.low().y + m) / 2);
+			let h = Point::new((r.high().x + m) / 2, (r.high().y + m) / 2);
+			Rect::from_points(l, h)
+		};
+		let apply_margin = |r: Rect| {
+			let l = r.low() + Vector::ONE * config.margin;
+			let h = r.high() - Vector::ONE * config.margin;
+			Rect::from_points(l, h)
+		};
+		let window_rect = |mgr: &manager::Manager<Client>, h| {
+			let r = mgr.window_rect(h, size_x2).unwrap();
+			let r = apply_margin(r);
+			unsize_x2(r)
+		};
+		let window_at = |mgr: &mut manager::Manager<Client>, pos: Point| {
+			let pos = Point::new(pos.x * 2, pos.y * 2);
+			let (h, r) = mgr.window_at(pos, size_x2).unwrap();
+			if Some(h) != mgr.focused_window() {
+				mgr.set_focused_window(h);
+				let r = apply_margin(r);
+				let r = unsize_x2(r);
+				Some(r)
+			} else {
+				None
+			}
+		};
+
 		while let Some((handle, job_id, req)) = table.dequeue() {
 			let mut prop_buf = [0; 511];
 			let response = match req {
@@ -167,7 +196,7 @@ fn main() {
 							main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 							old = None;
 							for (w, ww) in manager.windows() {
-								let full_rect = manager.window_rect(w, size).unwrap();
+								let full_rect = window_rect(&manager, w);
 								let (title, rect) = title_bar::split(&config, full_rect);
 								title_bar::render(
 									&mut main,
@@ -200,7 +229,7 @@ fn main() {
 					match (handle, &*prop) {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/resolution") => {
-							let rect = manager.window_rect(h, size).unwrap();
+							let rect = window_rect(&manager, h);
 							let (_, rect) = title_bar::split(&config, rect);
 							let data = table.alloc(8).expect("out of buffers");
 							data.copy_from(0, &u32::from(rect.size().x).to_le_bytes());
@@ -216,7 +245,7 @@ fn main() {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/cmd/fill") => {
 							if let &[r, g, b] = &*val {
-								let rect = manager.window_rect(h, size).unwrap();
+								let rect = window_rect(&manager, h);
 								let (_, rect) = title_bar::split(&config, rect);
 								main.fill(rect, [r, g, b]);
 								Response::Amount(0)
@@ -226,7 +255,7 @@ fn main() {
 						}
 						(h, b"title") => {
 							let s = String::from_utf8_lossy(val).into_owned().into_boxed_str();
-							let r = manager.window_rect(h, size).unwrap();
+							let r = window_rect(&manager, h);
 							let (r, _) = title_bar::split(&config, r);
 							title_bar::render(&mut main, &config, r, mouse_pos, &s);
 							manager.window_mut(h).unwrap().user_data.title = s;
@@ -306,7 +335,7 @@ fn main() {
 						sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
 							.unwrap();
 						for (w, ww) in manager.windows() {
-							let full_rect = manager.window_rect(w, size).unwrap();
+							let full_rect = window_rect(&manager, w);
 							let (title, rect) = title_bar::split(&config, full_rect);
 							let close = title_bar::Button::Close.render(
 								&mut main,
@@ -336,13 +365,7 @@ fn main() {
 						}
 					}
 					if edge {
-						let (h, r) = manager.window_at(mouse_pos, size).unwrap();
-						if Some(h) != manager.focused_window() {
-							manager.set_focused_window(h);
-							let r = Rect::from_points(
-								r.low() + Vector::ONE * config.margin,
-								r.high() - Vector::ONE * config.margin,
-							);
+						if let Some(r) = window_at(&mut manager, mouse_pos) {
 							draw_focus_borders = Some(r);
 						}
 					}
@@ -352,7 +375,7 @@ fn main() {
 					let window = manager.window(handle).unwrap();
 					let mut header = [0; 12];
 					data.copy_to(0, &mut header);
-					let rect = manager.window_rect(handle, size).unwrap();
+					let rect = window_rect(&manager, handle);
 					let (_, rect) = title_bar::split(&config, rect);
 					let draw = ipc_wm::Flush::decode(header);
 					let draw_size = draw.size;
@@ -386,7 +409,7 @@ fn main() {
 					main.fill(Rect::from_size(Point::ORIGIN, size), [50, 50, 50]);
 					old = None;
 					for (w, ww) in manager.windows() {
-						let full_rect = manager.window_rect(w, size).unwrap();
+						let full_rect = window_rect(&manager, w);
 						let (title, rect) = title_bar::split(&config, full_rect);
 						title_bar::render(
 							&mut main,
