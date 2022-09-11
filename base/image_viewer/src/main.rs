@@ -61,12 +61,17 @@ fn main() {
 		drop(fb);
 		unsafe { rt::mem::dealloc(fb_ptr, fb_size).unwrap() };
 
-		let mut evt = [0; 16];
-		let l = window.read(&mut evt).unwrap();
-		match ipc_wm::Event::decode(evt[..l].try_into().unwrap()).unwrap() {
-			ipc_wm::Event::Resize(r) => res = r,
-			ipc_wm::Event::Input(_) => {}
-			ipc_wm::Event::Close => rt::exit(0),
+		loop {
+			let mut evt = [0; 16];
+			let l = window.read(&mut evt).unwrap();
+			match ipc_wm::Event::decode(evt[..l].try_into().unwrap()).unwrap() {
+				ipc_wm::Event::Resize(r) => {
+					res = r;
+					break;
+				}
+				ipc_wm::Event::Input(_) => continue,
+				ipc_wm::Event::Close => rt::exit(0),
+			}
 		}
 	}
 }
