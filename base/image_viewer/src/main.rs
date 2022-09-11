@@ -9,15 +9,16 @@ use std::{
 static EXAMPLE: &[u8] = include_bytes!("/tank/stupid_memes/rust_evangelism_strike_force.jpg");
 
 fn main() {
-	let mut window = File::create("window_manager/window").unwrap();
+	let mut window = rt::args::handle(b"window").expect("window undefined");
 	let mut buf = [0; 8];
-	rt::io::get_meta(
-		window.as_handle(),
-		b"bin/resolution".into(),
-		(&mut buf).into(),
-	)
-	.unwrap();
+	window
+		.get_meta(b"bin/resolution".into(), (&mut buf).into())
+		.unwrap();
 	let mut res = ipc_wm::Resolution::decode(buf);
+
+	window
+		.set_meta(b"title".into(), b"rust_evangelism_strike_force.jpg".into())
+		.unwrap();
 
 	loop {
 		let (fb_ptr, fb_size) = {
@@ -30,7 +31,7 @@ fn main() {
 				rwx: rt::io::RWX::R,
 			})
 			.unwrap();
-			rt::io::share(window.as_handle(), fb_rdonly.as_raw()).unwrap();
+			window.share(&fb_rdonly).unwrap();
 			fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
 		};
 		let fb = unsafe { std::slice::from_raw_parts_mut(fb_ptr.as_ptr(), fb_size) };
@@ -60,10 +61,17 @@ fn main() {
 		drop(fb);
 		unsafe { rt::mem::dealloc(fb_ptr, fb_size).unwrap() };
 
-		let mut evt = [0; 16];
-		let l = window.read(&mut evt).unwrap();
-		match ipc_wm::Event::decode(evt[..l].try_into().unwrap()) {
-			ipc_wm::Event::Resize(r) => res = r,
+		loop {
+			let mut evt = [0; 16];
+			let l = window.read(&mut evt).unwrap();
+			match ipc_wm::Event::decode(evt[..l].try_into().unwrap()).unwrap() {
+				ipc_wm::Event::Resize(r) => {
+					res = r;
+					break;
+				}
+				ipc_wm::Event::Input(_) => continue,
+				ipc_wm::Event::Close => rt::exit(0),
+			}
 		}
 	}
 }

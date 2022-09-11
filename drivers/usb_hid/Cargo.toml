@@ -1,0 +1,27 @@
+[package]
+name = "driver_usb_hid"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.input]
+path = "../../../lib/input"
+
+[dependencies.ipc_usb]
+path = "../../lib/rust/ipc/usb"
+
+[dependencies.usb_hid_item]
+git = "https://github.com/rust-osdev/usb"
+
+[dependencies.usb_hid_usage]
+git = "https://github.com/rust-osdev/usb"
+
+[dependencies.usb_request]
+git = "https://github.com/rust-osdev/usb"
+
+[dependencies.rt]
+package = "norostb_rt"
+path = "../../lib/rust/rt"
+
+[dependencies.rt_default]
+package = "norost_rt_default"
+path = "../../lib/rust/rt_default"

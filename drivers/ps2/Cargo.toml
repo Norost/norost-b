@@ -16,6 +16,9 @@ default-features = false
 version = "0.3"
 default-features = false
 
+[dependencies.input]
+path = "../../../lib/input"
+
 [dependencies.rt]
 package = "norostb_rt"
 path = "../../lib/rust/rt"
@@ -23,6 +26,3 @@ path = "../../lib/rust/rt"
 [dependencies.rt_default]
 package = "norost_rt_default"
 path = "../../lib/rust/rt_default"
-
-[dependencies.scancodes]
-path = "../../lib/rust/scancodes"

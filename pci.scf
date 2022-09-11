@@ -5,7 +5,7 @@
 		(1001 "drivers/virtio_block"
 			(name "disk"))
 		;(1050 "drivers/virtio_gpu"
-		;	(name "gpu")))
+		;	(name "gpu"))
 		)
 	;(8086
 	;	(1616 "drivers/intel_hd_graphics")))

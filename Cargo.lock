@@ -20,6 +20,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "adler"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
+
+[[package]]
+name = "adler32"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aae1277d39aeec15cb388266ecc24b11c80469deae6067e17a1a7aa9e5c1f234"
+
+[[package]]
 name = "ahash"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -165,6 +177,15 @@ version = "0.1.0"
 source = "git+https://git.sr.ht/~demindiro/cpuid#93a7b200e3cc2520ce3b3deaa26c1f16527107dd"
 
 [[package]]
+name = "crc32fast"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b540bd8bc810d3885c6ea91e2018302f68baba2129ab3e88f32389ee9370880d"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "crypto-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -197,6 +218,15 @@ dependencies = [
  "rand_core 0.5.1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "deflate"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c86f7e25f518f4b81808a2cf1c50996a61f5c2eb394b2393bd87f2a4780a432f"
+dependencies = [
+ "adler32",
 ]
 
 [[package]]
@@ -292,10 +322,10 @@ dependencies = [
 name = "driver_pci"
 version = "0.1.0"
 dependencies = [
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "norostb_rt_alloc",
+ "scf",
 ]
 
 [[package]]
@@ -304,10 +334,10 @@ version = "0.2.0"
 dependencies = [
  "driver_utils",
  "futures-util",
+ "input",
  "norost_async_std",
  "norost_rt_default",
  "norostb_rt",
- "scancodes",
 ]
 
 [[package]]
@@ -315,11 +345,11 @@ name = "driver_scancode_to_char"
 version = "0.2.0"
 dependencies = [
  "driver_utils",
+ "input",
  "norost_async_std",
  "norost_rt_default",
  "norostb_kernel",
  "norostb_rt",
- "scancodes",
 ]
 
 [[package]]
@@ -329,22 +359,25 @@ dependencies = [
  "driver_utils",
  "ipc_usb",
  "nora_io_queue_rt",
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "pci",
+ "scf",
+ "usb_request",
  "xhci",
 ]
 
 [[package]]
-name = "driver_usb_kbd"
+name = "driver_usb_hid"
 version = "0.1.0"
 dependencies = [
- "driver_utils",
+ "input",
  "ipc_usb",
  "norost_rt_default",
  "norostb_rt",
- "scancodes",
+ "usb_hid_item",
+ "usb_hid_usage",
+ "usb_request",
 ]
 
 [[package]]
@@ -496,8 +529,7 @@ dependencies = [
 
 [[package]]
 name = "framebuffer"
-version = "0.1.0"
-source = "git+https://git.sr.ht/~demindiro/framebuffer#94b82e117d06b24e8f27dd31574a33528ebb1be9"
+version = "0.2.0"
 
 [[package]]
 name = "futures"
@@ -619,6 +651,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "518faa5064866338b013ff9b2350dc318e14cc4fcd6cb8206d7e7c9886c98815"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "group"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -630,13 +671,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gui3d"
+version = "0.2.0"
+dependencies = [
+ "glam",
+ "libm",
+]
+
+[[package]]
 name = "gui_cli"
 version = "0.2.0"
 dependencies = [
  "driver_utils",
  "fontdue",
  "hashbrown",
+ "input",
  "ipc_window_manager",
+ "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
 ]
@@ -672,10 +723,10 @@ dependencies = [
 name = "init"
 version = "0.2.0"
 dependencies = [
- "nora_scf",
  "norost_rt_default",
  "norostb_rt",
  "norostb_rt_alloc",
+ "scf",
 ]
 
 [[package]]
@@ -685,6 +736,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0c10553d664a4d0bcff9f4215d0aac67a639cc68ef660840afe309b807bc9f5"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "input"
+version = "0.3.0"
+dependencies = [
+ "scf",
 ]
 
 [[package]]
@@ -702,7 +760,16 @@ version = "0.1.0"
 name = "ipc_window_manager"
 version = "0.2.0"
 dependencies = [
+ "input",
  "norost_ipc_spec",
+]
+
+[[package]]
+name = "join"
+version = "0.1.0"
+dependencies = [
+ "norost_rt_default",
+ "norostb_rt",
 ]
 
 [[package]]
@@ -714,6 +781,12 @@ name = "libc"
 version = "0.2.132"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
+
+[[package]]
+name = "libm"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "292a948cd991e376cf75541fe5b97a1081d713c618b4f1b9500f8844e49eb565"
 
 [[package]]
 name = "litrs"
@@ -768,6 +841,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "miniz_oxide"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f5c75688da582b8ffc1f1799e9db273f32133c49e048f614d22ec3256773ccc"
+dependencies = [
+ "adler",
+]
+
+[[package]]
 name = "n85"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -819,10 +901,6 @@ dependencies = [
  "async_completion",
  "nora_io_queue",
 ]
-
-[[package]]
-name = "nora_scf"
-version = "0.1.0"
 
 [[package]]
 name = "nora_scsi"
@@ -967,6 +1045,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -1046,6 +1125,18 @@ checksum = "9eca2c590a5f85da82668fa685c09ce2888b9430e83299debf1f34b65fd4a4ba"
 dependencies = [
  "der",
  "spki",
+]
+
+[[package]]
+name = "png"
+version = "0.17.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc38c0ad57efb786dd57b9864e5b18bae478c00c824dc55a38bbc9da95dde3ba"
+dependencies = [
+ "bitflags",
+ "crc32fast",
+ "deflate",
+ "miniz_oxide",
 ]
 
 [[package]]
@@ -1178,11 +1269,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97477e48b4cf8603ad5f7aaf897467cf42ab4218a38ef76fb14c2d6773a6d6a8"
 
 [[package]]
-name = "scancodes"
-version = "0.2.0"
-dependencies = [
- "nora_scf",
-]
+name = "scf"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39b4ff1781acf2f469645f5bac9e23ee18c71f73204f0244bc61a3c335dc75ab"
 
 [[package]]
 name = "sec1"
@@ -1271,12 +1361,12 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "n85",
- "nora_scf",
  "nora_ssh",
  "norost_async_std",
  "norostb_rt",
  "p256",
  "rand",
+ "scf",
 ]
 
 [[package]]
@@ -1384,6 +1474,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "usb_hid_item"
+version = "0.1.0"
+
+[[package]]
+name = "usb_hid_usage"
+version = "0.1.0"
+
+[[package]]
+name = "usb_request"
+version = "0.1.0"
+
+[[package]]
 name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1466,10 +1568,15 @@ name = "window_manager"
 version = "0.2.0"
 dependencies = [
  "driver_utils",
+ "fontdue",
+ "gui3d",
+ "input",
  "ipc_gpu",
  "ipc_window_manager",
+ "nora_io_queue_rt",
  "norostb_rt",
  "norostb_rt_alloc",
+ "png",
 ]
 
 [[package]]

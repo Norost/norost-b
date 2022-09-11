@@ -7,18 +7,25 @@ struct Flush {
 	size: SizeInclusive
 }
 
+alias Input: u64
+
 struct Event {
 	ty: EventType
-	_reserved: u8
+	_reserved_0: u6
+	_reserved_1: u8
 	args: EventArgs
 }
 
 enum EventType {
 	Resize
+	Input
+	Close
+	_UglyWorkAroundB
 }
 
 union EventArgs {
 	resize: Resolution
+	input: Input
 }
 
 struct Point {

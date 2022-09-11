@@ -20,7 +20,7 @@ pub struct Info {
 #[repr(align(8))]
 pub struct Framebuffer {
 	pub base: u64,
-	pub pitch: u16,
+	pub pitch: u32,
 	pub width: u16,
 	pub height: u16,
 	pub bpp: u8,

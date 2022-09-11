@@ -106,6 +106,7 @@ impl Table {
 	}
 }
 
+#[derive(Default)]
 #[repr(C)]
 struct SegmentEntry {
 	base: u64,

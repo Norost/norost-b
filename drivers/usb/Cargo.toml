@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-#default = ["trace"]
+#default = ["trace", "poison"]
 trace = []
+poison = []
 
 [dependencies.pci]
 path = "../../lib/rust/pci"
@@ -26,8 +27,8 @@ features = ["alloc", "accessor"]
 [dependencies.xhci]
 version = "0.9"
 
-[dependencies.nora_scf]
-path = "../../../lib/nora_scf"
+[dependencies.scf]
+version = "0.1"
 
 [dependencies.ipc_usb]
 path = "../../lib/rust/ipc/usb"
@@ -35,3 +36,6 @@ path = "../../lib/rust/ipc/usb"
 [dependencies.io_queue_rt]
 package = "nora_io_queue_rt"
 path = "../../lib/rust/io_queue_rt"
+
+[dependencies.usb_request]
+git = "https://github.com/rust-osdev/usb"

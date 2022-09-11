@@ -82,19 +82,29 @@ impl Flush {
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
 	Resize(Resolution),
+	Input(input::Input),
+	Close,
 }
+
+#[derive(Debug)]
+pub struct InvalidEvent;
 
 impl Event {
 	#[inline]
-	pub fn decode(raw: [u8; 9]) -> Self {
+	pub fn decode(raw: [u8; 14]) -> Result<Self, InvalidEvent> {
 		let e = raw::Event::from_raw(&raw, 0);
-		match e.ty() {
+		Ok(match e.ty() {
 			raw::EventType::Resize => Self::Resize(Resolution::from_raw(e.args().resize())),
-		}
+			raw::EventType::Input => {
+				Self::Input(e.args().input().try_into().map_err(|_| InvalidEvent)?)
+			}
+			raw::EventType::Close => Self::Close,
+			_ => return Err(InvalidEvent),
+		})
 	}
 
 	#[inline]
-	pub fn encode(self) -> [u8; 9] {
+	pub fn encode(self) -> [u8; 14] {
 		let mut e = raw::Event::default();
 		match self {
 			Self::Resize(r) => {
@@ -103,8 +113,17 @@ impl Event {
 				a.set_resize(r.to_raw());
 				e.set_args(a);
 			}
+			Self::Input(k) => {
+				e.set_ty(raw::EventType::Input);
+				let mut a = raw::EventArgs::default();
+				a.set_input(k.into());
+				e.set_args(a);
+			}
+			Self::Close => {
+				e.set_ty(raw::EventType::Close);
+			}
 		}
-		let mut r = [0; 9];
+		let mut r = [0; 14];
 		e.to_raw(&mut r, 0);
 		r
 	}

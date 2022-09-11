@@ -1,6 +1,6 @@
 use {
 	crate::{
-		math::{Point, Ratio, Rect, Size},
+		math::{Point2, Ratio, Rect, Size},
 		window::PathIter,
 	},
 	core::{fmt, mem},
@@ -95,12 +95,12 @@ impl Workspace {
 
 	/// Remove a leaf, replacing its parent with its sibling.
 	///
-	/// Returns the path of the sibling along with its new path, if any.
+	/// Returns the path to the sibling node, if any.
 	///
 	/// # Panics
 	///
 	/// The path does not lead to a leaf.
-	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<(Handle, Path)> {
+	pub fn remove_leaf(&mut self, mut rem_path: PathIter) -> Option<Path> {
 		let mut cur = self.root;
 		let mut prev = None;
 		let mut path = Path { depth: 0, directions: 0 };
@@ -119,7 +119,7 @@ impl Workspace {
 					self.nodes.remove(cur).unwrap();
 					return if let Some((parent, sibling, path)) = prev {
 						self.nodes[parent] = self.nodes.remove(sibling).unwrap();
-						Some((w, path))
+						Some(path)
 					} else {
 						None
 					};
@@ -128,38 +128,98 @@ impl Workspace {
 		}
 	}
 
+	/// Call the closure with the handles in all leaves with the given path as prefix.
+	pub fn apply_with_prefix(&self, mut prefix: PathIter, mut cb: impl FnMut(Handle)) {
+		let mut cur = self.root;
+		for d in prefix {
+			match &self.nodes[cur] {
+				Node::Parent { left, right, .. } => {
+					let s = *if d { left } else { right };
+					cur = *if d { right } else { left };
+				}
+				Node::Leaf { window } => return,
+			}
+		}
+		fn f(slf: &Workspace, cur: Handle, cb: &mut impl FnMut(Handle)) {
+			match &slf.nodes[cur] {
+				Node::Parent { left, right, .. } => {
+					f(slf, *left, cb);
+					f(slf, *right, cb);
+				}
+				Node::Leaf { window } => cb(*window),
+			}
+		}
+		f(self, cur, &mut cb)
+	}
+
 	/// Calculate the [`Rect`] a leaf occupies.
 	///
 	/// # Panics
 	///
 	/// The path does not lead to a valid node.
 	pub fn calculate_rect(&self, mut path: PathIter, size: Size) -> Option<Rect> {
+		Some(
+			self.recurse(size, |l, r| {
+				path.next().expect("path does not lead to a leaf")
+			})?
+			.1,
+		)
+	}
+
+	/// Find the window at the given position.
+	pub fn window_at(&self, position: Point2, size: Size) -> Option<(Handle, Rect)> {
+		self.recurse(size, |_, r| r.contains(position))
+	}
+
+	/// Return an iterator over all window handles held by this workspace.
+	pub fn windows(&self) -> impl Iterator<Item = Handle> + '_ {
+		self.nodes.iter().flat_map(|(_, n)| match n {
+			Node::Parent { .. } => None,
+			Node::Leaf { window } => Some(*window),
+		})
+	}
+
+	/// Whether this workspace contains any windows at all.
+	pub fn is_empty(&self) -> bool {
+		self.nodes.is_empty()
+	}
+
+	/// Recurse in the tree, going left (`false`) or right (`true`) based on the given predicate.
+	///
+	/// Returns the handle of the window if any were found as well as the calculated rect.
+	fn recurse<F>(&self, size: Size, mut pred: F) -> Option<(Handle, Rect)>
+	where
+		F: FnMut(&Rect, &Rect) -> bool,
+	{
 		let mut cur = self.nodes.get(self.root)?; // Having no root node is valid
-		let mut rect = Rect::from_size(Point::ORIGIN, size);
+		let mut rect = Rect::from_size(Point2::ORIGIN, size);
 		loop {
 			match cur {
 				Node::Parent { left, right, ratio, vertical } => {
-					let dir = path.next().expect("path does not lead to a leaf");
-					rect = if *vertical {
+					let (rect_l, rect_r) = if *vertical {
 						let mid = ratio.partition_range(rect.y());
-						let y = if dir {
-							mid + 1..=rect.high().y
-						} else {
-							rect.low().y..=mid
-						};
-						Rect::from_ranges(rect.x(), y)
+						let (y_l, y_r) = (rect.low().y..=mid, mid + 1..=rect.high().y);
+						(
+							Rect::from_ranges(rect.x(), y_l),
+							Rect::from_ranges(rect.x(), y_r),
+						)
 					} else {
 						let mid = ratio.partition_range(rect.x());
-						let x = if dir {
-							mid + 1..=rect.high().x
-						} else {
-							rect.low().x..=mid
-						};
-						Rect::from_ranges(x, rect.y())
+						let (x_l, x_r) = (rect.low().x..=mid, mid + 1..=rect.high().x);
+						(
+							Rect::from_ranges(x_l, rect.y()),
+							Rect::from_ranges(x_r, rect.y()),
+						)
 					};
-					cur = &self.nodes[*if dir { right } else { left }];
+					cur = &self.nodes[*if pred(&rect_l, &rect_r) {
+						rect = rect_r;
+						right
+					} else {
+						rect = rect_l;
+						left
+					}];
 				}
-				Node::Leaf { .. } => return Some(rect),
+				Node::Leaf { window } => return Some((*window, rect)),
 			}
 		}
 	}
@@ -231,7 +291,7 @@ mod test {
 		let size = Size::new(100, 100);
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
-			Some(Rect::from_size(Point::ORIGIN, size)),
+			Some(Rect::from_size(Point2::ORIGIN, size)),
 		);
 	}
 
@@ -244,7 +304,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::ORIGIN,
+				Point2::ORIGIN,
 				Size::new(size.x / 2, size.y)
 			)),
 		);
@@ -259,7 +319,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::new(50, 0),
+				Point2::new(50, 0),
 				Size::new(size.x / 2, size.y)
 			)),
 		);
@@ -274,7 +334,7 @@ mod test {
 		assert_eq!(
 			ws.calculate_rect(path.into_iter(), size),
 			Some(Rect::from_size(
-				Point::ORIGIN,
+				Point2::ORIGIN,
 				Size::new(size.x, size.y / 2)
 			)),
 		);

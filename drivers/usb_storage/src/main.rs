@@ -34,7 +34,7 @@ fn main() {
 			assert!(prev.is_none(), "{} already specified", a);
 		};
 		match a {
-			"--class" => {
+			"--class" | "--configuration" | "--interface" => {
 				// Just ignore for now.
 				args.next().unwrap();
 			}

@@ -54,6 +54,7 @@ impl Buffer<'_> {
 	}
 
 	#[inline]
+	#[track_caller]
 	pub unsafe fn copy_from_raw_untrusted(&self, offset: usize, src: *const u8, count: usize) {
 		assert!(offset + count <= self.size as usize);
 		intrinsics::volatile_copy_nonoverlapping_memory(self.base.as_ptr().add(offset), src, count)
@@ -207,14 +208,14 @@ impl<'a> Data<'a> {
 		let skip = (offset / bs).try_into().unwrap();
 		offset %= bs;
 		for b in self.blocks().skip(skip) {
+			if count == 0 {
+				break;
+			}
 			let c = count.min(bs - offset);
 			b.1.copy_from_raw_untrusted(offset, src, c);
 			src = src.add(c);
 			offset = 0;
 			count -= c;
-			if count == 0 {
-				break;
-			}
 		}
 	}
 
@@ -334,6 +335,8 @@ impl<'a> Data<'a> {
 			// Even if len is 0 it's fine to take any buffer as long as we never actually use it
 			cur_buf: self.buffers.get_buf(self.offset),
 			cur_i: 0,
+			// Ensure last_size is in range [1..block_size]
+			last_size: (self.len.wrapping_sub(1) & (self.buffers.block_size - 1)) + 1,
 			_marker: PhantomData,
 		}
 	}
@@ -345,6 +348,7 @@ pub struct DataIter<'a, 'b: 'a> {
 	count: u32,
 	cur_buf: Buffer<'b>,
 	cur_i: u32,
+	last_size: u32,
 	_marker: PhantomData<&'a Data<'b>>,
 }
 
@@ -377,6 +381,7 @@ impl<'a, 'b: 'a> Iterator for DataIter<'a, 'b> {
 					self.offset = u32::from_le_bytes(n);
 					self.cur_buf = self.buffers.get_buf(self.offset);
 				}
+				self.cur_buf.size = self.last_size;
 				self.count -= 1;
 				return Some((self.offset, self.cur_buf));
 			} else {

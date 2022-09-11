@@ -1,49 +1,49 @@
 (programs
-	(minish
-		(objects
-			(file "")
-			(err gui_cli/write)
-			(in "keyboard/stream"))
-		(after "keyboard"))
+	(gpt
+		(after "usb/handlers/storage0")
+		(open
+			(data "usb/handlers/storage0" "data")
+			(share "")))
+	(framebuffer
+		;(disabled)
+		(args file)
+		(open
+			(share "")
+			(framebuffer framebuffer)))
+	(fs_fat
+		(args "file")
+		(after "gpt/1")
+		(open
+			(data "gpt/1")
+			(share "")))
 	(fs_fat
 		(disabled)
-		(args "file" "disk/data")
+		(args "file")
 		(after "disk/data")
-		(objects
-			(file "")))
-	(gui_cli
-		(after "window_manager")
-		(objects
-			(file "")))
+		(open
+			(data "disk/data")
+			(share "")))
 	(image_viewer
-		(after "window_manager")
-		(objects
-			(file "")))
+		(after wm)
+		(create (window wm/window))
+		(open (file "")))
 	(static_http_server
 		(disabled)
 		(after "file" "net")
-		(objects
+		(open
 			(file file)
 			(net net)))
-	(ps2
-		(objects
-			(file "")))
+	(ps2 (open (file "")))
 	(pci
-		(args "drivers/pci.scf")
-		(objects
+		(open
 			(file "")
+			(pci pci)
+			(cfg drivers/pci.scf)
 			(process "process")))
-	(scancode_to_char
-		;(args "keyboard" "ps2/keyboard/stream")
-		;(after "ps2/keyboard/stream")
-		(args "keyboard" "usb/handlers/usb_keyboard_share_test_yay")
-		(after "usb/handlers/usb_keyboard_share_test_yay")
-		(objects
-			(file "")))
 	(ssh
-		(args drivers/ssh_conf/ssh.scf)
+		(disabled)
 		(after net userdb)
-		(objects
+		(open
 			(cfg drivers/sshd.scf)
 			(cfg_secret drivers/sshd_secret.scf)
 			(net net)
@@ -51,11 +51,24 @@
 			(process process)
 			(userdb userdb)))
 	(window_manager
-		(after "gpu/sync")
-		(objects
-			(file "")))
+		(after gpu ps2)
+		(open (gpu gpu) (file drivers))
+		(create (share wm)))
+	(join (after ps2 wm) (open (out wm/input) (in ps2/mouse)))
+	(join (after ps2 wm) (open (out wm/input) (in ps2/keyboard)))
+	(join (after usb/handlers/hid0 wm) (open (out wm/input) (in usb/handlers/hid0)))
+	(gui_cli (after wm) (args --scale 10)
+		(open
+			(spawn/file "")
+			(process process) (font drivers/font.tff) (spawn drivers/minish))
+		(create (window wm/window)))
+	(gui_cli (after wm) (args --scale 20)
+		(open
+			(spawn/file drivers)
+			(process process) (font drivers/font.tff) (spawn drivers/minish))
+		(create (window wm/window)))
 	(userdb
-		(objects
+		(open
 			(share "")
 			(users "")
 			(cfg drivers/userdb.scf))))

@@ -20,15 +20,17 @@ impl CursorPosition {
 pub struct MoveCursor {
 	header: ControlHeader,
 	pub position: CursorPosition,
-	_padding: [u32le; 4],
+	pub resource_id: u32le,
+	_padding: [u32le; 3],
 }
 
 impl MoveCursor {
-	pub fn new(position: CursorPosition, fence: Option<u64>) -> Self {
+	pub fn new(position: CursorPosition, resource_id: u32, fence: Option<u64>) -> Self {
 		Self {
 			header: ControlHeader::new(ControlHeader::CMD_MOVE_CURSOR, fence),
 			position,
-			_padding: [0.into(); 4],
+			resource_id: resource_id.into(),
+			_padding: [0.into(); 3],
 		}
 	}
 }

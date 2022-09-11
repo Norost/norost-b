@@ -15,7 +15,8 @@ struct Program<'a> {
 	args: Vec<&'a str>,
 	env: Vec<(&'a str, &'a str)>,
 	after: Vec<&'a str>,
-	objects: Vec<(&'a str, Vec<&'a str>)>,
+	open: Vec<(&'a str, Vec<&'a str>)>,
+	create: Vec<(&'a str, Vec<&'a str>)>,
 }
 
 macro_rules! log {
@@ -77,12 +78,17 @@ fn main() -> ! {
 									p.env.push((key, val));
 								}
 							}
-							"objects" => {
+							s @ "open" | s @ "create" => {
 								for item in it {
 									let mut it = item.into_group().unwrap();
 									let name = it.next_str().unwrap();
 									let path = it.map(|e| e.into_str().unwrap()).collect();
-									p.objects.push((name, path));
+									match s {
+										"open" => &mut p.open,
+										"create" => &mut p.create,
+										_ => unreachable!(),
+									}
+									.push((name, path));
 								}
 							}
 							a @ "args" | a @ "after" => {
@@ -106,8 +112,14 @@ fn main() -> ! {
 
 	// Add stderr by default, as it is used for panic & other output
 	for p in programs.iter_mut() {
-		if !p.objects.iter().find(|(n, _)| *n == "err").is_some() {
-			p.objects.push(("err", Vec::from([SYSLOG])));
+		if !p
+			.open
+			.iter()
+			.chain(&*p.create)
+			.find(|(n, _)| *n == "err")
+			.is_some()
+		{
+			p.open.push(("err", Vec::from([SYSLOG])));
 		}
 	}
 
@@ -126,22 +138,35 @@ fn main() -> ! {
 				let bin = drivers.open(program.path.as_bytes())?;
 				let mut b = rt::process::Builder::new_with(&process_root)?;
 				b.set_binary(&bin)?;
-				for (name, path) in &program.objects {
+				let mut open_create = |name: &str, path: &[&str], create| {
 					// FIXME bug in Root, probably
-					(|| {
-						if &*path == &[""] {
-							b.add_object(name.as_ref(), &root)?;
-						} else {
-							let mut it = path.iter().map(|p| p.as_bytes());
-							let mut obj = root.open(it.next().unwrap())?;
-							for p in it {
-								obj = obj.open(p)?;
-							}
-							b.add_object(name.as_ref(), &obj)?;
+					if path == &[""] {
+						b.add_object(name.as_ref(), &root)?;
+					} else {
+						let (last, path) = path.split_last().unwrap();
+						let mut sto = None;
+						let mut obj = &root;
+						for p in path.iter().map(|p| p.as_bytes()) {
+							let o = obj.open(p)?;
+							obj = &*sto.insert(o);
 						}
-						Ok(())
-					})()
-					.inspect_err(|e: &rt::Error| log!("Failed to open {:?}: {:?}", path, e))?;
+						let obj = if create {
+							obj.create(last.as_bytes())
+						} else {
+							obj.open(last.as_bytes())
+						}?;
+						b.add_object(name.as_ref(), &obj)?;
+					}
+					Ok(())
+				};
+				for (name, path) in &program.open {
+					open_create(name, &path, false)
+						.inspect_err(|e: &rt::Error| log!("Failed to open {:?}: {:?}", path, e))?;
+				}
+				for (name, path) in &program.create {
+					open_create(name, &path, true).inspect_err(|e: &rt::Error| {
+						log!("Failed to create {:?}: {:?}", path, e)
+					})?;
 				}
 				b.add_args(&[program.path])?;
 				b.add_args(&program.args)?;

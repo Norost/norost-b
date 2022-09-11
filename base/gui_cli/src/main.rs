@@ -8,13 +8,13 @@ extern crate alloc;
 mod rasterizer;
 
 use {
-	alloc::vec::Vec,
+	alloc::{collections::VecDeque, vec::Vec},
+	core::time::Duration,
 	driver_utils::os::stream_table::{Request, Response, StreamTable},
 	fontdue::{Font, FontSettings},
+	io_queue_rt::{Pow2Size, Queue},
 	rt::{Error, Handle},
 };
-
-const FONT: &[u8] = include_bytes!("../../../thirdparty/font/inconsolata/Inconsolata-VF.ttf");
 
 #[cfg(not(test))]
 #[global_allocator]
@@ -36,8 +36,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 
 #[start]
 fn main(_: isize, _: *const *const u8) -> isize {
-	let root = rt::io::file_root().unwrap();
-
 	let mut scale = 20.0;
 	let mut no_quit = false;
 
@@ -58,41 +56,76 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		}
 	}
 
-	let font = Font::from_bytes(FONT, FontSettings { scale: 160.0, ..Default::default() }).unwrap();
+	// Spawn process
+	let (process, inp, out) = {
+		let bin = rt::args::handle(b"spawn").expect("spawn undefined");
+		let (inp, p_inp) = rt::Object::new(rt::NewObject::Pipe).unwrap();
+		let (p_out, out) = rt::Object::new(rt::NewObject::Pipe).unwrap();
+		let mut b = rt::process::Builder::new().unwrap();
+		b.set_binary(&bin).unwrap();
+		b.add_object(b"in", &p_inp).unwrap();
+		b.add_object(b"out", &p_out).unwrap();
+		b.add_object(b"err", &p_out).unwrap();
+		for (name, obj) in rt::args::handles() {
+			if let Some(name) = name.strip_prefix(b"spawn/") {
+				b.add_object(name, &obj).unwrap();
+			}
+		}
+		b.add_args(rt::args::args().take(1)).unwrap();
+		(b.spawn().unwrap(), inp, out)
+	};
+
+	let font = {
+		let font = rt::args::handle(b"font").expect("font undefined");
+		let font = font.read_file_all().unwrap();
+		Font::from_bytes(&*font, FontSettings { scale: 160.0, ..Default::default() }).unwrap()
+	};
 	let mut rasterizer = rasterizer::Rasterizer::new(font, scale);
 
-	let window = root.create(b"window_manager/window").unwrap();
+	let window = rt::args::handle(b"window").expect("window undefined");
+
+	window
+		.set_meta(b"title".into(), b"Terminal".into())
+		.unwrap();
 
 	let mut res = [0; 8];
 	let l = window
 		.get_meta(b"bin/resolution".into(), (&mut res).into())
 		.unwrap();
-	let width = u32::from_le_bytes(res[..4].try_into().unwrap());
-	let height = u32::from_le_bytes(res[4..l].try_into().unwrap());
+	let mut width = u32::from_le_bytes(res[..4].try_into().unwrap());
+	let mut height = u32::from_le_bytes(res[4..l].try_into().unwrap());
 
-	let (fb, _) = {
-		let size = width as usize * height as usize * 3;
-		let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
-		window
-			.share(
-				&rt::Object::new(rt::NewObject::PermissionMask {
-					handle: fb.as_raw(),
-					rwx: rt::io::RWX::R,
-				})
-				.unwrap()
-				.0,
-			)
-			.unwrap();
-		fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
+	let new_fb = |w, h| {
+		let (fb, _) = {
+			let size = w as usize * h as usize * 3;
+			let (fb, _) = rt::Object::new(rt::NewObject::SharedMemory { size }).unwrap();
+			window
+				.share(
+					&rt::Object::new(rt::NewObject::PermissionMask {
+						handle: fb.as_raw(),
+						rwx: rt::io::RWX::R,
+					})
+					.unwrap()
+					.0,
+				)
+				.unwrap();
+			fb.map_object(None, rt::io::RWX::RW, 0, usize::MAX).unwrap()
+		};
+		unsafe { rasterizer::FrameBuffer::new(fb.cast(), w, h) }
 	};
-	let mut fb = unsafe { rasterizer::FrameBuffer::new(fb.cast(), width, height) };
+	let drop_fb = |fb: &mut rasterizer::FrameBuffer, w, h| {
+		let size = (w as usize * h as usize * 3 + 0xfff) & !0xfff;
+		unsafe { rt::mem::dealloc(fb.as_ptr().cast(), size).unwrap() };
+	};
 
-	let mut draw = |rasterizer: &mut rasterizer::Rasterizer| {
+	let mut fb = new_fb(width, height);
+
+	let mut draw = |fb: &mut rasterizer::FrameBuffer, rs: &mut rasterizer::Rasterizer, w, h| {
 		fb.as_mut().fill(0);
-		rasterizer.render_all(&mut fb);
+		rs.render_all(fb);
 		let draw = ipc_wm::Flush {
 			origin: ipc_wm::Point { x: 0, y: 0 },
-			size: ipc_wm::SizeInclusive { x: (width - 1) as _, y: (height - 1) as _ },
+			size: ipc_wm::SizeInclusive { x: (w - 1) as _, y: (h - 1) as _ },
 		};
 		window.write(&draw.encode()).unwrap();
 	};
@@ -101,84 +134,78 @@ fn main(_: isize, _: *const *const u8) -> isize {
 		.set_meta(b"bin/cmd/fill".into(), (&[0, 0, 0]).into())
 		.unwrap();
 
-	let (tbl_buf, _) = rt::Object::new(rt::NewObject::SharedMemory { size: 1 << 12 }).unwrap();
-	let table = StreamTable::new(&tbl_buf, rt::io::Pow2Size(4), (1 << 8) - 1);
-	root.create(b"gui_cli")
-		.unwrap()
-		.share(table.public())
-		.unwrap();
+	let queue = Queue::new(Pow2Size::P6, Pow2Size::P6).unwrap();
+	let read = |h: &rt::Object, b| queue.submit_read(h.as_raw(), b).unwrap();
+	let mut writes = Vec::<io_queue_rt::Write<_>>::new();
 
-	const WRITE_HANDLE: Handle = Handle::MAX - 1;
+	let mut poll_out = read(&out, Vec::with_capacity(16));
+	let mut poll_window = read(&window, Vec::with_capacity(128));
 
 	let mut parser = Parser { state: ParserState::Idle };
-	let mut flushed @ mut dirty = false;
+	let mut next_draw = rt::time::Monotonic::MAX;
 	loop {
-		let mut flush = false;
-		while let Some((handle, job_id, req)) = table.dequeue() {
-			let resp = match req {
-				Request::Open { path } => {
-					let mut p = [0; 16];
-					let p = &mut p[..path.len()];
-					path.copy_to(0, p);
-					match &*p {
-						b"write" => Response::Handle(WRITE_HANDLE),
-						_ => Response::Error(Error::DoesNotExist),
+		queue.poll();
+		queue.wait(next_draw.duration_since(rt::time::Monotonic::now()));
+		queue.process();
+
+		// Finish writes
+		for i in (0..writes.len()).rev() {
+			if let Some((res, _)) = driver_utils::task::poll(&mut writes[i]) {
+				writes.swap_remove(i);
+				res.unwrap();
+			}
+		}
+
+		// Window events
+		if let Some((res, b)) = driver_utils::task::poll(&mut poll_window) {
+			res.unwrap();
+			match ipc_wm::Event::decode((&*b).try_into().unwrap()) {
+				Ok(ipc_wm::Event::Resize(r)) => {
+					drop_fb(&mut fb, width, height);
+					width = r.x;
+					height = r.y;
+					fb = new_fb(width, height);
+					next_draw = rt::time::Monotonic::ZERO;
+				}
+				Ok(ipc_wm::Event::Input(k)) if k.is_press() => {
+					if let input::Type::Unicode(c) = k.ty {
+						let mut b = [0; 4];
+						let b = c.encode_utf8(&mut b).as_bytes();
+						let b = Vec::from(b);
+						let wr = queue.submit_write(inp.as_raw(), b).unwrap();
+						writes.push(wr);
 					}
 				}
-				Request::Write { data } => match handle {
-					WRITE_HANDLE => {
-						let l = data.len().min(1024);
-						let mut v = Vec::with_capacity(l);
-						data.copy_to_uninit(0, &mut v.spare_capacity_mut()[..l]);
-						unsafe { v.set_len(l) }
-						for c in v {
-							match parser.add(c) {
-								None => continue,
-								Some(Action::PushChar(c)) => rasterizer.push_char(c),
-								Some(Action::PopChar) => rasterizer.pop_char(),
-								Some(Action::NewLine) => rasterizer.new_line(),
-								Some(Action::ClearLine) => rasterizer.clear_line(),
-							}
-							dirty = true;
-						}
-
-						let len = data.len().try_into().unwrap();
-						Response::Amount(len)
-					}
-					_ => Response::Error(Error::InvalidOperation),
-				},
-				Request::Close => match handle {
-					// Exit
-					WRITE_HANDLE if no_quit => continue,
-					WRITE_HANDLE => return 0,
-					_ => unreachable!(),
-				},
-				Request::Read { .. } => todo!(),
-				Request::GetMeta { .. } => todo!(),
-				Request::SetMeta { .. } => todo!(),
-				Request::Create { .. } => todo!(),
-				Request::Destroy { .. } => todo!(),
-				Request::Seek { .. } => todo!(),
-				Request::Share { .. } => todo!(),
-			};
-			table.enqueue(job_id, resp);
-			flush = true;
-		}
-		if flush {
-			table.flush();
-			flushed = true;
-		} else if flushed {
-			// TODO lazy hack, add some kind of table.wait_until instead (i.e. use
-			// async I/O queue).
-			for _ in 0..10 {
-				rt::thread::yield_now();
+				Ok(ipc_wm::Event::Input(_)) => {}
+				Ok(ipc_wm::Event::Close) => rt::exit(0),
+				Err(e) => todo!("{:?}", e),
 			}
-			flushed = false;
-		} else if dirty {
-			draw(&mut rasterizer);
-			dirty = false;
-		} else {
-			table.wait();
+			poll_window = read(&window, b);
+		}
+
+		// Process wrote something
+		if let Some((res, b)) = driver_utils::task::poll(&mut poll_out) {
+			let len = res.unwrap();
+			for &c in &b[..len] {
+				match parser.add(c) {
+					None => continue,
+					Some(Action::PushChar(c)) => rasterizer.push_char(c),
+					Some(Action::PopChar) => rasterizer.pop_char(),
+					Some(Action::NewLine) => rasterizer.new_line(),
+					Some(Action::ClearLine) => rasterizer.clear_line(),
+				}
+			}
+			let next_draw_t = rt::time::Monotonic::now()
+				.checked_add(Duration::from_millis(33))
+				.unwrap_or(rt::time::Monotonic::ZERO);
+			next_draw = next_draw.min(next_draw_t);
+			poll_out = read(&out, b);
+		}
+
+		// Draw window
+		if next_draw <= rt::time::Monotonic::now() {
+			draw(&mut fb, &mut rasterizer, width, height);
+			next_draw = rt::time::Monotonic::MAX;
 		}
 	}
 }

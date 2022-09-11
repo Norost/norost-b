@@ -5,7 +5,9 @@ edition = "2021"
 
 [dependencies]
 norostb_kernel = { path = "../../lib/rust/kernel" }
-scancodes = { path = "../../lib/rust/scancodes" }
+
+[dependencies.input]
+path = "../../../lib/input"
 
 [dependencies.rt]
 package = "norostb_rt"

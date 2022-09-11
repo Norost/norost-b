@@ -15,5 +15,4 @@ package = "norost_rt_default"
 path = "../../lib/rust/rt_default"
 
 [dependencies.scf]
-package = "nora_scf"
-path = "../../../lib/nora_scf"
+version = "0.1"

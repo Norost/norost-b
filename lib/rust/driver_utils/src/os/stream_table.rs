@@ -251,12 +251,13 @@ impl<'a> PropertyValue<'a> {
 	pub fn try_get<'b>(
 		&self,
 		buf: &'b mut [u8],
-	) -> Result<(&'b mut [u8], &'b mut [u8]), InvalidPropertyValue> {
+	) -> Result<(&'b [u8], &'b mut [u8]), InvalidPropertyValue> {
 		let l = buf.len();
 		let buf = &mut buf[..self.0.len().min(l)];
 		self.0.copy_to_untrusted(0, buf);
 		buf.split_first_mut()
 			.and_then(|(&mut l, b)| (usize::from(l) <= b.len()).then(|| b.split_at_mut(l.into())))
+			.map(|(a, b)| (&*a, b))
 			.ok_or(InvalidPropertyValue)
 	}
 

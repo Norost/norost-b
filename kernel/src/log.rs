@@ -43,6 +43,7 @@ fn append(msg: &[u8]) -> usize {
 
 	let mut log = LOG.auto_lock();
 
+	log.head %= SIZE;
 	let pre = if SIZE - log.head < msg.len() {
 		SIZE - log.head
 	} else {

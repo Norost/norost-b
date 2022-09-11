@@ -35,9 +35,9 @@ pub fn parse(config: &rt::Object) -> Config {
 	}
 
 	let mut drivers = BTreeMap::default();
-	let mut cf = nora_scf::parse2(&buf);
+	let mut cf = scf::parse2(&buf);
 
-	let trips = |it: &mut nora_scf::GroupsIter<'_, '_>| {
+	let trips = |it: &mut scf::GroupsIter<'_, '_>| {
 		let c = it.next_str().and_then(parse_hex_u8).unwrap();
 		let sc = it.next_str().and_then(parse_hex_u8).unwrap();
 		let p = it.next_str().and_then(parse_hex_u8).unwrap();

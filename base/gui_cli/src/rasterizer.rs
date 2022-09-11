@@ -129,6 +129,10 @@ impl FrameBuffer {
 			}
 		}
 	}
+
+	pub fn as_ptr(&self) -> NonNull<[u8; 3]> {
+		self.data
+	}
 }
 
 impl AsRef<[u8]> for FrameBuffer {

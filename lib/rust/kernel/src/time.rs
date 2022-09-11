@@ -6,6 +6,9 @@ pub struct Monotonic {
 }
 
 impl Monotonic {
+	pub const ZERO: Self = Self { ns: 0 };
+	pub const MAX: Self = Self { ns: u64::MAX };
+
 	#[inline]
 	pub fn now() -> Self {
 		crate::syscall::monotonic_time()
@@ -51,6 +54,12 @@ impl Monotonic {
 	#[inline]
 	pub fn duration_since(&self, earlier: Monotonic) -> Duration {
 		self.saturating_duration_since(earlier)
+	}
+
+	pub fn checked_add(&self, duration: Duration) -> Option<Self> {
+		self.ns
+			.checked_add(duration.as_nanos().try_into().ok()?)
+			.map(|ns| Self { ns })
 	}
 }
 
