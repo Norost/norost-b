@@ -9,14 +9,20 @@ use {
 	std::boxed::Box,
 };
 
-pub struct Manager<U> {
-	windows: Arena<Window<U>>,
-	workspaces: Box<[Workspace]>,
+macro_rules! mgr {
+	($self:expr, current_workspace) => {
+		$self.workspaces[$self.current_workspace()]
+	};
+}
+
+pub struct Manager {
+	pub windows: Arena<Window>,
+	pub workspaces: Box<[Workspace]>,
 	current_workspace: u8,
 	focused_window: Cell<Handle>,
 }
 
-impl<U> Manager<U> {
+impl Manager {
 	pub fn new() -> Result<Self, NewManagerError> {
 		let ws = Workspace::new().map_err(NewManagerError::NewWorkspace)?;
 		Ok(Self {
@@ -27,7 +33,7 @@ impl<U> Manager<U> {
 		})
 	}
 
-	pub fn new_window(&mut self, total_size: Size, user_data: U) -> Result<Handle, ()> {
+	pub fn new_window(&mut self, total_size: Size) -> Result<Handle, ()> {
 		let mut update = None;
 		let res = self.windows.insert_with(|handle| {
 			let p;
@@ -40,7 +46,7 @@ impl<U> Manager<U> {
 					total_size,
 				)
 				.unwrap_or_else(|e| todo!("{:?}", e));
-			Window::new(self.current_workspace, p, user_data)
+			Window::new(self.current_workspace, p)
 		});
 		update.map(|(handle, path)| self.windows[handle].set_path(self.current_workspace, path));
 		Ok(res)
@@ -66,23 +72,19 @@ impl<U> Manager<U> {
 	}
 
 	pub fn window_at(&self, position: Point2, total_size: Size) -> Option<(Handle, Rect)> {
-		self.current_workspace().window_at(position, total_size)
+		self.workspaces[self.current_workspace()].window_at(position, total_size)
 	}
 
-	pub fn window(&self, handle: Handle) -> Option<&Window<U>> {
+	pub fn window(&self, handle: Handle) -> Option<&Window> {
 		self.windows.get(handle)
 	}
 
-	pub fn window_mut(&mut self, handle: Handle) -> Option<&mut Window<U>> {
+	pub fn window_mut(&mut self, handle: Handle) -> Option<&mut Window> {
 		self.windows.get_mut(handle)
 	}
 
-	pub fn windows(&self) -> impl Iterator<Item = (Handle, &Window<U>)> + '_ {
-		self.windows.iter()
-	}
-
 	pub fn focused_window(&self) -> Option<Handle> {
-		let mut it = self.current_workspace().windows();
+		let mut it = self.workspaces[self.current_workspace()].windows();
 		let h = it.next()?;
 		let fw = self.focused_window.get();
 		if h != fw && !it.find(|h| h == &fw).is_some() {
@@ -95,12 +97,8 @@ impl<U> Manager<U> {
 		self.focused_window.set(handle);
 	}
 
-	fn current_workspace(&self) -> &Workspace {
-		&self.workspaces[usize::from(self.current_workspace)]
-	}
-
-	fn current_workspace_mut(&mut self) -> &mut Workspace {
-		&mut self.workspaces[usize::from(self.current_workspace)]
+	pub fn current_workspace(&self) -> usize {
+		self.current_workspace.into()
 	}
 }
 

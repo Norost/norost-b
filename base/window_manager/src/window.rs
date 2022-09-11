@@ -1,21 +1,31 @@
 use {
-	crate::workspace::Path,
+	crate::{workspace::Path, Events, FrameBuffer, JobId},
 	core::fmt::{self, Write},
+	std::collections::VecDeque,
 };
 
-pub struct Window<U> {
+pub struct Window {
 	/// Workspace containing this window.
 	workspace: u8,
 	/// Node path in bitmap format.
 	path: u32,
-	pub user_data: U,
+	pub framebuffer: FrameBuffer,
+	pub unread_events: Events,
+	pub event_listeners: VecDeque<JobId>,
+	pub title: Box<str>,
 }
 
-impl<U> Window<U> {
-	pub fn new(workspace: u8, path: Path, user_data: U) -> Self {
-		let mut s = Self { workspace, path: 0, user_data };
-		s.set_path(workspace, path);
-		s
+impl Window {
+	pub fn new(workspace: u8, path: Path) -> Self {
+		assert!(path.depth <= 32, "deeper than 32 levels");
+		Self {
+			workspace,
+			path: path.directions,
+			framebuffer: Default::default(),
+			unread_events: Default::default(),
+			event_listeners: Default::default(),
+			title: Default::default(),
+		}
 	}
 
 	pub fn path(&self) -> (u8, PathIter) {
@@ -41,21 +51,19 @@ pub struct PathIter {
 }
 
 impl PathIter {
-	#[inline(always)]
 	pub fn new(depth: u8, directions: u32) -> Self {
 		Self { count: depth, path: directions }
 	}
 
-	/// Create a path iterator that goes to the right bottom for up to 24 levels.
-	#[inline(always)]
+	/// Create a path iterator that goes to the right bottom for up to 32 levels.
 	pub fn right_bottom() -> Self {
-		Self::new(24, 0xffffff)
+		Self::new(32, u32::MAX)
 	}
 }
 
 impl Default for PathIter {
 	fn default() -> Self {
-		Self { count: 24, path: 0 }
+		Self { count: 32, path: 0 }
 	}
 }
 

@@ -17,6 +17,7 @@
 
 mod config;
 mod gpu;
+#[macro_use]
 mod manager;
 mod title_bar;
 mod window;
@@ -38,7 +39,7 @@ use {
 fn main() {
 	let config = config::load();
 
-	let mut manager = manager::Manager::<Client>::new().unwrap();
+	let mut mgr = manager::Manager::new().unwrap();
 
 	let mut main = gpu::Gpu::new();
 
@@ -89,12 +90,12 @@ fn main() {
 			let h = r.high() - Vec2::ONE * config.margin;
 			Rect::from_points(l, h)
 		};
-		let window_rect = |mgr: &manager::Manager<Client>, h| {
+		let window_rect = |mgr: &manager::Manager, h| {
 			let r = mgr.window_rect(h, size_x2).unwrap();
 			let r = apply_margin(r);
 			unsize_x2(r)
 		};
-		let window_at = |mgr: &mut manager::Manager<Client>, pos: Point2| {
+		let window_at = |mgr: &mut manager::Manager, pos: Point2| {
 			let pos = Point2::new(pos.x * 2 - config.margin, pos.y * 2 - config.margin);
 			let (h, r) = mgr.window_at(pos, size_x2).unwrap();
 			if Some(h) != mgr.focused_window() {
@@ -115,30 +116,24 @@ fn main() {
 					let (p, _) = path.copy_into(&mut p);
 					match (handle, &*p) {
 						(Handle::MAX, b"window") => {
-							let h = manager.new_window(main.size(), Default::default()).unwrap();
+							let h = mgr.new_window(main.size()).unwrap();
 							main.fill(Rect::from_size(Point2::ORIGIN, main.size()), [50; 3]);
 							old = None;
-							for (w, ww) in manager.windows() {
-								let full_rect = window_rect(&manager, w);
+							for w in mgr!(mgr, current_workspace).windows() {
+								let full_rect = window_rect(&mgr, w);
+								let ww = &mut mgr.windows[w];
 								let (title, rect) = title_bar::split(&config, full_rect);
-								title_bar::render(
-									&mut main,
-									&config,
-									title,
-									mouse_pos,
-									&ww.user_data.title,
-								);
+								title_bar::render(&mut main, &config, title, mouse_pos, &ww.title);
 								let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
-								let mut ue = ww.user_data.unread_events.borrow_mut();
-								ue.resize = Some(evt);
+								ww.unread_events.resize = Some(evt);
 								let evt = ipc_wm::Event::Resize(evt).encode();
-								for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
-									ue.resize = None;
+								for id in ww.event_listeners.drain(..) {
+									ww.unread_events.resize = None;
 									let data = table.alloc(evt.len()).expect("out of buffers");
 									data.copy_from(0, &evt);
 									table.enqueue(id, Response::Data(data));
 								}
-								if Some(w) == manager.focused_window() {
+								if Some(w) == mgr.focused_window() {
 									draw_focus_borders = Some(full_rect);
 								}
 							}
@@ -152,7 +147,7 @@ fn main() {
 					match (handle, &*prop) {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/resolution") => {
-							let rect = window_rect(&manager, h);
+							let rect = window_rect(&mgr, h);
 							let (_, rect) = title_bar::split(&config, rect);
 							let data = table.alloc(8).expect("out of buffers");
 							data.copy_from(0, &u32::from(rect.size().x).to_le_bytes());
@@ -168,7 +163,7 @@ fn main() {
 						(Handle::MAX, _) => Response::Error(Error::InvalidOperation as _),
 						(h, b"bin/cmd/fill") => {
 							if let &[r, g, b] = &*val {
-								let rect = window_rect(&manager, h);
+								let rect = window_rect(&mgr, h);
 								let (_, rect) = title_bar::split(&config, rect);
 								main.fill(rect, [r, g, b]);
 								Response::Amount(0)
@@ -178,24 +173,24 @@ fn main() {
 						}
 						(h, b"title") => {
 							let s = String::from_utf8_lossy(val).into_owned().into_boxed_str();
-							let r = window_rect(&manager, h);
+							let r = window_rect(&mgr, h);
 							let (r, _) = title_bar::split(&config, r);
 							title_bar::render(&mut main, &config, r, mouse_pos, &s);
-							manager.window_mut(h).unwrap().user_data.title = s;
+							mgr.window_mut(h).unwrap().title = s;
 							Response::Amount(0)
 						}
 						(_, _) => Response::Error(Error::DoesNotExist as _),
 					}
 				}
 				Request::Read { amount: _ } if handle != Handle::MAX => {
-					let w = &mut manager.window_mut(handle).unwrap().user_data;
-					if let Some(evt) = w.unread_events.get_mut().pop() {
+					let w = &mut mgr.window_mut(handle).unwrap();
+					if let Some(evt) = w.unread_events.pop() {
 						let evt = evt.encode();
 						let data = table.alloc(evt.len()).expect("out of buffers");
 						data.copy_from(0, &evt);
 						Response::Data(data)
 					} else {
-						w.event_listeners.get_mut().push_back(job_id);
+						w.event_listeners.push_back(job_id);
 						continue;
 					}
 				}
@@ -239,15 +234,15 @@ fn main() {
 								}
 								Type::Button(0) => mouse_clicked = k.is_press(),
 								_ => {
-									let Some(w) = manager.focused_window() else { continue };
-									let u = &mut manager.window_mut(w).unwrap().user_data;
-									if let Some(id) = u.event_listeners.get_mut().pop_front() {
+									let Some(w) = mgr.focused_window() else { continue };
+									let u = &mut mgr.window_mut(w).unwrap();
+									if let Some(id) = u.event_listeners.pop_front() {
 										let evt = ipc_wm::Event::Input(k).encode();
 										let d = table.alloc(evt.len()).expect("out of buffers");
 										d.copy_from(0, &evt);
 										table.enqueue(id, Response::Data(d));
 									} else {
-										u.unread_events.get_mut().inputs.push_back(k);
+										u.unread_events.inputs.push_back(k);
 									}
 								}
 							};
@@ -258,8 +253,9 @@ fn main() {
 						main.move_cursor(mouse_pos);
 					}
 					if mouse_moved | edge {
-						for (w, ww) in manager.windows() {
-							let full_rect = window_rect(&manager, w);
+						for w in mgr!(mgr, current_workspace).windows() {
+							let full_rect = window_rect(&mgr, w);
+							let ww = &mut mgr.windows[w];
 							let (title, rect) = title_bar::split(&config, full_rect);
 							let close = title_bar::Button::Close.render(
 								&mut main,
@@ -276,30 +272,29 @@ fn main() {
 								mouse_clicked,
 							);
 							if edge & close {
-								let u = &ww.user_data;
-								if let Some(id) = u.event_listeners.borrow_mut().pop_front() {
+								if let Some(id) = ww.event_listeners.pop_front() {
 									let evt = ipc_wm::Event::Close.encode();
 									let d = table.alloc(evt.len()).expect("out of buffers");
 									d.copy_from(0, &evt);
 									table.enqueue(id, Response::Data(d));
 								} else {
-									u.unread_events.borrow_mut().close = true;
+									ww.unread_events.close = true;
 								}
 							}
 						}
 					}
 					if edge {
-						if let Some(r) = window_at(&mut manager, mouse_pos) {
+						if let Some(r) = window_at(&mut mgr, mouse_pos) {
 							draw_focus_borders = Some(r);
 						}
 					}
 					Response::Amount(data.len() as _)
 				}
 				Request::Write { data } if handle != Handle::MAX => {
-					let window = manager.window(handle).unwrap();
+					let window = mgr.window(handle).unwrap();
 					let mut header = [0; 12];
 					data.copy_to(0, &mut header);
-					let rect = window_rect(&manager, handle);
+					let rect = window_rect(&mgr, handle);
 					let (_, rect) = title_bar::split(&config, rect);
 					let draw = ipc_wm::Flush::decode(header);
 					let draw_size = draw.size;
@@ -316,7 +311,7 @@ fn main() {
 					// TODO we can avoid this copy by passing shared memory buffers directly
 					// to the GPU
 					// FIXME unsafe as the client may be malicious
-					let fb = &window.user_data.framebuffer;
+					let fb = &window.framebuffer;
 					let fb = unsafe { core::slice::from_raw_parts(fb.base.as_ptr(), fb.size) };
 					main.copy(fb, draw_rect);
 					let l = data.len().try_into().unwrap();
@@ -324,31 +319,25 @@ fn main() {
 					Response::Amount(l)
 				}
 				Request::Close if handle != INPUT => {
-					manager.destroy_window(handle).unwrap();
+					mgr.destroy_window(handle).unwrap();
 					main.fill(Rect::from_size(Point2::ORIGIN, main.size()), [50, 50, 50]);
 					old = None;
-					for (w, ww) in manager.windows() {
-						let full_rect = window_rect(&manager, w);
+					for w in mgr!(mgr, current_workspace).windows() {
+						let full_rect = window_rect(&mgr, w);
+						let ww = &mut mgr.windows[w];
 						let (title, rect) = title_bar::split(&config, full_rect);
-						title_bar::render(
-							&mut main,
-							&config,
-							title,
-							mouse_pos,
-							&ww.user_data.title,
-						);
+						title_bar::render(&mut main, &config, title, mouse_pos, &ww.title);
 						let evt = ipc_wm::Resolution { x: rect.size().x, y: rect.size().y };
-						let mut ue = ww.user_data.unread_events.borrow_mut();
-						ue.resize = Some(evt);
+						ww.unread_events.resize = Some(evt);
 						let evt = ipc_wm::Event::Resize(evt).encode();
-						for id in ww.user_data.event_listeners.borrow_mut().drain(..) {
-							ue.resize = None;
+						for id in ww.event_listeners.drain(..) {
+							ww.unread_events.resize = None;
 							let data = table.alloc(evt.len()).expect("out of buffers");
 							data.copy_from(0, &evt);
 							table.enqueue(id, Response::Data(data));
 							send_notif = true;
 						}
-						if Some(w) == manager.focused_window() {
+						if Some(w) == mgr.focused_window() {
 							draw_focus_borders = Some(full_rect);
 						}
 					}
@@ -362,8 +351,7 @@ fn main() {
 					}
 				}
 				Request::Share { share } if handle != Handle::MAX => {
-					manager.window_mut(handle).unwrap().user_data.framebuffer =
-						FrameBuffer::wrap(&share);
+					mgr.window_mut(handle).unwrap().framebuffer = FrameBuffer::wrap(&share);
 					Response::Amount(0)
 				}
 				_ => Response::Error(Error::InvalidOperation),
@@ -396,7 +384,7 @@ fn main() {
 	}
 }
 
-struct FrameBuffer {
+pub struct FrameBuffer {
 	base: NonNull<u8>,
 	size: usize,
 }
@@ -441,15 +429,7 @@ impl Default for FrameBuffer {
 }
 
 #[derive(Default)]
-struct Client {
-	framebuffer: FrameBuffer,
-	unread_events: RefCell<Events>,
-	event_listeners: RefCell<VecDeque<JobId>>,
-	title: Box<str>,
-}
-
-#[derive(Default)]
-struct Events {
+pub struct Events {
 	resize: Option<ipc_wm::Resolution>,
 	close: bool,
 	inputs: VecDeque<input::Input>,
