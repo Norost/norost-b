@@ -84,6 +84,7 @@ impl Flush {
 		f.set_stride(self.stride);
 		f.set_origin(self.origin.to_raw());
 		f.set_size(self.size.to_raw());
+		f.set_buffer_id(self.buffer_id);
 		let mut r = [0; raw::Flush::BITS as usize / 8];
 		f.to_raw(&mut r, 0);
 		r
