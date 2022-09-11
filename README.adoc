@@ -68,18 +68,23 @@ Most drivers are outside the kernel, which makes it easier to replace and/or stu
 
 == Supported hardware
 
+* USB: xHCI
+
 === Storage
 
 * VIRTIO block devices
+* USB mass storage devices (BBB)
 
 === Graphics
 
+* Plain framebuffer via multiboot2
 * VIRTIO GPU
 * Intel HD Graphics (very poorly, only on specific laptops with specific boot settings)
 
 === Human Interface Devices (HID)
 
-* PS/2 keyboard
+* PS/2 keyboard & mouse
+* USB HID
 
 == Building
 
