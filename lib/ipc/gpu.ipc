@@ -7,6 +7,7 @@ struct Flush {
 	stride: u32
 	origin: Point
 	size: SizeInclusive
+	buffer_id: u32
 }
 
 struct Point {
@@ -29,4 +30,3 @@ struct Rgb8 {
 	g: u8
 	b: u8
 }
-

@@ -308,18 +308,14 @@ fn main() {
 					let draw_rect = rect
 						.calc_global_pos(Rect::from_size(draw_orig, draw_size))
 						.unwrap();
-					// TODO we can avoid this copy by passing shared memory buffers directly
-					// to the GPU
-					// FIXME unsafe as the client may be malicious
-					let fb = &window.framebuffer;
-					let fb = unsafe { core::slice::from_raw_parts(fb.base.as_ptr(), fb.size) };
-					main.copy(fb, draw_rect);
-					let l = data.len().try_into().unwrap();
-					main.sync_rect(draw_rect);
-					Response::Amount(l)
+					main.sync_rect(Some(window.framebuffer), draw_rect);
+					Response::Amount(data.len() as _)
 				}
 				Request::Close if handle != INPUT => {
-					mgr.destroy_window(handle).unwrap();
+					let w = mgr.destroy_window(handle).unwrap();
+					if w.framebuffer != u32::MAX {
+						main.unmap_buffer(w.framebuffer).unwrap();
+					}
 					main.fill(Rect::from_size(Point2::ORIGIN, main.size()), [50, 50, 50]);
 					old = None;
 					for w in mgr!(mgr, current_workspace).windows() {
@@ -351,8 +347,13 @@ fn main() {
 					}
 				}
 				Request::Share { share } if handle != Handle::MAX => {
-					mgr.window_mut(handle).unwrap().framebuffer = FrameBuffer::wrap(&share);
-					Response::Amount(0)
+					match main.share_buffer(share) {
+						Ok(h) => {
+							mgr.window_mut(handle).unwrap().framebuffer = h;
+							Response::Amount(0)
+						}
+						Err(e) => Response::Error(e),
+					}
 				}
 				_ => Response::Error(Error::InvalidOperation),
 			};
@@ -381,50 +382,6 @@ fn main() {
 			}
 			old = Some(new);
 		}
-	}
-}
-
-pub struct FrameBuffer {
-	base: NonNull<u8>,
-	size: usize,
-}
-
-impl FrameBuffer {
-	fn wrap(obj: &rt::Object) -> Self {
-		let (base, size) = obj.map_object(None, rt::io::RWX::R, 0, usize::MAX).unwrap();
-		Self { base, size }
-	}
-
-	fn copy_to_untrusted(&self, offset: usize, out: &mut [u8]) {
-		assert!(
-			offset < self.size && offset + out.len() <= self.size,
-			"out of bounds"
-		);
-		unsafe {
-			core::intrinsics::volatile_copy_nonoverlapping_memory(
-				out.as_mut_ptr(),
-				self.base.as_ptr().add(offset),
-				out.len(),
-			);
-		}
-	}
-}
-
-impl Drop for FrameBuffer {
-	fn drop(&mut self) {
-		if self.size > 0 {
-			// SAFETY: we have unique ownership of the memory.
-			unsafe {
-				// Assume nothing bad will happen
-				let _ = rt::mem::dealloc(self.base, self.size);
-			}
-		}
-	}
-}
-
-impl Default for FrameBuffer {
-	fn default() -> Self {
-		Self { base: NonNull::dangling(), size: 0 }
 	}
 }
 

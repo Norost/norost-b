@@ -52,7 +52,7 @@ impl Manager {
 		Ok(res)
 	}
 
-	pub fn destroy_window(&mut self, handle: Handle) -> Result<(), ()> {
+	pub fn destroy_window(&mut self, handle: Handle) -> Result<Window, ()> {
 		let w = self.windows.remove(handle).ok_or(())?;
 		let (ws, path) = w.path();
 		let path = self.workspaces[usize::from(ws)].remove_leaf(path).unwrap();
@@ -60,7 +60,7 @@ impl Manager {
 		self.workspaces[usize::from(ws)].apply_with_prefix(path.into_iter(), |h| {
 			self.windows[h].move_up(len);
 		});
-		Ok(())
+		Ok(w)
 	}
 
 	pub fn window_rect(&self, handle: Handle, total_size: Size) -> Option<Rect> {

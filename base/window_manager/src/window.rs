@@ -1,5 +1,5 @@
 use {
-	crate::{workspace::Path, Events, FrameBuffer, JobId},
+	crate::{workspace::Path, Events, JobId},
 	core::fmt::{self, Write},
 	std::collections::VecDeque,
 };
@@ -9,7 +9,7 @@ pub struct Window {
 	workspace: u8,
 	/// Node path in bitmap format.
 	path: u32,
-	pub framebuffer: FrameBuffer,
+	pub framebuffer: u32,
 	pub unread_events: Events,
 	pub event_listeners: VecDeque<JobId>,
 	pub title: Box<str>,
@@ -21,7 +21,7 @@ impl Window {
 		Self {
 			workspace,
 			path: path.directions,
-			framebuffer: Default::default(),
+			framebuffer: u32::MAX,
 			unread_events: Default::default(),
 			event_listeners: Default::default(),
 			title: Default::default(),

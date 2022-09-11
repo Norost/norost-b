@@ -61,6 +61,7 @@ pub struct Flush {
 	pub stride: u32,
 	pub origin: Point,
 	pub size: SizeInclusive,
+	pub buffer_id: u32,
 }
 
 impl Flush {
@@ -72,6 +73,7 @@ impl Flush {
 			stride: f.stride(),
 			origin: Point::from_raw(f.origin()),
 			size: SizeInclusive::from_raw(f.size()),
+			buffer_id: f.buffer_id(),
 		}
 	}
 

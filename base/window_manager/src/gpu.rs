@@ -3,6 +3,7 @@ use gui3d::math::int::{Point2, Rect, Size};
 pub struct Gpu {
 	size: Size,
 	shmem: &'static mut [u8],
+	shmem_id: u32,
 	sync: rt::RefObject<'static>,
 }
 
@@ -24,19 +25,33 @@ impl Gpu {
 		let (shmem, shmem_size) = shmem_obj
 			.map_object(None, rt::io::RWX::RW, 0, shmem_size)
 			.unwrap();
-		sync.share(
-			&rt::Object::new(rt::io::NewObject::PermissionMask {
-				handle: shmem_obj.as_raw(),
-				rwx: rt::io::RWX::R,
-			})
-			.unwrap()
-			.0,
-		)
-		.expect("failed to share mem with GPU");
+		let shmem_id = sync
+			.share(
+				&rt::Object::new(rt::io::NewObject::PermissionMask {
+					handle: shmem_obj.as_raw(),
+					rwx: rt::io::RWX::R,
+				})
+				.unwrap()
+				.0,
+			)
+			.expect("failed to share mem with GPU") as _;
 		// SAFETY: only we can write to this slice. The other side can go figure.
 		let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
 
-		Self { size, shmem, sync }
+		Self { size, shmem, sync, shmem_id }
+	}
+
+	pub fn share_buffer(&mut self, share: rt::Object) -> rt::io::Result<u32> {
+		self.sync.share(&share).map(|n| n as _)
+	}
+
+	pub fn unmap_buffer(&mut self, buffer_id: u32) -> rt::io::Result<()> {
+		self.sync
+			.set_meta(
+				b"bin/buffer/unmap".into(),
+				(&buffer_id.to_le_bytes()).into(),
+			)
+			.map(|_| ())
 	}
 
 	pub fn fill(&mut self, rect: Rect, color: [u8; 3]) {
@@ -53,10 +68,11 @@ impl Gpu {
 				s.copy_from_slice(&color);
 			}
 		}
-		self.sync_rect(rect);
+		self.sync_rect(None, rect);
 	}
 
-	pub fn sync_rect(&mut self, rect: Rect) {
+	pub fn sync_rect(&mut self, buffer: Option<u32>, rect: Rect) {
+		let buffer_id = buffer.unwrap_or(self.shmem_id);
 		self.sync
 			.write(
 				&ipc_gpu::Flush {
@@ -64,6 +80,7 @@ impl Gpu {
 					stride: rect.size().x,
 					origin: ipc_gpu::Point { x: rect.low().x, y: rect.low().y },
 					size: ipc_gpu::SizeInclusive { x: rect.size().x as _, y: rect.size().y as _ },
+					buffer_id,
 				}
 				.encode(),
 			)
@@ -72,7 +89,7 @@ impl Gpu {
 
 	pub fn copy(&mut self, data: &[u8], to: Rect) {
 		self.shmem[..data.len()].copy_from_slice(data);
-		self.sync_rect(to);
+		self.sync_rect(None, to);
 	}
 
 	pub fn set_cursor(&mut self, tex: &gui3d::Texture) {
@@ -80,7 +97,7 @@ impl Gpu {
 		self.shmem[..r.len()].copy_from_slice(r);
 		let f = |n| u8::try_from(n - 1).unwrap();
 		self.sync
-			.write(&[0xc5, f(tex.width()), f(tex.height())])
+			.write(&[0xc5, 0, 0, 0, 0, f(tex.width()), f(tex.height())])
 			.unwrap();
 	}
 

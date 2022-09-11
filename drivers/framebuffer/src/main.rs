@@ -65,7 +65,7 @@ fn main() -> ! {
 	let tbl = StreamTable::new(&tbl, 64.try_into().unwrap(), 64.try_into().unwrap());
 	share.create(b"gpu").unwrap().share(tbl.public()).unwrap();
 
-	let mut command_buf = (NonNull::<u8>::dangling(), 0);
+	let mut buffers = driver_utils::Arena::new();
 
 	// AtomicU32 is more efficient than AtomicBool on some architectures (e.g. RISC-V).
 	static CHANGES: AtomicU32 = AtomicU32::new(0);
@@ -216,6 +216,15 @@ fn main() -> ! {
 						Response::Amount(0)
 					}
 					Ok((b"bin/cursor/pos", _)) => Response::Error(Error::InvalidData),
+					Ok((b"bin/buffer/unmap", &mut [a, b, c, d])) => {
+						let buffer_id = u32::from_le_bytes([a, b, c, d]);
+						if buffers.remove(buffer_id).is_some() {
+							rt::dbg!();
+							Response::Amount(0)
+						} else {
+							Response::Error(Error::InvalidData)
+						}
+					}
 					Ok(_) => Response::Error(Error::DoesNotExist),
 					Err(_) => Response::Error(Error::InvalidData),
 				},
@@ -225,11 +234,12 @@ fn main() -> ! {
 					// Blit a specific area
 					if let Ok(d) = d.try_into() {
 						let cmd = ipc_gpu::Flush::decode(d);
+						let buf: &Buffer = buffers.get(cmd.buffer_id).unwrap(); // FIXME don't panic
 						assert!(cmd.stride != 0 && cmd.size.x != 0 && cmd.size.y != 0);
 						unsafe {
 							match &mut fb {
 								Fb::Rgbx8888(fb) => fb.copy_from_raw_untrusted_rgb24_to_rgbx32(
-									command_buf.0.as_ptr().add(cmd.offset as _).cast(),
+									buf.ptr.as_ptr().add(cmd.offset as _).cast(),
 									cmd.stride * 3,
 									cmd.origin.x as _,
 									cmd.origin.y as _,
@@ -237,7 +247,7 @@ fn main() -> ! {
 									(cmd.size.y - 1) as _,
 								),
 								Fb::Bgrx8888(fb) => fb.copy_from_raw_untrusted_rgb24_to_bgrx32(
-									command_buf.0.as_ptr().add(cmd.offset as _).cast(),
+									buf.ptr.as_ptr().add(cmd.offset as _).cast(),
 									cmd.stride * 3,
 									cmd.origin.x as _,
 									cmd.origin.y as _,
@@ -249,13 +259,14 @@ fn main() -> ! {
 						project_cursor(&fb, &cursor_img, &mut CURSOR.lock());
 						CHANGES.store(1, Ordering::Release);
 						Response::Amount(d.len().try_into().unwrap())
-					} else if let Ok([0xc5, w, h]) = <[u8; 3]>::try_from(&*d) {
+					} else if let Ok([0xc5, a, b, c, d, w, h]) = <[u8; 7]>::try_from(&*d) {
+						let buffer_id = u32::from_le_bytes([a, b, c, d]);
+						let buf: &Buffer = buffers.get(buffer_id).unwrap(); // FIXME don't panic
 						let l = (usize::from(w) + 1) * (usize::from(h) + 1);
-						if l * 4 <= command_buf.1 {
+						if l * 4 <= buf.len {
 							// FIXME untrusted
 							unsafe {
-								command_buf
-									.0
+								buf.ptr
 									.as_ptr()
 									.cast::<i32>()
 									.copy_to_nonoverlapping(cursor_img.as_mut_ptr(), l);
@@ -274,13 +285,10 @@ fn main() -> ! {
 					}
 				}
 				Request::Share { share } => {
-					match share.map_object(None, rt::io::RWX::R, 0, 1 << 30) {
-						Err(e) => Response::Error(e as _),
-						Ok((buf, size)) => {
-							command_buf = (buf.cast(), size);
-							Response::Amount(0)
-						}
-					}
+					Buffer::new(share).map_or_else(Response::Error, |buf| {
+						let h = buffers.insert(buf);
+						Response::Amount(h.into())
+					})
 				}
 				Request::Close => continue,
 				_ => Response::Error(Error::InvalidOperation),
@@ -289,5 +297,24 @@ fn main() -> ! {
 			flush = true;
 		}
 		flush.then(|| tbl.flush());
+	}
+}
+
+pub struct Buffer {
+	ptr: NonNull<u8>,
+	len: usize,
+}
+
+impl Buffer {
+	pub fn new(obj: rt::Object) -> rt::io::Result<Self> {
+		obj.map_object(None, rt::io::RWX::R, 0, 1 << 30)
+			.map(|(ptr, len)| Self { ptr, len })
+	}
+}
+
+impl Drop for Buffer {
+	fn drop(&mut self) {
+		// SAFETY; we have exclusive access to the buffer.
+		let _ = unsafe { rt::mem::dealloc(self.ptr, self.len) };
 	}
 }
