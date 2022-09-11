@@ -334,6 +334,8 @@ fn main() {
 						let [c, d] = (mouse_pos.y as u16).to_le_bytes();
 						sync.set_meta(b"bin/cursor/pos".into(), (&[a, b, c, d]).into())
 							.unwrap();
+					}
+					if mouse_moved | edge {
 						for (w, ww) in manager.windows() {
 							let full_rect = window_rect(&manager, w);
 							let (title, rect) = title_bar::split(&config, full_rect);
