@@ -4,6 +4,7 @@ pub struct Config {
 	pub title_bar: TitleBar,
 	pub cursor: gui3d::Texture,
 	pub font: fontdue::Font,
+	pub margin: u32,
 }
 
 pub struct TitleBar {
@@ -71,6 +72,7 @@ pub fn load() -> Config {
 		},
 		cursor,
 		font,
+		margin: 2,
 	}
 }
 

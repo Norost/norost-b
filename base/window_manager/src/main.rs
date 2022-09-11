@@ -109,7 +109,7 @@ fn main() {
 	// SAFETY: only we can write to this slice. The other side can go figure.
 	let shmem = unsafe { core::slice::from_raw_parts_mut(shmem.as_ptr(), shmem_size) };
 
-	let gwp = window::GlobalWindowParams { border_width: 4 };
+	let gwp = window::GlobalWindowParams { margin: config.margin };
 	let mut manager = manager::Manager::<Client>::new(gwp).unwrap();
 
 	let mut main = Main { size, sync, shmem };
@@ -340,8 +340,8 @@ fn main() {
 						if Some(h) != manager.focused_window() {
 							manager.set_focused_window(h);
 							let r = Rect::from_points(
-								r.low() + Vector::ONE * 4,
-								r.high() - Vector::ONE * 4,
+								r.low() + Vector::ONE * config.margin,
+								r.high() - Vector::ONE * config.margin,
 							);
 							draw_focus_borders = Some(r);
 						}
@@ -437,7 +437,7 @@ fn main() {
 				.into_iter()
 				.chain([(new, [127; 3])])
 			{
-				let w = 4;
+				let w = config.margin;
 				let (l, h) = (r.low() - Vector::ONE * w, r.high() + Vector::ONE);
 				let s = Size::new(r.size().x + w * 2, r.size().y + w * 2);
 				for r in [

@@ -86,5 +86,5 @@ impl fmt::Debug for PathIter {
 
 #[derive(Default)]
 pub struct GlobalWindowParams {
-	pub border_width: u32,
+	pub margin: u32,
 }

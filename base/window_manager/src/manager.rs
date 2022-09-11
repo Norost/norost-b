@@ -66,7 +66,7 @@ impl<U> Manager<U> {
 			.then(|| self.workspaces[usize::from(ws)].calculate_rect(path, total_size))
 			.flatten()
 			.map(|rect| {
-				let d = Vector::ONE * self.global_window_params.border_width;
+				let d = Vector::ONE * self.global_window_params.margin;
 				Rect::from_points(rect.low() + d, rect.high() - d)
 			})
 	}
