@@ -496,6 +496,10 @@ fn main(_: isize, _: *const *const u8) -> isize {
 					}
 				}
 
+				// Used nontemporal stores in the immediately preceding loop, so end with SFENCE
+				// See safety comment on DisplayFrameBuffer::stream_untrusted_row_rgb24_to_bgrx32
+				x86_64::_mm_sfence();
+
 				let base = memory.cast().try_into().unwrap();
 				let stride = stride / 4;
 				display_fb = DisplayFrameBuffer { base, width, height, stride };
@@ -627,15 +631,27 @@ impl DisplayFrameBuffer {
 		let pre_end = dst.add((h - 1) * f(self.stride));
 		let end = pre_end.add(f(self.stride));
 		while dst != pre_end {
-			Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, false);
+			Self::stream_untrusted_row_rgb24_to_bgrx32(dst, src, w, false);
 			src = src.add(stride);
 			dst = dst.add(f(self.stride));
 		}
-		Self::copy_untrusted_row_rgb24_to_bgrx32(dst, src, w, true);
+		Self::stream_untrusted_row_rgb24_to_bgrx32(dst, src, w, true);
+		// Required before returning to code that may set atomic flags that invite concurrent reads,
+		// as LLVM lowers `AtomicBool::store(flag, true, Release)` to ordinary stores on x86-64
+		// instead of SFENCE, even though SFENCE is required in the presence of nontemporal stores.
+		x86_64::_mm_sfence();
 	}
 
+	/// Translate a row with streaming stores
+	///
+	/// # Safety
+	///
+	/// This is a form of nontemporal store, and imposes the requirement of inserting SFENCE
+	/// via `_mm_sfence` or `asm!` in order to maintain the soundness of atomic barriers.
+	/// Control flow should not leave an `unsafe` context before inserting this SFENCE, and
+	/// it must be inserted before atomic operations are reached (e.g. `AtomicBool::store`).
 	#[inline]
-	unsafe fn copy_untrusted_row_rgb24_to_bgrx32(
+	unsafe fn stream_untrusted_row_rgb24_to_bgrx32(
 		mut dst: *mut i32,
 		mut src: *const [u8; 3],
 		w: usize,
